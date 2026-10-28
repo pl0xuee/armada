@@ -1,5 +1,5 @@
 import { Check } from "lucide-react";
-import { motion, useReducedMotion } from "motion/react";
+import { m, useReducedMotion } from "motion/react";
 
 const PARTICLES = Array.from({ length: 14 }, (_, i) => {
   const angle = (i / 14) * Math.PI * 2 + (i % 2 ? 0.2 : -0.1);
@@ -23,7 +23,7 @@ export function InboxZero({ handled }: { handled: number }) {
         <div className="absolute inset-0 -m-8 rounded-full bg-ok/10 blur-2xl" aria-hidden />
         {!reduce &&
           PARTICLES.map((p, i) => (
-            <motion.span
+            <m.span
               key={i}
               aria-hidden
               className="absolute left-1/2 top-1/2"
@@ -41,7 +41,7 @@ export function InboxZero({ handled }: { handled: number }) {
             />
           ))}
         {!reduce && (
-          <motion.span
+          <m.span
             aria-hidden
             className="absolute inset-0 rounded-full border border-ok/50"
             initial={{ scale: 0.7, opacity: 0.9 }}
@@ -49,16 +49,16 @@ export function InboxZero({ handled }: { handled: number }) {
             transition={{ duration: 1.1, delay: 0.15, ease: "easeOut" }}
           />
         )}
-        <motion.div
+        <m.div
           initial={reduce ? false : { scale: 0.6, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ type: "spring", stiffness: 380, damping: 18 }}
           className="relative flex h-20 w-20 items-center justify-center rounded-full border border-ok/40 bg-gradient-to-b from-ok/25 to-ok/5 shadow-[0_0_40px_-6px_color-mix(in_srgb,var(--ok)_55%,transparent)] edge-strong"
         >
           <Check className="h-9 w-9 text-ok" strokeWidth={2.5} />
-        </motion.div>
+        </m.div>
       </div>
-      <motion.div
+      <m.div
         initial={reduce ? false : { opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.2, delay: 0.2 }}
@@ -69,7 +69,7 @@ export function InboxZero({ handled }: { handled: number }) {
             ? `You cleared ${handled} ${handled === 1 ? "request" : "requests"}. Your agents are back to work.`
             : "Nothing is waiting on you. When an agent needs approval, it lands here."}
         </p>
-      </motion.div>
+      </m.div>
     </div>
   );
 }

@@ -1,22 +1,25 @@
-import { CalendarClock, Check, Gauge, GitBranch, ShieldAlert, X } from "lucide-react";
+import { CalendarClock, Check, Gauge, GitBranch, ShieldAlert, Workflow, X } from "lucide-react";
 import { memo, useState } from "react";
 import { AccountAvatar } from "@/components/AccountAvatar";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { useIdentity } from "@/hooks/useIdentity";
 import { StatusDot } from "@/components/StatusDot";
 import { Button } from "@/components/ui/button";
-import { quickRespond } from "@/lib/actions";
-import { lastAction } from "@/lib/agents";
-import { formatCost, formatTokens, relativeTime } from "@/lib/format";
+import { findOption, respondPermission } from "@/lib/actions";
+import { RelTime } from "@/components/RelTime";
+import { formatCost, formatTokens } from "@/lib/format";
 import { STATUS } from "@/lib/providers";
-import type { Account, Agent, TimelineItem } from "@/lib/types";
+import type { Account, Agent, PermissionOption, TimelineItem } from "@/lib/types";
+import type { TileSummary } from "./useTileSummaries";
 import { basename, cn } from "@/lib/utils";
 
 type PermissionItem = Extract<TimelineItem, { kind: "permission" }>;
 
 /** Plain-text preview of markdown, keeping the tail of what's streaming. */
 function preview(text: string, tail = false, max = 220): string {
-  const plain = text
+  // Only a window of the (possibly huge, still streaming) message is ever shown: regex just that.
+  const window = text.length > 1200 ? (tail ? text.slice(-400) : text.slice(0, 1200)) : text;
+  const plain = window
     .replace(/```[\s\S]*?(```|$)/g, " ")
     .replace(/[#>*`|]/g, "")
     .replace(/\[(.*?)\]\(.*?\)/g, "$1")
@@ -27,29 +30,17 @@ function preview(text: string, tail = false, max = 220): string {
   return tail ? `…${plain.slice(plain.length - max)}` : `${plain.slice(0, max)}…`;
 }
 
-function latestMessage(items: TimelineItem[] | undefined): { text: string; streaming: boolean } | null {
-  if (!items) return null;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const it = items[i];
-    if (it.kind === "agent_message" && it.text.trim()) return { text: it.text, streaming: i === items.length - 1 };
-    if (it.kind === "user_message") return null;
-  }
-  return null;
-}
-
 export const AgentTile = memo(function AgentTile({
   agent,
   account,
-  items,
+  summary,
   pending,
-  now,
   onOpen,
 }: {
   agent: Agent;
   account: Account | undefined;
-  items: TimelineItem[] | undefined;
+  summary: TileSummary;
   pending: PermissionItem | null;
-  now: number;
   onOpen: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -57,17 +48,28 @@ export const AgentTile = memo(function AgentTile({
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const live = meta.live;
   const working = agent.status === "working" || agent.status === "starting";
-  const action = lastAction(items);
-  const msg = latestMessage(items);
-  const streaming = working && Boolean(msg?.streaming);
-  const message = msg ? preview(msg.text, streaming) : agent.lastMessage ? preview(agent.lastMessage) : null;
+  // While working, show what it's doing right now; otherwise the last action it took.
+  const tail = working ? summary.tail : null;
+  const action = summary.action;
+  const streaming = working && Boolean(summary.message) && summary.messageIsTail;
+  const message = summary.message
+    ? preview(summary.message, streaming)
+    : agent.lastMessage
+      ? preview(agent.lastMessage)
+      : null;
+  // "Allow" means allow-once only; when the agent offers no such option, show its real label.
+  const allowOpt = pending ? (findOption(pending, ["allow_once"]) ?? findOption(pending, ["allow_always"])) : undefined;
+  const denyOpt = pending ? findOption(pending, ["reject_once", "reject_always"]) : undefined;
   const color = meta.colorVar;
 
-  const respond = async (family: "allow_once" | "reject") => {
-    if (!pending || busy) return;
+  const respond = async (option: PermissionOption | undefined) => {
+    if (!pending || !option || busy) return;
     setBusy(true);
-    await quickRespond(agent.id, pending, family);
-    setBusy(false);
+    try {
+      await respondPermission(agent.id, pending, option);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -132,9 +134,15 @@ export const AgentTile = memo(function AgentTile({
             <CalendarClock className="h-3 w-3" />
           </span>
         )}
-        <span className="ml-auto flex items-center gap-1.5 text-[11px] text-steel tabular">
+        {summary.subagents > 0 && (
+          <span className="flex h-5 shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-1.5 text-[10.5px] font-medium text-accent">
+            <Workflow className="h-3 w-3" />
+            {summary.subagents} sub-agent{summary.subagents === 1 ? "" : "s"}
+          </span>
+        )}
+        <span className="ml-auto flex items-center gap-1.5 text-[11px] text-steel">
           {agent.unread && <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-label="Unread" />}
-          {relativeTime(agent.lastActivityAt, now)}
+          <RelTime ts={agent.lastActivityAt} />
         </span>
       </div>
 
@@ -158,10 +166,16 @@ export const AgentTile = memo(function AgentTile({
       </div>
 
       <div className="relative mt-3 flex min-h-0 flex-1 flex-col gap-2 px-3.5">
-        {action && !pending && (
-          <div className="flex min-w-0 items-center gap-1.5 rounded-md border border-line/70 bg-base/50 px-2 py-1 font-mono text-[11px] text-muted">
+        {(tail ?? action) && !pending && (
+          <div
+            className={cn(
+              "flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[11px]",
+              tail ? "border-accent/25 bg-accent/[0.06] text-fg/85" : "border-line/70 bg-base/50 text-muted",
+            )}
+            aria-live={tail ? "off" : undefined}
+          >
             <span className={cn("h-1 w-1 shrink-0 rounded-full", working ? "bg-accent animate-breathe" : "bg-steel")} />
-            <span className="truncate">{action}</span>
+            <span className="truncate">{tail ?? action}</span>
           </div>
         )}
         {message ? (
@@ -182,24 +196,32 @@ export const AgentTile = memo(function AgentTile({
             <span className="truncate font-medium">{pending.title}</span>
           </div>
           <div className="mt-2 flex gap-1.5">
-            <Button
-              size="xs"
-              variant="warn"
-              className="flex-1"
-              disabled={busy}
-              onClick={() => void respond("allow_once")}
-            >
-              <Check className="!h-3.5 !w-3.5" /> Allow
-            </Button>
-            <Button
-              size="xs"
-              variant="danger"
-              className="flex-1"
-              disabled={busy}
-              onClick={() => void respond("reject")}
-            >
-              <X className="!h-3.5 !w-3.5" /> Deny
-            </Button>
+            {allowOpt && (
+              <Button
+                size="xs"
+                variant="warn"
+                className="min-w-0 flex-1"
+                disabled={busy}
+                title={allowOpt.name}
+                onClick={() => void respond(allowOpt)}
+              >
+                <Check className="!h-3.5 !w-3.5" />
+                <span className="truncate">{allowOpt.kind === "allow_once" ? "Allow" : allowOpt.name}</span>
+              </Button>
+            )}
+            {denyOpt && (
+              <Button
+                size="xs"
+                variant="danger"
+                className="min-w-0 flex-1"
+                disabled={busy}
+                title={denyOpt.name}
+                onClick={() => void respond(denyOpt)}
+              >
+                <X className="!h-3.5 !w-3.5" />
+                <span className="truncate">{denyOpt.kind === "reject_once" ? "Deny" : denyOpt.name}</span>
+              </Button>
+            )}
           </div>
         </div>
       )}

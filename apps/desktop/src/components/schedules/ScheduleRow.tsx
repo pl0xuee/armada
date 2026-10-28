@@ -1,4 +1,15 @@
-import { ArrowUpRight, CalendarClock, FolderOpen, GitBranch, Pencil, Play, Trash2 } from "lucide-react";
+import {
+  ArrowUpRight,
+  CalendarClock,
+  FolderOpen,
+  GitBranch,
+  Pencil,
+  Play,
+  ShieldCheck,
+  Trash2,
+  TriangleAlert,
+  Zap,
+} from "lucide-react";
 import { memo } from "react";
 import { relativeTimeLong } from "@/lib/format";
 import { useIdentity } from "@/hooks/useIdentity";
@@ -96,6 +107,24 @@ export const ScheduleRow = memo(function ScheduleRow({
                   <span className="truncate">{basename(schedule.projectPath)}</span>
                 </span>
               </Tooltip>
+              {schedule.permissionMode && (
+                <Tooltip
+                  content={
+                    schedule.permissionMode === "auto"
+                      ? "Runs start in Auto: agents edit and run commands without asking"
+                      : "Runs start in Ask: agents ask before editing or running commands"
+                  }
+                >
+                  <span className="flex items-center gap-1 text-[11.5px] text-steel">
+                    {schedule.permissionMode === "auto" ? (
+                      <Zap className="h-3.5 w-3.5 text-accent" />
+                    ) : (
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                    )}
+                    {schedule.permissionMode === "auto" ? "Auto" : "Ask"}
+                  </span>
+                </Tooltip>
+              )}
               {schedule.worktree && (
                 <Tooltip content="Each run gets its own git worktree">
                   <span className="flex items-center text-steel">
@@ -107,6 +136,18 @@ export const ScheduleRow = memo(function ScheduleRow({
             <p className="mt-1.5 line-clamp-1 text-[12px] text-steel" title={schedule.prompt}>
               {schedule.prompt}
             </p>
+            {schedule.lastError && (
+              <Tooltip content={<span className="block max-w-[340px] break-words">{schedule.lastError}</span>}>
+                <p
+                  role="note"
+                  className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] text-warn"
+                  aria-label={`Last run failed: ${schedule.lastError}`}
+                >
+                  <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">Last run failed: {schedule.lastError}</span>
+                </p>
+              </Tooltip>
+            )}
           </div>
         </div>
 
@@ -159,7 +200,7 @@ export const ScheduleRow = memo(function ScheduleRow({
                   checked={schedule.enabled}
                   disabled={toggling}
                   onCheckedChange={onToggle}
-                  aria-label={`${schedule.enabled ? "Pause" : "Enable"} ${schedule.name}`}
+                  aria-label={`${schedule.name} enabled`}
                 />
               </span>
             </Tooltip>

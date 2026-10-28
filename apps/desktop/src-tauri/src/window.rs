@@ -65,7 +65,8 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
                 .try_state::<Core>()
                 .and_then(|core| core.settings().ok())
                 .map(|s| s.close_to_tray)
-                .unwrap_or(true);
+                .unwrap_or(true)
+                && crate::tray::available();
             if close_to_tray {
                 api.prevent_close();
                 hide_main(app);

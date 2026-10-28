@@ -34,7 +34,13 @@ export function installNavigationGuard(): () => void {
     e.preventDefault();
     if (e.type === "click" || (e.type === "auxclick" && e.button === 1)) void openExternal(href);
   };
-  const blockDrop = (e: DragEvent) => e.preventDefault();
+  // Drop zones (composer, New agent) handle their own events and call preventDefault first;
+  // anywhere else a file drop is refused, and must never navigate the webview.
+  const blockDrop = (e: DragEvent) => {
+    if (e.defaultPrevented) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "none";
+  };
   document.addEventListener("click", onClick, true);
   document.addEventListener("auxclick", onClick, true);
   window.addEventListener("dragover", blockDrop);

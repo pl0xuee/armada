@@ -24,6 +24,7 @@ import { api } from "@/lib/api";
 import { monogram } from "@/lib/identity";
 import type { CustomAgent } from "@/lib/types";
 import { cn, errorMessage, uuid } from "@/lib/utils";
+import { useShallow } from "zustand/react/shallow";
 import { useApp } from "@/store/app";
 import { cleanKeyValues, KeyValueEditor, validateKeyValues, type KeyValueRow } from "./KeyValueEditor";
 import { SectionHeader } from "./SettingRow";
@@ -113,14 +114,20 @@ export function AgentsSection({ agents }: { agents: CustomAgent[] }) {
   const [editing, setEditing] = useState<Draft | null>(null);
   const [deleting, setDeleting] = useState<CustomAgent | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
-  const running = useApp((s) => s.agents);
+  // Only the custom-agent ids of active agents: streaming updates to other fields don't re-render.
+  const activeCustomIds = useApp(
+    useShallow((s) =>
+      Object.values(s.agents)
+        .filter((a) => a.customAgentId && !a.archived)
+        .map((a) => a.customAgentId as string)
+        .sort(),
+    ),
+  );
   const usage = useMemo(() => {
     const m = new Map<string, number>();
-    for (const a of Object.values(running)) {
-      if (a.customAgentId && !a.archived) m.set(a.customAgentId, (m.get(a.customAgentId) ?? 0) + 1);
-    }
+    for (const id of activeCustomIds) m.set(id, (m.get(id) ?? 0) + 1);
     return m;
-  }, [running]);
+  }, [activeCustomIds]);
 
   const toggle = async (agent: CustomAgent, on: boolean) => {
     setToggling(agent.id);
@@ -345,11 +352,7 @@ function AgentRow({
         {busy ? (
           <Spinner className="h-3.5 w-3.5" />
         ) : (
-          <Switch
-            checked={agent.enabled}
-            onCheckedChange={onToggle}
-            aria-label={`${agent.enabled ? "Disable" : "Enable"} ${agent.name}`}
-          />
+          <Switch checked={agent.enabled} onCheckedChange={onToggle} aria-label={`${agent.name} enabled`} />
         )}
       </span>
     </li>
@@ -430,7 +433,14 @@ function AgentDialog({ draft, agents, onClose }: { draft: Draft | null; agents: 
 
   const submit = async () => {
     setAttempted(true);
-    if (!valid || saving) return;
+    if (!valid) {
+      // The button stays enabled so a click explains itself: reveal errors and focus the first one.
+      requestAnimationFrame(() =>
+        document.querySelector<HTMLElement>('[role="dialog"] [aria-invalid="true"]')?.focus(),
+      );
+      return;
+    }
+    if (saving) return;
     setSaving(true);
     const agent = build();
     const list = editingId ? agents.map((a) => (a.id === editingId ? agent : a)) : [...agents, agent];
@@ -569,7 +579,7 @@ function AgentDialog({ draft, agents, onClose }: { draft: Draft | null; agents: 
             <Button type="button" variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary" disabled={!valid || saving}>
+            <Button type="submit" variant="primary" disabled={saving}>
               {saving && <Spinner className="h-3.5 w-3.5 text-current" />}
               {editingId ? "Save changes" : "Add agent"}
             </Button>

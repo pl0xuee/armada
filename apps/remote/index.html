@@ -24,6 +24,19 @@
   <body>
     <div id="root"></div>
     <noscript>Armada Remote needs JavaScript enabled.</noscript>
+    <script>
+      // Browsers older than the build target (iOS < 16.4, …) can't run the app: say so instead of a blank page.
+      (function () {
+        var ok = window.CSS && CSS.supports && CSS.supports("color", "color-mix(in srgb, red, blue)") && "noModule" in document.createElement("script");
+        if (ok) return;
+        document.addEventListener("DOMContentLoaded", function () {
+          document.body.innerHTML =
+            '<div style="font:16px/1.5 -apple-system,system-ui,sans-serif;color:#E6EAEF;background:#0B0D10;min-height:100vh;padding:48px 24px;text-align:center">' +
+            "<h1 style=\"font-size:22px;margin:0 0 8px\">Please update your browser</h1>" +
+            '<p style="color:#9AA4B2;margin:0">Armada Remote needs iOS 16.4 or later, or a recent Chrome, Edge or Firefox.</p></div>';
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,17 +1,32 @@
-import { LayoutGrid, Plus, Radar } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { LayoutGrid, Plus, Radar, Rows3 } from "lucide-react";
+import { m, AnimatePresence } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { AgentTile } from "@/components/mission/AgentTile";
 import { HeaderAction, PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
-import { useNow } from "@/hooks/useNow";
+import { splitCost } from "@/lib/costSplit";
 import { formatCost } from "@/lib/format";
 import type { Agent, AgentStatus } from "@/lib/types";
 import { isMac, modKey } from "@/lib/utils";
-import { collectPending, useApp } from "@/store/app";
+
+import { AgentRowCompact } from "@/components/mission/AgentRowCompact";
+import { EMPTY_SUMMARY, useTileSummaries } from "@/components/mission/useTileSummaries";
+import { Tooltip } from "@/components/ui/tooltip";
+import { useApp, usePendingPermissions, type PendingPermission } from "@/store/app";
 import { useUi } from "@/store/ui";
+
+type Density = "comfortable" | "compact";
+const DENSITY_KEY = "armada.missionDensity";
+
+function readDensity(): Density {
+  try {
+    return localStorage.getItem(DENSITY_KEY) === "compact" ? "compact" : "comfortable";
+  } catch {
+    return "comfortable";
+  }
+}
 
 type Filter = "all" | "live" | "needs" | "idle";
 
@@ -38,28 +53,39 @@ function matches(a: Agent, f: Filter) {
 
 export function MissionControlView() {
   const agentsMap = useApp((s) => s.agents);
-  const items = useApp((s) => s.items);
+  const pending = usePendingPermissions();
+  const summaries = useTileSummaries();
   const accounts = useApp((s) => s.accounts);
   const openAgent = useUi((s) => s.openAgent);
   const openNewAgent = useUi((s) => s.openNewAgent);
-  const now = useNow();
   const [filter, setFilter] = useState<Filter>("all");
+  const [density, setDensityState] = useState<Density>(readDensity);
+  const setDensity = (d: Density) => {
+    setDensityState(d);
+    try {
+      localStorage.setItem(DENSITY_KEY, d);
+    } catch {
+      /* ignore */
+    }
+  };
 
   const agents = useMemo(
     () =>
       Object.values(agentsMap)
         .filter((a) => !a.archived)
-        .sort((a, b) => ORDER[a.status] - ORDER[b.status] || b.lastActivityAt - a.lastActivityAt),
+        // Stable order: status group, then creation time. (Sorting by activity made tiles jump on
+        // every cost/token tick.)
+        .sort((a, b) => ORDER[a.status] - ORDER[b.status] || b.createdAt - a.createdAt),
     [agentsMap],
   );
 
   const pendingByAgent = useMemo(() => {
-    const map = new Map<string, ReturnType<typeof collectPending>[number]["item"]>();
-    for (const p of collectPending({ agents: agentsMap, items })) {
+    const map = new Map<string, PendingPermission["item"]>();
+    for (const p of pending) {
       if (!map.has(p.agent.id)) map.set(p.agent.id, p.item);
     }
     return map;
-  }, [agentsMap, items]);
+  }, [pending]);
 
   // Lazily load timelines for live agents so tiles can show their last action.
   const liveIds = agents
@@ -82,7 +108,7 @@ export function MissionControlView() {
     return c;
   }, [agents]);
 
-  const spend = agents.reduce((s, a) => s + a.costUsd, 0);
+  const cost = splitCost(agents, accounts);
   const visible = agents.filter((a) => matches(a, filter));
   const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
 
@@ -106,17 +132,55 @@ export function MissionControlView() {
         subtitle={
           <>
             <span className="tabular">{counts.live}</span> live · <span className="tabular">{counts.needs}</span> need
-            you · <span className="tabular">{formatCost(spend)}</span> spent across the fleet
+            you ·{" "}
+            {cost.billed > 0 && (
+              <>
+                <span className="tabular">{formatCost(cost.billed)}</span> billed
+                {cost.equivalent > 0 && " · "}
+              </>
+            )}
+            {cost.equivalent > 0 && (
+              <>
+                <span className="tabular">{formatCost(cost.equivalent)}</span> API-equivalent on subscriptions
+              </>
+            )}
+            {cost.billed === 0 && cost.equivalent === 0 && "no usage yet"}
           </>
         }
         right={
-          <HeaderAction
-            variant="primary"
-            icon={<Plus />}
-            label="New agent"
-            hint={`${modKey}${isMac ? "" : "+"}N`}
-            onClick={() => openNewAgent()}
-          />
+          <>
+            <Segmented<Density>
+              size="sm"
+              aria-label="Density"
+              value={density}
+              onChange={setDensity}
+              options={[
+                {
+                  value: "comfortable",
+                  label: (
+                    <Tooltip content="Tiles">
+                      <LayoutGrid className="h-3.5 w-3.5" aria-label="Comfortable" />
+                    </Tooltip>
+                  ),
+                },
+                {
+                  value: "compact",
+                  label: (
+                    <Tooltip content="Compact rows">
+                      <Rows3 className="h-3.5 w-3.5" aria-label="Compact" />
+                    </Tooltip>
+                  ),
+                },
+              ]}
+            />
+            <HeaderAction
+              variant="primary"
+              icon={<Plus />}
+              label="New agent"
+              hint={`${modKey}${isMac ? "" : "+"}N`}
+              onClick={() => openNewAgent()}
+            />
+          </>
         }
       >
         <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] @2xl/ph:mx-0 @2xl/ph:px-0 [&::-webkit-scrollbar]:hidden">
@@ -160,13 +224,33 @@ export function MissionControlView() {
               </Button>
             }
           />
+        ) : density === "compact" ? (
+          <div
+            role="list"
+            aria-label="Agents"
+            className="@container overflow-hidden rounded-xl border border-line bg-card edge"
+          >
+            <div className="contents">
+              {visible.map((a) => (
+                <AgentRowCompact
+                  key={a.id}
+                  agent={a}
+                  account={accountMap.get(a.accountId)}
+                  summary={summaries.get(a.id) ?? EMPTY_SUMMARY}
+                  pending={pendingByAgent.get(a.id) ?? null}
+                  onOpen={openAgent}
+                />
+              ))}
+            </div>
+          </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 @2xl:grid-cols-2 @5xl:[grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
-            <AnimatePresence initial={false} mode="popLayout">
+            <AnimatePresence initial={false}>
               {visible.map((a) => (
-                <motion.div
+                // No `layout`: it measured every tile on every render. Tiles only move when an agent
+                // changes status group, which is a deliberate jump, not an animation.
+                <m.div
                   key={a.id}
-                  layout="position"
                   className="h-full"
                   initial={{ opacity: 0, scale: 0.97 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -176,12 +260,11 @@ export function MissionControlView() {
                   <AgentTile
                     agent={a}
                     account={accountMap.get(a.accountId)}
-                    items={items[a.id]}
+                    summary={summaries.get(a.id) ?? EMPTY_SUMMARY}
                     pending={pendingByAgent.get(a.id) ?? null}
-                    now={now}
                     onOpen={openAgent}
                   />
-                </motion.div>
+                </m.div>
               ))}
             </AnimatePresence>
           </div>

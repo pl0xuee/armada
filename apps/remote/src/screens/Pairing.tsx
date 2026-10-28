@@ -4,6 +4,8 @@ import { Button } from "@/components/ui";
 import { parsePasted } from "@/lib/auth";
 import { pairWithToken, retryConnect, unpair } from "@/lib/controller";
 import { cn } from "@/lib/cn";
+import { isIOS, isStandalone } from "@/lib/platform";
+import { confirmAction } from "@/lib/confirm";
 import { useStore } from "@/lib/store";
 
 function Frame({ children }: { children: ReactNode }) {
@@ -61,6 +63,7 @@ function Callout({ tone, icon, title, children }: { tone: "warn" | "err"; icon: 
 
 export function Pairing() {
   const reason = useStore((s) => s.unpairedReason);
+  const standalone = isStandalone();
   const [pasteOpen, setPasteOpen] = useState(false);
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -114,8 +117,16 @@ export function Pairing() {
         </Step>
       </ol>
 
+      {standalone && (
+        <Callout tone="warn" icon="info" title="Pair this Home Screen app">
+          {isIOS()
+            ? "On iPhone the Home Screen app keeps its own storage, separate from Safari. Copy the pairing link in Armada (Settings → Remote) and paste it below once."
+            : "Copy the pairing link in Armada (Settings → Remote) and paste it below."}
+        </Callout>
+      )}
+
       <div className="mt-5">
-        {pasteOpen ? (
+        {pasteOpen || standalone ? (
           <form
             className="animate-fade space-y-2"
             onSubmit={(e) => {
@@ -124,7 +135,7 @@ export function Pairing() {
             }}
           >
             <label htmlFor="pair-link" className="block text-[13px] font-medium text-muted">
-              Pairing link
+              Paste the pairing link
             </label>
             <input
               id="pair-link"
@@ -142,7 +153,7 @@ export function Pairing() {
               aria-invalid={!!error}
               aria-describedby={error ? "pair-error" : undefined}
               className={cn(
-                "block h-12 w-full rounded-xl border bg-card px-3.5 font-mono text-[16px] text-fg outline-none placeholder:text-steel/70 focus:border-accent/60",
+                "block h-12 w-full rounded-xl border bg-card px-3.5 font-mono text-[16px] text-fg outline-none placeholder:text-steel focus:border-accent/60",
                 error ? "border-err/60" : "border-line-strong",
               )}
             />
@@ -156,14 +167,9 @@ export function Pairing() {
             </Button>
           </form>
         ) : (
-          <button
-            type="button"
-            onClick={() => setPasteOpen(true)}
-            className="press mx-auto flex h-11 items-center gap-1.5 rounded-xl px-3 text-[14px] font-medium text-accent"
-          >
-            <Icon name="link" size={17} />
-            Have a pairing link? Paste it
-          </button>
+          <Button variant="secondary" size="lg" icon="link" className="w-full" onClick={() => setPasteOpen(true)}>
+            Paste a pairing link instead
+          </Button>
         )}
       </div>
 
@@ -183,7 +189,7 @@ export function Blocked() {
 
   // Keep trying quietly while the computer is asleep / the network is down.
   useEffect(() => {
-    if (reason !== "unreachable") return;
+    if (reason !== "unreachable" && reason !== "unavailable") return;
     const retry = () => {
       if (document.visibilityState === "visible") void retryConnect();
     };
@@ -199,6 +205,7 @@ export function Blocked() {
 
   const rate = reason === "rate_limited";
   const unreachable = reason === "unreachable";
+  const unavailable = reason === "unavailable";
   return (
     <Frame>
       <span
@@ -210,10 +217,24 @@ export function Blocked() {
         <Icon name={rate ? "clock" : unreachable ? "wifiOff" : "alertCircle"} size={32} strokeWidth={1.6} />
       </span>
       <h1 className="mt-6 text-center text-[24px] leading-tight font-semibold tracking-[-0.02em] text-fg">
-        {rate ? "Too many attempts" : unreachable ? "Can't reach Armada" : "Something went wrong"}
+        {rate
+          ? "Too many attempts"
+          : unreachable
+            ? "Can't reach Armada"
+            : unavailable
+              ? "Remote access is off"
+              : reason === "misdirected"
+                ? "Use Armada's link"
+                : "Something went wrong"}
       </h1>
       <p className="mx-auto mt-2 max-w-[330px] text-center text-[15px] leading-relaxed text-muted">
-        {rate ? "Try again in a few minutes." : unreachable ? "Your phone couldn't connect to Armada on your computer." : message}
+        {rate
+          ? (message ?? "Try again in a few minutes.")
+          : unreachable
+            ? "Your phone couldn't connect to Armada on your computer."
+            : unavailable
+              ? `${message ?? "Armada isn't accepting connections."} Turn it on in Settings → Remote; this page reconnects by itself.`
+              : message}
       </p>
 
       {unreachable && (
@@ -228,6 +249,10 @@ export function Blocked() {
               {t}
             </li>
           ))}
+          <li className="flex items-start gap-2.5 border-t border-line/70 pt-3 text-muted">
+            <Icon name="qr" size={17} className="mt-0.5 shrink-0 text-steel" />
+            If your computer's network address changed (new Wi-Fi, router restart), scan the QR code in Armada again.
+          </li>
         </ul>
       )}
 
@@ -246,11 +271,24 @@ export function Blocked() {
         >
           Try again
         </Button>
-        <Button variant="ghost" size="lg" className="w-full" onClick={unpair}>
+        <Button
+          variant="ghost"
+          size="lg"
+          className="w-full"
+          onClick={async () => {
+            const ok = await confirmAction({
+              title: "Pair a different computer?",
+              body: "This forgets the current pairing. You'll need to scan a QR code again.",
+              confirmLabel: "Forget pairing",
+              destructive: true,
+            });
+            if (ok) unpair();
+          }}
+        >
           Pair a different computer
         </Button>
       </div>
-      {unreachable && <p className="mt-4 text-center text-[12.5px] text-steel">Retrying automatically…</p>}
+      {(unreachable || unavailable) && <p className="mt-4 text-center text-[12.5px] text-steel">Retrying automatically…</p>}
     </Frame>
   );
 }

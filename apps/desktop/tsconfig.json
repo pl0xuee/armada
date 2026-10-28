@@ -1,4 +1,8 @@
 {
-  "files": [],
-  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }]
+  // `tsc --noEmit` checks the app (incl. tests). The build runs `tsc -b tsconfig.build.json`,
+  // which checks both the app and the node/vite configs.
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.root.tsbuildinfo"
+  }
 }

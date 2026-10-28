@@ -1,6 +1,6 @@
 // Small UI-level actions shared by several views (toasts + error handling).
 import { toast } from "sonner";
-import { useApp } from "@/store/app";
+import { markRemoved, suppressAgent, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { api } from "./api";
 import { PROVIDERS } from "./providers";
@@ -17,15 +17,22 @@ export function findOption(item: PermissionItem, kinds: PermissionOptionKind[]):
   return undefined;
 }
 
-export async function respondPermission(agentId: string, item: PermissionItem, option: PermissionOption) {
+/** Answer a permission request. Resolves false (after a toast) when the backend refused it. */
+export async function respondPermission(
+  agentId: string,
+  item: PermissionItem,
+  option: PermissionOption,
+): Promise<boolean> {
   try {
     await api.respondPermission(agentId, item.requestId, option.id);
+    return true;
   } catch (e) {
     toast.error("Couldn't send your answer", { description: errorMessage(e) });
+    return false;
   }
 }
 
-/** Respond with the first option of the given family. Returns false if none matched. */
+/** Respond with the first option of the given family. Returns false if none matched or it failed. */
 export async function quickRespond(
   agentId: string,
   item: PermissionItem,
@@ -33,20 +40,20 @@ export async function quickRespond(
 ): Promise<boolean> {
   const opt =
     family === "allow_once"
-      ? findOption(item, ["allow_once", "allow_always"])
+      ? findOption(item, ["allow_once"])
       : family === "allow_always"
         ? findOption(item, ["allow_always"])
         : findOption(item, ["reject_once", "reject_always"]);
   if (!opt) return false;
-  await respondPermission(agentId, item, opt);
-  return true;
+  return respondPermission(agentId, item, opt);
 }
 
 export async function startLogin(account: Account) {
   try {
-    const terminalId = await api.loginAccount(account.id);
+    const { terminalId, reused } = await api.loginAccount(account.id);
     useUi.getState().setTerminal({
       terminalId,
+      reused,
       kind: "login",
       accountId: account.id,
       title: `Sign in · ${account.name}`,
@@ -98,7 +105,7 @@ export async function stopAgent(agent: Agent) {
   try {
     await api.stopAgent(agent.id);
   } catch (e) {
-    toast.error("Couldn't stop agent", { description: errorMessage(e) });
+    toast.error("Couldn't shut down agent", { description: errorMessage(e) });
   }
 }
 
@@ -143,9 +150,16 @@ export async function attempt<T>(label: string, fn: () => Promise<T>): Promise<T
   try {
     return await fn();
   } catch (e) {
-    toast.error(label, { description: errorMessage(e) });
+    const msg = errorMessage(e);
+    // Not a failure of the action: the core is quitting (e.g. the app is closing/updating).
+    if (isShuttingDown(msg)) toast("Armada is shutting down", { id: "shutting-down" });
+    else toast.error(label, { description: msg });
     return null;
   }
+}
+
+export function isShuttingDown(message: string): boolean {
+  return message.includes("Armada is shutting down");
 }
 
 export async function installMissing() {
@@ -202,16 +216,27 @@ export async function switchAccount(agent: Agent, account: Account, continueAfte
   try {
     const updated = await api.switchAccount(agent.id, account.id);
     useApp.getState().upsertAgent(updated);
-    if (continueAfter) await api.sendPrompt(agent.id, CONTINUE_PROMPT);
-    toast.success(`Now running on ${account.name}`, {
-      id,
-      description: continueAfter ? "Continuing where it left off." : "Send a message whenever you're ready.",
-    });
-    return true;
   } catch (e) {
     toast.error("Couldn't switch account", { id, description: errorMessage(e) });
     return false;
   }
+  if (continueAfter) {
+    try {
+      await api.sendPrompt(agent.id, CONTINUE_PROMPT);
+    } catch (e) {
+      // The move itself worked; only the follow-up prompt failed.
+      toast.warning(`Switched to ${account.name}, but couldn't continue`, {
+        id,
+        description: `${errorMessage(e)} Send a message to pick it up.`,
+      });
+      return true;
+    }
+  }
+  toast.success(`Now running on ${account.name}`, {
+    id,
+    description: continueAfter ? "Continuing where it left off." : "Send a message whenever you're ready.",
+  });
+  return true;
 }
 
 /** Other signed-in accounts an agent could move to. */
@@ -237,4 +262,95 @@ export async function exportConversation(agent: Agent) {
   } catch (e) {
     toast.error("Export failed", { description: errorMessage(e) });
   }
+}
+
+/** The real delete runs after DELETE_DELAY_MS; Undo is offered for less, so it can't race it. */
+const DELETE_DELAY_MS = 6000;
+const UNDO_MS = 5000;
+
+/**
+ * Delete with Undo: the agent disappears immediately and is deleted for real after a few
+ * seconds unless the user undoes it. (Closing the app inside that window keeps the agent.)
+ * Events for it are suppressed meanwhile, so Undo re-syncs from the core rather than trusting
+ * the snapshot (the agent may have kept working, or asked for approval, in the meantime).
+ */
+export function deleteAgentWithUndo(agent: Agent, removeWorktree: boolean, force = false) {
+  const app = useApp.getState();
+  const snapshot = app.agents[agent.id];
+  if (!snapshot) return;
+  suppressAgent(agent.id, true);
+  const agents = { ...app.agents };
+  delete agents[agent.id];
+  useApp.setState({ agents });
+  const ui = useUi.getState();
+  const wasSelected = ui.selectedAgentId === agent.id;
+  if (wasSelected) useUi.setState({ selectedAgentId: null });
+
+  // undo → restored; once the delete call starts, Undo is locked out.
+  let state: "pending" | "undone" | "deleting" = "pending";
+
+  const restore = async () => {
+    suppressAgent(agent.id, false);
+    useApp.setState((s) => ({ agents: { ...s.agents, [agent.id]: s.agents[agent.id] ?? snapshot } }));
+    if (wasSelected && useUi.getState().selectedAgentId === null) useUi.getState().openAgent(agent.id);
+    // Re-sync what happened while events were suppressed.
+    try {
+      const fresh = (await api.getState()).agents.find((a) => a.id === agent.id);
+      if (fresh) useApp.setState((s) => ({ agents: { ...s.agents, [agent.id]: fresh } }));
+    } catch {
+      /* keep the snapshot; live events resume from here */
+    }
+    void useApp.getState().ensureItems(agent.id, true);
+  };
+
+  const timer = setTimeout(async () => {
+    if (state !== "pending") return;
+    state = "deleting";
+    try {
+      await api.deleteAgent(agent.id, removeWorktree, force);
+      markRemoved(agent.id);
+      suppressAgent(agent.id, false);
+    } catch (e) {
+      await restore();
+      const msg = errorMessage(e);
+      // The worktree holds work that exists nowhere else: nothing was deleted; let the user decide.
+      if (msg.startsWith("Unsaved work: ")) {
+        toast.warning(`“${agent.title}” wasn't deleted`, {
+          description: msg.slice("Unsaved work: ".length),
+          duration: 15_000,
+          action: {
+            label: "Delete anyway",
+            onClick: () => {
+              const cur = useApp.getState().agents[agent.id];
+              if (cur) deleteAgentWithUndo(cur, removeWorktree, true);
+            },
+          },
+          cancel: { label: "Review diff", onClick: () => useUi.getState().setReviewAgent(agent.id) },
+        });
+      } else {
+        toast.error("Couldn't delete agent", { description: msg });
+      }
+    }
+  }, DELETE_DELAY_MS);
+
+  toast(`Deleted “${agent.title}”`, {
+    description: removeWorktree
+      ? force
+        ? "Its worktree and unsaved work will be discarded."
+        : "Its worktree will be removed too."
+      : undefined,
+    duration: UNDO_MS,
+    action: {
+      label: "Undo",
+      onClick: () => {
+        if (state !== "pending") {
+          toast("Too late to undo", { description: "The agent was already deleted." });
+          return;
+        }
+        state = "undone";
+        clearTimeout(timer);
+        void restore();
+      },
+    },
+  });
 }

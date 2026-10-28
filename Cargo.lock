@@ -91,7 +91,7 @@ dependencies = [
 
 [[package]]
 name = "armada-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -110,12 +110,13 @@ dependencies = [
  "ureq",
  "uuid",
  "which",
+ "windows-sys 0.59.0",
  "zip 9.1.3",
 ]
 
 [[package]]
 name = "armada-desktop"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "armada-core",
@@ -123,6 +124,9 @@ dependencies = [
  "chrono",
  "dirs 7.0.0",
  "futures-util",
+ "hyper",
+ "hyper-util",
+ "libc",
  "notify-rust",
  "parking_lot",
  "portable-pty",
@@ -139,12 +143,14 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tokio",
+ "tower",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "ureq",
  "uuid",
  "which",
+ "zbus 5.19.0",
 ]
 
 [[package]]
@@ -5660,9 +5666,11 @@ dependencies = [
  "percent-encoding",
  "rustls",
  "rustls-pki-types",
+ "rustls-platform-verifier",
  "ureq-proto",
  "utf8-zero",
  "webpki-roots",
+ "winreg 0.56.0",
 ]
 
 [[package]]

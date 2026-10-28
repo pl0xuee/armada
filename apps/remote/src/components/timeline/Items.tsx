@@ -1,11 +1,14 @@
 import { memo, useState } from "react";
 import { cn } from "@/lib/cn";
 import { devParam } from "@/lib/dev";
-import { clockTime, shortPath, wordCount } from "@/lib/format";
+import { clockTime, formatBytes, shortPath, wordCount } from "@/lib/format";
 import { noteUserLayoutChange } from "@/lib/scroll";
-import type { PlanEntry, TimelineItem, ToolCallItem, ToolKind, ToolStatus } from "@/lib/types";
+import type { Attachment, PlanEntry, TimelineItem, ToolCallItem, ToolKind, ToolStatus } from "@/lib/types";
 import { CopyButton } from "../CopyButton";
 import { Icon, Spinner, type IconName } from "../Icon";
+import { ImageStrip } from "../Images";
+import { LocalImage } from "../LocalImage";
+import { isLocalImagePath } from "@/lib/localImages";
 import { Markdown } from "../Markdown";
 import { DiffList } from "./DiffView";
 
@@ -37,12 +40,17 @@ const LONG_USER_LINES = 14;
 export const UserBubble = memo(function UserBubble({
   text,
   ts,
+  attachments,
   state,
+  progress = null,
   onRetry,
   onEdit,
 }: {
   text: string;
   ts?: number;
+  attachments?: Attachment[];
+  /** Upload progress (0..1) while photos are sent. */
+  progress?: number | null;
   state?: "sending" | "failed";
   onRetry?: () => void;
   onEdit?: () => void;
@@ -51,6 +59,8 @@ export const UserBubble = memo(function UserBubble({
   const long = text.split("\n").length > LONG_USER_LINES || text.length > 900;
   return (
     <div className="flex flex-col items-end">
+      {attachments && attachments.length > 0 && <ImageStrip images={attachments} className="mb-1.5 max-w-[86%] justify-end" />}
+      {text.trim() !== "" && (
       <div
         className={cn(
           "relative max-w-[86%] rounded-[20px] rounded-br-md border px-3.5 py-2.5 text-[15px] leading-[1.5] break-words whitespace-pre-wrap",
@@ -64,25 +74,37 @@ export const UserBubble = memo(function UserBubble({
           <button
             type="button"
             onClick={() => toggle(setExpanded)}
-            className="press mt-1 -mb-1 h-8 text-[13px] font-semibold text-accent"
+            className="press hit relative mt-1 -mb-1 h-8 text-[13px] font-semibold text-accent"
           >
             {expanded ? "Show less" : "Show more"}
           </button>
         )}
       </div>
-      {state === "sending" && <span className="mt-1 mr-1 text-[11.5px] text-steel">Sending…</span>}
+      )}
+      {state === "sending" &&
+        (progress !== null && progress < 1 ? (
+          <span className="mt-1.5 mr-1 flex w-40 flex-col items-end gap-1 text-[11.5px] text-steel" role="status">
+            Uploading photos… {Math.round(progress * 100)}%
+            <span className="h-1 w-full overflow-hidden rounded-full bg-raised" aria-hidden>
+              <span className="block h-full w-full origin-left rounded-full bg-accent transition-transform duration-150" style={{ transform: `scaleX(${progress})` }} />
+            </span>
+          </span>
+        ) : (
+          <span className="mt-1 mr-1 text-[11.5px] text-steel">Sending…</span>
+        ))}
+
       {state === "failed" && (
         <div className="mt-1 flex items-center gap-1 text-[12.5px]">
           <span className="inline-flex items-center gap-1 text-err">
             <Icon name="alertCircle" size={14} /> Not delivered
           </span>
           {onEdit && (
-            <button type="button" onClick={onEdit} className="press h-9 rounded-lg px-2 font-semibold text-muted">
+            <button type="button" onClick={onEdit} className="press hit relative h-9 rounded-lg px-2 font-semibold text-muted">
               Edit
             </button>
           )}
           {onRetry && (
-            <button type="button" onClick={onRetry} className="press h-9 rounded-lg px-2 font-semibold text-accent">
+            <button type="button" onClick={onRetry} className="press hit relative h-9 rounded-lg px-2 font-semibold text-accent">
               Retry
             </button>
           )}
@@ -124,7 +146,7 @@ export const ThoughtRow = memo(function ThoughtRow({ item, streaming }: { item: 
       >
         <Icon name="sparkle" size={16} className={cn("shrink-0", streaming && "animate-breathe text-accent")} />
         <span className="font-medium">{streaming ? "Thinking…" : "Thought"}</span>
-        {!streaming && <span className="text-steel/70">· {words} {words === 1 ? "word" : "words"}</span>}
+        {!streaming && <span className="text-steel">· {words} {words === 1 ? "word" : "words"}</span>}
         <Icon name="chevronDown" size={16} className={cn("ml-auto shrink-0 transition-transform duration-150", !open && "-rotate-90")} />
       </button>
       {open && (
@@ -153,20 +175,34 @@ function StatusGlyph({ status }: { status: ToolStatus }) {
 }
 
 const OUTPUT_TAIL = 12_000;
+const OUTPUT_PAGE = 64 * 1024;
+
+/** How much of a long output to show: the tail, growing by 64 KB pages. */
+export function outputWindow(length: number, pages: number): { start: number; hidden: number } {
+  const shown = Math.min(length, OUTPUT_TAIL + pages * OUTPUT_PAGE);
+  return { start: length - shown, hidden: length - shown };
+}
 
 export function OutputBlock({ text, label = "Output" }: { text: string; label?: string }) {
-  const [all, setAll] = useState(false);
-  const clipped = !all && text.length > OUTPUT_TAIL;
-  const shown = clipped ? text.slice(-OUTPUT_TAIL) : text;
+  const [pages, setPages] = useState(0);
+  const { start, hidden } = outputWindow(text.length, pages);
+  const shown = start ? text.slice(start) : text;
   return (
     <div className="overflow-hidden rounded-xl border border-line bg-code">
       <div className="flex h-8 items-center justify-between border-b border-line/70 pr-1 pl-3">
         <span className="text-[11px] font-medium tracking-wider text-steel uppercase">{label}</span>
         <CopyButton text={text} label={`Copy ${label.toLowerCase()}`} />
       </div>
-      {clipped && (
-        <button type="button" onClick={() => toggle(setAll)} className="press-row h-9 w-full border-b border-line/70 text-[12.5px] font-medium text-accent">
-          Showing the last {OUTPUT_TAIL.toLocaleString()} characters. Show all
+      {hidden > 0 && (
+        <button
+          type="button"
+          onClick={() => {
+            noteUserLayoutChange();
+            setPages((p) => p + 1);
+          }}
+          className="press-row min-h-11 w-full border-b border-line/70 px-3 text-[12.5px] font-medium text-accent"
+        >
+          {formatBytes(hidden)} earlier output hidden · Show {formatBytes(Math.min(hidden, OUTPUT_PAGE))} more
         </button>
       )}
       <pre className="max-h-[22rem] overflow-auto px-3 py-2.5 font-mono text-[12px] leading-[1.55] whitespace-pre-wrap break-words text-muted">
@@ -222,9 +258,17 @@ export const ToolRow = memo(function ToolRow({ item }: { item: ToolCallItem }) {
           <Icon name="chevronDown" size={16} className={cn("shrink-0 text-steel transition-transform duration-150", !open && "-rotate-90")} />
         )}
       </button>
+      {item.images && item.images.length > 0 && <ImageStrip images={item.images} className="px-3 pb-3 pl-[52px]" />}
       {open && (
         <div className="animate-fade space-y-2 px-3 pt-0.5 pb-3">
           {item.command && <CommandBlock command={item.command} />}
+          {item.locations.some(isLocalImagePath) && (
+            <div className="flex flex-wrap gap-2">
+              {item.locations.filter(isLocalImagePath).slice(0, 4).map((p) => (
+                <LocalImage key={p} path={p} />
+              ))}
+            </div>
+          )}
           {item.locations.length > 0 && !item.diffs.length && (
             <div className="flex flex-wrap gap-1.5">
               {item.locations.map((loc) => (
@@ -285,7 +329,10 @@ export const PlanCard = memo(function PlanCard({ item }: { item: Of<"plan"> }) {
           {done} of {total} done
         </span>
         <div className="ml-auto h-1.5 w-20 overflow-hidden rounded-full bg-raised" aria-hidden>
-          <div className="h-full rounded-full bg-ok transition-[width] duration-200" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+          <div
+            className="h-full w-full origin-left rounded-full bg-ok transition-transform duration-200"
+            style={{ transform: `scaleX(${total ? done / total : 0})` }}
+          />
         </div>
       </div>
       <ul className="px-4 pb-3">

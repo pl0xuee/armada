@@ -61,6 +61,11 @@ jobs:
           npm ci
           npm run build
 
+      - name: Test frontend
+        if: runner.os == 'Linux'
+        working-directory: apps/desktop
+        run: npm run test --if-present
+
       # Embedded into the desktop binary by src-tauri/build.rs.
       - name: Build mobile companion
         working-directory: apps/remote
@@ -68,12 +73,17 @@ jobs:
           npm ci
           npm run build
 
+      - name: Test mobile companion
+        if: runner.os == 'Linux'
+        working-directory: apps/remote
+        run: npm test
+
       - name: Formatting
         if: runner.os == 'Linux'
         run: cargo fmt --all --check
 
+      # On every OS: there are cfg(windows)/cfg(unix)/cfg(target_os) code paths.
       - name: Clippy
-        if: runner.os == 'Linux'
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test
@@ -85,3 +95,16 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: apps/desktop
         run: npm run tauri build -- --ci --debug --bundles deb --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      # The same check for the macOS app bundle and the Windows installer, which are
+      # otherwise first built on a release tag.
+      - name: Bundle (app, debug)
+        if: runner.os == 'macOS'
+        working-directory: apps/desktop
+        run: npm run tauri build -- --ci --debug --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Bundle (nsis, debug)
+        if: runner.os == 'Windows'
+        working-directory: apps/desktop
+        shell: bash
+        run: npm run tauri build -- --ci --debug --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'

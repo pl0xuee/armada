@@ -1,5 +1,5 @@
-import { Link2, RefreshCw, ShieldCheck, Smartphone, Trash2, Unplug } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { Eye, EyeOff, Link2, QrCode, RefreshCw, ShieldCheck, Smartphone, Trash2, Unplug } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CopyButton } from "@/components/CopyButton";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
@@ -14,7 +14,12 @@ import { api } from "@/lib/api";
 import { relativeTimeLong } from "@/lib/format";
 import type { RemoteSettings, RemoteStatus, Settings, ShareLink } from "@/lib/types";
 import { cn, errorMessage } from "@/lib/utils";
+import { useShallow } from "zustand/react/shallow";
 import { useApp } from "@/store/app";
+import { pollRemoteStatus } from "./remoteStatus";
+import { FieldError } from "./FieldError";
+import { fieldErrorId, saveSettingsPatch, useFieldError } from "./settingsErrors";
+import { useCommitOnUnmount } from "./useCommitOnUnmount";
 import { SectionHeader, SettingGroup, SettingRow } from "./SettingRow";
 
 const SECURITY_COPY =
@@ -34,8 +39,17 @@ export function RemoteSection({ settings }: { settings: Settings }) {
   const [port, setPort] = useState(String(remote.port));
   const [confirmUnpair, setConfirmUnpair] = useState(false);
   const [rotating, setRotating] = useState(false);
+  /** True while the server (re)starts after a change: show "Starting…", not a stale/error state. */
+  const [starting, setStarting] = useState(false);
+  const [confirmLan, setConfirmLan] = useState(false);
+  const [showPairing, setShowPairing] = useState(false);
 
-  useEffect(() => setPort(String(remote.port)), [remote.port]);
+  // Follow the saved port, except while a rejected value is shown with its error (so it can be fixed).
+  const keepTyped = useRef(false);
+  useEffect(() => {
+    if (keepTyped.current) return;
+    setPort(String(remote.port));
+  }, [remote.port]);
 
   const refresh = useCallback(async () => {
     try {
@@ -55,21 +69,39 @@ export function RemoteSection({ settings }: { settings: Settings }) {
     const current = useApp.getState().settings;
     if (!current) return;
     setApplying(true);
-    try {
-      await useApp.getState().setSettings({ ...current, remote: { ...current.remote, ...patch } });
-    } catch (e) {
-      toast.error("Couldn't update remote access", { description: errorMessage(e) });
+    // Validation errors (e.g. the port) land inline on their field; the store rolls back.
+    keepTyped.current = "port" in patch;
+    const ok = await saveSettingsPatch({ remote: { ...current.remote, ...patch } }, (message) =>
+      toast.error("Couldn't update remote access", { description: message }),
+    );
+    // Release on the next tick, after the rollback re-render has been skipped.
+    setTimeout(() => (keepTyped.current = !ok && "port" in patch), 0);
+    if (!ok) {
+      setApplying(false);
+      return;
     }
-    await refresh();
+    setStarting(true);
+    try {
+      await pollRemoteStatus((st, settled) => {
+        setStatus(st);
+        if (settled) setStarting(false);
+      });
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(errorMessage(e));
+      setStarting(false);
+    }
     setApplying(false);
   };
 
+  const portBackendError = useFieldError("port");
   const parsedPort = validPort(port);
   const portError = parsedPort === null ? "Use a port between 1024 and 65535." : null;
   const commitPort = () => {
     if (parsedPort === null || parsedPort === remote.port) return;
     void apply({ port: parsedPort });
   };
+  useCommitOnUnmount(commitPort);
 
   const unpair = async () => {
     setRotating(true);
@@ -128,7 +160,8 @@ export function RemoteSection({ settings }: { settings: Settings }) {
               id="remote-lan"
               checked={remote.lan}
               disabled={applying}
-              onCheckedChange={(v) => void apply({ lan: v })}
+              // Opening the server to the network is a real exposure: confirm it.
+              onCheckedChange={(v) => (v ? setConfirmLan(true) : void apply({ lan: false }))}
             />
           </SettingRow>
           <SettingRow
@@ -136,23 +169,30 @@ export function RemoteSection({ settings }: { settings: Settings }) {
             description={portError ?? "Change it if something else on this computer already uses it."}
             htmlFor="remote-port"
           >
-            <Input
-              id="remote-port"
-              inputMode="numeric"
-              value={port}
-              disabled={applying}
-              aria-invalid={!!portError}
-              onChange={(e) => setPort(e.target.value)}
-              onBlur={commitPort}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commitPort();
-                if (e.key === "Escape") setPort(String(remote.port));
-              }}
-              className={cn(
-                "h-8 w-[96px] text-right font-mono text-[12.5px] tabular",
-                portError && "border-err/60 focus:border-err/70 focus:ring-err/15",
-              )}
-            />
+            <div className="flex flex-col items-end">
+              <Input
+                id="remote-port"
+                inputMode="numeric"
+                value={port}
+                disabled={applying}
+                aria-invalid={!!portError || !!portBackendError}
+                aria-describedby={portBackendError ? fieldErrorId("port") : undefined}
+                onChange={(e) => setPort(e.target.value)}
+                onBlur={commitPort}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitPort();
+                  if (e.key === "Escape") {
+                    keepTyped.current = false;
+                    setPort(String(remote.port));
+                  }
+                }}
+                className={cn(
+                  "h-8 w-[96px] text-right font-mono text-[12.5px] tabular",
+                  (portError || portBackendError) && "border-err/60 focus:border-err/70 focus:ring-err/15",
+                )}
+              />
+              <FieldError field="port" />
+            </div>
           </SettingRow>
         </SettingGroup>
 
@@ -169,14 +209,37 @@ export function RemoteSection({ settings }: { settings: Settings }) {
           <Skeleton className="h-[148px] rounded-xl" />
         ) : (
           <>
-            <StatusCard status={status} />
+            <StatusCard status={status} starting={starting} />
             {status.running && status.pairingUrl && (
-              <PairingCard status={status} rotating={rotating} onUnpair={() => setConfirmUnpair(true)} />
+              <PairingCard
+                status={status}
+                rotating={rotating}
+                shown={showPairing}
+                onShow={setShowPairing}
+                onUnpair={() => setConfirmUnpair(true)}
+              />
             )}
             <SharesGroup shares={status.shares} enabled={status.enabled} onChanged={() => void refresh()} />
           </>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmLan}
+        onOpenChange={setConfirmLan}
+        title="Allow devices on your network?"
+        description={
+          <>
+            Anyone on this network who gets the pairing link can control your agents, and traffic isn't encrypted. Use
+            it on networks you trust (home, or a VPN such as Tailscale), not on public Wi-Fi.
+          </>
+        }
+        confirmLabel="Allow network access"
+        onConfirm={() => {
+          setConfirmLan(false);
+          void apply({ lan: true });
+        }}
+      />
 
       <ConfirmDialog
         open={confirmUnpair}
@@ -192,7 +255,7 @@ export function RemoteSection({ settings }: { settings: Settings }) {
   );
 }
 
-function StatusCard({ status }: { status: RemoteStatus }) {
+function StatusCard({ status, starting }: { status: RemoteStatus; starting: boolean }) {
   if (!status.enabled) {
     return (
       <div className="flex items-center gap-3 rounded-xl border border-dashed border-line-strong bg-card/40 px-4 py-4">
@@ -206,7 +269,7 @@ function StatusCard({ status }: { status: RemoteStatus }) {
       </div>
     );
   }
-  if (status.error) {
+  if (status.error && !starting) {
     return (
       <div role="alert" className="flex items-start gap-3 rounded-xl border border-err/30 bg-err/[0.06] px-4 py-3.5">
         <Unplug className="mt-0.5 h-4 w-4 shrink-0 text-err" />
@@ -225,7 +288,11 @@ function StatusCard({ status }: { status: RemoteStatus }) {
           status.running ? "border-ok/30 bg-ok/10 text-ok" : "border-line-strong bg-raised text-muted",
         )}
       >
-        <span className={cn("h-1.5 w-1.5 rounded-full", status.running ? "bg-ok" : "bg-steel")} />
+        {status.running ? (
+          <span className="h-1.5 w-1.5 rounded-full bg-ok" />
+        ) : (
+          <Spinner className="h-3 w-3 text-current" />
+        )}
         {status.running ? "Running" : "Starting…"}
       </span>
       {status.url && <span className="selectable min-w-0 truncate font-mono text-[12px] text-fg/90">{status.url}</span>}
@@ -237,13 +304,43 @@ function StatusCard({ status }: { status: RemoteStatus }) {
 function PairingCard({
   status,
   rotating,
+  shown,
+  onShow,
   onUnpair,
 }: {
   status: RemoteStatus;
   rotating: boolean;
+  /** The QR and link grant full control: keep them hidden until asked for (screen sharing, shoulder surfing). */
+  shown: boolean;
+  onShow: (shown: boolean) => void;
   onUnpair: () => void;
 }) {
   const url = status.pairingUrl ?? "";
+  if (!shown) {
+    return (
+      <section
+        aria-label="Pair a device"
+        className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-card px-4 py-3.5 edge"
+      >
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line-strong bg-raised text-steel">
+          <QrCode className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-medium">Pair your phone</div>
+          <div className="text-[12px] text-muted">
+            The pairing code gives full control. It's hidden so it doesn't show up in screen shares.
+          </div>
+        </div>
+        <Button size="sm" variant="secondary" onClick={() => onShow(true)}>
+          <Eye /> Show pairing code
+        </Button>
+        <Button size="sm" variant="ghost" disabled={rotating} onClick={onUnpair}>
+          {rotating ? <Spinner className="h-3.5 w-3.5" /> : <Unplug className="!h-3.5 !w-3.5" />}
+          Unpair all
+        </Button>
+      </section>
+    );
+  }
   return (
     <section
       aria-label="Pair a device"
@@ -265,7 +362,12 @@ function PairingCard({
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <h3 className="text-[14px] font-semibold tracking-tight">Pair your phone</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-[14px] font-semibold tracking-tight">Pair your phone</h3>
+          <Button size="xs" variant="ghost" className="ml-auto" onClick={() => onShow(false)}>
+            <EyeOff className="!h-3.5 !w-3.5" /> Hide
+          </Button>
+        </div>
         <ol className="mt-2 space-y-1 text-[12.5px] text-muted">
           <li>
             <span className="mr-1.5 text-steel tabular">1.</span>Open the camera on your phone.
@@ -299,7 +401,8 @@ function PairingCard({
 
 function SharesGroup({ shares, enabled, onChanged }: { shares: ShareLink[]; enabled: boolean; onChanged: () => void }) {
   const now = useNow();
-  const agents = useApp((s) => s.agents);
+  // Titles of the shared agents only (not the whole agent map, which changes on every stream tick).
+  const titles = useApp(useShallow((s) => shares.map((sh) => s.agents[sh.agentId]?.title ?? null)));
   const [revoking, setRevoking] = useState<string | null>(null);
 
   const revoke = async (link: ShareLink) => {
@@ -327,7 +430,7 @@ function SharesGroup({ shares, enabled, onChanged }: { shares: ShareLink[]; enab
         </div>
       ) : (
         shares.map((s) => {
-          const title = s.agentTitle ?? agents[s.agentId]?.title ?? "Deleted agent";
+          const title = s.agentTitle ?? titles[shares.indexOf(s)] ?? "Deleted agent";
           return (
             <div key={s.token} className="flex items-center gap-3 px-4 py-3">
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line-strong bg-raised text-steel">

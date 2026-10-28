@@ -1,7 +1,10 @@
 import { useEffect } from "react";
 import { orderedAgents } from "@/lib/agents";
 import { LIST_DOCK_QUERY } from "@/lib/layout";
+import { selectNextTriage, triageQueueNow } from "@/components/triage/useTriage";
 import { toggleAgentList } from "./useAgentListLayout";
+import { isEditableTarget, isMac } from "@/lib/utils";
+import { openShortcutHelp, toggleShortcutHelp } from "@/components/shell/ShortcutHelp";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 
@@ -10,16 +13,33 @@ export function useGlobalShortcuts(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey;
+      // ⌘ on macOS, Ctrl elsewhere (Ctrl+K on a Mac is a text-editing shortcut).
+      const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+      // "?" (not while typing) opens the shortcut cheat sheet.
+      if (!mod && e.key === "?" && !e.altKey && !e.repeat && !isEditableTarget(e.target) && !dialogOpen()) {
+        e.preventDefault();
+        openShortcutHelp();
+        return;
+      }
       if (!mod || e.altKey) return;
       const ui = useUi.getState();
       const key = e.key.toLowerCase();
 
+      if (e.key === "/" && !e.shiftKey) {
+        e.preventDefault();
+        toggleShortcutHelp();
+        return;
+      }
+
       if (key === "k" && !e.shiftKey) {
+        // The palette toggles itself; any other open dialog blocks it.
+        if (!ui.paletteOpen && dialogOpen()) return;
         e.preventDefault();
         ui.setPaletteOpen(!ui.paletteOpen);
         return;
       }
+      // Never navigate out from under an open dialog, sheet or menu.
+      if (dialogOpen()) return;
       if (key === "n" && !e.shiftKey) {
         e.preventDefault();
         ui.setPaletteOpen(false);
@@ -35,6 +55,13 @@ export function useGlobalShortcuts(enabled: boolean) {
         } else {
           toggleAgentList();
         }
+        return;
+      }
+      if (key === "j" && !e.shiftKey) {
+        e.preventDefault();
+        // Opens "Needs you"; pressed again while it's open, moves to the next waiting agent.
+        if (ui.view === "triage") selectNextTriage(triageQueueNow());
+        else ui.setView("triage");
         return;
       }
       if (key === "i" && !e.shiftKey) {
@@ -64,4 +91,10 @@ export function useGlobalShortcuts(enabled: boolean) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [enabled]);
+}
+
+function dialogOpen(): boolean {
+  return !!document.querySelector(
+    '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"]',
+  );
 }

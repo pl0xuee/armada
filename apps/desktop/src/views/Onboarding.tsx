@@ -3,6 +3,7 @@ import {
   ArrowRight,
   Bell,
   Check,
+  FolderGit2,
   GitBranch,
   Play,
   RefreshCw,
@@ -25,7 +26,8 @@ import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { PROVIDER_ORDER, PROVIDERS } from "@/lib/providers";
 import type { Settings } from "@/lib/types";
-import { cn, errorMessage, modKey } from "@/lib/utils";
+import { basename, cn, errorMessage, modKey, prettyPath } from "@/lib/utils";
+import { discoverProjectsOnce } from "@/lib/launchDefaults";
 import { useApp } from "@/store/app";
 
 // Step transitions in CSS (transform/opacity only; reduced motion handled globally).
@@ -85,51 +87,57 @@ export function Onboarding() {
       <style>{ONBOARDING_CSS}</style>
       <Backdrop />
 
-      {/* Step indicator */}
-      <div className="relative z-10 flex items-center justify-center gap-1 pt-6">
-        {STEPS.map((s, i) => (
-          <button
-            key={s.id}
-            type="button"
-            onClick={() => i < step && go(i)}
-            disabled={i > step}
-            aria-current={i === step ? "step" : undefined}
-            className="group flex items-center gap-1 disabled:cursor-default"
-          >
-            <span
-              className={cn(
-                "flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[11.5px] font-medium transition-colors duration-150",
-                i === step
-                  ? "bg-raised text-fg ring-1 ring-line-strong"
-                  : i < step
-                    ? "text-muted hover:text-fg"
-                    : "text-steel/60",
-              )}
+      {/* Step indicator, with "Skip setup" in the same row (in flow, so it never overlaps). */}
+      <div className="relative z-10 grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-4 pt-6 sm:px-5">
+        <span aria-hidden />
+        <nav aria-label="Setup steps" className="flex items-center justify-center gap-1">
+          {STEPS.map((s, i) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => i < step && go(i)}
+              disabled={i > step}
+              aria-current={i === step ? "step" : undefined}
+              aria-label={`Step ${i + 1}: ${s.label}${i < step ? " (done)" : ""}`}
+              className="group flex items-center gap-1 disabled:cursor-default"
             >
               <span
                 className={cn(
-                  "flex h-4 w-4 items-center justify-center rounded-full text-[9.5px] tabular",
-                  i < step
-                    ? "bg-accent/90 text-accent-fg"
-                    : i === step
-                      ? "bg-accent text-accent-fg"
-                      : "bg-raised text-steel",
+                  "flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[11.5px] font-medium transition-colors duration-150",
+                  i === step
+                    ? "bg-raised text-fg ring-1 ring-line-strong"
+                    : i < step
+                      ? "text-muted hover:text-fg"
+                      : "text-steel",
                 )}
               >
-                {i < step ? <Check className="h-2.5 w-2.5" strokeWidth={3.5} /> : i + 1}
+                <span
+                  className={cn(
+                    "flex h-4 w-4 items-center justify-center rounded-full text-[9.5px] tabular",
+                    i < step
+                      ? "bg-accent/90 text-accent-fg"
+                      : i === step
+                        ? "bg-accent text-accent-fg"
+                        : "bg-raised text-steel",
+                  )}
+                >
+                  {i < step ? <Check className="h-2.5 w-2.5" strokeWidth={3.5} /> : i + 1}
+                </span>
+                <span className="hidden md:inline">{s.label}</span>
               </span>
-              <span className="hidden sm:inline">{s.label}</span>
-            </span>
-            {i < STEPS.length - 1 && <span className={cn("h-px w-5", i < step ? "bg-accent/50" : "bg-line")} />}
+              {i < STEPS.length - 1 && <span className={cn("h-px w-5", i < step ? "bg-accent/50" : "bg-line")} />}
+            </button>
+          ))}
+        </nav>
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={finish}
+            className="h-6 shrink-0 whitespace-nowrap rounded-md px-2 text-[12px] text-steel transition-colors hover:text-fg"
+          >
+            Skip setup
           </button>
-        ))}
-        <button
-          type="button"
-          onClick={finish}
-          className="absolute right-5 top-6 h-6 rounded-md px-2 text-[12px] text-steel transition-colors hover:text-fg"
-        >
-          Skip setup
-        </button>
+        </div>
       </div>
 
       <div className="relative z-10 min-h-0 flex-1 overflow-y-auto">
@@ -475,6 +483,7 @@ function DoneStep({ onFinish, finishing }: { onFinish: () => void; finishing: bo
         <Stat value={`${ready}/${providers.length}`} label="providers ready" />
         <Stat value={`${signedIn}/${accounts.length}`} label="accounts signed in" />
       </div>
+      <ProjectsGlimpse />
       <Button
         variant="primary"
         size="lg"
@@ -494,6 +503,54 @@ function Stat({ value, label }: { value: string; label: string }) {
     <div className="rounded-xl border border-line bg-card px-4 py-3 edge">
       <div className="text-[20px] font-semibold tracking-tight tabular">{value}</div>
       <div className="text-[11.5px] text-muted">{label}</div>
+    </div>
+  );
+}
+
+/** "We found N repos": a non-blocking peek at discover_projects so the first agent has somewhere to go. */
+function ProjectsGlimpse() {
+  const [found, setFound] = useState<string[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    discoverProjectsOnce()
+      .then((p) => !cancelled && setFound(p))
+      .catch(() => !cancelled && setFailed(true));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (failed || (found && found.length === 0)) return null;
+  return (
+    <div className="mt-4 w-full max-w-[420px] rounded-xl border border-line bg-card px-4 py-3 text-left edge">
+      <div className="flex items-center gap-2 text-[12.5px]">
+        <FolderGit2 className="h-4 w-4 text-accent" />
+        {found ? (
+          <span>
+            <span className="font-semibold tabular">{found.length}</span> project{found.length === 1 ? "" : "s"} found
+            on this computer
+          </span>
+        ) : (
+          <span className="text-muted">Looking for your projects…</span>
+        )}
+      </div>
+      <div className="mt-2 flex min-h-6 flex-wrap gap-1.5">
+        {found
+          ? found.slice(0, 6).map((p) => (
+              <span
+                key={p}
+                title={prettyPath(p)}
+                className="inline-flex h-6 max-w-[160px] items-center rounded-full border border-line bg-base/60 px-2.5 text-[11.5px] text-muted"
+              >
+                <span className="truncate">{basename(p)}</span>
+              </span>
+            ))
+          : ["w-20", "w-24", "w-16"].map((w) => <span key={w} className={cn("skeleton h-6 rounded-full", w)} />)}
+        {found && found.length > 6 && (
+          <span className="inline-flex h-6 items-center px-1 text-[11.5px] text-steel">+{found.length - 6} more</span>
+        )}
+      </div>
+      <p className="mt-2 text-[11.5px] text-steel">Pick any of them when you start an agent.</p>
     </div>
   );
 }

@@ -6,7 +6,9 @@ import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { providerReady } from "@/components/settings/ProviderCard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/misc";
-import { checkAccount, startInstall } from "@/lib/actions";
+import { toast } from "sonner";
+import { startInstall } from "@/lib/actions";
+import { api } from "@/lib/api";
 import { HeaderAction, PageHeader } from "@/components/PageHeader";
 import { PROVIDER_ORDER, PROVIDERS, type BuiltinProvider } from "@/lib/providers";
 import { cn } from "@/lib/utils";
@@ -20,10 +22,27 @@ export function AccountsView() {
 
   const signedIn = accounts.filter((a) => a.status?.loggedIn).length;
 
+  /** Check every account and report once (not one toast per account). */
   const checkAll = async () => {
     setCheckingAll(true);
-    await Promise.all(accounts.map((a) => checkAccount(a)));
+    const results = await Promise.allSettled(accounts.map((a) => api.checkAccount(a.id)));
     setCheckingAll(false);
+    const signedIn: string[] = [];
+    const signedOut: string[] = [];
+    const failed: string[] = [];
+    results.forEach((r, i) => {
+      const label = `${PROVIDERS[accounts[i].provider].short} · ${accounts[i].name}`;
+      if (r.status === "rejected") return void failed.push(label);
+      useApp.getState().upsertAccount(r.value);
+      (r.value.status?.loggedIn ? signedIn : signedOut).push(label);
+    });
+    const parts = [
+      signedOut.length ? `Needs sign-in: ${signedOut.join(", ")}` : null,
+      failed.length ? `Couldn't check: ${failed.join(", ")}` : null,
+    ].filter(Boolean);
+    const title = `${signedIn.length} of ${accounts.length} signed in`;
+    if (signedOut.length || failed.length) toast.warning(title, { description: parts.join(" · ") });
+    else toast.success(`All ${accounts.length} accounts are signed in`);
   };
 
   return (
@@ -93,14 +112,14 @@ export function AccountsView() {
                       <p className="text-[12px] text-muted">
                         {info?.installed
                           ? `${meta.tagline}${info.version ? ` v${info.version}` : ""}${
-                              info.adapterRequired && !info.adapterInstalled ? " · ACP adapter missing" : ""
+                              info.adapterRequired && !info.adapterInstalled ? " · ACP adapter needs an update" : ""
                             }`
                           : `${meta.tagline} is not installed`}
                       </p>
                     </div>
                     {info && !ready ? (
                       <Button size="sm" variant="secondary" onClick={() => void startInstall(p)}>
-                        <Download /> Install
+                        <Download /> {info.installed ? "Update" : "Install"}
                       </Button>
                     ) : (
                       <Badge tone="ok">

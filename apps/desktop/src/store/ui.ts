@@ -1,7 +1,8 @@
 import { create } from "zustand";
-import type { Agent, Provider } from "@/lib/types";
+import type { Agent, Provider, Schedule } from "@/lib/types";
 
-export type View = "agents" | "mission" | "inbox" | "compare" | "schedules" | "usage" | "accounts" | "settings";
+export type View =
+  "agents" | "triage" | "mission" | "inbox" | "compare" | "schedules" | "usage" | "accounts" | "settings";
 
 export type SettingsSection =
   | "appearance"
@@ -23,6 +24,8 @@ export interface TerminalSession {
   kind: "login" | "install";
   accountId?: string;
   provider?: Provider;
+  /** The core reused a sign-in that was already running (its earlier output isn't replayed). */
+  reused?: boolean;
 }
 
 export interface NewAgentPreset {
@@ -44,6 +47,12 @@ interface UiStore {
   /** Agent list visibility, remembered separately for wide (docked) and narrow (drawer) layouts. */
   agentList: { wide: boolean; narrow: boolean };
   reviewAgentId: string | null;
+  /** File to focus when the review sheet opens (from a turn-summary chip). */
+  reviewFile: string | null;
+  /** Open the review sheet straight into a flow (e.g. the PR form). */
+  reviewIntent: "pr" | null;
+  /** Prefill for the schedule editor ("Schedule this" from an agent); consumed by the Schedules view. */
+  schedulePrefill: Partial<Schedule> | null;
   paletteOpen: boolean;
   newAgent: { open: boolean; preset: NewAgentPreset | null };
   handoffAgent: Agent | null;
@@ -64,7 +73,9 @@ interface UiStore {
   setInspectorOpen: (open: boolean) => void;
   setInspectorOverlay: (open: boolean) => void;
   setAgentList: (layout: "wide" | "narrow", open: boolean) => void;
-  setReviewAgent: (id: string | null) => void;
+  setReviewAgent: (id: string | null, file?: string | null, intent?: "pr" | null) => void;
+  openScheduleFor: (prefill: Partial<Schedule>) => void;
+  clearSchedulePrefill: () => void;
   setPaletteOpen: (open: boolean) => void;
   openNewAgent: (preset?: NewAgentPreset) => void;
   closeNewAgent: () => void;
@@ -101,7 +112,7 @@ function readInspector(): boolean {
   }
 }
 
-const VIEWS: View[] = ["agents", "mission", "inbox", "compare", "schedules", "usage", "accounts", "settings"];
+const VIEWS: View[] = ["agents", "triage", "mission", "inbox", "compare", "schedules", "usage", "accounts", "settings"];
 
 /** Dev/review convenience: ?view=mission&agent=<id> picks the initial screen. */
 function initialFromUrl(): { view: View; agent: string | null } {
@@ -125,6 +136,9 @@ export const useUi = create<UiStore>((set) => ({
   inspectorOverlay: false,
   agentList: readAgentList(),
   reviewAgentId: null,
+  reviewFile: null,
+  reviewIntent: null,
+  schedulePrefill: null,
   paletteOpen: false,
   newAgent: { open: false, preset: null },
   handoffAgent: null,
@@ -158,7 +172,10 @@ export const useUi = create<UiStore>((set) => ({
       }
       return { agentList };
     }),
-  setReviewAgent: (reviewAgentId) => set({ reviewAgentId }),
+  setReviewAgent: (reviewAgentId, file = null, intent = null) =>
+    set({ reviewAgentId, reviewFile: reviewAgentId ? file : null, reviewIntent: reviewAgentId ? intent : null }),
+  openScheduleFor: (schedulePrefill) => set({ schedulePrefill, view: "schedules" }),
+  clearSchedulePrefill: () => set({ schedulePrefill: null }),
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   openNewAgent: (preset) => set({ newAgent: { open: true, preset: preset ?? null } }),
   closeNewAgent: () => set((s) => ({ newAgent: { ...s.newAgent, open: false } })),

@@ -119,10 +119,19 @@ export const ContextMenu = CM.Root;
 export const ContextMenuTrigger = CM.Trigger;
 export const ContextMenuSub = CM.Sub;
 
-export function ContextMenuContent({ children }: { children: ReactNode }) {
+export function ContextMenuContent({
+  children,
+  onCloseAutoFocus,
+}: {
+  children: ReactNode;
+  /** e.g. preventDefault so an inline editor opened from the menu keeps focus. */
+  onCloseAutoFocus?: (e: Event) => void;
+}) {
   return (
     <CM.Portal>
-      <CM.Content className={contentClass}>{children}</CM.Content>
+      <CM.Content className={contentClass} onCloseAutoFocus={onCloseAutoFocus}>
+        {children}
+      </CM.Content>
     </CM.Portal>
   );
 }

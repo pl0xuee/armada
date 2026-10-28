@@ -3,13 +3,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use armada_core::{AgentStatus, Core, NavigateTarget};
+use armada_core::{Core, NavigateTarget};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 use tokio::sync::Notify;
-use tracing::warn;
 
 use crate::window;
 
@@ -19,6 +18,14 @@ pub struct TrayState {
     tray: TrayIcon,
     inbox: MenuItem<tauri::Wry>,
     dirty: Arc<Notify>,
+}
+
+/// Whether the tray icon was created (some Linux desktops have no tray host or
+/// lack the indicator library); without it, closing the window must quit.
+pub static AVAILABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn available() -> bool {
+    AVAILABLE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
@@ -115,28 +122,8 @@ fn spawn_updater(app: AppHandle, dirty: Arc<Notify>) {
 
 /// (agents waiting on the user, pending approvals in the inbox)
 fn counts(app: &AppHandle) -> Option<(usize, i64)> {
-    let agents = match app.state::<Core>().agents() {
-        Ok(a) => a,
-        Err(e) => {
-            warn!("tray: could not list agents: {e:#}");
-            return None;
-        }
-    };
-    let live = agents.iter().filter(|a| !a.archived);
-    let waiting = live
-        .clone()
-        .filter(|a| a.status == AgentStatus::NeedsPermission)
-        .count();
-    let inbox = live
-        .map(|a| {
-            if a.status == AgentStatus::NeedsPermission {
-                a.pending_permissions.max(1)
-            } else {
-                a.pending_permissions
-            }
-        })
-        .sum();
-    Some((waiting, inbox))
+    let c = app.try_state::<Core>()?.agent_counts();
+    Some((c.needs_permission, c.pending_permissions))
 }
 
 fn refresh(app: &AppHandle, waiting: usize, inbox: i64) {

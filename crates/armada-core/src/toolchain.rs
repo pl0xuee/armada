@@ -84,11 +84,11 @@ pub fn add_managed_paths(data_dir: &Path) {
     }
 }
 
+/// No console window on Windows; no AppImage library paths for npm/node.
 fn hidden(cmd: &mut tokio::process::Command) {
+    crate::childenv::sanitize_child_env(cmd);
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000);
-    #[cfg(not(windows))]
-    let _ = cmd;
 }
 
 async fn node_major(node: &Path) -> Option<u32> {
@@ -185,9 +185,20 @@ fn node_platform() -> anyhow::Result<(&'static str, &'static str, &'static str)>
     Ok((os, arch, ext))
 }
 
+/// TLS settings for Armada's own HTTPS requests: the OS certificate store, so
+/// corporate TLS-inspecting proxies with a company root CA work.
+pub fn platform_tls() -> ureq::tls::TlsConfig {
+    ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build()
+}
+
 fn http() -> ureq::Agent {
+    // Proxy settings come from HTTP(S)_PROXY / ALL_PROXY / NO_PROXY (and the
+    // Windows system proxy) by default.
     ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
+            .tls_config(platform_tls())
             .timeout_connect(Some(std::time::Duration::from_secs(20)))
             .timeout_recv_response(Some(std::time::Duration::from_secs(60)))
             .timeout_recv_body(Some(std::time::Duration::from_secs(15 * 60)))
@@ -206,6 +217,90 @@ fn get_text(agent: &ureq::Agent, url: &str) -> anyhow::Result<String> {
         .limit(16 * 1024 * 1024)
         .read_to_string()
         .with_context(|| format!("reading {url}"))
+}
+
+/// 8 hex characters for short unique names.
+fn short_id() -> String {
+    uuid::Uuid::new_v4().simple().to_string()[..8].to_string()
+}
+
+/// A scratch directory that is deleted when dropped (on success, error or panic).
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn create(path: PathBuf) -> anyhow::Result<TempDir> {
+        std::fs::create_dir_all(&path).with_context(|| format!("creating {}", path.display()))?;
+        Ok(TempDir(path))
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Whether `name` is one of the scratch names the installer uses in the runtime dir.
+fn is_scratch_name(name: &str) -> bool {
+    if name.starts_with(".staging-") {
+        return true; // older builds
+    }
+    let short = name.strip_prefix(".s").or_else(|| name.strip_prefix(".o"));
+    short.is_some_and(|h| h.len() == 8 && h.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// Deletes scratch dirs left behind by an install that crashed or was killed.
+/// Only called while holding the install lock, so no install is using them.
+fn sweep_scratch(data_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(runtime_dir(data_dir)) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if is_scratch_name(&entry.file_name().to_string_lossy()) {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+/// Moves `new` to `dest`. An existing `dest` is first renamed aside and only deleted
+/// once the new copy is in place; if that fails, the old copy is put back.
+fn replace_dir(new: &Path, dest: &Path, scratch_parent: &Path, log: &Log) -> anyhow::Result<()> {
+    let aside = scratch_parent.join(format!(".o{}", short_id()));
+    let had_old = dest.exists();
+    if had_old {
+        std::fs::rename(dest, &aside).with_context(|| {
+            format!(
+                "couldn't move the previous Node.js at {} out of the way. If an agent is \
+                 running on it, stop your agents and try again",
+                dest.display()
+            )
+        })?;
+    }
+    if let Err(e) = std::fs::rename(new, dest) {
+        if had_old {
+            if let Err(restore) = std::fs::rename(&aside, dest) {
+                tracing::error!(
+                    "couldn't restore the previous Node.js from {}: {restore}",
+                    aside.display()
+                );
+            }
+        }
+        return Err(e).with_context(|| format!("moving Node.js into {}", dest.display()));
+    }
+    if had_old {
+        if let Err(e) = std::fs::remove_dir_all(&aside) {
+            // Typically node.exe still running on Windows; swept on the next install.
+            log(&format!(
+                "! Couldn't delete the previous Node.js at {} ({e}); it will be removed next time.",
+                aside.display()
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn download_node(data_dir: &Path, log: &Log) -> anyhow::Result<()> {
@@ -234,10 +329,10 @@ fn download_node(data_dir: &Path, log: &Log) -> anyhow::Result<()> {
         .ok_or_else(|| anyhow!("{file} isn't listed in SHASUMS256.txt"))?;
 
     let runtime = runtime_dir(data_dir);
-    // Unique per run so an abandoned download can't trample a newer one.
-    let staging = runtime.join(format!(".staging-{}", uuid::Uuid::new_v4().simple()));
-    std::fs::create_dir_all(&staging)?;
-    let archive = staging.join(&file);
+    // Unique per run so an abandoned download can't trample a newer one. Short, so
+    // Node's deep node_modules paths stay under Windows' MAX_PATH. Deleted on drop.
+    let staging = TempDir::create(runtime.join(format!(".s{}", short_id())))?;
+    let archive = staging.path().join(&file);
 
     log(&format!("▸ Downloading Node.js {version} ({os}-{arch})…"));
     let resp = agent
@@ -279,7 +374,6 @@ fn download_node(data_dir: &Path, log: &Log) -> anyhow::Result<()> {
 
     let actual = format!("{:x}", hasher.finalize());
     if actual != expected {
-        let _ = std::fs::remove_dir_all(&staging);
         bail!("checksum mismatch for {file} (expected {expected}, got {actual}); download aborted");
     }
     log("✓ Checksum verified (SHA-256)");
@@ -287,15 +381,13 @@ fn download_node(data_dir: &Path, log: &Log) -> anyhow::Result<()> {
     log("▸ Unpacking…");
     let f = std::fs::File::open(&archive)?;
     if ext == "zip" {
-        zip::ZipArchive::new(f)?.extract(&staging)?;
+        zip::ZipArchive::new(f)?.extract(staging.path())?;
     } else {
-        tar::Archive::new(flate2::read::GzDecoder::new(f)).unpack(&staging)?;
+        tar::Archive::new(flate2::read::GzDecoder::new(f)).unpack(staging.path())?;
     }
     let home = managed_node_home(data_dir);
-    let _ = std::fs::remove_dir_all(&home);
-    std::fs::rename(staging.join(&name), &home)
-        .with_context(|| format!("moving Node.js into {}", home.display()))?;
-    let _ = std::fs::remove_dir_all(&staging);
+    replace_dir(&staging.path().join(&name), &home, &runtime, log)?;
+    drop(staging);
     log(&format!(
         "✓ Node.js {version} installed in {}",
         home.display()
@@ -311,7 +403,8 @@ fn packages_for(provider: Provider, data_dir: &Path) -> Vec<String> {
             if providers::find_cli(Provider::Claude).is_none() {
                 pkgs.push("@anthropic-ai/claude-code@latest".into());
             }
-            if providers::claude_adapter_entry(data_dir).is_none() {
+            // Missing, or not the pinned version: (re)install the pinned one.
+            if !providers::claude_adapter_current(data_dir) {
                 pkgs.push(format!(
                     "{}@{}",
                     providers::CLAUDE_ADAPTER_PKG,
@@ -386,24 +479,69 @@ async fn npm_install(npm: &Npm, data_dir: &Path, pkgs: &[String], log: &Log) -> 
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     hidden(&mut cmd);
+    // Own process group, so a timeout also stops the install scripts npm runs.
+    #[cfg(unix)]
+    cmd.process_group(0);
     let mut child = cmd.spawn().context("starting npm")?;
     let stdout = child.stdout.take().context("npm stdout")?;
     let stderr = child.stderr.take().context("npm stderr")?;
     // Lossy line reading: npm on Windows may print in the console code page.
     let l1 = log.clone();
     let out_task = tokio::spawn(async move {
-        let _ = crate::jsonrpc::read_lines(stdout, |line| l1(&format!("  {line}"))).await;
+        let _ =
+            crate::jsonrpc::read_lines(stdout, 16 * 1024, |line| l1(&format!("  {line}"))).await;
     });
     let l2 = log.clone();
     let err_task = tokio::spawn(async move {
-        let _ = crate::jsonrpc::read_lines(stderr, |line| l2(&format!("  {line}"))).await;
+        let _ =
+            crate::jsonrpc::read_lines(stderr, 16 * 1024, |line| l2(&format!("  {line}"))).await;
     });
-    let status = child.wait().await?;
-    let _ = tokio::join!(out_task, err_task);
+    let status = match tokio::time::timeout(NPM_TIMEOUT, child.wait()).await {
+        Ok(status) => status?,
+        Err(_) => {
+            kill_tree(&mut child).await;
+            out_task.abort();
+            err_task.abort();
+            bail!(
+                "npm install didn't finish within {} minutes and was stopped. Check your network connection and try again",
+                NPM_TIMEOUT.as_secs() / 60
+            );
+        }
+    };
+    // A leftover grandchild may still hold the pipes; don't wait on it forever.
+    let drain = async {
+        let _ = tokio::join!(out_task, err_task);
+    };
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), drain).await;
     if !status.success() {
         bail!("npm install failed ({status})");
     }
     Ok(())
+}
+
+/// How long `npm install` may run before it's stopped.
+const NPM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// Kills a child and everything it started.
+async fn kill_tree(child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    if let Some(pid) = child.id() {
+        // SAFETY: plain syscall on the process group created at spawn.
+        unsafe {
+            libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+        }
+    }
+    #[cfg(windows)]
+    if let Some(pid) = child.id() {
+        let mut cmd = tokio::process::Command::new("taskkill");
+        cmd.args(["/T", "/F", "/PID", &pid.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        hidden(&mut cmd);
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(10), cmd.status()).await;
+    }
+    let _ = child.kill().await;
 }
 
 /// One install at a time: installs share the Node runtime dir and the npm prefix.
@@ -412,6 +550,7 @@ static INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// Installs whatever this provider is missing and verifies the result.
 pub async fn install(provider: Provider, data_dir: &Path, log: Log) -> anyhow::Result<()> {
     let _guard = lock_installs(&log).await;
+    sweep_scratch(data_dir);
     install_unlocked(provider, data_dir, log).await
 }
 
@@ -461,8 +600,12 @@ async fn install_unlocked(provider: Provider, data_dir: &Path, log: Log) -> anyh
         .unwrap_or("")
         .trim()
         .to_string();
-    if provider == Provider::Claude && providers::claude_adapter_entry(data_dir).is_none() {
-        bail!("The Claude ACP adapter didn't install correctly");
+    if provider == Provider::Claude && !providers::claude_adapter_current(data_dir) {
+        bail!(
+            "The Claude ACP adapter didn't install correctly (expected version {}, found {})",
+            providers::CLAUDE_ADAPTER_VERSION,
+            providers::claude_adapter_version(data_dir).unwrap_or_else(|| "none".into())
+        );
     }
     log(&format!("✓ {name} is ready ({version})"));
     Ok(())
@@ -471,6 +614,7 @@ async fn install_unlocked(provider: Provider, data_dir: &Path, log: Log) -> anyh
 /// Installs everything missing for all providers; keeps going past failures.
 pub async fn install_missing(data_dir: &Path, log: Log) -> anyhow::Result<()> {
     let _guard = lock_installs(&log).await;
+    sweep_scratch(data_dir);
     let mut failed = Vec::new();
     let mut any = false;
     for provider in Provider::ALL {
@@ -491,5 +635,53 @@ pub async fn install_missing(data_dir: &Path, log: Log) -> anyhow::Result<()> {
         Ok(())
     } else {
         bail!("Some installs failed: {}", failed.join(", "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scratch_names() {
+        assert!(is_scratch_name(".staging-0123456789abcdef"));
+        assert!(is_scratch_name(".s1a2b3c4d"));
+        assert!(is_scratch_name(".o1a2b3c4d"));
+        assert!(!is_scratch_name("node"));
+        assert!(!is_scratch_name(".settings"));
+        assert!(!is_scratch_name(".s1a2b3c4"));
+    }
+
+    #[test]
+    fn replace_dir_swaps_and_sweeps() {
+        let data = std::env::temp_dir().join(format!("armada-tc-{}", short_id()));
+        let runtime = runtime_dir(&data);
+        let log: Log = Arc::new(|_| {});
+        let home = managed_node_home(&data);
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("old"), "1").unwrap();
+        {
+            let staging = TempDir::create(runtime.join(format!(".s{}", short_id()))).unwrap();
+            let new = staging.path().join("node-vX");
+            std::fs::create_dir_all(&new).unwrap();
+            std::fs::write(new.join("new"), "2").unwrap();
+            replace_dir(&new, &home, &runtime, &log).unwrap();
+            // A missing source leaves the current install in place.
+            assert!(replace_dir(&staging.path().join("nope"), &home, &runtime, &log).is_err());
+        }
+        assert!(home.join("new").exists() && !home.join("old").exists());
+        // Only `node` is left: the staging dir dropped, the old copy deleted.
+        let names: Vec<String> = std::fs::read_dir(&runtime)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["node".to_string()]);
+        // Leftovers from a crashed install are swept.
+        std::fs::create_dir_all(runtime.join(".staging-abc")).unwrap();
+        std::fs::create_dir_all(runtime.join(".s0000beef")).unwrap();
+        sweep_scratch(&data);
+        assert_eq!(std::fs::read_dir(&runtime).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&data);
     }
 }

@@ -11,9 +11,9 @@ use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use crate::jsonrpc::{error_code, Incoming, Peer, SpawnOptions};
+use crate::jsonrpc::{looks_like_auth_error, Incoming, Peer, SpawnOptions};
 use crate::model::*;
-use crate::session::{AgentCtx, Prompt, StreamKind, TurnOutcome};
+use crate::session::{AgentCtx, Prompt, StartCancelled, StreamKind, TurnOutcome};
 
 const PROTOCOL_VERSION: i64 = 1;
 const RESUME_TIMEOUT: Duration = Duration::from_secs(120);
@@ -47,7 +47,9 @@ pub struct StartOptions<'a> {
     pub args: &'a [String],
     pub cwd: &'a Path,
     pub env: &'a [(String, String)],
+    pub env_remove: &'a [String],
     pub label: &'a str,
+    pub children_file: Option<&'a Path>,
     pub resume: Option<&'a str>,
     pub version: &'a str,
     pub mcp_servers: &'a [McpServer],
@@ -63,16 +65,26 @@ impl AcpDriver {
             args: opts.args,
             cwd: opts.cwd,
             env: opts.env,
+            env_remove: opts.env_remove,
             label: opts.label,
+            children_file: opts.children_file,
         })?;
-        let generation = ctx.begin_start();
+        // Registered so Stop/quit/delete can kill a hung handshake right away.
+        let generation = ctx.begin_start_with(peer.clone());
         let result = Self::connect(ctx.clone(), &opts, peer.clone(), rx, generation).await;
         ctx.end_start(generation);
-        if result.is_err() {
-            // Don't leave a half-started agent process behind; the caller reports.
-            peer.kill().await;
+        match result {
+            Ok(d) => Ok(d),
+            Err(e) => {
+                // Don't leave a half-started agent process behind; the caller reports.
+                peer.kill().await;
+                if ctx.start_cancelled(generation) {
+                    Err(StartCancelled.into())
+                } else {
+                    Err(e)
+                }
+            }
         }
-        result
     }
 
     async fn connect(
@@ -115,7 +127,7 @@ impl AcpDriver {
                 Some(Duration::from_secs(90)),
             )
             .await
-            .map_err(|e| with_stderr(e, &peer))?;
+            .map_err(|e| peer.with_stderr(e, 0))?;
         let caps = &init["agentCapabilities"];
         driver.accepts_images.store(
             caps["promptCapabilities"]["image"]
@@ -145,7 +157,7 @@ impl AcpDriver {
                 // session/load replays the whole history as updates; we already have
                 // it. The replay flag is cleared by a barrier that the event loop
                 // reaches only after every replayed message was read.
-                ctx.set_replaying(true);
+                ctx.set_replaying(generation, true);
                 let r = peer
                     .request_timeout("session/load", params, Some(RESUME_TIMEOUT))
                     .await;
@@ -173,7 +185,7 @@ impl AcpDriver {
                         Some(Duration::from_secs(120)),
                     )
                     .await
-                    .map_err(|e| auth_hint(with_stderr(e, &peer)))?;
+                    .map_err(|e| auth_hint(peer.with_stderr(e, 0)))?;
                 let id = resp["sessionId"]
                     .as_str()
                     .ok_or_else(|| anyhow!("session/new returned no sessionId"))?
@@ -285,11 +297,14 @@ impl AcpDriver {
         tokio::spawn(async move {
             let mut prompt = prompt;
             loop {
-                if !me.ctx.is_current(me.generation) {
+                // Stopped, cancelled or replaced while waiting: never send it.
+                if !me.ctx.is_current(me.generation) || !me.ctx.begin_turn(prompt.token) {
                     break;
                 }
-                me.ctx.turn_started();
-                let body = match me.ctx.take_preamble() {
+                me.peer.mark_turn();
+                let mark = me.peer.stderr_mark();
+                let preamble = me.ctx.take_preamble();
+                let body = match &preamble {
                     Some(pre) => format!("{pre}\n\n---\n\n{}", prompt.text),
                     None => prompt.text.clone(),
                 };
@@ -335,8 +350,17 @@ impl AcpDriver {
                             _ => TurnOutcome::Completed,
                         }
                     }
+                    // Some agents answer a cancelled prompt with an error.
+                    Err(_) if me.ctx.cancel_was_requested() => TurnOutcome::Cancelled,
                     Err(e) => {
-                        TurnOutcome::Failed(format!("{:#}", auth_hint(with_stderr(e, &me.peer))))
+                        if let Some(pre) = preamble {
+                            // The briefing never reached the agent; send it next time.
+                            me.ctx.restore_preamble(pre);
+                        }
+                        TurnOutcome::Failed(format!(
+                            "{:#}",
+                            auth_hint(me.peer.with_stderr(e, mark))
+                        ))
                     }
                 };
                 // The prompt reply overtakes queued updates; let the timeline catch up
@@ -346,8 +370,12 @@ impl AcpDriver {
                     // Stopped meanwhile; the stop already settled the turn.
                     break;
                 }
-                match me.ctx.turn_finished(outcome) {
-                    Some(next) => prompt = next,
+                match me.ctx.turn_finished_by(me.generation, outcome) {
+                    Some(next) => {
+                        // Approvals from the finished turn can't be answered anymore.
+                        me.perms.lock().clear();
+                        prompt = next;
+                    }
                     None => {
                         // Requests from the finished turn can't be answered anymore.
                         me.perms.lock().clear();
@@ -360,6 +388,9 @@ impl AcpDriver {
 
     /// Waits until the event loop has handled everything read before this call.
     async fn sync_events(&self) {
+        if self.peer.is_closed() {
+            return;
+        }
         let n = self
             .next_barrier
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -455,9 +486,18 @@ impl AcpDriver {
         self.peer.is_closed()
     }
 
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
     fn handle_update(&self, u: &Value) {
         let ctx = &self.ctx;
+        // A sub-agent's own text (Claude Code tags it with the Task call it runs
+        // under) isn't part of the main conversation; its result arrives as that
+        // call's output. Dropped here rather than merged into the main stream.
+        let from_subagent = u["_meta"]["claudeCode"]["parentToolUseId"].is_string();
         match u["sessionUpdate"].as_str().unwrap_or("") {
+            "agent_message_chunk" | "agent_thought_chunk" if from_subagent => {}
             "agent_message_chunk" => {
                 if let Some(t) = content_text(&u["content"]) {
                     ctx.append_text(StreamKind::Message, None, &t);
@@ -482,11 +522,13 @@ impl AcpDriver {
                 ctx.plan(entries);
             }
             "usage_update" => {
-                ctx.usage(
-                    u["used"].as_i64(),
-                    u["size"].as_i64(),
-                    u["cost"]["amount"].as_f64(),
-                );
+                // A replayed cost is already counted.
+                let cost = if ctx.replaying() {
+                    None
+                } else {
+                    u["cost"]["amount"].as_f64()
+                };
+                ctx.usage(u["used"].as_i64(), u["size"].as_i64(), cost);
             }
             "session_info_update" => {
                 if let Some(t) = u["title"].as_str() {
@@ -522,7 +564,9 @@ impl AcpDriver {
         }
     }
 
-    fn on_permission_request(&self, rpc_id: Value, params: &Value) {
+    /// Shows the agent's permission request. Returns false if it can't be shown
+    /// (no choices offered); the caller then declines it.
+    fn on_permission_request(&self, rpc_id: Value, params: &Value) -> bool {
         let tc = &params["toolCall"];
         let request_id = uuid::Uuid::new_v4().to_string();
         let title = tc["title"]
@@ -537,7 +581,7 @@ impl AcpDriver {
                     })
             })
             .unwrap_or_else(|| "The agent wants to perform an action".into());
-        let options = params["options"]
+        let options: Vec<PermissionOption> = params["options"]
             .as_array()
             .map(|a| {
                 a.iter()
@@ -551,6 +595,13 @@ impl AcpDriver {
                     .collect()
             })
             .unwrap_or_default();
+        if options.is_empty() {
+            self.ctx.notice(
+                NoticeLevel::Warn,
+                format!("The agent asked to \u{201c}{title}\u{201d} without offering any choices, so Armada declined it."),
+            );
+            return false;
+        }
         let mut diffs = Vec::new();
         collect_diffs(&tc["content"], &mut diffs);
         let command = raw_command(&tc["rawInput"]);
@@ -558,6 +609,7 @@ impl AcpDriver {
         self.perms.lock().insert(request_id.clone(), rpc_id);
         self.ctx
             .permission_requested(&request_id, title, kind, command, diffs, options);
+        true
     }
 }
 
@@ -575,28 +627,35 @@ async fn event_loop(
         }
         match msg {
             Incoming::Notification { method, params } => {
-                if method == "session/update" && !ctx.replaying() {
+                // History replayed by session/load is already in the timeline; only
+                // timeline updates are skipped (commands, modes, config and usage
+                // still apply).
+                let skip = ctx.replaying() && is_timeline_update(&params["update"]);
+                if method == "session/update" && !skip {
                     if let Some(d) = driver.upgrade() {
                         d.handle_update(&params["update"]);
                     }
                 }
             }
             Incoming::Request { id, method, params } => match method.as_str() {
-                "session/request_permission" => match driver.upgrade() {
-                    Some(d) => d.on_permission_request(id, &params),
-                    None => {
+                "session/request_permission" => {
+                    let shown = match driver.upgrade() {
+                        Some(d) => d.on_permission_request(id.clone(), &params),
+                        None => false,
+                    };
+                    if !shown {
                         let _ = peer
                             .respond(id, json!({ "outcome": { "outcome": "cancelled" } }))
                             .await;
                     }
-                },
+                }
                 _ => {
                     let _ = peer
                         .respond_error(id, -32601, &format!("{method} is not supported by Armada"))
                         .await;
                 }
             },
-            Incoming::Barrier(REPLAY_DONE) => ctx.set_replaying(false),
+            Incoming::Barrier(REPLAY_DONE) => ctx.set_replaying(generation, false),
             Incoming::Barrier(n) => {
                 if let Some(d) = driver.upgrade() {
                     if let Some(tx) = d.barriers.lock().remove(&n) {
@@ -605,7 +664,9 @@ async fn event_loop(
                 }
             }
             Incoming::Closed => {
-                ctx.process_exited(generation, peer.stderr_tail(8));
+                ctx.process_exited(generation, peer.turn_stderr(8));
+                // The agent exited on its own: make sure nothing it started lives on.
+                peer.kill().await;
                 break;
             }
         }
@@ -624,7 +685,9 @@ pub async fn probe(
         args,
         cwd,
         env,
+        env_remove: &[],
         label: "probe",
+        children_file: None,
     })?;
     let res = peer
         .request_timeout(
@@ -672,12 +735,15 @@ fn mcp_json(servers: &[McpServer], caps: &Value) -> Value {
             .iter()
             .filter(|s| s.enabled)
             .filter_map(|s| match s.transport {
-                McpTransport::Stdio if !s.command.trim().is_empty() => Some(json!({
-                    "name": s.name,
-                    "command": s.command,
-                    "args": s.args,
-                    "env": kv(&s.env),
-                })),
+                McpTransport::Stdio if !s.command.trim().is_empty() => {
+                    let (command, args) = crate::childenv::mcp_launch(&s.command, &s.args);
+                    Some(json!({
+                        "name": s.name,
+                        "command": command,
+                        "args": args,
+                        "env": kv(&s.env),
+                    }))
+                }
                 McpTransport::Http if http_ok && !s.url.trim().is_empty() => Some(json!({
                     "type": "http",
                     "name": s.name,
@@ -690,18 +756,21 @@ fn mcp_json(servers: &[McpServer], caps: &Value) -> Value {
     )
 }
 
-fn with_stderr(e: anyhow::Error, peer: &Peer) -> anyhow::Error {
-    let tail = peer.stderr_tail(6);
-    if tail.trim().is_empty() || error_code(&e).is_some_and(|c| c != -32099) {
-        e
-    } else {
-        e.context(format!("agent output:\n{tail}"))
-    }
+/// `session/update` kinds that add to the timeline (skipped while replaying).
+fn is_timeline_update(u: &Value) -> bool {
+    matches!(
+        u["sessionUpdate"].as_str().unwrap_or(""),
+        "agent_message_chunk"
+            | "agent_thought_chunk"
+            | "user_message_chunk"
+            | "tool_call"
+            | "tool_call_update"
+            | "plan"
+    )
 }
 
 fn auth_hint(e: anyhow::Error) -> anyhow::Error {
-    let text = format!("{e:#}").to_lowercase();
-    if text.contains("auth") || text.contains("login") || text.contains("401") {
+    if looks_like_auth_error(&format!("{e:#}")) {
         e.context("Sign-in required: open Accounts and sign in to this account")
     } else {
         e
@@ -756,11 +825,37 @@ fn apply_tool_fields(b: &mut ItemBody, u: &Value) {
         diffs,
         output,
         command,
+        images,
+        subagent,
+        parent_tool_call_id,
         ..
     } = b
     else {
         return;
     };
+    if let Some(content) = u["content"].as_array() {
+        collect_images(content, images);
+    }
+    // Claude Code tags sub-agent launches (Agent/Task tool) and the tool calls a
+    // sub-agent makes (parentToolUseId) in `_meta`.
+    let meta = &u["_meta"]["claudeCode"];
+    if let Some(parent) = meta["parentToolUseId"].as_str() {
+        *parent_tool_call_id = Some(parent.to_string());
+    }
+    if matches!(meta["toolName"].as_str(), Some("Agent" | "Task")) {
+        let sa = subagent.get_or_insert_with(SubAgent::default);
+        let input = &u["rawInput"];
+        if let Some(k) = input["subagent_type"].as_str() {
+            sa.kind = Some(k.to_string());
+        }
+        if let Some(d) = input["description"].as_str() {
+            sa.description = Some(d.to_string());
+        }
+        if let Some(p) = input["prompt"].as_str() {
+            sa.prompt = Some(p.to_string());
+        }
+        *tool_kind = ToolKind::Think;
+    }
     if let Some(t) = u["title"].as_str() {
         *title = t.to_string();
     }
@@ -808,6 +903,31 @@ fn apply_tool_fields(b: &mut ItemBody, u: &Value) {
             }
             _ => {}
         }
+    }
+}
+
+/// Image blocks in tool output (e.g. a screenshot tool) become viewable images.
+fn collect_images(content: &[Value], images: &mut Vec<Attachment>) {
+    for c in content.iter().filter(|c| c["type"] == "content") {
+        let block = &c["content"];
+        if block["type"] != "image" {
+            continue;
+        }
+        let (Some(data), Some(mime)) = (block["data"].as_str(), block["mimeType"].as_str()) else {
+            continue;
+        };
+        if !mime.starts_with("image/")
+            || data.len() > crate::files::MAX_IMAGE_BASE64
+            || images.len() >= crate::files::MAX_IMAGES_PER_ITEM
+            || images.iter().any(|i| i.data == data)
+        {
+            continue;
+        }
+        images.push(Attachment {
+            name: format!("image-{}", images.len() + 1),
+            mime_type: mime.to_string(),
+            data: data.to_string(),
+        });
     }
 }
 

@@ -10,16 +10,16 @@ import {
   PanelLeftClose,
   Pencil,
   Play,
+  Power,
   Plus,
   Search,
-  Square,
   Trash2,
   X,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { m, AnimatePresence } from "motion/react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { archiveAgent, exportConversation, renameAgent, resumeAgent, stopAgent } from "@/lib/actions";
-import { groupAgents, type AgentGroupId } from "@/lib/agents";
+import { groupAgents, orderedAgents, type AgentGroupId } from "@/lib/agents";
 import { relativeTime, relativeTimeLong } from "@/lib/format";
 import { STATUS } from "@/lib/providers";
 import type { Account, Agent } from "@/lib/types";
@@ -95,7 +95,14 @@ export function AgentList({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  let index = 0;
+  // ⌘1–9 targets come from the same ordering the shortcut uses (not the visible rows).
+  const hotkeys = useMemo(() => {
+    const m = new Map<string, number>();
+    orderedAgents(agents)
+      .slice(0, 9)
+      .forEach((a, i) => m.set(a.id, i + 1));
+    return m;
+  }, [agents]);
 
   return (
     <aside
@@ -146,6 +153,7 @@ export function AgentList({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                 if (e.key === "Escape") {
                   setQuery("");
                   (e.target as HTMLInputElement).blur();
@@ -191,7 +199,7 @@ export function AgentList({
                 </button>
                 <AnimatePresence initial={false}>
                   {!isCollapsed && (
-                    <motion.ul
+                    <m.ul
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
@@ -199,7 +207,6 @@ export function AgentList({
                       className="space-y-px"
                     >
                       {g.agents.map((a) => {
-                        if (g.id !== "archived") index++;
                         return (
                           <AgentRow
                             key={a.id}
@@ -207,12 +214,12 @@ export function AgentList({
                             account={accountMap.get(a.accountId)}
                             selected={a.id === selected}
                             now={now}
-                            hotkey={g.id !== "archived" && index <= 9 ? index : null}
+                            hotkey={hotkeys.get(a.id) ?? null}
                             onNavigate={onNavigate}
                           />
                         );
                       })}
-                    </motion.ul>
+                    </m.ul>
                   )}
                 </AnimatePresence>
               </div>
@@ -261,7 +268,34 @@ const AgentRow = memo(function AgentRow({
   const resumable = agent.status === "interrupted" || agent.status === "stopped";
   const live = agent.status === "working" || agent.status === "needs_permission" || agent.status === "starting";
 
+  const inputRef = useRef<HTMLInputElement>(null);
+  /** Always start from the current title (it may have changed since the row mounted). */
+  // Ends exactly once: Enter commits, Esc cancels, blur commits only if neither happened.
+  const settled = useRef(false);
+  const startRename = () => {
+    settled.current = false;
+    setTitle(agent.title);
+    setRenaming(true);
+  };
+  useEffect(() => {
+    if (!renaming) return;
+    // After the context menu closes and returns focus, take it back.
+    const t = setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }, 0);
+    return () => clearTimeout(t);
+  }, [renaming]);
+
+  const cancelRename = () => {
+    settled.current = true;
+    setTitle(agent.title);
+    setRenaming(false);
+  };
+
   const commitRename = async () => {
+    if (settled.current) return;
+    settled.current = true;
     setRenaming(false);
     const t = title.trim();
     if (t && t !== agent.title) await renameAgent(agent, t);
@@ -287,7 +321,7 @@ const AgentRow = memo(function AgentRow({
                 openAgent(agent.id);
                 onNavigate?.();
               }
-              if (e.key === "F2") setRenaming(true);
+              if (e.key === "F2") startRename();
             }}
             className={cn(
               "group relative flex gap-2.5 rounded-xl px-2.5 py-2 outline-none transition-colors duration-100",
@@ -296,7 +330,7 @@ const AgentRow = memo(function AgentRow({
             )}
           >
             {selected && (
-              <motion.span
+              <m.span
                 layoutId="agent-row-active"
                 transition={{ type: "spring", stiffness: 600, damping: 42 }}
                 className="absolute -left-2 top-3 h-6 w-[3px] rounded-r-full bg-accent shadow-[0_0_8px_var(--accent)]"
@@ -316,7 +350,7 @@ const AgentRow = memo(function AgentRow({
               <div className="flex items-center gap-1.5">
                 {renaming ? (
                   <input
-                    autoFocus
+                    ref={inputRef}
                     value={title}
                     aria-label="Agent title"
                     onChange={(e) => setTitle(e.target.value)}
@@ -324,10 +358,13 @@ const AgentRow = memo(function AgentRow({
                     onBlur={() => void commitRename()}
                     onKeyDown={(e) => {
                       e.stopPropagation();
-                      if (e.key === "Enter") void commitRename();
-                      if (e.key === "Escape") {
-                        setTitle(agent.title);
-                        setRenaming(false);
+                      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void commitRename();
+                      } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        cancelRename();
                       }
                     }}
                     className="h-5 min-w-0 flex-1 rounded border border-accent/50 bg-base px-1 text-[13px] focus:outline-none"
@@ -348,11 +385,17 @@ const AgentRow = memo(function AgentRow({
                     aria-label="Unread"
                   />
                 )}
-                <Tooltip content={relativeTimeLong(agent.lastActivityAt, now)} side="right">
-                  <span className="shrink-0 text-[11px] text-steel tabular">
-                    {relativeTime(agent.lastActivityAt, now)}
-                  </span>
-                </Tooltip>
+                <span className="shrink-0 text-[11px] text-steel">
+                  <span className="sr-only">Last active </span>
+                  <Tooltip
+                    content={`${relativeTimeLong(agent.lastActivityAt, now)} · ${new Date(agent.lastActivityAt).toLocaleString()}`}
+                    side="right"
+                  >
+                    <time dateTime={new Date(agent.lastActivityAt).toISOString()} className="tabular">
+                      {relativeTime(agent.lastActivityAt, now)}
+                    </time>
+                  </Tooltip>
+                </span>
               </div>
               <div className="mt-0.5 flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[11.5px] text-steel">
                 <StatusDot status={agent.status} size={6} />
@@ -410,8 +453,8 @@ const AgentRow = memo(function AgentRow({
             )}
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent>
-          <ContextMenuItem onSelect={() => setRenaming(true)} shortcut="F2">
+        <ContextMenuContent onCloseAutoFocus={(e) => renaming && e.preventDefault()}>
+          <ContextMenuItem onSelect={startRename} shortcut="F2">
             <Pencil /> Rename
           </ContextMenuItem>
           {resumable ? (
@@ -420,7 +463,7 @@ const AgentRow = memo(function AgentRow({
             </ContextMenuItem>
           ) : (
             <ContextMenuItem disabled={!agent.running} onSelect={() => void stopAgent(agent)}>
-              <Square /> Stop
+              <Power /> Shut down
             </ContextMenuItem>
           )}
           <ContextMenuItem onSelect={() => setHandoffAgent(agent)}>

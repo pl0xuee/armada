@@ -9,7 +9,7 @@ import { Icon, Spinner } from "./Icon";
 export function TopBar({ left, children, right, below }: { left?: ReactNode; children?: ReactNode; right?: ReactNode; below?: ReactNode }) {
   return (
     <header className="chrome sticky top-0 z-30 border-b border-line/70 pt-[var(--safe-top)]">
-      <div className="mx-auto flex h-14 w-full max-w-[860px] items-center gap-1 pr-[max(6px,var(--safe-right))] pl-[max(6px,var(--safe-left))]">
+      <div className="mx-auto flex h-14 w-full max-w-[860px] items-center gap-1 pr-[max(6px,var(--safe-right))] pl-[max(6px,var(--safe-left))] [@media(orientation:landscape)_and_(max-height:500px)]:h-11">
         {left}
         <div className="flex min-w-0 flex-1 items-center">{children}</div>
         {right}
@@ -25,6 +25,7 @@ const PILL: Record<Connection, { label: string; color: string }> = {
   connecting: { label: "Connecting", color: "var(--steel)" },
   reconnecting: { label: "Reconnecting", color: "var(--warn)" },
   offline: { label: "Offline", color: "var(--err)" },
+  limited: { label: "Limited", color: "var(--warn)" },
 };
 
 export function ConnectionPill({ className }: { className?: string }) {
@@ -59,11 +60,13 @@ export function ConnectionPill({ className }: { className?: string }) {
 /** Explains a lost connection once it has lasted long enough to matter. */
 function ConnectionBanner() {
   const connection = useStore((s) => s.connection);
+  const note = useStore((s) => s.connectionNote);
   const ready = useStore((s) => s.stateStatus === "ready");
-  const down = ready && (connection === "reconnecting" || connection === "offline");
-  const show = useDelayed(down, connection === "offline" ? 0 : 2_500);
+  const down = ready && (connection === "reconnecting" || connection === "offline" || connection === "limited");
+  const show = useDelayed(down, connection === "reconnecting" ? 2_500 : 0);
   if (!show || !down) return null;
   const offline = connection === "offline";
+  const limited = connection === "limited";
   return (
     <div
       className={cn(
@@ -73,12 +76,22 @@ function ConnectionBanner() {
       role="status"
     >
       <span className="mx-auto flex w-full max-w-[828px] items-center gap-2.5">
-        {offline ? <Icon name="wifiOff" size={16} className="shrink-0" /> : <Spinner size={14} className="shrink-0" />}
+        {offline ? (
+          <Icon name="wifiOff" size={16} className="shrink-0" />
+        ) : limited ? (
+          <Icon name="alert" size={16} className="shrink-0" />
+        ) : (
+          <Spinner size={14} className="shrink-0" />
+        )}
         <span className="min-w-0 flex-1 leading-snug">
-          {offline ? "You're offline. Showing the last known state." : "Connection lost. Reconnecting to Armada…"}
+          {offline
+            ? "You're offline. Showing the last known state."
+            : limited
+              ? `${note ?? "Live updates are unavailable."} Updating every 10 seconds.`
+              : (note ?? "Connection lost. Reconnecting to Armada…")}
         </span>
         {!offline && (
-          <button type="button" onClick={reconnectNow} className="press -my-2 h-9 shrink-0 rounded-lg px-2 font-semibold text-warn">
+          <button type="button" onClick={reconnectNow} className="press hit relative -my-2 h-9 shrink-0 rounded-lg px-2 font-semibold text-warn">
             Retry now
           </button>
         )}

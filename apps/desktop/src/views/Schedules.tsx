@@ -9,10 +9,12 @@ import { ConfirmDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
+import { onScheduleEvent } from "@/lib/scheduleEvents";
 import { nextRun, sortSchedules, untilLabel } from "@/lib/schedules";
 import type { Schedule } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
-import { useNow } from "@/hooks/useNow";
+import { useFreshNow } from "@/components/schedules/useFreshNow";
+import { useShallow } from "zustand/react/shallow";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 
@@ -25,9 +27,24 @@ export function SchedulesView() {
   const [running, setRunning] = useState<Record<string, boolean>>({});
   const [toggling, setToggling] = useState<Record<string, boolean>>({});
   const accounts = useApp((s) => s.accounts);
-  const agents = useApp((s) => s.agents);
+  // Only the agents schedules link to, compared shallowly (status changes still update the row).
+  const lastIds = useMemo(() => (schedules ?? []).map((s) => s.lastAgentId), [schedules]);
+  const lastAgents = useApp(useShallow((s) => lastIds.map((id) => (id ? s.agents[id] : undefined))));
   const openAgent = useUi((s) => s.openAgent);
-  const now = useNow();
+  const now = useFreshNow();
+  const prefill = useUi((s) => s.schedulePrefill);
+
+  // "Schedule this" from an agent: open the editor prefilled, once.
+  useEffect(() => {
+    if (!prefill) return;
+    const base = blankSchedule();
+    const provider = prefill.provider ?? base.provider;
+    const accountId =
+      prefill.accountId ??
+      (provider === base.provider ? base.accountId : (accounts.find((a) => a.provider === provider)?.id ?? ""));
+    setEditing({ ...base, ...prefill, provider, accountId, id: "", updatedAt: Date.now() });
+    useUi.getState().clearSchedulePrefill();
+  }, [prefill, accounts]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -52,6 +69,16 @@ export function SchedulesView() {
       return next;
     });
   }, []);
+
+  // Live updates (saves, runs starting, the run's agent being recorded, deletions).
+  useEffect(
+    () =>
+      onScheduleEvent((e) => {
+        if (e.type === "updated") upsert(e.schedule);
+        else setSchedules((list) => list?.filter((x) => x.id !== e.scheduleId) ?? null);
+      }),
+    [upsert],
+  );
 
   const sorted = useMemo(() => (schedules ? sortSchedules(schedules, new Date(now)) : []), [schedules, now]);
   const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
@@ -79,11 +106,6 @@ export function SchedulesView() {
         description: agent.title,
         action: { label: "Open", onClick: () => openAgent(agent.id) },
       });
-      // Pick up whatever the backend recorded about the run.
-      api
-        .listSchedules()
-        .then(setSchedules)
-        .catch(() => {});
     } catch (e) {
       toast.error(`Couldn't run “${s.name}”`, { description: errorMessage(e) });
     } finally {
@@ -178,7 +200,7 @@ export function SchedulesView() {
                   key={s.id}
                   schedule={s}
                   account={accountMap.get(s.accountId)}
-                  lastAgent={s.lastAgentId ? agents[s.lastAgentId] : undefined}
+                  lastAgent={s.lastAgentId ? lastAgents[lastIds.indexOf(s.lastAgentId)] : undefined}
                   now={now}
                   running={running[s.id] ?? false}
                   toggling={toggling[s.id] ?? false}
