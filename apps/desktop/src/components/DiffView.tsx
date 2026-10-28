@@ -12,6 +12,9 @@ import {
 } from "react";
 import type { DiffLine, ParsedFileDiff } from "@/lib/diff";
 import { cn } from "@/lib/utils";
+import type { HlLine } from "@/lib/highlight";
+import { useDiffHighlight } from "@/hooks/useHighlight";
+import { TokenLine } from "./CodeText";
 
 export function DiffStat({
   additions,
@@ -129,6 +132,7 @@ export const FileDiffView = memo(function FileDiffView({
     prevViewed.current = viewed;
   }, [viewed]);
   const Icon = STATUS_ICON[file.status];
+  const hunkTokens = useDiffHighlight(file.path, file.hunks, open && !file.binary);
   const dir = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/") + 1) : "";
   const name = file.path.slice(dir.length);
   return (
@@ -209,7 +213,7 @@ export const FileDiffView = memo(function FileDiffView({
           ) : (
             <table className="w-full border-collapse font-mono text-[12px] leading-[1.55]">
               {commenting ? (
-                <CommentableBody file={file} commenting={commenting} review={review} />
+                <CommentableBody file={file} commenting={commenting} review={review} tokens={hunkTokens} />
               ) : (
                 <tbody>
                   {file.hunks.map((h, hi) => (
@@ -217,6 +221,7 @@ export const FileDiffView = memo(function FileDiffView({
                       key={hi}
                       header={h.header}
                       lines={h.lines}
+                      tokens={hunkTokens?.[hi]}
                       onRevert={review ? () => review.revertHunk(file.path, hi) : undefined}
                     />
                   ))}
@@ -229,6 +234,11 @@ export const FileDiffView = memo(function FileDiffView({
     </div>
   );
 });
+
+function codeCell(text: string, tokens: HlLine | null | undefined): ReactNode {
+  if (!text) return " ";
+  return tokens ? <TokenLine line={tokens} /> : text;
+}
 
 function HunkHeaderRow({ header, onRevert }: { header: string; onRevert?: () => void }) {
   return (
@@ -257,10 +267,12 @@ function HunkHeaderRow({ header, onRevert }: { header: string; onRevert?: () => 
 function HunkRows({
   header,
   lines,
+  tokens,
   onRevert,
 }: {
   header: string;
   lines: ParsedFileDiff["hunks"][number]["lines"];
+  tokens?: (HlLine | null)[];
   onRevert?: () => void;
 }) {
   return (
@@ -285,7 +297,7 @@ function HunkRows({
           >
             {l.type === "add" ? "+" : l.type === "del" ? "−" : " "}
           </td>
-          <td className="whitespace-pre pr-4 text-fg/90">{l.text || " "}</td>
+          <td className="whitespace-pre pr-4 text-fg/90">{codeCell(l.text, tokens?.[i])}</td>
         </tr>
       ))}
     </>
@@ -302,17 +314,26 @@ interface Chunk {
   hunk: number;
   header: string | null;
   lines: DiffLine[];
+  /** Syntax tokens per line (same order as `lines`), when ready. */
+  tokens?: (HlLine | null)[];
   /** Global row index of the chunk's first line (for roving focus). */
   start: number;
 }
 
-function chunksOf(file: ParsedFileDiff): Chunk[] {
+function chunksOf(file: ParsedFileDiff, tokens: (HlLine | null)[][] | null): Chunk[] {
   const out: Chunk[] = [];
   let start = 0;
   file.hunks.forEach((h, hi) => {
     for (let i = 0; i < Math.max(1, h.lines.length); i += CHUNK) {
       const lines = h.lines.slice(i, i + CHUNK);
-      out.push({ key: `${hi}-${i}`, hunk: hi, header: i === 0 ? h.header : null, lines, start });
+      out.push({
+        key: `${hi}-${i}`,
+        hunk: hi,
+        header: i === 0 ? h.header : null,
+        lines,
+        tokens: tokens?.[hi]?.slice(i, i + CHUNK),
+        start,
+      });
       start += lines.length;
     }
   });
@@ -328,14 +349,16 @@ function CommentableBody({
   file,
   commenting,
   review,
+  tokens,
 }: {
   file: ParsedFileDiff;
   commenting: LineCommenting;
   review?: FileReviewActions;
+  tokens: (HlLine | null)[][] | null;
 }) {
   const [focusIdx, setFocusIdx] = useState(0);
   const rows = useRef<(HTMLTableRowElement | null)[]>([]);
-  const chunks = useMemo(() => chunksOf(file), [file]);
+  const chunks = useMemo(() => chunksOf(file, tokens), [file, tokens]);
   const total = chunks.reduce((n, c) => n + c.lines.length, 0);
 
   const onKey = useCallback(
@@ -506,7 +529,7 @@ const LazyChunk = memo(function LazyChunk({
               >
                 {l.type === "add" ? "+" : l.type === "del" ? "−" : " "}
               </td>
-              <td className="whitespace-pre pr-4 text-fg/90">{l.text || " "}</td>
+              <td className="whitespace-pre pr-4 text-fg/90">{codeCell(l.text, chunk.tokens?.[li])}</td>
             </tr>
             {below && (
               <tr>

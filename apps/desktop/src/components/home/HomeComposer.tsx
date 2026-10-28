@@ -9,6 +9,7 @@ import { pickFolder } from "@/lib/window";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { AccountAvatar } from "../AccountAvatar";
+import { DictateButton } from "../DictateButton";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { Button } from "../ui/button";
 import {
@@ -55,6 +56,21 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
   useLayoutEffect(() => {
     if (autoFocus) ref.current?.focus();
   }, [autoFocus]);
+
+  // Dictated text goes in at the caret. Never auto-starts an agent, whatever the setting.
+  const insertDictation = (spoken: string) => {
+    const el = ref.current;
+    const cur = el?.value ?? "";
+    const start = Math.min(el?.selectionStart ?? cur.length, cur.length);
+    const end = Math.min(el?.selectionEnd ?? start, cur.length);
+    const before = cur.slice(0, start);
+    const inserted = `${before && !/\s$/.test(before) ? " " : ""}${spoken}`;
+    setPrompt(`${before}${inserted}${cur.slice(end)}`);
+    requestAnimationFrame(() => {
+      ref.current?.focus();
+      ref.current?.setSelectionRange(start + inserted.length, start + inserted.length);
+    });
+  };
 
   const account = accounts.find((a) => a.id === target.accountId);
   const missing = !target.folder.trim()
@@ -135,6 +151,7 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
         </Tooltip>
         {!compact && <PermissionModeChip value={mode} onChange={setMode} className="h-7 rounded-lg" />}
         <div className="ml-auto flex items-center gap-2">
+          <DictateButton onText={insertDictation} iconOnly />
           {missing && prompt.trim() && <span className="text-[11.5px] text-warn">{missing}</span>}
           <Tooltip content="Start agent" shortcut={[modKey, "⏎"]}>
             <Button

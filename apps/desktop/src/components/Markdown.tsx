@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 import { localImagePath } from "@/lib/images";
 import { CopyButton } from "./CopyButton";
 import { LocalImage } from "./LocalImage";
+import { CodeText } from "./CodeText";
+import { langFromFence } from "@/lib/highlight";
 
 function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
   const isDiff = lang === "diff" || lang === "patch";
@@ -19,21 +21,23 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
       </div>
       <pre className="selectable overflow-x-auto px-3.5 py-3 font-mono text-[12.5px] leading-[1.6]">
         <code>
-          {isDiff
-            ? lines.map((l, i) => (
-                <span
-                  key={i}
-                  className={cn(
-                    "-mx-3.5 block px-3.5",
-                    l.startsWith("+") && "bg-[var(--diff-add)] text-ok",
-                    l.startsWith("-") && "bg-[var(--diff-del)] text-err",
-                    l.startsWith("@@") && "text-accent/80",
-                  )}
-                >
-                  {l || " "}
-                </span>
-              ))
-            : code.replace(/\n$/, "")}
+          {isDiff ? (
+            lines.map((l, i) => (
+              <span
+                key={i}
+                className={cn(
+                  "-mx-3.5 block px-3.5",
+                  l.startsWith("+") && "bg-[var(--diff-add)] text-ok",
+                  l.startsWith("-") && "bg-[var(--diff-del)] text-err",
+                  l.startsWith("@@") && "text-accent/80",
+                )}
+              >
+                {l || " "}
+              </span>
+            ))
+          ) : (
+            <CodeText code={code.replace(/\n$/, "")} lang={langFromFence(lang)} />
+          )}
         </code>
       </pre>
     </div>

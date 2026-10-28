@@ -1454,6 +1454,53 @@ impl Core {
         Ok(())
     }
 
+    // ---- checkpoints -------------------------------------------------------
+
+    /// Saves the agent's files before its next message runs. Best effort and
+    /// bounded: a slow or failing git only costs this message its checkpoint.
+    pub(crate) async fn checkpoint_for_turn(&self, agent_id: &str, item_id: Option<String>) {
+        let Ok(agent) = self.agent(agent_id) else {
+            return;
+        };
+        let work = crate::checkpoints::take_for_turn(&self.inner.db, &agent, item_id);
+        match tokio::time::timeout(std::time::Duration::from_secs(60), work).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => tracing::warn!("checkpoint for {agent_id}: {e:#}"),
+            Err(_) => tracing::warn!("checkpoint for {agent_id} took too long; skipped"),
+        }
+    }
+
+    pub async fn list_checkpoints(
+        &self,
+        agent_id: &str,
+    ) -> Result<crate::checkpoints::CheckpointList> {
+        let agent = self.agent(agent_id)?;
+        crate::checkpoints::list(&self.inner.db, &agent).await
+    }
+
+    pub async fn preview_checkpoint(
+        &self,
+        agent_id: &str,
+        checkpoint_id: &str,
+    ) -> Result<crate::checkpoints::RestorePreview> {
+        let agent = self.agent(agent_id)?;
+        crate::checkpoints::preview(&self.inner.db, &agent, checkpoint_id).await
+    }
+
+    /// Puts the agent's files back to a checkpoint (saving the current state first).
+    /// Refused while the agent is working.
+    pub async fn restore_checkpoint(
+        &self,
+        agent_id: &str,
+        checkpoint_id: &str,
+    ) -> Result<crate::checkpoints::RestoreResult> {
+        let agent = self.agent(agent_id)?;
+        if self.ctx(agent_id).is_turn_active() || agent.status.is_busy() {
+            bail!("Stop the agent before restoring its files");
+        }
+        crate::checkpoints::restore(&self.inner.db, &agent, checkpoint_id).await
+    }
+
     /// Cancels the running turn. A turn whose prompt hasn't reached the agent
     /// yet ends here and then; otherwise the agent is asked to stop, and if it
     /// hasn't ended the turn after a while (or the request fails) its process is
@@ -1753,6 +1800,7 @@ impl Core {
             d.shutdown().await;
             ctx.retire_generation(d.generation());
         }
+        crate::checkpoints::forget_agent(&agent).await;
         if remove {
             // Checked again inside: the agent may have written more before it stopped.
             if let Err(e) =
@@ -2640,7 +2688,19 @@ impl Core {
             return;
         };
         if let Ok(mut account) = self.account(&agent.account_id) {
-            account.usage = Some(usage);
+            // Merge: providers report partial snapshots (e.g. only the window that
+            // changed), so a missing window or plan keeps its previous value.
+            let prev = account.usage.take();
+            let merged = match prev {
+                Some(prev) => AccountUsage {
+                    primary: usage.primary.or(prev.primary),
+                    secondary: usage.secondary.or(prev.secondary),
+                    plan: usage.plan.or(prev.plan),
+                    updated_at: usage.updated_at,
+                },
+                None => usage,
+            };
+            account.usage = Some(merged);
             let _ = self.put_account(account);
         }
     }

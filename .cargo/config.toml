@@ -1,0 +1,12 @@
+[env]
+# whisper-rs-sys otherwise runs bindgen, which needs libclang. Use the bindings it
+# ships so building Armada only needs cmake and a C++ compiler.
+WHISPER_DONT_GENERATE_BINDINGS = "1"
+# Don't tune the CPU code for the build machine (-march=native): releases are built on
+# CI runners and must run on every user's CPU. AVX2/FMA/F16C (x86 only; ignored on
+# Apple Silicon) keep transcription fast on any CPU from the last decade.
+GGML_NATIVE = "OFF"
+GGML_AVX = "ON"
+GGML_AVX2 = "ON"
+GGML_FMA = "ON"
+GGML_F16C = "ON"

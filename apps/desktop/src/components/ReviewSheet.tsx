@@ -28,6 +28,7 @@ import { findFileSlice, hunkPatch, slicePatch } from "@/lib/patchSlices";
 import type { Agent, AgentDiff, ChangedFile } from "@/lib/types";
 import { basename, cn, errorMessage } from "@/lib/utils";
 import { useApp } from "@/store/app";
+import { refreshPrSoon } from "@/store/pr";
 import { useUi } from "@/store/ui";
 import {
   anchorKey,
@@ -203,6 +204,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
       (summary) => {
         toastCommit(summary);
         setCommitMsg("");
+        refreshPrSoon(agent.id);
       },
     );
 
@@ -759,6 +761,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
               setBusy("pr");
               try {
                 toastPr(await api.createPr(agent.id, t, b));
+                refreshPrSoon(agent.id);
                 return null;
               } catch (e) {
                 return errorMessage(e);

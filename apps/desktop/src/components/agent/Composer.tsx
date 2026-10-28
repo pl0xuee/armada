@@ -11,8 +11,9 @@ import { useElementWidth } from "@/hooks/useElementWidth";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useAttachments } from "@/hooks/useAttachments";
 import { useUi } from "@/store/ui";
-import { getDraft, setDraft } from "./drafts";
+import { getDraft, onDraftInsert, setDraft } from "./drafts";
 import { AttachButton, DropOverlay } from "../AttachControls";
+import { DictateButton } from "../DictateButton";
 import { AttachmentStrip } from "../AttachmentStrip";
 import { TemplatePicker } from "../TemplatePicker";
 import { Button } from "../ui/button";
@@ -192,6 +193,26 @@ export function Composer({ agent }: { agent: Agent }) {
     if (slashQuery(v) === null && mentionQuery(v, nextCaret) === null) setSlashDismissed(false);
   };
 
+  // Text sent in from elsewhere (e.g. terminal output from the workspace panel).
+  const updateRef = useRef(update);
+  updateRef.current = update;
+  useEffect(
+    () =>
+      onDraftInsert(agent.id, (insert) => {
+        const cur = textRef.current;
+        const next = cur.trim() ? `${cur.trimEnd()}\n\n${insert}` : insert;
+        updateRef.current(next);
+        requestAnimationFrame(() => {
+          const el = ref.current;
+          if (el) {
+            el.focus();
+            el.setSelectionRange(next.length, next.length);
+          }
+        });
+      }),
+    [agent.id],
+  );
+
   const pickFile = (path: string) => {
     const before = text.slice(0, caret);
     const start = before.lastIndexOf("@");
@@ -262,6 +283,33 @@ export function Composer({ agent }: { agent: Agent }) {
     }
     requestAnimationFrame(() => ref.current?.focus());
   };
+
+  /** Dictated text goes in at the caret; with "send after dictation" it is sent right away. */
+  const insertDictation = (spoken: string, autoSend: boolean) => {
+    const el = ref.current;
+    const cur = textRef.current;
+    const start = el ? Math.min(el.selectionStart ?? cur.length, cur.length) : cur.length;
+    const end = el ? Math.min(el.selectionEnd ?? start, cur.length) : cur.length;
+    const before = cur.slice(0, start);
+    const lead = before && !/\s$/.test(before) ? " " : "";
+    const inserted = `${lead}${spoken}`;
+    const next = `${before}${inserted}${cur.slice(end)}`;
+    update(next, start + inserted.length);
+    if (autoSend) autoSendRef.current = next.trim();
+    requestAnimationFrame(() => {
+      const t = ref.current;
+      if (!t) return;
+      t.focus();
+      t.setSelectionRange(start + inserted.length, start + inserted.length);
+    });
+  };
+  const autoSendRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (autoSendRef.current === null) return;
+    const want = autoSendRef.current;
+    autoSendRef.current = null;
+    if (text.trim() === want) void send();
+  });
 
   const send = async () => {
     if (!canSend) return;
@@ -417,6 +465,7 @@ export function Composer({ agent }: { agent: Agent }) {
                 ))}
                 {tight && <ConfigOverflowMenu agent={agent} options={agent.configOptions.slice(1)} />}
                 <AttachButton onClick={attach.openPicker} count={attach.attachments.length} iconOnly={!roomy} />
+                <DictateButton onText={insertDictation} iconOnly={!roomy} />
                 <TemplatePicker
                   onInsert={insertTemplate}
                   trigger={

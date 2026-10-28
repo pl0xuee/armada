@@ -301,6 +301,7 @@ impl AcpDriver {
                 if !me.ctx.is_current(me.generation) || !me.ctx.begin_turn(prompt.token) {
                     break;
                 }
+                me.ctx.checkpoint_before_turn().await;
                 me.peer.mark_turn();
                 let mark = me.peer.stderr_mark();
                 let preamble = me.ctx.take_preamble();
@@ -529,6 +530,12 @@ impl AcpDriver {
                     u["cost"]["amount"].as_f64()
                 };
                 ctx.usage(u["used"].as_i64(), u["size"].as_i64(), cost);
+                // Claude Code's rate-limit snapshot rides along in `_meta`.
+                if !ctx.replaying() {
+                    if let Some(usage) = parse_claude_rate_limit(&u["_meta"]["_claude/rateLimit"]) {
+                        ctx.account_usage(usage);
+                    }
+                }
             }
             "session_info_update" => {
                 if let Some(t) = u["title"].as_str() {
@@ -976,4 +983,88 @@ fn parse_config_option(o: &Value) -> Option<ConfigOption> {
         current_value: o["currentValue"].as_str().unwrap_or("").to_string(),
         options: choices,
     })
+}
+
+/// Converts Claude Code's `rate_limit_info` (forwarded by the ACP adapter in a
+/// `usage_update`'s `_meta["_claude/rateLimit"]`) into an account usage snapshot.
+/// Utilization is a 0-1 fraction and `resetsAt` is unix seconds.
+fn parse_claude_rate_limit(info: &Value) -> Option<AccountUsage> {
+    fn window(w: &Value, mins: i64) -> Option<UsageWindow> {
+        let util = w["utilization"].as_f64()?;
+        Some(UsageWindow {
+            used_percent: (util * 100.0).clamp(0.0, 100.0),
+            window_mins: Some(mins),
+            resets_at: w["resetsAt"].as_i64().map(
+                |t| {
+                    if t < 1_000_000_000_000 {
+                        t * 1000
+                    } else {
+                        t
+                    }
+                },
+            ),
+        })
+    }
+    if !info.is_object() {
+        return None;
+    }
+    let windows = &info["unifiedWindows"];
+    let mut primary = window(&windows["five_hour"], 300);
+    let mut secondary = window(&windows["seven_day"], 10080);
+    if primary.is_none() && secondary.is_none() {
+        // Older CLIs: only the window that triggered the event.
+        match info["rateLimitType"].as_str() {
+            Some("five_hour") => primary = window(info, 300),
+            Some("seven_day") => secondary = window(info, 10080),
+            _ => {}
+        }
+    }
+    if primary.is_none() && secondary.is_none() {
+        return None;
+    }
+    Some(AccountUsage {
+        primary,
+        secondary,
+        plan: None,
+        updated_at: now_ms(),
+    })
+}
+
+#[cfg(test)]
+mod rate_limit_tests {
+    use super::*;
+
+    const CAPTURED: &str = r#"{"status":"allowed","resetsAt":1793218200,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.01,"resetsAt":1793218200,"status":"allowed"},"seven_day":{"utilization":0.22,"resetsAt":1793746800,"status":"allowed"}}}"#;
+
+    #[test]
+    fn parses_unified_windows() {
+        let v: Value = serde_json::from_str(CAPTURED).unwrap();
+        let u = parse_claude_rate_limit(&v).unwrap();
+        let p = u.primary.unwrap();
+        assert!((p.used_percent - 1.0).abs() < 1e-6);
+        assert_eq!(p.window_mins, Some(300));
+        assert_eq!(p.resets_at, Some(1793218200000));
+        let s = u.secondary.unwrap();
+        assert!((s.used_percent - 22.0).abs() < 1e-6);
+        assert_eq!(s.window_mins, Some(10080));
+        assert_eq!(s.resets_at, Some(1793746800000));
+        assert!(u.plan.is_none());
+    }
+
+    #[test]
+    fn falls_back_to_top_level_window() {
+        let v = json!({"rateLimitType":"seven_day","utilization":0.5,"resetsAt":1793746800});
+        let u = parse_claude_rate_limit(&v).unwrap();
+        assert!(u.primary.is_none());
+        assert!((u.secondary.unwrap().used_percent - 50.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ignores_missing_or_unusable() {
+        assert!(parse_claude_rate_limit(&Value::Null).is_none());
+        assert!(
+            parse_claude_rate_limit(&json!({"status":"allowed","rateLimitType":"five_hour"}))
+                .is_none()
+        );
+    }
 }

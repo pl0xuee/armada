@@ -14,6 +14,7 @@ export type SettingsSection =
   | "providers"
   | "agents"
   | "remote"
+  | "voice"
   | "about";
 
 export interface TerminalSession {
@@ -63,6 +64,9 @@ interface UiStore {
   shareAgent: Agent | null;
   terminal: TerminalSession | null;
   windowFocused: boolean;
+  /** Workspace panel (terminals, scripts) under the conversation; remembered across restarts. */
+  workspaceOpen: boolean;
+  workspaceHeight: number;
   /** Bumps to ask the composer to focus itself. */
   composerFocusTick: number;
 
@@ -86,6 +90,34 @@ interface UiStore {
   setTerminal: (t: TerminalSession | null) => void;
   setWindowFocused: (f: boolean) => void;
   focusComposer: () => void;
+  setWorkspaceOpen: (open: boolean) => void;
+  setWorkspaceHeight: (px: number) => void;
+}
+
+const WORKSPACE_KEY = "armada.workspace";
+export const WORKSPACE_MIN_HEIGHT = 120;
+export const WORKSPACE_DEFAULT_HEIGHT = 280;
+
+function readWorkspace(): { open: boolean; height: number } {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_KEY);
+    if (raw) {
+      const v = JSON.parse(raw) as Partial<{ open: boolean; height: number }>;
+      const h = typeof v.height === "number" && Number.isFinite(v.height) ? v.height : WORKSPACE_DEFAULT_HEIGHT;
+      return { open: v.open === true, height: Math.max(WORKSPACE_MIN_HEIGHT, Math.min(2000, Math.round(h))) };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { open: false, height: WORKSPACE_DEFAULT_HEIGHT };
+}
+
+function saveWorkspace(open: boolean, height: number) {
+  try {
+    localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ open, height }));
+  } catch {
+    /* ignore */
+  }
 }
 
 const INSPECTOR_KEY = "armada.inspectorOpen";
@@ -148,6 +180,8 @@ export const useUi = create<UiStore>((set) => ({
   terminal: null,
   windowFocused: typeof document !== "undefined" ? document.hasFocus() : true,
   composerFocusTick: 0,
+  workspaceOpen: readWorkspace().open,
+  workspaceHeight: readWorkspace().height,
 
   setView: (view) => set({ view }),
   openAgent: (id) => set({ view: "agents", selectedAgentId: id }),
@@ -186,4 +220,13 @@ export const useUi = create<UiStore>((set) => ({
   setTerminal: (terminal) => set({ terminal }),
   setWindowFocused: (windowFocused) => set({ windowFocused }),
   focusComposer: () => set((s) => ({ composerFocusTick: s.composerFocusTick + 1 })),
+  setWorkspaceOpen: (workspaceOpen) => {
+    saveWorkspace(workspaceOpen, useUi.getState().workspaceHeight);
+    set({ workspaceOpen });
+  },
+  setWorkspaceHeight: (h) => {
+    const workspaceHeight = Math.max(WORKSPACE_MIN_HEIGHT, Math.round(h));
+    saveWorkspace(useUi.getState().workspaceOpen, workspaceHeight);
+    set({ workspaceHeight });
+  },
 }));

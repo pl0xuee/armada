@@ -8,6 +8,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  CheckpointList,
+  RestorePreview,
+  RestoreResult,
   Account,
   Agent,
   AgentDiff,
@@ -17,10 +20,12 @@ import type {
   AttentionReason,
   CreateAccountRequest,
   CommitSummary,
+  PrStatus,
   CreateAgentRequest,
   CustomAgent,
   McpServer,
   Provider,
+  ProjectScript,
   ProviderInfo,
   RemoteStatus,
   Schedule,
@@ -30,7 +35,12 @@ import type {
   ShipResult,
   TimelineItem,
   UpdateInfo,
+  VoiceDownloadEvent,
+  VoiceInputDevice,
+  VoiceStatus,
+  VoiceTranscript,
 } from "./types";
+import { onVoiceBus } from "./voiceBus";
 
 export const EVENT_CHANNEL = "armada://event";
 
@@ -64,6 +74,8 @@ const tauriApi = {
     invoke<void>("send_prompt", { agentId, text, attachments: attachments ?? [] }),
   /** Loads an image file an agent referenced (relative to its cwd; images ≤10 MB in the agent's folders or temp dir). */
   readImage: (agentId: string, path: string) => invoke<Attachment>("read_image", { agentId, path }),
+  /** Images on the system clipboard, read natively (fallback when a paste event carries no image file; Linux only). */
+  readClipboardImages: () => invoke<{ attachments: Attachment[]; problems: string[] }>("read_clipboard_images"),
   /** Fuzzy file search in the agent's cwd: top 50 relative paths. */
   listFiles: (agentId: string, query: string) => invoke<string[]>("list_files", { agentId, query }),
   cancelTurn: (agentId: string) => invoke<void>("cancel_turn", { agentId }),
@@ -117,6 +129,15 @@ const tauriApi = {
 
   // review / git
   getDiff: (agentId: string) => invoke<AgentDiff>("get_diff", { agentId }),
+
+  // checkpoints (rewind)
+  listCheckpoints: (agentId: string) => invoke<CheckpointList>("list_checkpoints", { agentId }),
+  /** What restoring would change: files that differ between now and the checkpoint. */
+  previewCheckpoint: (agentId: string, checkpointId: string) =>
+    invoke<RestorePreview>("preview_checkpoint", { agentId, checkpointId }),
+  /** Saves the current state, then restores the checkpoint. Restoring `safetyId` undoes it. */
+  restoreCheckpoint: (agentId: string, checkpointId: string) =>
+    invoke<RestoreResult>("restore_checkpoint", { agentId, checkpointId }),
   commitAgent: (agentId: string, message: string) => invoke<CommitSummary>("commit_agent", { agentId, message }),
   mergeAgent: (agentId: string) => invoke<string>("merge_agent", { agentId }),
   /**
@@ -127,6 +148,12 @@ const tauriApi = {
   /** Commits anything uncommitted (message defaults to the title), then merges into the base branch. */
   shipAgent: (agentId: string, message: string) => invoke<ShipResult>("ship_agent", { agentId, message }),
   createPr: (agentId: string, title: string, body: string) => invoke<string>("create_pr", { agentId, title, body }),
+  /** PR + CI status of the agent's branch (cached; never rejects for gh/auth/network problems). */
+  prStatus: (agentId: string, force = false) => invoke<PrStatus>("pr_status", { agentId, force }),
+  /** Editable "Fix CI" prompt: failing checks plus trimmed failing-job logs. Rejects when nothing is failing. */
+  prFixCiPrompt: (agentId: string) => invoke<string>("pr_fix_ci_prompt", { agentId }),
+  /** Editable prompt with the PR's review feedback. Rejects when there's nothing to address. */
+  prReviewPrompt: (agentId: string) => invoke<string>("pr_review_prompt", { agentId }),
   discardWorktree: (agentId: string) => invoke<void>("discard_worktree", { agentId }),
 
   // accounts
@@ -152,9 +179,14 @@ const tauriApi = {
   terminalResize: (terminalId: string, cols: number, rows: number) =>
     invoke<void>("terminal_resize", { terminalId, cols, rows }),
   terminalKill: (terminalId: string) => invoke<void>("terminal_kill", { terminalId }),
+  // workspace panel: a shell (or a detected project script) in the agent's own folder
+  workspaceTerminalOpen: (agentId: string, scriptId?: string) =>
+    invoke<string>("workspace_terminal_open", { agentId, scriptId: scriptId ?? null }),
+  workspaceScripts: (agentId: string) => invoke<ProjectScript[]>("workspace_scripts", { agentId }),
 
   // settings & attention
   updateSettings: (settings: Settings) => invoke<Settings>("update_settings", { settings }),
+  setInterfaceZoom: (percent: number) => invoke<void>("set_interface_zoom", { percent }),
   previewSound: (reason: AttentionReason) => invoke<void>("preview_sound", { reason }),
   /** Shows a test notification; also sends a phone push to `ntfyUrl` (or the saved one) when set. */
   testNotification: (ntfyUrl?: string | null) => invoke<void>("test_notification", { ntfyUrl: ntfyUrl ?? null }),
@@ -187,6 +219,19 @@ const tauriApi = {
   checkForUpdate: () => invoke<UpdateInfo | null>("check_for_update"),
   /** Downloads, installs and restarts the app; progress via update_progress events. */
   installUpdate: () => invoke<void>("install_update"),
+
+  // voice dictation (local speech-to-text; audio never leaves the device)
+  voiceStatus: () => invoke<VoiceStatus>("voice_status"),
+  voiceListDevices: () => invoke<VoiceInputDevice[]>("voice_list_devices"),
+  /** Downloads a model (SHA-256 verified); progress via voice-download events. Resolves when done. */
+  voiceDownloadModel: (id: string) => invoke<void>("voice_download_model", { id }),
+  voiceCancelDownload: () => invoke<void>("voice_cancel_download"),
+  voiceDeleteModel: (id: string) => invoke<void>("voice_delete_model", { id }),
+  /** Opens the microphone; level meter via voice-level events. */
+  voiceStart: () => invoke<void>("voice_start"),
+  /** Stops recording and transcribes. */
+  voiceStop: () => invoke<VoiceTranscript>("voice_stop"),
+  voiceCancel: () => invoke<void>("voice_cancel"),
 };
 
 export type ArmadaApi = typeof tauriApi;
@@ -218,4 +263,20 @@ export function onArmadaEvent(cb: (e: ArmadaEvent) => void): Promise<UnlistenFn>
   };
   if (!isTauri()) return loadMock().then((m) => m.subscribeMock(deliver));
   return listen<ArmadaEvent | ArmadaEvent[]>(EVENT_CHANNEL, (e) => deliver(e.payload));
+}
+
+/** Voice events: microphone level while recording, model download progress, the length limit. */
+export function onVoiceLevel(cb: (e: { level: number; elapsedMs: number }) => void): Promise<UnlistenFn> {
+  if (!isTauri()) return Promise.resolve(onVoiceBus("voice-level", cb));
+  return listen<{ level: number; elapsedMs: number }>("voice-level", (e) => cb(e.payload));
+}
+
+export function onVoiceLimit(cb: () => void): Promise<UnlistenFn> {
+  if (!isTauri()) return Promise.resolve(onVoiceBus("voice-limit", cb));
+  return listen("voice-limit", () => cb());
+}
+
+export function onVoiceDownload(cb: (e: VoiceDownloadEvent) => void): Promise<UnlistenFn> {
+  if (!isTauri()) return Promise.resolve(onVoiceBus("voice-download", cb));
+  return listen<VoiceDownloadEvent>("voice-download", (e) => cb(e.payload));
 }

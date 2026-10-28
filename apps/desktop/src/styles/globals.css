@@ -39,6 +39,19 @@
   --code-bg: #0e1115;
   --diff-add: rgba(61, 220, 151, 0.11);
   --diff-del: rgba(255, 92, 108, 0.11);
+
+  /* Syntax highlighting (Shiki css-variables theme, see lib/highlight.ts). */
+  --syntax-foreground: currentColor;
+  --syntax-background: transparent;
+  --syntax-token-comment: #6b7886;
+  --syntax-token-keyword: #c4a7ff;
+  --syntax-token-string: #8fdcb0;
+  --syntax-token-string-expression: #8fdcb0;
+  --syntax-token-constant: #f5b544;
+  --syntax-token-parameter: #e6eaef;
+  --syntax-token-function: #6cc9f5;
+  --syntax-token-punctuation: #8693a1;
+  --syntax-token-link: #4fc3f7;
 }
 
 [data-theme="carbon"] {
@@ -70,6 +83,19 @@
   --code-bg: #0a0a0b;
   --diff-add: rgba(61, 220, 151, 0.1);
   --diff-del: rgba(255, 92, 108, 0.1);
+
+  /* Syntax highlighting (Shiki css-variables theme, see lib/highlight.ts). */
+  --syntax-foreground: currentColor;
+  --syntax-background: transparent;
+  --syntax-token-comment: #6e7681;
+  --syntax-token-keyword: #c9a9ff;
+  --syntax-token-string: #93e0b4;
+  --syntax-token-string-expression: #93e0b4;
+  --syntax-token-constant: #f7b955;
+  --syntax-token-parameter: #e8e8ea;
+  --syntax-token-function: #72cdf7;
+  --syntax-token-punctuation: #8a8f98;
+  --syntax-token-link: #5ec8f8;
 }
 
 [data-theme="titanium"] {
@@ -101,6 +127,19 @@
   --code-bg: #f1f3f6;
   --diff-add: rgba(16, 133, 92, 0.1);
   --diff-del: rgba(212, 47, 67, 0.09);
+
+  /* Syntax highlighting (Shiki css-variables theme, see lib/highlight.ts). */
+  --syntax-foreground: currentColor;
+  --syntax-background: transparent;
+  --syntax-token-comment: #69727e;
+  --syntax-token-keyword: #6d4fd8;
+  --syntax-token-string: #0c7652;
+  --syntax-token-string-expression: #0c7652;
+  --syntax-token-constant: #8f5609;
+  --syntax-token-parameter: #12161b;
+  --syntax-token-function: #0268a4;
+  --syntax-token-punctuation: #56616e;
+  --syntax-token-link: #0268a4;
 }
 
 @theme inline {

@@ -344,6 +344,7 @@ impl CodexDriver {
         if !self.ctx.is_current(self.generation) || !self.ctx.begin_turn(prompt.token) {
             return None;
         }
+        self.ctx.checkpoint_before_turn().await;
         self.peer.mark_turn();
         let mark = self.peer.stderr_mark();
         let preamble = self.ctx.take_preamble();

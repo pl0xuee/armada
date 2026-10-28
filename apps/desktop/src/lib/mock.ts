@@ -3,6 +3,7 @@
 // including simulated streaming, permissions, login terminals and installs.
 
 import type { ArmadaApi } from "./api";
+import { emitVoiceBus } from "./voiceBus";
 import { isStressMode, STRESS_AGENTS, STRESS_TICK_MS, stressAgents, stressItems, stressWords } from "./mock-stress";
 import {
   commandsFor,
@@ -19,7 +20,12 @@ import {
 } from "./mock-data";
 import type {
   Account,
+  Checkpoint,
+  RestorePreview,
   ShipResult,
+  PrStatus,
+  PrInfo,
+  PrCheck,
   CommitSummary,
   Agent,
   AgentDiff,
@@ -30,6 +36,7 @@ import type {
   FileDiff,
   PermissionOption,
   PlanEntry,
+  ProjectScript,
   Provider,
   ProviderInfo,
   QueuedPrompt,
@@ -609,7 +616,16 @@ interface MockTerminal {
   buffer: string;
   stage: number;
   done: boolean;
+  /** A workspace-panel shell (echoes typed input). */
+  shell?: boolean;
 }
+
+const MOCK_SCRIPTS: ProjectScript[] = [
+  { id: "npm:dev", source: "npm", name: "dev", command: "npm run dev" },
+  { id: "npm:build", source: "npm", name: "build", command: "npm run build" },
+  { id: "npm:test", source: "npm", name: "test", command: "npm run test" },
+  { id: "cargo:test", source: "cargo", name: "test", command: "cargo test" },
+];
 
 const terminals = new Map<string, MockTerminal>();
 
@@ -1271,6 +1287,51 @@ export const mockApi: ArmadaApi = {
     return delay(withoutReverted(seedDiff(itemsOf(agentId)), revertedPatches.get(agentId) ?? []), 400);
   },
 
+  async listCheckpoints(agentId) {
+    const agent = getAgent(agentId);
+    const extra = mockSafety.get(agentId) ?? [];
+    const turns: Checkpoint[] = itemsOf(agentId)
+      .filter((it) => it.kind === "user_message")
+      .map((it, i) => ({ id: `ck-${it.id}`, agentId, seq: i + 1, itemId: it.id, createdAt: it.ts, kind: "turn" }));
+    return delay({ available: agent.worktree, checkpoints: [...turns, ...extra] }, 150);
+  },
+
+  async previewCheckpoint(agentId, checkpointId) {
+    getAgent(agentId);
+    if (!checkpointId) throw new Error("That checkpoint no longer exists");
+    const files: RestorePreview["files"] = [
+      { path: "src/lib/session.ts", status: "modified", additions: 4, deletions: 31 },
+      { path: "src/lib/session.test.ts", status: "deleted", additions: 0, deletions: 58 },
+      { path: "README.md", status: "added", additions: 12, deletions: 0 },
+    ];
+    return delay(
+      {
+        files,
+        totalFiles: files.length,
+        additions: files.reduce((n, f) => n + f.additions, 0),
+        deletions: files.reduce((n, f) => n + f.deletions, 0),
+      },
+      250,
+    );
+  },
+
+  async restoreCheckpoint(agentId, checkpointId) {
+    const a = getAgent(agentId);
+    assertIdle(a, "restoring its files");
+    await gitLock(agentId, 500);
+    const list = mockSafety.get(agentId) ?? [];
+    const safety: Checkpoint = {
+      id: `ck-safety-${list.length + 1}-${checkpointId}`,
+      agentId,
+      seq: 1000 + list.length,
+      itemId: null,
+      createdAt: Date.now(),
+      kind: "safety",
+    };
+    mockSafety.set(agentId, [...list, safety]);
+    return { safetyId: safety.id, filesChanged: 3 };
+  },
+
   async commitAgent(agentId, message) {
     const a = getAgent(agentId);
     assertIdle(a, "committing");
@@ -1345,6 +1406,74 @@ export const mockApi: ArmadaApi = {
     await sleep(900);
     if (agentId === "a-e2e") return "A pull request already exists: https://github.com/acme/storefront/pull/77";
     return "https://github.com/acme/atlas-api/pull/128";
+  },
+
+  async prStatus(agentId) {
+    const a = getAgent(agentId);
+    const base = { reason: null, fetchedAt: Date.now() } as const;
+    if (!a.branch) return delay<PrStatus>({ ...base, state: "none", pr: null });
+    const mk = (n: number, state: PrInfo["state"], checks: PrCheck[], review: PrInfo["review"]): PrStatus => {
+      const count = (s: string) => checks.filter((c) => c.status === s).length;
+      const failing = count("failing");
+      const pending = count("pending");
+      return {
+        ...base,
+        state: "ok",
+        pr: {
+          number: n,
+          url: `https://github.com/acme/${a.projectPath.split("/").pop()}/pull/${n}`,
+          title: a.title,
+          state,
+          review,
+          mergeable: "mergeable",
+          checks,
+          summary: {
+            passing: count("passing"),
+            failing,
+            pending,
+            overall: failing ? "failing" : pending ? "pending" : checks.length ? "passing" : "none",
+          },
+        },
+      };
+    };
+    const c = (name: string, status: PrCheck["status"], d: number | null): PrCheck => ({
+      name,
+      workflow: "CI",
+      status,
+      url: "https://github.com/acme/atlas-api/actions/runs/1/job/2",
+      runId: "1",
+      durationSecs: d,
+    });
+    if (agentId === "a-token")
+      return delay(
+        mk(
+          128,
+          "open",
+          [
+            c("lint", "passing", 41),
+            c("test (ubuntu)", "failing", 212),
+            c("test (macos)", "failing", 305),
+            c("build", "passing", 97),
+          ],
+          "changes_requested",
+        ),
+      );
+    if (agentId === "a-e2e") return delay(mk(77, "open", [c("e2e", "pending", null), c("lint", "passing", 38)], null));
+    if (agentId === "a-ratelimit") return delay(mk(64, "draft", [c("test", "passing", 120)], null));
+    return delay<PrStatus>({ ...base, state: "none", pr: null });
+  },
+
+  async prFixCiPrompt(agentId) {
+    const s = await mockApi.prStatus(agentId);
+    const failing = s.pr?.checks.filter((x) => x.status === "failing") ?? [];
+    if (!s.pr || failing.length === 0) throw new Error("No checks are failing.");
+    return `CI is failing on PR #${s.pr.number}. Fix it.\n\nFailing checks:\n${failing.map((x) => `- CI / ${x.name} (${x.url})`).join("\n")}\n\nLogs:\n\`\`\`\n--- ${failing[0].name} ---\nerror[E0432]: unresolved import \`crate::auth::refresh\`\n --> src/session.rs:12:5\n##[error]Process completed with exit code 101.\n\`\`\`\n`;
+  },
+
+  async prReviewPrompt(agentId) {
+    const s = await mockApi.prStatus(agentId);
+    if (!s.pr) throw new Error("This branch has no pull request.");
+    return `Reviewers left feedback on PR #${s.pr.number}. Address it: make the requested changes (or explain briefly why not).\n\nReviews requesting changes:\n- maria requested changes: Please add a regression test for the refresh race.\n\nInline comments:\n- src/session.rs:42 (maria): This lock is held across the await; use a scoped guard.\n`;
   },
 
   async discardWorktree(agentId) {
@@ -1466,6 +1595,11 @@ export const mockApi: ArmadaApi = {
     if (data.length > 65_536) throw new Error("That's too much input at once (over 64 KB).");
     const t = terminals.get(terminalId);
     if (!t || t.done) return;
+    if (t.shell) {
+      t.buffer = (t.buffer + data).replace(/\r/g, "\r\n");
+      termOut(t.id, data.replace(/\r/g, "\r\n"));
+      return;
+    }
     if (t.kind === "login" && t.stage === 1) {
       for (const ch of data) {
         if (ch === "\r" || ch === "\n") {
@@ -1487,6 +1621,28 @@ export const mockApi: ArmadaApi = {
         }
       }
     }
+  },
+
+  async workspaceTerminalOpen(agentId, scriptId) {
+    const agent = db.agents.find((a) => a.id === agentId);
+    if (!agent) throw new Error("Agent not found");
+    const t: MockTerminal = { id: newId("term"), kind: "install", buffer: "", stage: 0, done: false, shell: true };
+    terminals.set(t.id, t);
+    const prompt = `${C.green}${agent.cwd.split("/").filter(Boolean).pop() ?? "~"}${C.reset} $ `;
+    const script = scriptId ? MOCK_SCRIPTS.find((x) => x.id === scriptId) : undefined;
+    setTimeout(() => {
+      if (script) {
+        termOut(t.id, `${prompt}${script.command}\r\n${C.dim}(mock) running…${C.reset}\r\nDone.\r\n`);
+        void termExit(t, 0);
+      } else {
+        termOut(t.id, `${C.dim}Mock shell (browser preview)${C.reset}\r\n${prompt}`);
+      }
+    }, 200);
+    return delay(t.id, 60);
+  },
+
+  async workspaceScripts() {
+    return delay(clone(MOCK_SCRIPTS), 80);
   },
 
   async terminalResize() {
@@ -1520,6 +1676,10 @@ export const mockApi: ArmadaApi = {
     return delay(clone(db.settings), 60);
   },
 
+  async setInterfaceZoom(percent) {
+    (document.documentElement.style as CSSStyleDeclaration & { zoom: string }).zoom = String(percent / 100);
+  },
+
   async previewSound(reason) {
     playTone(reason);
   },
@@ -1544,6 +1704,10 @@ export const mockApi: ArmadaApi = {
   async openPath(path) {
     if (/^https?:\/\//.test(path)) window.open(path, "_blank", "noopener");
     else console.info("[mock] open path", path);
+  },
+
+  async readClipboardImages() {
+    return { attachments: [], problems: [] };
   },
 
   async readImage(agentId, path) {
@@ -1658,6 +1822,80 @@ export const mockApi: ArmadaApi = {
   async checkForUpdate() {
     await sleep(900);
     return MOCK_UPDATE;
+  },
+
+  // ---- voice dictation (simulated: no microphone, canned transcript)
+  async voiceStatus() {
+    const v = db.settings.voice;
+    return {
+      models: MOCK_VOICE_MODELS.map((m) => ({ ...m, installed: mockVoice.installed.has(m.id) })),
+      languages: MOCK_VOICE_LANGUAGES,
+      maxRecordingSecs: 300,
+      model: v.model,
+      ready: mockVoice.installed.has(v.model),
+      downloading: mockVoice.downloading,
+    };
+  },
+
+  async voiceListDevices() {
+    await sleep(80);
+    return [
+      { name: "Built-in Microphone", isDefault: true },
+      { name: "USB Headset", isDefault: false },
+    ];
+  },
+
+  async voiceDownloadModel(id) {
+    const m = MOCK_VOICE_MODELS.find((x) => x.id === id);
+    if (!m) throw new Error(`Unknown dictation model “${id}”`);
+    if (mockVoice.downloading) throw new Error("A model is already downloading");
+    mockVoice.downloading = id;
+    mockVoice.cancel = false;
+    let done = 0;
+    try {
+      while (done < m.sizeBytes) {
+        await sleep(120);
+        if (mockVoice.cancel) {
+          emitVoiceBus("voice-download", { id, done: 0, total: m.sizeBytes, state: "cancelled", error: null });
+          throw new Error("Download cancelled");
+        }
+        done = Math.min(m.sizeBytes, done + Math.round(m.sizeBytes / 30));
+        emitVoiceBus("voice-download", { id, done, total: m.sizeBytes, state: "progress", error: null });
+      }
+      mockVoice.installed.add(id);
+      emitVoiceBus("voice-download", { id, done, total: m.sizeBytes, state: "done", error: null });
+    } finally {
+      mockVoice.downloading = null;
+    }
+  },
+
+  async voiceCancelDownload() {
+    mockVoice.cancel = true;
+  },
+
+  async voiceDeleteModel(id) {
+    mockVoice.installed.delete(id);
+  },
+
+  async voiceStart() {
+    await sleep(120);
+    if (mockVoice.timer) clearInterval(mockVoice.timer);
+    const t0 = Date.now();
+    mockVoice.timer = setInterval(() => {
+      emitVoiceBus("voice-level", { level: Math.random() * 0.8, elapsedMs: Date.now() - t0 });
+    }, 80);
+  },
+
+  async voiceStop() {
+    if (mockVoice.timer) clearInterval(mockVoice.timer);
+    mockVoice.timer = null;
+    await sleep(900);
+    return { text: "Please add tests for the retry logic and run them.", autoSend: db.settings.voice.autoSend };
+  },
+
+  async voiceCancel() {
+    if (mockVoice.timer) clearInterval(mockVoice.timer);
+    mockVoice.timer = null;
   },
 
   async installUpdate() {
@@ -1841,6 +2079,8 @@ function withoutReverted(diff: AgentDiff, reverted: string[]): AgentDiff {
 
 const gitBusy = new Set<string>();
 
+const mockSafety = new Map<string, Checkpoint[]>();
+
 function assertIdle(a: Agent, what: string) {
   if (a.status === "working" || a.status === "needs_permission" || a.status === "starting") {
     throw new Error(`The agent is still working; stop it or wait before ${what} changes.`);
@@ -1880,11 +2120,36 @@ function ntfyProblem(url: string): string | null {
   return null;
 }
 
+const MOCK_VOICE_MODELS = [
+  { id: "tiny.en", label: "Tiny (English)", description: "Fastest, least accurate", sizeBytes: 77_704_715, multilingual: false, isDefault: false },
+  { id: "base.en", label: "Base (English)", description: "Good balance of speed and accuracy", sizeBytes: 147_964_211, multilingual: false, isDefault: true },
+  { id: "small.en", label: "Small (English)", description: "More accurate, slower", sizeBytes: 487_614_201, multilingual: false, isDefault: false },
+  { id: "small", label: "Small (multilingual)", description: "Understands about 99 languages", sizeBytes: 487_601_967, multilingual: true, isDefault: false },
+];
+const MOCK_VOICE_LANGUAGES: [string, string][] = [
+  ["en", "English"],
+  ["fr", "French"],
+  ["de", "German"],
+  ["es", "Spanish"],
+  ["ja", "Japanese"],
+];
+const mockVoice = {
+  installed: new Set<string>(),
+  downloading: null as string | null,
+  cancel: false,
+  timer: null as ReturnType<typeof setInterval> | null,
+};
+
 function validateSettings(s: Settings): string | null {
   if (!["off", "ask", "auto"].includes(s.failover)) return `Unknown failover setting “${s.failover}”`;
   if (!["auto", "ask"].includes(s.defaultPermissionMode)) return `Unknown permission mode “${s.defaultPermissionMode}”`;
   if (!Number.isInteger(s.remote.port) || s.remote.port < 1 || s.remote.port > 65535) {
     return "The remote control port must be between 1 and 65535";
+  }
+  const vm = MOCK_VOICE_MODELS.find((m) => m.id === s.voice.model);
+  if (!vm) return `Unknown dictation model “${s.voice.model}”`;
+  if (!vm.multilingual && s.voice.language !== "auto" && s.voice.language !== "en") {
+    return `The ${vm.label} model only understands English; pick a multilingual model for other languages`;
   }
   const hhmm = /^([01]\d|2[0-3]):[0-5]\d$/;
   for (const t of [s.quietHours.start, s.quietHours.end]) {

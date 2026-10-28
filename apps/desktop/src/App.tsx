@@ -3,6 +3,7 @@ import { lazy, Profiler, Suspense, useEffect, useState, type ComponentType, type
 import { Toaster } from "sonner";
 import { AgentDialogs } from "@/components/AgentDialogs";
 import { Announcer } from "@/components/shell/Announcer";
+import { VoiceSetupDialog } from "@/components/DictateButton";
 import { ShortcutHelp } from "@/components/shell/ShortcutHelp";
 import { AppMark } from "@/components/AppMark";
 import { Rail } from "@/components/Rail";
@@ -10,11 +11,13 @@ import { TitleBar } from "@/components/TitleBar";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
+import { usePrPolling } from "@/hooks/usePrPolling";
 import { api } from "@/lib/api";
 import { applyDevLinks } from "@/lib/devlinks";
 import { installNavigationGuard } from "@/lib/external";
 import { useApp } from "@/store/app";
 import { connectEvents } from "@/store/events";
+import { applyInterfaceScale } from "@/lib/zoom";
 import { useUi, type View } from "@/store/ui";
 import { AgentsView } from "@/views/Agents";
 
@@ -89,6 +92,12 @@ export function App() {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
+  // Interface zoom (webview zoom, so layout and measurements stay consistent)
+  const scale = settings?.interfaceScale;
+  useEffect(() => {
+    if (scale !== undefined) applyInterfaceScale(scale);
+  }, [scale]);
+
   // Window focus tracking (smart mute)
   useEffect(() => {
     const onFocus = () => useUi.getState().setWindowFocused(true);
@@ -108,6 +117,7 @@ export function App() {
   }, [focusTarget, booted]);
 
   useGlobalShortcuts(booted && settings?.onboarded === true);
+  usePrPolling();
 
   return (
     <LazyMotion features={loadMotionFeatures} strict>
@@ -141,6 +151,7 @@ export function App() {
                 </WhenOpened>
                 <AgentDialogs />
                 <ShortcutHelp />
+                <VoiceSetupDialog />
                 <Announcer />
                 <WhenOpened open={(s) => s.reviewAgentId !== null}>
                   <ReviewSheet />

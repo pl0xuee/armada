@@ -9,6 +9,8 @@ import { useApp } from "@/store/app";
 import { Spinner } from "../ui/misc";
 import { Skeleton } from "../ui/skeleton";
 import { AgentMessage, NoticeBanner, PermissionCard, PlanCard, ThoughtBlock, ToolCallCard, UserBubble } from "./items";
+import { ActivityGroup } from "./ActivityGroup";
+import { groupActivity } from "./activityGroups";
 import { SubagentCard } from "./SubagentCard";
 import { TurnSummaryCard, TurnSummaryLine } from "./TurnSummaryCard";
 import { latestPending, usePermissionKeys } from "./usePermissionKeys";
@@ -73,12 +75,29 @@ export function Timeline({
   // Keyed on structure on purpose: it reads the current list, but deltas never change the structure.
   const view = useMemo(() => buildView(list), [structureKey]);
   const rows = view.top;
-  const childrenOf = useResolvedChildren(view, list);
+  const childrenOf = useResolvedLists(view.children, list, isToolItem);
+  const groupItems = useResolvedLists(view.groups, list);
+
+  // Expanded activity groups, keyed by group id (kept here so it survives row virtualization).
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(new Set());
+  useLayoutEffect(() => setOpenGroups(new Set()), [agent.id]);
+  const toggleGroup = useCallback((id: string) => {
+    setOpenGroups((s) => {
+      const n = new Set(s);
+      if (!n.delete(id)) n.add(id);
+      return n;
+    });
+  }, []);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (i) => estimateSize(list[rows[i]]),
+    estimateSize: (i) => {
+      const it = list[rows[i]];
+      const g = it && groupItems.get(it.id);
+      if (g) return openGroups.has(it.id) ? 60 + g.length * 48 : 48;
+      return estimateSize(it);
+    },
     getItemKey: (i) => list[rows[i]]?.id ?? i,
     overscan: 6,
     paddingStart: 16,
@@ -245,6 +264,7 @@ export function Timeline({
                 const it = list[rows[v.index]];
                 if (!it) return null;
                 const prev = v.index > 0 ? list[rows[v.index - 1]] : undefined;
+                const group = groupItems.get(it.id);
                 return (
                   <div
                     key={v.key}
@@ -254,17 +274,29 @@ export function Timeline({
                     className={cn("absolute left-0 top-0 w-full pb-3", spacingFor(it, prev))}
                     style={{ transform: `translateY(${v.start}px)` }}
                   >
-                    {renderItem(it, {
-                      agent: stableAgent,
-                      prev,
-                      liveTail: live && it.id === lastId,
-                      view,
-                      childrenOf,
-                      lastPrompt: lastPrompt?.kind === "user_message" ? lastPrompt : null,
-                      pendingId,
-                      reasonFor,
-                      reasonHandler,
-                    })}
+                    {group ? (
+                      <ActivityGroup
+                        groupId={it.id}
+                        items={group}
+                        agent={stableAgent}
+                        live={live && group[group.length - 1].id === lastId}
+                        agentLive={stableAgent.running && stableAgent.status !== "interrupted"}
+                        open={openGroups.has(it.id)}
+                        onToggle={toggleGroup}
+                      />
+                    ) : (
+                      renderItem(it, {
+                        agent: stableAgent,
+                        prev,
+                        liveTail: live && it.id === lastId,
+                        view,
+                        childrenOf,
+                        lastPrompt: lastPrompt?.kind === "user_message" ? lastPrompt : null,
+                        pendingId,
+                        reasonFor,
+                        reasonHandler,
+                      })
+                    )}
                   </div>
                 );
               })}
@@ -336,6 +368,8 @@ type UserItem = Extract<TimelineItem, { kind: "user_message" }>;
 interface TimelineView {
   /** Top-level rows (sub-agent children are nested in their card). */
   top: number[];
+  /** Collapsed activity runs: member indices keyed by the group id (its first item's id). */
+  groups: Map<string, number[]>;
   /** Child call indices per sub-agent toolCallId (any depth). */
   children: Map<string, number[]>;
   lastSummaryId: string | null;
@@ -369,7 +403,10 @@ function buildView(items: TimelineItem[]): TimelineView {
     }
     top.push(i);
   });
-  return { top, children, lastSummaryId, lastErrorId, lastPromptIdx };
+  const grouped = groupActivity(items, top);
+  const groups = new Map<string, number[]>();
+  for (const [first, idxs] of grouped.groups) groups.set(items[first].id, idxs);
+  return { top: grouped.rows, groups, children, lastSummaryId, lastErrorId, lastPromptIdx };
 }
 
 function sameList<T>(a: T[] | undefined, b: T[]): boolean {
@@ -378,20 +415,32 @@ function sameList<T>(a: T[] | undefined, b: T[]): boolean {
   return true;
 }
 
+function isToolItem(it: TimelineItem): it is ToolItem {
+  return it.kind === "tool_call";
+}
+
 /**
- * Child calls per sub-agent, resolved to the current item objects. The map keeps its identity
- * (and each list too) while nothing inside changed, so memoized sub-agent cards skip re-rendering.
+ * Index lists (sub-agent children, activity groups) resolved to the current item objects. The map
+ * keeps its identity (and each list too) while nothing inside changed, so memoized cards skip re-rendering.
  */
-function useResolvedChildren(view: TimelineView, items: TimelineItem[]): Map<string, ToolItem[]> {
-  const prev = useRef<Map<string, ToolItem[]>>(new Map());
-  if (view.children.size === 0) {
+function useResolvedLists<T extends TimelineItem = TimelineItem>(
+  src: Map<string, number[]>,
+  items: TimelineItem[],
+  keep?: (it: TimelineItem) => it is T,
+): Map<string, T[]> {
+  const prev = useRef<Map<string, T[]>>(new Map());
+  if (src.size === 0) {
     if (prev.current.size) prev.current = new Map();
     return prev.current;
   }
-  let changed = view.children.size !== prev.current.size;
-  const next = new Map<string, ToolItem[]>();
-  for (const [k, idxs] of view.children) {
-    const resolved = idxs.map((i) => items[i]).filter((it): it is ToolItem => it?.kind === "tool_call");
+  let changed = src.size !== prev.current.size;
+  const next = new Map<string, T[]>();
+  for (const [k, idxs] of src) {
+    const resolved: T[] = [];
+    for (const i of idxs) {
+      const it = items[i];
+      if (it && (!keep || keep(it))) resolved.push(it as T);
+    }
     const old = prev.current.get(k);
     if (old && sameList(old, resolved)) next.set(k, old);
     else {

@@ -30,6 +30,7 @@ import { basename, cn } from "@/lib/utils";
 import { useApp, usePendingPermissions } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { REASON_LABEL, REASON_TONE, type TriageEntry } from "./useTriage";
+import { CodeText } from "../CodeText";
 
 type Permission = Extract<TimelineItem, { kind: "permission" }>;
 
@@ -262,7 +263,7 @@ function PermissionPanel({
       {item.command && (
         <pre className="selectable overflow-x-auto rounded-xl border border-line bg-code px-3.5 py-2.5 font-mono text-[12px] text-fg/90">
           <span className="select-none text-accent">❯ </span>
-          {item.command}
+          <CodeText code={item.command} lang="shellscript" />
         </pre>
       )}
       {parsed.map((f, i) => (

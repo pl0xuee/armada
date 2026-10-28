@@ -241,6 +241,13 @@ pub async fn check_status(account: &Account) -> AccountStatus {
                         "pro" => "Claude Pro".to_string(),
                         other => format!("Claude {other}"),
                     });
+                    if status.logged_in && account.auth_kind != AuthKind::ApiKey {
+                        let tier = read_claude_rate_limit_tier(account)
+                            .and_then(|t| claude_tier_label(&t));
+                        if tier.is_some() {
+                            status.label = tier;
+                        }
+                    }
                     if status.label.is_none() && status.logged_in {
                         status.label = v["authMethod"].as_str().map(str::to_string);
                     }
@@ -291,5 +298,69 @@ fn find_str(v: &serde_json::Value, key: &str) -> Option<String> {
             .or_else(|| m.values().find_map(|x| find_str(x, key))),
         serde_json::Value::Array(a) => a.iter().find_map(|x| find_str(x, key)),
         _ => None,
+    }
+}
+
+/// Reads only `claudeAiOauth.rateLimitTier` from the account's Claude credentials
+/// file. The file also holds OAuth tokens, which are never kept or returned.
+fn read_claude_rate_limit_tier(account: &Account) -> Option<String> {
+    let dir = account
+        .config_dir
+        .clone()
+        .filter(|_| !account.is_system)
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("CLAUDE_CONFIG_DIR")
+                .map(PathBuf::from)
+                .or_else(|| providers::home_dir().map(|h| h.join(".claude")))
+        })?;
+    let bytes = std::fs::read(dir.join(".credentials.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    v["claudeAiOauth"]["rateLimitTier"]
+        .as_str()
+        .map(str::to_string)
+}
+
+/// "default_claude_max_20x" -> "Claude Max 20x". None for unknown shapes.
+fn claude_tier_label(tier: &str) -> Option<String> {
+    let t = tier.to_lowercase();
+    let mult = t.rsplit('_').next().filter(|m| {
+        m.len() > 1 && m.ends_with('x') && m[..m.len() - 1].chars().all(|c| c.is_ascii_digit())
+    });
+    if t.contains("claude_max") {
+        Some(match mult {
+            Some(m) => format!("Claude Max {m}"),
+            None => "Claude Max".into(),
+        })
+    } else if t.contains("claude_pro") {
+        Some("Claude Pro".into())
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tier_tests {
+    use super::claude_tier_label;
+
+    #[test]
+    fn maps_tiers() {
+        assert_eq!(
+            claude_tier_label("default_claude_max_20x").as_deref(),
+            Some("Claude Max 20x")
+        );
+        assert_eq!(
+            claude_tier_label("default_claude_max_5x").as_deref(),
+            Some("Claude Max 5x")
+        );
+        assert_eq!(
+            claude_tier_label("default_claude_pro").as_deref(),
+            Some("Claude Pro")
+        );
+        assert_eq!(
+            claude_tier_label("default_claude_max").as_deref(),
+            Some("Claude Max")
+        );
+        assert_eq!(claude_tier_label("default"), None);
     }
 }
