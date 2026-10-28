@@ -18,6 +18,8 @@ use crate::session::{AgentCtx, Prompt, StreamKind, TurnOutcome};
 pub struct CodexDriver {
     peer: Arc<Peer>,
     ctx: Arc<AgentCtx>,
+    /// Which process of this agent we drive (see `AgentCtx::retire_generation`).
+    generation: u64,
     thread_id: String,
     turn_id: Mutex<Option<String>>,
     /// Last turn Codex reported complete (its `turn/start` reply can arrive later).
@@ -142,6 +144,7 @@ impl CodexDriver {
         let driver = Arc::new(CodexDriver {
             peer: peer.clone(),
             ctx: ctx.clone(),
+            generation,
             thread_id,
             turn_id: Mutex::new(None),
             completed_turn: Mutex::new(None),
@@ -255,6 +258,9 @@ impl CodexDriver {
     }
 
     async fn start_turn(self: Arc<Self>, prompt: Prompt) {
+        if !self.ctx.is_current(self.generation) {
+            return;
+        }
         self.ctx.turn_started();
         let body = match self.ctx.take_preamble() {
             Some(pre) => format!("{pre}\n\n---\n\n{}", prompt.text),
@@ -299,10 +305,12 @@ impl CodexDriver {
                 }
             }
             Err(e) => {
-                let next = self
-                    .ctx
-                    .turn_finished(TurnOutcome::Failed(format!("{e:#}")));
-                debug_assert!(next.is_none());
+                if self.ctx.is_current(self.generation) {
+                    let next = self
+                        .ctx
+                        .turn_finished(TurnOutcome::Failed(format!("{e:#}")));
+                    debug_assert!(next.is_none());
+                }
             }
         }
     }
@@ -753,6 +761,10 @@ async fn event_loop(
     generation: u64,
 ) {
     while let Some(msg) = rx.recv().await {
+        // A retired process's leftovers must not touch the current turn.
+        if !ctx.is_current(generation) && !matches!(msg, Incoming::Closed | Incoming::Barrier(_)) {
+            continue;
+        }
         match msg {
             Incoming::Notification { method, params } => {
                 if let Some(d) = driver.upgrade() {

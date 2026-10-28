@@ -1,4 +1,4 @@
-"""Configurable ACP agent for lifecycle tests. Modes: normal, die, badstderr, slowinit, replay."""
+"""Configurable ACP agent for lifecycle tests. Modes: normal, die, badstderr, slowinit, replay, flood."""
 import json, sys, os, time
 MODE = sys.argv[1] if len(sys.argv) > 1 else "normal"
 next_id = 1000
@@ -48,6 +48,10 @@ while True:
             send({"jsonrpc": "2.0", "id": pid, "method": "session/request_permission", "params": {"sessionId": sid,
                   "toolCall": {"toolCallId": "t1", "title": "Run ls", "kind": "execute"},
                   "options": [{"optionId": "yes", "name": "Allow", "kind": "allow_once"}]}})
+            if MODE == "flood":
+                # Keep the client's queue busy so our exit is processed late.
+                for i in range(30000):
+                    update(sid, {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "."}})
             while True:
                 r = read()
                 if r.get("id") == pid and "method" not in r:

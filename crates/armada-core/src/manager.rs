@@ -119,6 +119,12 @@ impl WeakCore {
     pub(crate) fn upgrade(&self) -> Option<Core> {
         self.0.upgrade().map(|inner| Core { inner })
     }
+
+    /// A handle to no core at all (unit tests of the session state machine).
+    #[cfg(test)]
+    pub(crate) fn dangling() -> WeakCore {
+        WeakCore(Weak::new())
+    }
 }
 
 fn provider_color(p: Provider) -> &'static str {
@@ -271,6 +277,8 @@ impl Core {
                 a.pending_permissions = 0;
             });
             driver.shutdown().await;
+            ctx.end_turn_early(ExitIntent::Shutdown);
+            ctx.retire_generation();
         }
         for ctx in self.inner.ctxs.lock().values() {
             ctx.flush();
@@ -615,6 +623,7 @@ impl Core {
         if ctx.start_cancelled() || self.agent(agent_id).is_err() {
             ctx.set_exit_intent(ExitIntent::Stop);
             driver.shutdown().await;
+            ctx.retire_generation();
             return Err(StartCancelled.into());
         }
         let session_id = driver.session_id();
@@ -920,8 +929,10 @@ impl Core {
                 let ctx = self.ctx(agent_id);
                 ctx.set_exit_intent(ExitIntent::Stop);
                 d.shutdown().await;
-                // Settle now rather than when the exit is noticed (idempotent).
+                // Settle now, then ignore whatever the old process still reports
+                // (its exit can arrive after the user has started a new turn).
                 ctx.end_turn_early(ExitIntent::Stop);
+                ctx.retire_generation();
                 self.update_agent(agent_id, |a| a.running = false)?;
             }
             None => {
@@ -944,8 +955,10 @@ impl Core {
         self.ctx(agent_id).request_cancel_start();
         let driver = self.inner.live.lock().remove(agent_id);
         if let Some(d) = driver {
-            self.ctx(agent_id).set_exit_intent(ExitIntent::Shutdown);
+            let ctx = self.ctx(agent_id);
+            ctx.set_exit_intent(ExitIntent::Shutdown);
             d.shutdown().await;
+            ctx.retire_generation();
         }
         if remove_worktree && agent.worktree {
             let shared = self
@@ -1148,6 +1161,7 @@ impl Core {
         if let Some(d) = driver {
             ctx.set_exit_intent(ExitIntent::Stop);
             d.shutdown().await;
+            ctx.retire_generation();
         }
         ctx.set_preamble(self.transcript(agent_id, 12_000));
         let agent = self.update_agent(agent_id, |a| {

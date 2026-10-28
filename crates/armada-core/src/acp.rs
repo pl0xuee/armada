@@ -30,6 +30,8 @@ enum ConfigSource {
 pub struct AcpDriver {
     peer: Arc<Peer>,
     ctx: Arc<AgentCtx>,
+    /// Which process of this agent we drive (see `AgentCtx::retire_generation`).
+    generation: u64,
     session_id: Mutex<String>,
     /// our request id → JSON-RPC id of the agent's `session/request_permission`
     perms: Mutex<HashMap<String, Value>>,
@@ -83,6 +85,7 @@ impl AcpDriver {
         let driver = Arc::new(AcpDriver {
             peer: peer.clone(),
             ctx: ctx.clone(),
+            generation,
             session_id: Mutex::new(String::new()),
             perms: Mutex::default(),
             accepts_images: std::sync::atomic::AtomicBool::new(false),
@@ -282,6 +285,9 @@ impl AcpDriver {
         tokio::spawn(async move {
             let mut prompt = prompt;
             loop {
+                if !me.ctx.is_current(me.generation) {
+                    break;
+                }
                 me.ctx.turn_started();
                 let body = match me.ctx.take_preamble() {
                     Some(pre) => format!("{pre}\n\n---\n\n{}", prompt.text),
@@ -336,6 +342,10 @@ impl AcpDriver {
                 // The prompt reply overtakes queued updates; let the timeline catch up
                 // so the turn ends after its last message.
                 me.sync_events().await;
+                if !me.ctx.is_current(me.generation) {
+                    // Stopped meanwhile; the stop already settled the turn.
+                    break;
+                }
                 match me.ctx.turn_finished(outcome) {
                     Some(next) => prompt = next,
                     None => {
@@ -559,6 +569,10 @@ async fn event_loop(
     generation: u64,
 ) {
     while let Some(msg) = rx.recv().await {
+        // A retired process's leftovers must not touch the current turn.
+        if !ctx.is_current(generation) && !matches!(msg, Incoming::Closed | Incoming::Barrier(_)) {
+            continue;
+        }
         match msg {
             Incoming::Notification { method, params } => {
                 if method == "session/update" && !ctx.replaying() {

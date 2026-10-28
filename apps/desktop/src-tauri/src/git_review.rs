@@ -218,9 +218,11 @@ struct TempIndex(PathBuf);
 
 impl TempIndex {
     async fn copy_of(git: &ReadOnlyGit<'_>) -> anyhow::Result<Self> {
-        let real = git.run(&["rev-parse", "--git-path", "index"]).await?;
-        // Relative to the working directory unless GIT_DIR lives elsewhere.
-        let real = git.cwd.join(real.trim_end_matches(['\r', '\n']));
+        let real = git
+            .run(&["rev-parse", "--path-format=absolute", "--git-path", "index"])
+            .await?;
+        // Absolute already; the join only matters for very old git versions.
+        let real = plain_path(&git.cwd.join(real.trim_end_matches(['\r', '\n'])));
         let name = format!("armada-index-{}", uuid::Uuid::new_v4());
         // Next to the real index (same permissions as the repository) when possible.
         let mut candidates = Vec::new();
@@ -581,6 +583,19 @@ fn repo_relative_paths(cwd: &Path, top: &Path, touched: &[String]) -> Vec<String
 /// Canonicalizes the longest existing ancestor of `path` (resolving symlinks such as
 /// macOS's /var → /private/var) and re-appends the rest; `..` in the missing part is
 /// resolved lexically.
+/// Removes Windows' `\\?\` verbatim prefix (from `canonicalize`), which git and
+/// most tools can't use: `\\?\C:\x` → `C:\x`, `\\?\UNC\srv\x` → `\\srv\x`.
+fn plain_path(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
+}
+
 fn lenient_canonicalize(path: &Path) -> PathBuf {
     let mut existing = path;
     let mut missing = Vec::new();
@@ -759,6 +774,22 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    #[test]
+    fn verbatim_prefixes_are_removed() {
+        assert_eq!(
+            plain_path(Path::new(r"\\?\C:\repo\.git\index")),
+            PathBuf::from(r"C:\repo\.git\index")
+        );
+        assert_eq!(
+            plain_path(Path::new(r"\\?\UNC\srv\share\x")),
+            PathBuf::from(r"\\srv\share\x")
+        );
+        assert_eq!(
+            plain_path(Path::new("/home/me/repo")),
+            PathBuf::from("/home/me/repo")
+        );
     }
 
     #[tokio::test]
