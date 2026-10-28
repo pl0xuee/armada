@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use armada_core::{AttentionReason, SoundSettings};
-use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink};
+use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
 use tracing::{debug, warn};
 
 static PERMISSION_WAV: &[u8] = include_bytes!("../sounds/permission.wav");
@@ -107,7 +107,7 @@ const IDLE_CLOSE: Duration = Duration::from_secs(45);
 
 /// The open output stream, and whether it has reported an error since.
 struct Output {
-    stream: OutputStream,
+    stream: MixerDeviceSink,
     broken: Arc<AtomicBool>,
     last_used: Instant,
 }
@@ -116,7 +116,7 @@ impl Output {
     fn open() -> Result<Output, String> {
         let broken = Arc::new(AtomicBool::new(false));
         let flag = broken.clone();
-        let stream = OutputStreamBuilder::from_default_device()
+        let stream = DeviceSinkBuilder::from_default_device()
             .and_then(|b| {
                 b.with_error_callback(move |e| {
                     warn!("audio output error: {e}");
@@ -125,7 +125,7 @@ impl Output {
                 .open_stream()
             })
             // Unusual configurations: rodio's own fallbacks (no error tracking).
-            .or_else(|_| OutputStreamBuilder::open_default_stream())
+            .or_else(|_| DeviceSinkBuilder::open_default_sink())
             .map_err(|e| e.to_string())?;
         let mut stream = stream;
         stream.log_on_drop(false);
@@ -146,7 +146,7 @@ impl Output {
 fn play_on(output: &Output, req: &PlayRequest) -> bool {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if let Some(source) = decode(req) {
-            let sink = Sink::connect_new(output.stream.mixer());
+            let sink = Player::connect_new(output.stream.mixer());
             sink.set_volume(req.volume.clamp(0.0, 1.0));
             sink.append(source);
             sink.detach();
@@ -282,6 +282,28 @@ mod tests {
         assert!(read_custom(&big).is_err());
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Every bundled clip must decode through the same path used for playback,
+    /// without needing an output device.
+    #[test]
+    fn bundled_sounds_decode() {
+        use rodio::Source;
+        for reason in [
+            AttentionReason::Permission,
+            AttentionReason::Done,
+            AttentionReason::Error,
+        ] {
+            let req = PlayRequest {
+                reason,
+                volume: 1.0,
+                custom: None,
+            };
+            let decoder = decode(&req).expect("bundled sound decodes");
+            assert!(decoder.sample_rate().get() > 0);
+            assert!(decoder.channels().get() > 0);
+            assert!(decoder.count() > 0, "{reason:?} decoded to no samples");
+        }
     }
 
     #[test]

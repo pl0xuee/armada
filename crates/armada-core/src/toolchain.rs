@@ -220,6 +220,17 @@ fn get_text(agent: &ureq::Agent, url: &str) -> anyhow::Result<String> {
 }
 
 /// 8 hex characters for short unique names.
+/// Lowercase hex encoding (digest 0.11 output no longer implements `LowerHex`).
+pub(crate) fn hex_lower(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+}
+
 fn short_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()[..8].to_string()
 }
@@ -372,7 +383,7 @@ fn download_node(data_dir: &Path, log: &Log) -> anyhow::Result<()> {
     out.flush()?;
     drop(out);
 
-    let actual = format!("{:x}", hasher.finalize());
+    let actual = hex_lower(&hasher.finalize());
     if actual != expected {
         bail!("checksum mismatch for {file} (expected {expected}, got {actual}); download aborted");
     }
@@ -642,6 +653,14 @@ pub async fn install_missing(data_dir: &Path, log: Log) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sha256_hex_matches_known_digest() {
+        assert_eq!(
+            hex_lower(&Sha256::digest(b"abc")),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 
     #[test]
     fn scratch_names() {
