@@ -1,5 +1,5 @@
-import { Columns3, Inbox, LayoutGrid, Play, Plus, RotateCcw } from "lucide-react";
-import { AnimatePresence } from "motion/react";
+import { Columns3, Inbox, LayoutGrid, PanelLeftOpen, Play, Plus, RotateCcw } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo } from "react";
 import { AgentHeader } from "@/components/agent/AgentHeader";
 import { AgentList } from "@/components/agent/AgentList";
@@ -10,25 +10,65 @@ import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { Timeline } from "@/components/timeline/Timeline";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
+import { Tooltip } from "@/components/ui/tooltip";
 import { resumeAgent } from "@/lib/actions";
 import { api } from "@/lib/api";
 import { relativeTime } from "@/lib/format";
 import { basename, modKey } from "@/lib/utils";
+import { useAgentListLayout } from "@/hooks/useAgentListLayout";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { INSPECTOR_DOCK_QUERY } from "@/lib/layout";
 import { useNow } from "@/hooks/useNow";
 import { pendingCount, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 
-export const WIDE_QUERY = "(min-width: 1180px)";
-
 export function AgentsView() {
   const selectedId = useUi((s) => s.selectedAgentId);
   const agent = useApp((s) => (selectedId ? s.agents[selectedId] : undefined));
+  const list = useAgentListLayout();
+
+  // Narrow window, nothing open: the list is the main area.
+  if (!list.docked && !agent) {
+    return (
+      <div className="flex h-full">
+        <AgentList variant="full" />
+      </div>
+    );
+  }
 
   return (
-    <div className="flex h-full">
-      <AgentList />
+    <div className="relative flex h-full">
+      {list.docked && list.open && <AgentList variant="docked" />}
       {agent ? <AgentPane key={agent.id} agentId={agent.id} /> : <Welcome />}
+      {!list.docked && (
+        <AnimatePresence>
+          {list.open && (
+            <>
+              <motion.div
+                key="scrim"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="absolute inset-0 z-30 bg-[var(--scrim)]"
+                onClick={list.close}
+                aria-hidden
+              />
+              <motion.div
+                key="drawer"
+                initial={{ x: -24, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: -24, opacity: 0 }}
+                transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+                className="absolute inset-y-0 left-0 z-40 flex shadow-[24px_0_60px_-20px_rgba(0,0,0,0.6)]"
+                onKeyDown={(e) => e.key === "Escape" && list.close()}
+              >
+                <AgentList variant="drawer" onNavigate={list.close} />
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+      )}
     </div>
   );
 }
@@ -39,7 +79,7 @@ function AgentPane({ agentId }: { agentId: string }) {
   const loading = useApp((s) => s.itemsLoading[agentId] ?? false);
   const inspectorPref = useUi((s) => s.inspectorOpen);
   const overlay = useUi((s) => s.inspectorOverlay);
-  const wide = useMediaQuery(WIDE_QUERY);
+  const wide = useMediaQuery(INSPECTOR_DOCK_QUERY);
   const inspectorOpen = wide ? inspectorPref : overlay;
   const windowFocused = useUi((s) => s.windowFocused);
 
@@ -91,6 +131,7 @@ function AgentPane({ agentId }: { agentId: string }) {
 
 function Welcome() {
   const agents = useApp((s) => s.agents);
+  const listLayout = useAgentListLayout();
   const openNewAgent = useUi((s) => s.openNewAgent);
   const setView = useUi((s) => s.setView);
   const openAgent = useUi((s) => s.openAgent);
@@ -111,6 +152,15 @@ function Welcome() {
 
   return (
     <div className="relative flex min-w-0 flex-1 items-center justify-center overflow-y-auto bg-base">
+      {!listLayout.open && (
+        <div className="absolute left-3 top-3 z-10">
+          <Tooltip content="Show agents" shortcut={[modKey, "B"]}>
+            <Button size="icon-sm" variant="ghost" aria-label="Show agent list" onClick={listLayout.toggle}>
+              <PanelLeftOpen />
+            </Button>
+          </Tooltip>
+        </div>
+      )}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 opacity-60"

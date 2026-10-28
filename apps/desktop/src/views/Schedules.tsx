@@ -2,7 +2,7 @@ import { CalendarClock, Plus, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/EmptyState";
-import { PageHeader } from "@/components/PageHeader";
+import { HeaderAction, PageHeader } from "@/components/PageHeader";
 import { blankSchedule, ScheduleDialog } from "@/components/schedules/ScheduleDialog";
 import { ScheduleRow } from "@/components/schedules/ScheduleRow";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
@@ -117,20 +117,23 @@ export function SchedulesView() {
       : "Start agents automatically on a timetable.";
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="@container flex h-full flex-col">
       <PageHeader
         icon={<CalendarClock />}
         title="Schedules"
         subtitle={subtitle}
         right={
-          <Button variant="primary" onClick={() => setEditing(blankSchedule())}>
-            <Plus /> New schedule
-          </Button>
+          <HeaderAction
+            variant="primary"
+            icon={<Plus />}
+            label="New schedule"
+            onClick={() => setEditing(blankSchedule())}
+          />
         }
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1040px] px-6 pb-16 pt-6">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-[1040px] flex-1 flex-col px-4 pb-10 pt-4 @2xl:px-6 @2xl:pb-16 @2xl:pt-6">
           {loadError ? (
             <div
               role="alert"
@@ -158,7 +161,7 @@ export function SchedulesView() {
             </ul>
           ) : sorted.length === 0 ? (
             <EmptyState
-              className="py-20"
+              className="my-auto py-12"
               icon={<CalendarClock />}
               title="No schedules yet"
               description="Have an agent audit dependencies every night, triage issues each morning, or draft a weekly changelog. It starts on its own and pings you when it's done."

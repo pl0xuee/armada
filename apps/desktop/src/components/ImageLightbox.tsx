@@ -28,7 +28,7 @@ export function ImageLightbox({
             if (e.key === "ArrowRight") step(1);
             if (e.key === "ArrowLeft") step(-1);
           }}
-          className="anim-fade fixed inset-0 z-[90] flex flex-col items-center justify-center p-10 focus:outline-none"
+          className="anim-fade fixed inset-0 z-[90] flex flex-col items-center justify-center p-10 focus:outline-none max-sm:p-4"
           onClick={(e) => e.target === e.currentTarget && onIndexChange(null)}
         >
           <D.Title className="sr-only">{current?.name ?? "Image"}</D.Title>

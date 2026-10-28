@@ -1,4 +1,4 @@
-import { ArrowUp, FileText, Play, RotateCcw, Square } from "lucide-react";
+import { ArrowUp, BookText, FileText, Play, RotateCcw, Square } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { cancelTurn, resumeAgent } from "@/lib/actions";
@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import type { Agent, SlashCommand } from "@/lib/types";
 import { cn, errorMessage } from "@/lib/utils";
 import { useDebounced } from "@/hooks/useDebounced";
+import { useElementWidth } from "@/hooks/useElementWidth";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useAttachments } from "@/hooks/useAttachments";
 import { useUi } from "@/store/ui";
@@ -14,7 +15,7 @@ import { AttachmentStrip } from "../AttachmentStrip";
 import { TemplatePicker } from "../TemplatePicker";
 import { Button } from "../ui/button";
 import { Kbd } from "../ui/kbd";
-import { ConfigSelect } from "./ConfigSelect";
+import { ConfigOverflowMenu, ConfigSelect } from "./ConfigSelect";
 import { RateLimitBanner } from "./RateLimitBanner";
 
 const drafts = new Map<string, string>();
@@ -46,6 +47,10 @@ export function Composer({ agent }: { agent: Agent }) {
   const [caret, setCaret] = useState(0);
   const [files, setFiles] = useState<string[]>([]);
   const attach = useAttachments();
+  const [wrapRef, width] = useElementWidth<HTMLDivElement>();
+  // Toolbar tiers by available width: labels → icons → extra options in a "+" menu.
+  const roomy = width === 0 || width >= 700;
+  const tight = width > 0 && width < 520;
   const ref = useRef<HTMLTextAreaElement>(null);
   const focusTick = useUi((s) => s.composerFocusTick);
 
@@ -251,8 +256,8 @@ export function Composer({ agent }: { agent: Agent }) {
         : `Message ${name}…  @ to mention files`;
 
   return (
-    <div className="shrink-0 px-6 pb-4 pt-1">
-      <div className="mx-auto w-full max-w-[860px]">
+    <div ref={wrapRef} className={cn("shrink-0 pb-4 pt-1", tight ? "px-3" : "px-6")}>
+      <div className={cn("mx-auto w-full", width >= 1330 ? "max-w-[1000px]" : "max-w-[860px]")}>
         {agent.rateLimited && !resumable && <RateLimitBanner agent={agent} />}
         {resumable ? (
           <ResumeBanner agent={agent} />
@@ -316,11 +321,25 @@ export function Composer({ agent }: { agent: Agent }) {
             </div>
             <div className="flex items-center gap-2 px-2.5 pb-2.5 pt-1">
               <div className="flex min-w-0 shrink-0 items-center gap-0.5">
-                {agent.configOptions.map((opt) => (
-                  <ConfigSelect key={opt.id} agent={agent} option={opt} />
+                {(tight ? agent.configOptions.slice(0, 1) : agent.configOptions).map((opt) => (
+                  <ConfigSelect key={opt.id} agent={agent} option={opt} compact={!roomy} />
                 ))}
-                <AttachButton onClick={attach.openPicker} count={attach.attachments.length} />
-                <TemplatePicker onInsert={insertTemplate} />
+                {tight && <ConfigOverflowMenu agent={agent} options={agent.configOptions.slice(1)} />}
+                <AttachButton onClick={attach.openPicker} count={attach.attachments.length} iconOnly={!roomy} />
+                <TemplatePicker
+                  onInsert={insertTemplate}
+                  trigger={
+                    roomy ? undefined : (
+                      <button
+                        type="button"
+                        aria-label="Prompt templates"
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg"
+                      >
+                        <BookText className="h-3.5 w-3.5" />
+                      </button>
+                    )
+                  }
+                />
                 <span className={cn("mx-1.5 h-4 w-px bg-line", !busy && "hidden xl:block")} aria-hidden />
               </div>
               <div className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-steel">
@@ -335,7 +354,9 @@ export function Composer({ agent }: { agent: Agent }) {
                       />
                       <span className={cn("relative h-2 w-2 rounded-full", blocked ? "bg-warn" : "bg-accent")} />
                     </span>
-                    <span className="truncate">{blocked ? "Waiting for approval" : `${name} is working…`}</span>
+                    <span className={cn("truncate", tight && "sr-only")}>
+                      {blocked ? "Waiting for approval" : `${name} is working…`}
+                    </span>
                     <span className="hidden items-center gap-1 xl:flex">
                       <Kbd>Esc</Kbd> to cancel
                     </span>

@@ -41,7 +41,7 @@ type Item<K extends TimelineItem["kind"]> = Extract<TimelineItem, { kind: K }>;
 
 export const UserBubble = memo(function UserBubble({ item }: { item: Item<"user_message"> }) {
   return (
-    <div className="group flex justify-end pl-12">
+    <div className="group flex justify-end pl-6 @lg:pl-12">
       <div className="relative max-w-[min(680px,88%)]">
         {item.attachments && item.attachments.length > 0 && (
           <AttachmentStrip attachments={item.attachments} size={88} className="mb-1.5 justify-end" />

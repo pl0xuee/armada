@@ -1,7 +1,7 @@
 {
   "name": "armada-remote",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Armada mobile companion: a single-file web app served by the desktop app's remote server.",
   "type": "module",
   "scripts": {

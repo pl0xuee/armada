@@ -173,13 +173,13 @@ export function UsageView() {
 
   if (agents.length === 0) {
     return (
-      <div className="flex h-full flex-col">
+      <div className="@container flex h-full flex-col">
         <PageHeader
           icon={<ChartColumn />}
           title="Usage"
           subtitle="Spend and tokens across providers, accounts and projects"
         />
-        <div className="flex flex-1 items-center justify-center">
+        <div className="flex flex-1 items-center justify-center overflow-y-auto">
           <EmptyState
             icon={<Coins />}
             title="No usage yet"
@@ -191,7 +191,7 @@ export function UsageView() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="@container flex h-full flex-col">
       <PageHeader
         icon={<ChartColumn />}
         title="Usage"
@@ -211,8 +211,8 @@ export function UsageView() {
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-6xl space-y-4 px-6 py-5">
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
+        <div className="mx-auto max-w-6xl space-y-3 px-4 py-4 @2xl:space-y-4 @2xl:px-6 @2xl:py-5">
+          <div className="grid grid-cols-2 gap-3 @3xl:grid-cols-4">
             <KpiTile
               icon={<Coins />}
               label="Total spend"
@@ -254,7 +254,7 @@ export function UsageView() {
               <ul className="divide-y divide-line/70">
                 {metered.map((acc) => (
                   <li key={acc.id} className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-                    <div className="flex min-w-[200px] flex-1 items-center gap-2.5">
+                    <div className="flex min-w-[180px] flex-1 items-center gap-2.5">
                       <AccountAvatar account={acc} size={24} />
                       <div className="min-w-0">
                         <div className="truncate text-[13px] font-medium text-fg">
@@ -271,7 +271,7 @@ export function UsageView() {
                         </div>
                       </div>
                     </div>
-                    <UsageMeters usage={acc.usage} className="w-full max-w-[520px] sm:w-auto sm:flex-1" />
+                    <UsageMeters usage={acc.usage} className="w-full max-w-[520px] @2xl:w-auto @2xl:flex-1" />
                   </li>
                 ))}
               </ul>
@@ -281,7 +281,7 @@ export function UsageView() {
             </Panel>
           )}
 
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className="grid gap-3 @2xl:gap-4 @4xl:grid-cols-3">
             <Panel title="By provider" icon={<Layers />}>
               <BarList data={providerData} />
             </Panel>
@@ -299,9 +299,9 @@ export function UsageView() {
                 <tr className="border-b border-line text-left text-[11px] uppercase tracking-[0.06em] text-steel">
                   <th className="w-10 py-2 pl-4 font-medium">#</th>
                   <th className="py-2 font-medium">Agent</th>
-                  <th className="hidden w-[150px] py-2 font-medium md:table-cell">Account</th>
-                  <th className="w-[90px] py-2 pr-4 text-right font-medium">Tokens</th>
-                  <th className="w-[180px] py-2 pr-4 text-right font-medium">Cost</th>
+                  <th className="hidden w-[150px] py-2 font-medium @2xl:table-cell">Account</th>
+                  <th className="hidden w-[90px] py-2 pr-4 text-right font-medium @md:table-cell">Tokens</th>
+                  <th className="w-[84px] py-2 pr-4 text-right font-medium @lg:w-[180px]">Cost</th>
                 </tr>
               </thead>
               <tbody>
@@ -323,12 +323,12 @@ export function UsageView() {
                           <ProviderGlyph provider={a.provider} customAgentId={a.customAgentId} size="xs" />
                           <span className="truncate text-fg">{a.title}</span>
                           <StatusDot status={a.status} size={6} />
-                          <span className="hidden truncate text-[11.5px] text-steel lg:inline">
+                          <span className="hidden truncate text-[11.5px] text-steel @4xl:inline">
                             {basename(a.projectPath)}
                           </span>
                         </div>
                       </td>
-                      <td className="hidden py-2.5 pr-3 md:table-cell">
+                      <td className="hidden py-2.5 pr-3 @2xl:table-cell">
                         {acc ? (
                           <span className="flex items-center gap-1.5 text-muted">
                             <AccountAvatar account={acc} size={14} showProvider={false} />
@@ -340,10 +340,12 @@ export function UsageView() {
                           <span className="text-steel">—</span>
                         )}
                       </td>
-                      <td className="py-2.5 pr-4 text-right text-muted tabular">{formatTokens(a.tokensUsed)}</td>
+                      <td className="hidden py-2.5 pr-4 text-right text-muted tabular @md:table-cell">
+                        {formatTokens(a.tokensUsed)}
+                      </td>
                       <td className="py-2.5 pr-4">
                         <div className="flex items-center justify-end gap-2.5">
-                          <span className="hidden h-1.5 w-20 overflow-hidden rounded-[4px] bg-raised/70 sm:block">
+                          <span className="hidden h-1.5 w-20 overflow-hidden rounded-[4px] bg-raised/70 @lg:block">
                             <span
                               className="block h-full rounded-[4px]"
                               style={{

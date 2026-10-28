@@ -55,106 +55,122 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
   };
 
   return (
-    <div className={cn("group flex items-center gap-3.5 px-4", compact ? "py-2.5" : "py-3.5")}>
-      <AccountAvatar account={account} size={compact ? 30 : 36} />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="truncate text-[13.5px] font-medium text-fg">{account.name}</span>
-          {account.isSystem ? <Badge>System (default login)</Badge> : <Badge>{AUTH_LABEL[account.authKind]}</Badge>}
-          {!compact && agentCount > 0 && (
-            <span className="text-[11.5px] text-steel tabular">
-              · {agentCount} agent{agentCount === 1 ? "" : "s"}
-            </span>
-          )}
-        </div>
-        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px]">
-          {st === null ? (
-            <span className="text-steel">Status unknown. Run a check.</span>
-          ) : loggedIn ? (
-            <>
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ok shadow-[0_0_6px_var(--ok)]" />
-              <span className="truncate text-muted">
-                {[st.label, st.plan && st.plan !== st.label ? st.plan : null, st.email].filter(Boolean).join(" · ") ||
-                  "Signed in"}
+    <div className="@container/acct">
+      <div className={cn("group flex items-center gap-3 px-4 @lg/acct:gap-3.5", compact ? "py-2.5" : "py-3.5")}>
+        <AccountAvatar account={account} size={compact ? 30 : 36} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="truncate text-[13.5px] font-medium text-fg">{account.name}</span>
+            {account.isSystem ? <Badge>System (default login)</Badge> : <Badge>{AUTH_LABEL[account.authKind]}</Badge>}
+            {!compact && agentCount > 0 && (
+              <span className="text-[11.5px] text-steel tabular">
+                · {agentCount} agent{agentCount === 1 ? "" : "s"}
               </span>
-            </>
-          ) : (
-            <>
-              <CircleAlert className="h-3.5 w-3.5 shrink-0 text-warn" />
-              <span className="truncate text-warn/90">{st.error ?? "Not signed in"}</span>
-            </>
-          )}
-          {!compact && st && (
-            <span className="shrink-0 text-steel/80">· checked {relativeTimeLong(st.checkedAt, now)}</span>
-          )}
-        </div>
-        {usage && (usage.primary || usage.secondary) && (
-          <div className={cn("flex flex-wrap items-end gap-x-4 gap-y-1.5", compact ? "mt-1.5" : "mt-2.5")}>
-            <UsageMeters usage={usage} className="w-full max-w-[460px]" />
-            {!compact && (
-              <span className="pb-px text-[11px] text-steel/80">updated {relativeTimeLong(usage.updatedAt, now)}</span>
             )}
           </div>
-        )}
-      </div>
-
-      <div className="flex shrink-0 items-center gap-1">
-        {(!loggedIn || !compact) && account.authKind !== "api_key" && (
-          <Button
-            size="sm"
-            variant={loggedIn ? "ghost" : "primary"}
-            onClick={() => void startLogin(account)}
-            aria-label={`Sign in to ${account.name}`}
+          <div
+            className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px]"
+            title={st ? `Checked ${relativeTimeLong(st.checkedAt, now)}` : undefined}
           >
-            <LogIn /> {loggedIn ? "Re-sign in" : "Sign in"}
-          </Button>
-        )}
-        <Tooltip content="Check sign-in status">
-          <Button size="icon-sm" variant="ghost" onClick={onCheck} disabled={checking} aria-label="Check account">
-            <RefreshCw className={cn(checking && "animate-spin")} />
-          </Button>
-        </Tooltip>
-        {!compact && (
-          <>
-            <EditAccountPopover account={account}>
-              <Button size="icon-sm" variant="ghost" aria-label="Rename or recolor">
-                <Pencil />
-              </Button>
-            </EditAccountPopover>
-            {!account.isSystem && (
-              <Tooltip content="Remove account">
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  className="hover:!bg-err/12 hover:!text-err"
-                  onClick={() => setConfirmDelete(true)}
-                  aria-label="Remove account"
-                >
-                  <Trash2 />
-                </Button>
-              </Tooltip>
+            {st === null ? (
+              <span className="text-steel">Status unknown. Run a check.</span>
+            ) : loggedIn ? (
+              <>
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ok shadow-[0_0_6px_var(--ok)]" />
+                <span className="truncate text-muted">
+                  {[st.label, st.plan && st.plan !== st.label ? st.plan : null, st.email].filter(Boolean).join(" · ") ||
+                    "Signed in"}
+                </span>
+              </>
+            ) : (
+              <>
+                <CircleAlert className="h-3.5 w-3.5 shrink-0 text-warn" />
+                <span className="truncate text-warn/90">{st.error ?? "Not signed in"}</span>
+              </>
             )}
-          </>
-        )}
-      </div>
+            {!compact && st && (
+              <span className="hidden shrink-0 text-steel/80 @2xl/acct:inline">
+                · checked {relativeTimeLong(st.checkedAt, now)}
+              </span>
+            )}
+          </div>
+          {usage && (usage.primary || usage.secondary) && (
+            <div className={cn("flex flex-wrap items-end gap-x-4 gap-y-1.5", compact ? "mt-1.5" : "mt-2.5")}>
+              <UsageMeters usage={usage} className="w-full max-w-[460px]" />
+              {!compact && (
+                <span className="hidden pb-px text-[11px] text-steel/80 @xl/acct:inline">
+                  updated {relativeTimeLong(usage.updatedAt, now)}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
 
-      <ConfirmDialog
-        open={confirmDelete}
-        onOpenChange={setConfirmDelete}
-        danger
-        busy={deleting}
-        title={`Remove “${account.name}”?`}
-        description={
-          <>
-            Armada will delete this profile's isolated config directory
-            {account.authKind === "api_key" ? " and remove its API key from your OS keychain" : " and its saved login"}.
-            {agentCount > 0 &&
-              ` ${agentCount} agent${agentCount === 1 ? " uses" : "s use"} this account and won't be able to resume.`}
-          </>
-        }
-        confirmLabel="Remove account"
-        onConfirm={onDelete}
-      />
+        <div className="flex shrink-0 items-center gap-0.5 @lg/acct:gap-1">
+          {(!loggedIn || !compact) && account.authKind !== "api_key" && (
+            <Tooltip content={loggedIn ? "Sign in again" : "Sign in"}>
+              <Button
+                size="sm"
+                variant={loggedIn ? "ghost" : "primary"}
+                onClick={() => void startLogin(account)}
+                aria-label={`${loggedIn ? "Sign in again to" : "Sign in to"} ${account.name}`}
+                className={cn(loggedIn && "w-8 px-0 @2xl/acct:w-auto @2xl/acct:px-2.5")}
+              >
+                <LogIn />
+                <span className={cn(loggedIn && "hidden @2xl/acct:inline")}>{loggedIn ? "Re-sign in" : "Sign in"}</span>
+              </Button>
+            </Tooltip>
+          )}
+          <Tooltip content="Check sign-in status">
+            <Button size="icon-sm" variant="ghost" onClick={onCheck} disabled={checking} aria-label="Check account">
+              <RefreshCw className={cn(checking && "animate-spin")} />
+            </Button>
+          </Tooltip>
+          {!compact && (
+            <>
+              <EditAccountPopover account={account}>
+                <Button size="icon-sm" variant="ghost" aria-label="Rename or recolor">
+                  <Pencil />
+                </Button>
+              </EditAccountPopover>
+              {!account.isSystem && (
+                <Tooltip content="Remove account">
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    className="hover:!bg-err/12 hover:!text-err"
+                    onClick={() => setConfirmDelete(true)}
+                    aria-label="Remove account"
+                  >
+                    <Trash2 />
+                  </Button>
+                </Tooltip>
+              )}
+            </>
+          )}
+        </div>
+
+        <ConfirmDialog
+          open={confirmDelete}
+          onOpenChange={setConfirmDelete}
+          danger
+          busy={deleting}
+          title={`Remove “${account.name}”?`}
+          description={
+            <>
+              Armada will delete this profile's isolated config directory
+              {account.authKind === "api_key"
+                ? " and remove its API key from your OS keychain"
+                : " and its saved login"}
+              .
+              {agentCount > 0 &&
+                ` ${agentCount} agent${agentCount === 1 ? " uses" : "s use"} this account and won't be able to resume.`}
+            </>
+          }
+          confirmLabel="Remove account"
+          onConfirm={onDelete}
+        />
+      </div>
     </div>
   );
 }

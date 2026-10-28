@@ -32,6 +32,7 @@ export function NewAgentDialog() {
         title="New agent"
         description="Launch an agent into a project. It keeps running even if you close the window."
         className="w-[min(640px,calc(100vw-32px))]"
+        sheet
       >
         {open && <NewAgentForm preset={preset} onDone={close} />}
       </DialogContent>
@@ -158,7 +159,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
 
   return (
     <>
-      <DialogBody className="space-y-4 pt-2">
+      <DialogBody className="space-y-4 pt-2 max-sm:flex max-sm:flex-col">
         {/* Project */}
         <div>
           <Label htmlFor="na-project">Project folder</Label>
@@ -371,7 +372,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
         </div>
 
         {/* Prompt */}
-        <div>
+        <div className="max-sm:flex max-sm:min-h-[180px] max-sm:flex-1 max-sm:flex-col">
           <div className="mb-1.5 flex items-center justify-between">
             <Label htmlFor="na-prompt" className="mb-0">
               Prompt
@@ -389,7 +390,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
             </div>
           </div>
           <input {...attach.inputProps} />
-          <div {...attach.dropHandlers} className="relative">
+          <div {...attach.dropHandlers} className="relative max-sm:flex max-sm:flex-1 max-sm:flex-col">
             <Textarea
               id="na-prompt"
               onPaste={attach.onPaste}
@@ -403,7 +404,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                 }
               }}
               placeholder="What should the agent do? Be specific about goals and constraints. Paste or drop images to attach them."
-              className="min-h-[112px]"
+              className="min-h-[112px] max-sm:flex-1"
             />
             {attach.dragging && <DropOverlay />}
           </div>

@@ -46,13 +46,13 @@ export function RateLimitBanner({ agent }: { agent: Agent }) {
       className="relative mb-2.5 overflow-hidden rounded-xl border border-warn/35 bg-gradient-to-b from-warn/[0.09] to-card/80 edge"
     >
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-warn/60 to-transparent" />
-      <div className="flex flex-wrap items-center gap-3 px-3.5 py-3">
+      <div className="flex flex-wrap items-center gap-3 px-3.5 py-3 [@media(max-height:700px)]:py-2">
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-warn/40 bg-warn/15 text-warn">
           <Gauge className="h-4 w-4" />
         </span>
         <div className="min-w-[200px] flex-1">
           <div className="text-[13px] font-semibold">This account hit its usage limit</div>
-          <div className="text-[12px] leading-snug text-muted">
+          <div className="text-[12px] leading-snug text-muted [@media(max-height:700px)]:line-clamp-1">
             {current ? `${provider} · ${current.name}` : provider}.{" "}
             {first
               ? "Move to another account to keep going. The session and its history come along."
@@ -99,7 +99,7 @@ export function RateLimitBanner({ agent }: { agent: Agent }) {
       <button
         type="button"
         onClick={() => useUi.getState().openSettings("behavior")}
-        className="flex w-full items-center gap-1.5 border-t border-warn/15 bg-base/30 px-3.5 py-1.5 text-left text-[11.5px] text-steel transition-colors hover:text-muted"
+        className="flex w-full items-center gap-1.5 border-t border-warn/15 bg-base/30 px-3.5 py-1.5 text-left text-[11.5px] text-steel transition-colors hover:text-muted [@media(max-height:700px)]:hidden"
       >
         <Settings2 className="h-3 w-3" />
         Automatic failover: <span className="text-muted">{FAILOVER_LABEL[failover]}</span>

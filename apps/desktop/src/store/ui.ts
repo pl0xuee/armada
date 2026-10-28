@@ -41,6 +41,8 @@ interface UiStore {
   inspectorOpen: boolean;
   /** Inspector shown as an overlay on narrow windows. */
   inspectorOverlay: boolean;
+  /** Agent list visibility, remembered separately for wide (docked) and narrow (drawer) layouts. */
+  agentList: { wide: boolean; narrow: boolean };
   reviewAgentId: string | null;
   paletteOpen: boolean;
   newAgent: { open: boolean; preset: NewAgentPreset | null };
@@ -61,6 +63,7 @@ interface UiStore {
   openSettings: (section?: SettingsSection) => void;
   setInspectorOpen: (open: boolean) => void;
   setInspectorOverlay: (open: boolean) => void;
+  setAgentList: (layout: "wide" | "narrow", open: boolean) => void;
   setReviewAgent: (id: string | null) => void;
   setPaletteOpen: (open: boolean) => void;
   openNewAgent: (preset?: NewAgentPreset) => void;
@@ -75,6 +78,20 @@ interface UiStore {
 }
 
 const INSPECTOR_KEY = "armada.inspectorOpen";
+const LIST_KEY = "armada.agentList";
+
+function readAgentList(): { wide: boolean; narrow: boolean } {
+  try {
+    const raw = localStorage.getItem(LIST_KEY);
+    if (raw) {
+      const v = JSON.parse(raw) as Partial<{ wide: boolean; narrow: boolean }>;
+      return { wide: v.wide !== false, narrow: v.narrow === true };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { wide: true, narrow: false };
+}
 
 function readInspector(): boolean {
   try {
@@ -106,6 +123,7 @@ export const useUi = create<UiStore>((set) => ({
   settingsSection: "appearance",
   inspectorOpen: readInspector(),
   inspectorOverlay: false,
+  agentList: readAgentList(),
   reviewAgentId: null,
   paletteOpen: false,
   newAgent: { open: false, preset: null },
@@ -130,6 +148,16 @@ export const useUi = create<UiStore>((set) => ({
     set({ inspectorOpen });
   },
   setInspectorOverlay: (inspectorOverlay) => set({ inspectorOverlay }),
+  setAgentList: (layout, open) =>
+    set((s) => {
+      const agentList = { ...s.agentList, [layout]: open };
+      try {
+        localStorage.setItem(LIST_KEY, JSON.stringify(agentList));
+      } catch {
+        /* ignore */
+      }
+      return { agentList };
+    }),
   setReviewAgent: (reviewAgentId) => set({ reviewAgentId }),
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   openNewAgent: (preset) => set({ newAgent: { open: true, preset: preset ?? null } }),
