@@ -62,6 +62,32 @@ def notes_for(tag: str) -> tuple[str, str | None]:
     raise AssertionError("unreachable")
 
 
+BLOCK_START = re.compile(r"^(\s*([-*+]|\d+[.)])\s|#|>|\||```)")
+
+
+def unwrap(md: str) -> str:
+    """Joins hard-wrapped lines: GitHub release pages render each newline as a line break."""
+    out: list[str] = []
+    fenced = False
+    for line in md.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            out.append(line)
+            continue
+        prev = out[-1] if out else ""
+        if (
+            not fenced
+            and line.strip()
+            and prev.strip()
+            and not prev.lstrip().startswith(("#", "```", "|"))
+            and not BLOCK_START.match(line)
+        ):
+            out[-1] = f"{prev.rstrip()} {line.strip()}"
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
 def cargo_version() -> str:
     text = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
     m = re.search(r'^version = "([^"]+)"', text, re.MULTILINE)
@@ -81,7 +107,7 @@ def main(argv: list[str]) -> None:
         sys.exit(2)
     tag = argv[0]
     body, prev = notes_for(tag)
-    parts = [body, INSTALL]
+    parts = [unwrap(body), INSTALL]
     repo = os.environ.get("GITHUB_REPOSITORY")
     if repo and prev:
         parts.append(f"**Full changelog**: https://github.com/{repo}/compare/{prev}...{tag}")
