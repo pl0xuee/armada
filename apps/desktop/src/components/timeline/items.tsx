@@ -105,7 +105,12 @@ export const AgentMessage = memo(function AgentMessage({
         </div>
       )}
       {item.text ? (
-        <Markdown text={item.text} streaming={streaming} agentId={agent.id} />
+        <Markdown
+          text={item.text}
+          streaming={streaming}
+          agentId={agent.id}
+          runAgentId={agent.cwd ? agent.id : undefined}
+        />
       ) : !streaming ? (
         <p className="text-[12.5px] italic text-steel">No reply (the turn ended before any text).</p>
       ) : (

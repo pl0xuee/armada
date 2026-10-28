@@ -9,6 +9,10 @@ docs/RELEASING.md).
 
 ### New
 
+- **Run commands from the chat.** Shell code blocks in an agent's replies now have a Run button
+  (Ctrl/Cmd+Enter when the block is focused) that opens a new terminal in the agent's workspace
+  panel and runs the commands there. Risky ones (like `rm -rf` or `sudo`) ask first, and "Paste
+  without running" puts the text on the prompt for you to edit.
 - **You can tell when an agent is done.** The thinking indicator now turns into a "Done" line with
   the turn's time (or "Stopped" / "Stopped with an error"), the status pill shows a green "Done"
   until your next message, the window title shows what the selected agent is doing, the taskbar
