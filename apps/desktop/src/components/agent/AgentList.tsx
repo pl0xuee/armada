@@ -14,6 +14,7 @@ import {
   Plus,
   Search,
   Trash2,
+  Workflow,
   X,
 } from "lucide-react";
 import { m, AnimatePresence } from "motion/react";
@@ -32,6 +33,7 @@ import { usePr } from "@/store/pr";
 import { ciSummary, listIndicator } from "@/lib/pr";
 import { useUi } from "@/store/ui";
 import { ProviderGlyph } from "../ProviderGlyph";
+import { useRunningSubagentCount } from "./useSubagents";
 import { CiIcon } from "./PrChip";
 import { StatusDot } from "../StatusDot";
 import { Button } from "../ui/button";
@@ -246,6 +248,23 @@ export function AgentList({
   );
 }
 
+/** Running sub-agent count. Nothing when there are none. */
+function SubagentBadge({ agentId }: { agentId: string }) {
+  const n = useRunningSubagentCount(agentId);
+  if (n === 0) return null;
+  return (
+    <Tooltip content={`${n} sub-agent${n === 1 ? "" : "s"} running`} side="right">
+      <span
+        className="flex shrink-0 items-center gap-0.5 text-[11px] text-accent tabular"
+        aria-label={`${n} sub-agent${n === 1 ? "" : "s"} running`}
+      >
+        <Workflow className="h-3 w-3" />
+        {n}
+      </span>
+    </Tooltip>
+  );
+}
+
 /** "#12" + CI glyph for agents with an open PR. Nothing otherwise, so most rows stay clean. */
 function PrIndicator({ agentId }: { agentId: string }) {
   const pr = usePr((s) => listIndicator(s.byAgent[agentId]));
@@ -439,6 +458,7 @@ const AgentRow = memo(function AgentRow({
                     </span>
                   </Tooltip>
                 )}
+                <SubagentBadge agentId={agent.id} />
                 <PrIndicator agentId={agent.id} />
                 <span className="text-line-strong">·</span>
                 <span className="truncate">

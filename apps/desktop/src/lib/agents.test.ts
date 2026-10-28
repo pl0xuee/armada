@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { liveTail, needsAttention, triageQueue } from "./agents";
+import { liveTail, needsAttention, runningCount, subagentRuns, triageQueue } from "./agents";
 import { seedAgents } from "./mock-data";
 import type { Agent, TimelineItem } from "./types";
 
@@ -110,5 +110,64 @@ describe("liveTail", () => {
       2,
     );
     expect(liveTail([item("user_message", { text: "hi" }, 1), sub])).toBe("Explore: find callers");
+  });
+});
+
+describe("subagentRuns", () => {
+  let n = 0;
+  const call = (
+    toolCallId: string,
+    status: "in_progress" | "completed" | "failed",
+    subagent?: { kind?: string; background?: boolean; control?: boolean },
+    parentToolCallId?: string,
+  ): TimelineItem => ({
+    id: `i${++n}`,
+    agentId: "a",
+    seq: n,
+    ts: n,
+    kind: "tool_call",
+    toolCallId,
+    title: toolCallId,
+    toolKind: "other",
+    status,
+    locations: [],
+    diffs: [],
+    output: "",
+    command: null,
+    subagent: subagent ? { description: `desc ${toolCallId}`, ...subagent } : undefined,
+    parentToolCallId,
+  });
+  const user: TimelineItem = { id: "u", agentId: "a", seq: 0, ts: 0, kind: "user_message", text: "go" };
+
+  it("counts an open foreground sub-agent only while the agent is busy", () => {
+    const items = [user, call("s1", "in_progress", { kind: "Explore" })];
+    expect(runningCount(subagentRuns(items, true))).toBe(1);
+    expect(subagentRuns(items, false)).toEqual([]);
+  });
+
+  it("keeps a completed background sub-agent running until the turn ends", () => {
+    const items = [user, call("s1", "completed", { background: true }), call("c1", "in_progress", undefined, "s1")];
+    const busy = subagentRuns(items, true);
+    expect(busy).toHaveLength(1);
+    expect(busy[0]).toMatchObject({ state: "running", step: "c1", background: true });
+    expect(subagentRuns(items, false)[0].state).toBe("done");
+  });
+
+  it("does not carry a background sub-agent into a later turn", () => {
+    const items = [user, call("s1", "completed", { background: true }), { ...user, id: "u2" }];
+    expect(runningCount(subagentRuns(items, true))).toBe(0);
+    expect(subagentRuns(items, true)).toEqual([]);
+  });
+
+  it("lists sub-agents finished this turn and ignores control calls", () => {
+    const items = [
+      user,
+      call("s1", "completed", {}),
+      call("s2", "failed", {}),
+      call("w", "in_progress", { control: true }),
+    ];
+    const runs = subagentRuns(items, true);
+    expect(runs.map((r) => r.state)).toEqual(["done", "failed"]);
+    expect(runningCount(runs)).toBe(0);
   });
 });

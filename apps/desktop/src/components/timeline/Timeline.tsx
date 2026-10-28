@@ -6,6 +6,7 @@ import type { Agent, TimelineItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useApp } from "@/store/app";
+import { useUi } from "@/store/ui";
 import { Spinner } from "../ui/misc";
 import { Skeleton } from "../ui/skeleton";
 import { AgentMessage, NoticeBanner, PermissionCard, PlanCard, ThoughtBlock, ToolCallCard, UserBubble } from "./items";
@@ -145,6 +146,38 @@ export function Timeline({
       lastCount.current = n;
     }
   }, [rows.length, scrollToBottom]);
+
+  // Scroll to an item another part of the UI asked for (a sub-agent's card), once its row exists.
+  const revealTarget = useUi((s) => (s.revealTarget?.agentId === agent.id ? s.revealTarget : null));
+  const [flashId, setFlashId] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    if (!revealTarget || (loading && !items)) return;
+    const idxOf = new Map<string, number>();
+    list.forEach((it, i) => idxOf.set(it.id, i));
+    let at = idxOf.get(revealTarget.itemId);
+    // Climb out of nested sub-agents to the top-level card.
+    for (let guard = 0; at !== undefined && guard < 8; guard++) {
+      const it = list[at];
+      const parent =
+        it.kind === "tool_call" && it.parentToolCallId ? view.parentIdx.get(it.parentToolCallId) : undefined;
+      if (parent === undefined) break;
+      at = parent;
+    }
+    const row = at === undefined ? -1 : rows.indexOf(at);
+    useUi.getState().clearRevealTarget();
+    if (row < 0) return;
+    stick.current = false;
+    setAtBottom(false);
+    virtualizer.scrollToIndex(row, { align: "center" });
+    setFlashId(list[at as number].id);
+    // Measurement can shift rows after the first jump; settle on the target again.
+    requestAnimationFrame(() => virtualizer.scrollToIndex(row, { align: "center" }));
+  }, [revealTarget, rows, list, items, loading, view, virtualizer]);
+  useEffect(() => {
+    if (!flashId) return;
+    const t = setTimeout(() => setFlashId(null), 1600);
+    return () => clearTimeout(t);
+  }, [flashId]);
 
   // Paging up: remember the first visible row and keep it in place once older items land.
   const anchor = useRef<{ id: string; offset: number } | null>(null);
@@ -291,7 +324,11 @@ export function Timeline({
                     role="listitem"
                     data-index={v.index}
                     ref={virtualizer.measureElement}
-                    className={cn("absolute left-0 top-0 w-full pb-3", spacingFor(it, prev))}
+                    className={cn(
+                      "absolute left-0 top-0 w-full pb-3",
+                      spacingFor(it, prev),
+                      flashId === it.id && "[&>*]:rounded-xl [&>*]:ring-2 [&>*]:ring-accent/50",
+                    )}
                     style={{ transform: `translateY(${v.start}px)` }}
                   >
                     {group ? (
@@ -407,6 +444,8 @@ interface TimelineView {
   groups: Map<string, number[]>;
   /** Child call indices per sub-agent toolCallId (any depth). */
   children: Map<string, number[]>;
+  /** Index of each sub-agent call by its toolCallId. */
+  parentIdx: Map<string, number>;
   lastSummaryId: string | null;
   lastErrorId: string | null;
   lastPromptIdx: number | null;
@@ -416,7 +455,13 @@ const NO_ITEMS: TimelineItem[] = [];
 
 function buildView(items: TimelineItem[]): TimelineView {
   const parents = new Set<string>();
-  for (const it of items) if (it.kind === "tool_call" && it.subagent) parents.add(it.toolCallId);
+  const parentIdx = new Map<string, number>();
+  items.forEach((it, i) => {
+    if (it.kind === "tool_call" && it.subagent) {
+      parents.add(it.toolCallId);
+      parentIdx.set(it.toolCallId, i);
+    }
+  });
   const children = new Map<string, number[]>();
   let lastSummaryId: string | null = null;
   let lastErrorId: string | null = null;
@@ -441,7 +486,7 @@ function buildView(items: TimelineItem[]): TimelineView {
   const grouped = groupActivity(items, top);
   const groups = new Map<string, number[]>();
   for (const [first, idxs] of grouped.groups) groups.set(items[first].id, idxs);
-  return { top: grouped.rows, groups, children, lastSummaryId, lastErrorId, lastPromptIdx };
+  return { top: grouped.rows, groups, children, parentIdx, lastSummaryId, lastErrorId, lastPromptIdx };
 }
 
 function sameList<T>(a: T[] | undefined, b: T[]): boolean {

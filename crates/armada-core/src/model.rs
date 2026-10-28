@@ -293,6 +293,17 @@ pub struct SubAgent {
     pub kind: Option<String>,
     pub description: Option<String>,
     pub prompt: Option<String>,
+    /// Launched in the background (Claude `run_in_background`): the call
+    /// completes as soon as the sub-agent starts, but the sub-agent keeps
+    /// running. The adapter reports no per-sub-agent end to us, so the UI treats
+    /// it as running until the turn ends (the adapter holds the turn open while
+    /// background sub-agents live).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub background: bool,
+    /// A management call on existing sub-agents (Codex wait / close / send
+    /// input), not a sub-agent of its own: shown, but never counted as running.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub control: bool,
 }
 
 /// An image attached to a prompt (base64 payload, no data: prefix).
