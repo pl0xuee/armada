@@ -1575,9 +1575,12 @@ mod tests {
             let dir = std::env::temp_dir().join(format!("armada-git-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(dir.join("hooks-none")).unwrap();
             let repo = Repo {
-                dir: dir.canonicalize().unwrap(),
+                // Without Windows' \\?\ prefix, which git can't handle.
+                dir: plain_path(&dir.canonicalize().unwrap()),
             };
             repo.git(&["init", "-q"]);
+            // Byte-exact checkouts whatever the machine's git config says.
+            repo.git(&["config", "core.autocrlf", "false"]);
             repo.git(&["config", "user.name", "Armada Test"]);
             repo.git(&["config", "user.email", "test@armada.invalid"]);
             repo.git(&["config", "commit.gpgsign", "false"]);
