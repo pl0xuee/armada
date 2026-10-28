@@ -113,10 +113,10 @@ pub fn voice_status(
 pub async fn voice_list_devices() -> CmdResult<Vec<InputDevice>> {
     tauri::async_runtime::spawn_blocking(|| {
         let host = cpal::default_host();
-        let default = host.default_input_device().and_then(|d| d.name().ok());
+        let default = host.default_input_device().and_then(|d| device_name(&d));
         let mut out: Vec<InputDevice> = Vec::new();
         for d in host.input_devices().map_err(|e| e.to_string())? {
-            if let Ok(name) = d.name() {
+            if let Some(name) = device_name(&d) {
                 if !out.iter().any(|o| o.name == name) {
                     out.push(InputDevice {
                         is_default: default.as_deref() == Some(name.as_str()),
@@ -220,11 +220,16 @@ pub fn voice_delete_model(
 
 // ---- recording -------------------------------------------------------------------
 
+/// The device's human-readable name (what the Voice settings picker stores).
+fn device_name(d: &cpal::Device) -> Option<String> {
+    d.description().ok().map(|x| x.name().to_string())
+}
+
 fn pick_device(name: Option<&str>) -> Result<cpal::Device, String> {
     let host = cpal::default_host();
     if let Some(name) = name {
         if let Ok(mut devices) = host.input_devices() {
-            if let Some(d) = devices.find(|d| d.name().ok().as_deref() == Some(name)) {
+            if let Some(d) = devices.find(|d| device_name(d).as_deref() == Some(name)) {
                 return Ok(d);
             }
         }
@@ -293,7 +298,7 @@ fn run_capture(
         let config = device
             .default_input_config()
             .map_err(|e| mic_error("Couldn't read the microphone's settings", e))?;
-        let rate = config.sample_rate().0;
+        let rate = config.sample_rate();
         let channels = config.channels() as usize;
         let cap = rate as usize * voice::MAX_RECORDING_SECS as usize;
         let buf = Arc::new(Mutex::new(Vec::with_capacity(rate as usize * 30)));
@@ -307,16 +312,26 @@ fn run_capture(
         });
         let err_slot = failure.clone();
         let err_stop = stop.clone();
-        let on_err = move |e: cpal::StreamError| {
+        let on_err = move |e: cpal::Error| {
+            // cpal 0.17+ also reports recoverable conditions here; only real
+            // failures should end the recording (as with cpal 0.16).
+            if matches!(
+                e.kind(),
+                cpal::ErrorKind::Xrun
+                    | cpal::ErrorKind::RealtimeDenied
+                    | cpal::ErrorKind::DeviceChanged
+            ) {
+                return;
+            }
             *err_slot.lock() = Some(mic_error("The microphone stopped working", e));
             err_stop.store(true, Ordering::Relaxed);
         };
-        let stream_config: cpal::StreamConfig = config.clone().into();
+        let stream_config: cpal::StreamConfig = config.into();
         let stream = match config.sample_format() {
             cpal::SampleFormat::F32 => {
                 let s = sink.clone();
                 device.build_input_stream(
-                    &stream_config,
+                    stream_config,
                     move |d: &[f32], _| s.push_f32(d),
                     on_err,
                     None,
@@ -325,7 +340,7 @@ fn run_capture(
             cpal::SampleFormat::I16 => {
                 let s = sink.clone();
                 device.build_input_stream(
-                    &stream_config,
+                    stream_config,
                     move |d: &[i16], _| {
                         let f: Vec<f32> = d.iter().map(|v| *v as f32 / 32768.0).collect();
                         s.push_f32(&f)
@@ -337,7 +352,7 @@ fn run_capture(
             cpal::SampleFormat::U16 => {
                 let s = sink.clone();
                 device.build_input_stream(
-                    &stream_config,
+                    stream_config,
                     move |d: &[u16], _| {
                         let f: Vec<f32> =
                             d.iter().map(|v| (*v as f32 - 32768.0) / 32768.0).collect();
@@ -350,7 +365,7 @@ fn run_capture(
             cpal::SampleFormat::I32 => {
                 let s = sink.clone();
                 device.build_input_stream(
-                    &stream_config,
+                    stream_config,
                     move |d: &[i32], _| {
                         let f: Vec<f32> = d.iter().map(|v| *v as f32 / 2_147_483_648.0).collect();
                         s.push_f32(&f)
@@ -655,5 +670,23 @@ mod tests {
         let text = transcribe(&ctx, &samples, Some("en")).unwrap();
         println!("TRANSCRIPT: {text}");
         assert!(!text.is_empty());
+    }
+
+    /// Needs a sound server/device; enumerates only, never records.
+    /// Run with `cargo test -p armada-desktop -- --ignored --nocapture enumerates_input_devices`.
+    #[test]
+    #[ignore]
+    fn enumerates_input_devices() {
+        let host = cpal::default_host();
+        let mut n = 0;
+        for d in host.input_devices().unwrap() {
+            println!("input device: {:?} id={:?}", device_name(&d), d.id().ok());
+            n += 1;
+        }
+        println!(
+            "default: {:?}",
+            host.default_input_device().and_then(|d| device_name(&d))
+        );
+        assert!(n > 0, "no input devices enumerated");
     }
 }

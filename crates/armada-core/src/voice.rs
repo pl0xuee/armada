@@ -204,7 +204,7 @@ fn fetch_verified(
     drop(out);
     progress(done, spec.size_bytes);
 
-    let actual = format!("{:x}", hasher.finalize());
+    let actual = crate::toolchain::hex_lower(&hasher.finalize());
     if done != spec.size_bytes || actual != spec.sha256 {
         bail!(
             "checksum mismatch for {} (expected {}, got {actual}); the download was discarded",

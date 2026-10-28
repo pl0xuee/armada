@@ -729,7 +729,7 @@ impl Db {
             // Keep the user's data recoverable, once per distinct content (not on
             // every launch while the bad value is still stored).
             use sha2::{Digest, Sha256};
-            let hash = format!("{:x}", Sha256::digest(data.as_bytes()));
+            let hash = crate::toolchain::hex_lower(&Sha256::digest(data.as_bytes()));
             let backup = self
                 .dir
                 .join(format!("settings-unreadable-{}.json", &hash[..12]));
