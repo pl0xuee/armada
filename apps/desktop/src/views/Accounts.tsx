@@ -7,7 +7,7 @@ import { providerReady } from "@/components/settings/ProviderCard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/misc";
 import { checkAccount, startInstall } from "@/lib/actions";
-import { PageHeader } from "@/components/PageHeader";
+import { HeaderAction, PageHeader } from "@/components/PageHeader";
 import { PROVIDER_ORDER, PROVIDERS, type BuiltinProvider } from "@/lib/providers";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/store/app";
@@ -27,7 +27,7 @@ export function AccountsView() {
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="@container flex h-full flex-col">
       <PageHeader
         icon={<Users />}
         title="Accounts"
@@ -39,18 +39,25 @@ export function AccountsView() {
         }
         right={
           <>
-            <Button variant="ghost" onClick={checkAll} disabled={checkingAll || accounts.length === 0}>
-              <RefreshCw className={cn(checkingAll && "animate-spin")} /> Check all
-            </Button>
-            <Button variant="primary" onClick={() => setAddFor("claude")}>
-              <UserPlus /> Add account
-            </Button>
+            <HeaderAction
+              variant="ghost"
+              icon={<RefreshCw className={cn(checkingAll && "animate-spin")} />}
+              label="Check all"
+              onClick={() => void checkAll()}
+              disabled={checkingAll || accounts.length === 0}
+            />
+            <HeaderAction
+              variant="primary"
+              icon={<UserPlus />}
+              label="Add account"
+              onClick={() => setAddFor("claude")}
+            />
           </>
         }
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[880px] px-6 pb-16 pt-6">
-          <div className="space-y-5">
+        <div className="mx-auto max-w-[880px] px-4 pb-10 pt-4 @2xl:px-6 @2xl:pb-16 @2xl:pt-6">
+          <div className="space-y-4 @2xl:space-y-5">
             {PROVIDER_ORDER.map((p) => {
               const meta = PROVIDERS[p];
               const info = providers.find((x) => x.provider === p);

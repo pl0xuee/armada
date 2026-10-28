@@ -28,6 +28,7 @@ import { Button } from "./ui/button";
 import { Input, Label, Textarea } from "./ui/input";
 import { Spinner } from "./ui/misc";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Select } from "./ui/select";
 import { Skeleton } from "./ui/skeleton";
 
 export function ReviewSheet() {
@@ -41,7 +42,7 @@ export function ReviewSheet() {
         <D.Overlay className="anim-fade fixed inset-0 z-50 bg-[var(--scrim)] backdrop-blur-[2px]" />
         <D.Content
           aria-describedby={undefined}
-          className="anim-sheet fixed inset-y-2 right-2 z-50 flex w-[min(1180px,calc(100vw-72px))] flex-col overflow-hidden rounded-2xl border border-line-strong bg-panel shadow-[0_24px_80px_-12px_rgba(0,0,0,0.7)] edge-strong focus:outline-none"
+          className="anim-sheet fixed inset-y-2 right-2 z-50 flex w-[min(1180px,calc(100vw-72px))] flex-col max-[900px]:left-2 max-[900px]:w-auto overflow-hidden rounded-2xl border border-line-strong bg-panel shadow-[0_24px_80px_-12px_rgba(0,0,0,0.7)] edge-strong focus:outline-none"
         >
           {agent && <ReviewBody agent={agent} onClose={() => setReviewAgent(null)} />}
         </D.Content>
@@ -151,9 +152,11 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
             {diff && (
               <>
                 <span className="text-line-strong">·</span>
-                <span>{pluralize(diff.files.length, "file")}</span>
-                <span className="font-mono text-[11px] text-ok">+{totals.add}</span>
-                <span className="font-mono text-[11px] text-err">−{totals.del}</span>
+                <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                  {pluralize(diff.files.length, "file")}
+                  <span className="font-mono text-[11px] text-ok">+{totals.add}</span>
+                  <span className="font-mono text-[11px] text-err">−{totals.del}</span>
+                </span>
                 {diff.ahead > 0 && (
                   <>
                     <span className="text-line-strong">·</span>
@@ -172,8 +175,35 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         </Button>
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        <nav aria-label="Changed files" className="flex w-[250px] shrink-0 flex-col border-r border-line bg-panel">
+      <div className="flex min-h-0 flex-1 max-[900px]:flex-col">
+        {/* Narrow windows: a file picker bar instead of the sidebar. */}
+        {diff && diff.files.length > 0 && (
+          <div className="hidden shrink-0 items-center gap-2.5 border-b border-line bg-panel px-3 py-2 max-[900px]:flex">
+            <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel">
+              {pluralize(diff.files.length, "file")}
+            </span>
+            <Select
+              aria-label="Jump to file"
+              value={selected ?? undefined}
+              onValueChange={jump}
+              className="h-8 min-w-0 flex-1 font-mono text-[12px]"
+              options={diff.files.map((f) => ({
+                value: f.path,
+                label: (
+                  <span className="flex min-w-0 items-center gap-2 font-mono text-[12px]">
+                    <span className="truncate">{f.path}</span>
+                    <span className="shrink-0 text-ok">+{f.additions}</span>
+                    <span className="shrink-0 text-err">−{f.deletions}</span>
+                  </span>
+                ),
+              }))}
+            />
+          </div>
+        )}
+        <nav
+          aria-label="Changed files"
+          className="flex w-[250px] shrink-0 flex-col border-r border-line bg-panel max-[900px]:hidden"
+        >
           <div className="px-4 pb-1.5 pt-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel">
             Changed files
           </div>
@@ -192,7 +222,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
           </div>
         </nav>
 
-        <div ref={scrollRef} className="min-w-0 flex-1 overflow-y-auto bg-base p-4">
+        <div ref={scrollRef} className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-base p-4 max-sm:p-2.5">
           {error ? (
             <div className="rounded-xl border border-err/30 bg-err/[0.06] p-4 text-[13px] text-err">
               Couldn't load the diff: <span className="selectable font-mono text-[12px]">{error}</span>
@@ -231,7 +261,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
       </div>
 
       <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line bg-panel px-4 py-3">
-        <div className="flex min-w-[260px] flex-1 items-center gap-2">
+        <div className="flex min-w-[min(280px,100%)] flex-[1_1_320px] items-center gap-2">
           <Input
             value={commitMsg}
             onChange={(e) => setCommitMsg(e.target.value)}
@@ -247,40 +277,42 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
             Commit
           </Button>
         </div>
-        <Button
-          variant="secondary"
-          disabled={busy !== null || !agent.worktree}
-          onClick={() =>
-            void run(
-              "merge",
-              () => api.mergeAgent(agent.id),
-              (msg) => toast.success("Merged", { description: msg }),
-            )
-          }
-        >
-          {busy === "merge" ? <Spinner className="h-3.5 w-3.5" /> : <GitMerge />}
-          Merge into {agent.baseBranch ?? "base"}
-        </Button>
-        <PrPopover
-          agent={agent}
-          busy={busy === "pr"}
-          disabled={busy !== null}
-          onSubmit={(t, b) =>
-            run(
-              "pr",
-              () => api.createPr(agent.id, t, b),
-              (url) =>
-                toast.success("Pull request opened", {
-                  description: url,
-                  action: { label: "Open", onClick: () => void openExternal(url) },
-                }),
-            )
-          }
-        />
-        <Button variant="danger" disabled={busy !== null || !agent.worktree} onClick={() => setConfirmDiscard(true)}>
-          <Trash2 />
-          Discard
-        </Button>
+        <div className="flex flex-wrap items-center justify-end gap-2 max-[900px]:w-full">
+          <Button
+            variant="secondary"
+            disabled={busy !== null || !agent.worktree}
+            onClick={() =>
+              void run(
+                "merge",
+                () => api.mergeAgent(agent.id),
+                (msg) => toast.success("Merged", { description: msg }),
+              )
+            }
+          >
+            {busy === "merge" ? <Spinner className="h-3.5 w-3.5" /> : <GitMerge />}
+            Merge into {agent.baseBranch ?? "base"}
+          </Button>
+          <PrPopover
+            agent={agent}
+            busy={busy === "pr"}
+            disabled={busy !== null}
+            onSubmit={(t, b) =>
+              run(
+                "pr",
+                () => api.createPr(agent.id, t, b),
+                (url) =>
+                  toast.success("Pull request opened", {
+                    description: url,
+                    action: { label: "Open", onClick: () => void openExternal(url) },
+                  }),
+              )
+            }
+          />
+          <Button variant="danger" disabled={busy !== null || !agent.worktree} onClick={() => setConfirmDiscard(true)}>
+            <Trash2 />
+            Discard
+          </Button>
+        </div>
       </footer>
 
       <ConfirmDialog

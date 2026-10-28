@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { AgentTile } from "@/components/mission/AgentTile";
-import { PageHeader } from "@/components/PageHeader";
+import { HeaderAction, PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import { useNow } from "@/hooks/useNow";
@@ -99,7 +99,7 @@ export function MissionControlView() {
   );
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="@container flex h-full flex-col">
       <PageHeader
         icon={<LayoutGrid />}
         title="Mission Control"
@@ -110,32 +110,35 @@ export function MissionControlView() {
           </>
         }
         right={
-          <Button variant="primary" size="sm" onClick={() => openNewAgent()}>
-            <Plus /> New agent
-            <span className="ml-1 text-[10.5px] opacity-70">
-              {modKey}
-              {isMac ? "" : "+"}N
-            </span>
-          </Button>
+          <HeaderAction
+            variant="primary"
+            icon={<Plus />}
+            label="New agent"
+            hint={`${modKey}${isMac ? "" : "+"}N`}
+            onClick={() => openNewAgent()}
+          />
         }
       >
-        <Segmented<Filter>
-          size="sm"
-          aria-label="Filter agents"
-          value={filter}
-          onChange={setFilter}
-          options={[
-            { value: "all", label: chip("All", counts.all) },
-            { value: "live", label: chip("Live", counts.live, "var(--accent)") },
-            { value: "needs", label: chip("Needs you", counts.needs, "var(--warn)") },
-            { value: "idle", label: chip("Idle", counts.idle) },
-          ]}
-        />
+        <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] @2xl/ph:mx-0 @2xl/ph:px-0 [&::-webkit-scrollbar]:hidden">
+          <Segmented<Filter>
+            size="sm"
+            aria-label="Filter agents"
+            value={filter}
+            onChange={setFilter}
+            options={[
+              { value: "all", label: chip("All", counts.all) },
+              { value: "live", label: chip("Live", counts.live, "var(--accent)") },
+              { value: "needs", label: chip("Needs you", counts.needs, "var(--warn)") },
+              { value: "idle", label: chip("Idle", counts.idle) },
+            ]}
+          />
+        </div>
       </PageHeader>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 @2xl:px-6 @2xl:py-5">
         {agents.length === 0 ? (
           <EmptyState
+            className="my-auto"
             icon={<Radar />}
             title="Your fleet is docked"
             description="Launch an agent and it shows up here as a live tile: status, last action and approvals at a glance."
@@ -147,6 +150,7 @@ export function MissionControlView() {
           />
         ) : visible.length === 0 ? (
           <EmptyState
+            className="my-auto"
             icon={<Radar />}
             title="All quiet on this channel"
             description="No agents match this filter right now."
@@ -157,7 +161,7 @@ export function MissionControlView() {
             }
           />
         ) : (
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
+          <div className="grid grid-cols-1 gap-3 @2xl:grid-cols-2 @5xl:[grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
             <AnimatePresence initial={false} mode="popLayout">
               {visible.map((a) => (
                 <motion.div

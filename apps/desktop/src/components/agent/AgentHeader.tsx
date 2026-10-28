@@ -11,6 +11,7 @@ import {
   FolderOpen,
   GitBranch,
   GitCompare,
+  PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
   Pencil,
@@ -33,9 +34,12 @@ import { CUSTOM_ACCOUNT_ID, PROVIDERS } from "@/lib/providers";
 import type { Agent, CustomAgent, Provider } from "@/lib/types";
 
 const EMPTY_CUSTOM: CustomAgent[] = [];
-import { basename, cn, prettyPath } from "@/lib/utils";
+import { basename, cn, modKey, prettyPath } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
+import { useAgentListLayout } from "@/hooks/useAgentListLayout";
+import { useElementWidth } from "@/hooks/useElementWidth";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { INSPECTOR_DOCK_QUERY } from "@/lib/layout";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { AccountAvatar } from "../AccountAvatar";
@@ -55,7 +59,11 @@ import { Tooltip } from "../ui/tooltip";
 export function AgentHeader({ agent }: { agent: Agent }) {
   const account = useApp((s) => s.accounts.find((a) => a.id === agent.accountId));
   const identity = useIdentity(agent.provider, agent.customAgentId);
-  const wide = useMediaQuery("(min-width: 1180px)");
+  const wide = useMediaQuery(INSPECTOR_DOCK_QUERY);
+  const list = useAgentListLayout();
+  const [ref, width] = useElementWidth<HTMLElement>();
+  // full: labelled buttons · icons: icon buttons · compact: secondary actions live in ⋯
+  const tier = width === 0 || width >= 760 ? "full" : width >= 520 ? "icons" : "compact";
   const inspectorPref = useUi((s) => s.inspectorOpen);
   const overlay = useUi((s) => s.inspectorOverlay);
   const inspectorOpen = wide ? inspectorPref : overlay;
@@ -68,36 +76,50 @@ export function AgentHeader({ agent }: { agent: Agent }) {
   const resumable = agent.status === "interrupted" || agent.status === "stopped";
 
   return (
-    <header className="shrink-0 border-b border-line bg-panel/40 px-5 pb-2.5 pt-3">
-      <div className="flex min-w-0 items-center gap-3">
+    <header
+      ref={ref}
+      className={cn("shrink-0 border-b border-line bg-panel/40 pb-2.5 pt-3", tier === "compact" ? "px-3" : "px-5")}
+    >
+      <div className="flex min-w-0 items-center gap-2.5">
+        {(!list.docked || !list.open) && (
+          <Tooltip content="Show agents" shortcut={[modKey, "B"]}>
+            <Button size="icon-sm" variant="ghost" aria-label="Show agent list" onClick={list.toggle} className="-ml-1">
+              <PanelLeftOpen />
+            </Button>
+          </Tooltip>
+        )}
         <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="md" />
         <div className="min-w-0 flex-1">
           <EditableTitle agent={agent} />
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1">
           {busy ? (
-            <Button
-              size="sm"
-              variant="secondary"
+            <ActionButton
+              tier={tier}
+              label="Cancel"
+              tooltip="Cancel the current turn"
               onClick={() => void cancelTurn(agent)}
-              aria-label="Cancel current turn"
             >
               <Square className="!h-3 !w-3 fill-current" />
-              <span className="hidden md:inline">Cancel</span>
-            </Button>
+            </ActionButton>
           ) : resumable ? (
-            <Button size="sm" variant="secondary" onClick={() => void resumeAgent(agent)}>
+            <ActionButton
+              tier={tier}
+              label="Resume"
+              tooltip="Resume this agent"
+              onClick={() => void resumeAgent(agent)}
+            >
               <Play className="!h-3.5 !w-3.5" />
-              <span className="hidden md:inline">Resume</span>
-            </Button>
+            </ActionButton>
           ) : null}
-          {agent.worktree && (
-            <Button size="sm" variant="secondary" onClick={() => setReviewAgent(agent.id)}>
+          {agent.worktree && tier !== "compact" && (
+            <ActionButton tier={tier} label="Review" tooltip="Review changes" onClick={() => setReviewAgent(agent.id)}>
               <GitCompare className="!h-3.5 !w-3.5" />
-              <span className="hidden md:inline">Review</span>
-            </Button>
+            </ActionButton>
           )}
-          <HandoffMenu agent={agent} onCustom={() => setHandoffAgent(agent)} />
+          {tier !== "compact" && (
+            <HandoffMenu agent={agent} onCustom={() => setHandoffAgent(agent)} showLabel={tier === "full"} />
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button size="icon-sm" variant="ghost" aria-label="More actions">
@@ -105,6 +127,19 @@ export function AgentHeader({ agent }: { agent: Agent }) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {tier === "compact" && (
+                <>
+                  {agent.worktree && (
+                    <DropdownMenuItem onSelect={() => setReviewAgent(agent.id)}>
+                      <GitCompare /> Review changes…
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onSelect={() => setHandoffAgent(agent)}>
+                    <ArrowRightLeft /> Hand off…
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
               <DropdownMenuItem onSelect={() => void api.openPath(agent.cwd)}>
                 <FolderOpen /> Open folder
               </DropdownMenuItem>
@@ -148,7 +183,12 @@ export function AgentHeader({ agent }: { agent: Agent }) {
         </div>
       </div>
 
-      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5 pl-[38px]">
+      <div
+        className={cn(
+          "mt-2 flex min-w-0 flex-wrap items-center gap-1.5",
+          tier !== "compact" && (!list.docked || !list.open ? "pl-[72px]" : "pl-[38px]"),
+        )}
+      >
         <StatusPill status={agent.status} />
         {agent.rateLimited && (
           <Chip className="border-warn/35 bg-warn/10 text-warn">
@@ -256,16 +296,18 @@ function EditableTitle({ agent }: { agent: Agent }) {
     <button
       type="button"
       onClick={() => setEditing(true)}
-      title="Rename"
-      className="group -ml-1.5 flex h-8 max-w-full items-center gap-2 rounded-md px-1.5 text-left transition-colors hover:bg-raised/60"
+      title={agent.title}
+      className="group -ml-1.5 flex min-h-8 max-w-full items-center gap-2 rounded-md px-1.5 py-0.5 text-left transition-colors hover:bg-raised/60"
     >
-      <h1 className="truncate text-[16px] font-semibold tracking-[-0.015em] text-fg">{agent.title}</h1>
+      <h1 className="line-clamp-2 break-words text-[15.5px] font-semibold leading-snug tracking-[-0.015em] text-fg">
+        {agent.title}
+      </h1>
       <Pencil className="h-3.5 w-3.5 shrink-0 text-steel opacity-0 transition-opacity group-hover:opacity-100" />
     </button>
   );
 }
 
-function HandoffMenu({ agent, onCustom }: { agent: Agent; onCustom: () => void }) {
+function HandoffMenu({ agent, onCustom, showLabel }: { agent: Agent; onCustom: () => void; showLabel: boolean }) {
   const accounts = useApp((s) => s.accounts);
   const openAgent = useUi((s) => s.openAgent);
   const customAgents = useApp((s) => s.settings?.customAgents ?? EMPTY_CUSTOM);
@@ -286,7 +328,7 @@ function HandoffMenu({ agent, onCustom }: { agent: Agent; onCustom: () => void }
         <DropdownMenuTrigger asChild>
           <Button size="sm" variant="ghost" aria-label="Hand off">
             <ArrowRightLeft className="!h-3.5 !w-3.5" />
-            <span className="hidden lg:inline">Hand off</span>
+            {showLabel && <span>Hand off</span>}
           </Button>
         </DropdownMenuTrigger>
       </Tooltip>
@@ -312,5 +354,35 @@ function HandoffMenu({ agent, onCustom }: { agent: Agent; onCustom: () => void }
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+function ActionButton({
+  tier,
+  label,
+  tooltip,
+  onClick,
+  children,
+}: {
+  tier: "full" | "icons" | "compact";
+  label: string;
+  tooltip: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  if (tier === "full") {
+    return (
+      <Button size="sm" variant="secondary" onClick={onClick}>
+        {children}
+        {label}
+      </Button>
+    );
+  }
+  return (
+    <Tooltip content={tooltip}>
+      <Button size="icon-sm" variant="secondary" aria-label={tooltip} onClick={onClick}>
+        {children}
+      </Button>
+    </Tooltip>
   );
 }

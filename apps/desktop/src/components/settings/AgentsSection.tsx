@@ -176,12 +176,12 @@ export function AgentsSection({ agents }: { agents: CustomAgent[] }) {
               />
             ))}
           </ul>
-          <p className="mt-3 flex items-center gap-1.5 px-0.5 text-[12px] text-steel">
+          <p className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 px-0.5 text-[12px] text-steel">
             Enabled agents appear as providers in New agent, Compare and Schedules.
             <a
               href={ACP_AGENTS_URL}
               rel="noreferrer noopener"
-              className="inline-flex items-center gap-1 text-muted underline decoration-line-strong underline-offset-2 hover:text-fg"
+              className="inline-flex items-center gap-1 whitespace-nowrap text-muted underline decoration-line-strong underline-offset-2 hover:text-fg"
             >
               Find ACP agents <ExternalLink className="h-3 w-3" />
             </a>

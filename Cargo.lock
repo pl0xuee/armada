@@ -91,7 +91,7 @@ dependencies = [
 
 [[package]]
 name = "armada-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -115,7 +115,7 @@ dependencies = [
 
 [[package]]
 name = "armada-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "armada-core",

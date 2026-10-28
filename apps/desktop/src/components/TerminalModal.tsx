@@ -177,12 +177,13 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
         </span>
       }
       description={session.subtitle}
-      className="w-[min(760px,calc(100vw-32px))]"
+      className="w-[min(760px,calc(100vw-16px))]"
+      sheet
       onOpenAutoFocus={(e) => e.preventDefault()}
     >
-      <div className="px-5 pb-4 pt-2">
-        <div className="overflow-hidden rounded-xl border border-line bg-code shadow-[inset_0_1px_0_var(--edge)]">
-          <div className="flex h-8 items-center gap-2 border-b border-line bg-panel/70 px-3">
+      <div className="flex min-h-0 flex-1 flex-col px-5 pb-4 pt-2 max-sm:px-3">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-line bg-code shadow-[inset_0_1px_0_var(--edge)]">
+          <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line bg-panel/70 px-3">
             <span className="flex gap-1.5" aria-hidden>
               <span className="h-2.5 w-2.5 rounded-full bg-raised" />
               <span className="h-2.5 w-2.5 rounded-full bg-raised" />
@@ -195,7 +196,11 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
               <StatusChip state={state} />
             </span>
           </div>
-          <div ref={setHost} className="xterm-host h-[340px] w-full" aria-label="Terminal" />
+          <div
+            ref={setHost}
+            className="xterm-host h-[min(340px,calc(100dvh-260px))] min-h-[180px] w-full max-sm:h-auto max-sm:flex-1"
+            aria-label="Terminal"
+          />
         </div>
         {session.kind === "login" && !exited && (
           <p className="mt-2.5 text-[12px] text-muted">

@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 import { orderedAgents } from "@/lib/agents";
+import { LIST_DOCK_QUERY } from "@/lib/layout";
+import { toggleAgentList } from "./useAgentListLayout";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 
@@ -22,6 +24,17 @@ export function useGlobalShortcuts(enabled: boolean) {
         e.preventDefault();
         ui.setPaletteOpen(false);
         ui.openNewAgent();
+        return;
+      }
+      if (key === "b" && !e.shiftKey) {
+        e.preventDefault();
+        if (ui.view !== "agents") {
+          ui.setView("agents");
+          const layout = window.matchMedia(LIST_DOCK_QUERY).matches ? "wide" : "narrow";
+          ui.setAgentList(layout, true);
+        } else {
+          toggleAgentList();
+        }
         return;
       }
       if (key === "i" && !e.shiftKey) {

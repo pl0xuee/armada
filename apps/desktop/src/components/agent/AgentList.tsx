@@ -7,6 +7,7 @@ import {
   Gauge,
   Repeat,
   ChevronRight,
+  PanelLeftClose,
   Pencil,
   Play,
   Plus,
@@ -24,6 +25,7 @@ import { STATUS } from "@/lib/providers";
 import type { Account, Agent } from "@/lib/types";
 import { basename, cn, modKey } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
+import { toggleAgentList } from "@/hooks/useAgentListLayout";
 import { useNow } from "@/hooks/useNow";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
@@ -46,7 +48,16 @@ function readCollapsed(): Record<AgentGroupId, boolean> {
   return { needs: false, working: false, recent: false, archived: true };
 }
 
-export function AgentList() {
+export type AgentListVariant = "docked" | "drawer" | "full";
+
+export function AgentList({
+  variant = "docked",
+  onNavigate,
+}: {
+  variant?: AgentListVariant;
+  /** Called after an agent is opened (closes the drawer on narrow windows). */
+  onNavigate?: () => void;
+}) {
   const agentsMap = useApp((s) => s.agents);
   const accounts = useApp((s) => s.accounts);
   const selected = useUi((s) => s.selectedAgentId);
@@ -87,108 +98,139 @@ export function AgentList() {
   let index = 0;
 
   return (
-    <aside aria-label="Agents" className="flex h-full w-[292px] shrink-0 flex-col border-r border-line bg-panel">
-      <div className="flex items-center gap-2 px-3.5 pb-2 pt-3">
-        <h2 className="text-[13px] font-semibold tracking-tight">Agents</h2>
-        <span className="rounded-md bg-raised px-1.5 text-[11px] font-medium text-steel tabular">{total}</span>
-        <Tooltip content="New agent" shortcut={[modKey, "N"]}>
-          <Button size="sm" variant="primary" className="ml-auto h-7 gap-1 px-2" onClick={() => openNewAgent()}>
-            <Plus className="!h-3.5 !w-3.5" strokeWidth={2.5} />
-            New
-          </Button>
-        </Tooltip>
-      </div>
-      <div className="px-3 pb-2">
-        <div className="group relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-steel" />
-          <input
-            ref={searchRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                setQuery("");
-                (e.target as HTMLInputElement).blur();
-              }
-            }}
-            placeholder="Filter agents"
-            aria-label="Filter agents"
-            spellCheck={false}
-            className="h-8 w-full rounded-lg border border-line bg-base/50 pl-8 pr-8 text-[12.5px] text-fg placeholder:text-steel transition-colors hover:border-line-strong focus:border-accent/50 focus:outline-none focus:ring-3 focus:ring-accent/10"
-          />
-          {query ? (
-            <button
-              type="button"
-              aria-label="Clear filter"
-              onClick={() => setQuery("")}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-steel hover:text-fg"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          ) : (
-            <Kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 opacity-70">/</Kbd>
+    <aside
+      aria-label="Agents"
+      className={cn(
+        "flex h-full flex-col bg-panel",
+        variant === "docked" && "w-[clamp(272px,24vw,304px)] shrink-0 border-r border-line",
+        variant === "drawer" && "w-[min(320px,calc(100vw-72px))] border-r border-line-strong",
+        variant === "full" && "min-w-0 flex-1",
+      )}
+    >
+      <div className={cn("flex h-full w-full flex-col", variant === "full" && "mx-auto max-w-[760px]")}>
+        <div className={cn("flex items-center gap-2 px-3.5 pb-2 pt-3", variant === "full" && "px-4 pb-3 pt-5")}>
+          {variant !== "full" && (
+            <Tooltip content={variant === "drawer" ? "Close agent list" : "Hide agent list"} shortcut={[modKey, "B"]}>
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                className="-ml-1"
+                aria-label={variant === "drawer" ? "Close agent list" : "Hide agent list"}
+                onClick={toggleAgentList}
+              >
+                {variant === "drawer" ? <X className="!h-3.5 !w-3.5" /> : <PanelLeftClose className="!h-3.5 !w-3.5" />}
+              </Button>
+            </Tooltip>
           )}
+          <h2 className={cn("font-semibold tracking-tight", variant === "full" ? "text-[18px]" : "text-[13px]")}>
+            Agents
+          </h2>
+          <span className="rounded-md bg-raised px-1.5 text-[11px] font-medium text-steel tabular">{total}</span>
+          <Tooltip content="New agent" shortcut={[modKey, "N"]}>
+            <Button
+              size="sm"
+              variant="primary"
+              className={cn("ml-auto gap-1 px-2", variant === "full" ? "h-8 px-3" : "h-7")}
+              onClick={() => openNewAgent()}
+            >
+              <Plus className="!h-3.5 !w-3.5" strokeWidth={2.5} />
+              {variant === "full" ? "New agent" : "New"}
+            </Button>
+          </Tooltip>
         </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {groups.map((g) => {
-          if (g.agents.length === 0) return null;
-          const isCollapsed = collapsed[g.id] && !searching;
-          return (
-            <div key={g.id} className="mb-1">
+        <div className="px-3 pb-2">
+          <div className="group relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-steel" />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setQuery("");
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              placeholder="Filter agents"
+              aria-label="Filter agents"
+              spellCheck={false}
+              className="h-8 w-full rounded-lg border border-line bg-base/50 pl-8 pr-8 text-[12.5px] text-fg placeholder:text-steel transition-colors hover:border-line-strong focus:border-accent/50 focus:outline-none focus:ring-3 focus:ring-accent/10"
+            />
+            {query ? (
               <button
                 type="button"
-                onClick={() => toggle(g.id)}
-                aria-expanded={!isCollapsed}
-                className="group flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel transition-colors hover:text-muted"
+                aria-label="Clear filter"
+                onClick={() => setQuery("")}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-steel hover:text-fg"
               >
-                <ChevronRight
-                  className={cn("h-3 w-3 transition-transform duration-150", !isCollapsed && "rotate-90")}
-                />
-                <span className={cn(g.id === "needs" && "text-warn/90")}>{g.label}</span>
-                <span className="font-medium tabular text-steel/70">{g.agents.length}</span>
+                <X className="h-3 w-3" />
               </button>
-              <AnimatePresence initial={false}>
-                {!isCollapsed && (
-                  <motion.ul
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.12 }}
-                    className="space-y-px"
-                  >
-                    {g.agents.map((a) => {
-                      if (g.id !== "archived") index++;
-                      return (
-                        <AgentRow
-                          key={a.id}
-                          agent={a}
-                          account={accountMap.get(a.accountId)}
-                          selected={a.id === selected}
-                          now={now}
-                          hotkey={g.id !== "archived" && index <= 9 ? index : null}
-                        />
-                      );
-                    })}
-                  </motion.ul>
-                )}
-              </AnimatePresence>
-            </div>
-          );
-        })}
-        {searching && groups.every((g) => g.agents.length === 0) && (
-          <div className="px-4 py-10 text-center text-[12.5px] text-steel">No agents match “{query}”.</div>
-        )}
-        {!searching && agents.length === 0 && (
-          <div className="px-4 py-10 text-center">
-            <p className="text-[13px] font-medium">No agents yet</p>
-            <p className="mt-1 text-[12px] text-steel">Launch your first one to get started.</p>
-            <Button size="sm" variant="primary" className="mt-4" onClick={() => openNewAgent()}>
-              <Plus className="!h-3.5 !w-3.5" /> New agent
-            </Button>
+            ) : (
+              <Kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 opacity-70">/</Kbd>
+            )}
           </div>
-        )}
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+          {groups.map((g) => {
+            if (g.agents.length === 0) return null;
+            const isCollapsed = collapsed[g.id] && !searching;
+            return (
+              <div key={g.id} className="mb-1">
+                <button
+                  type="button"
+                  onClick={() => toggle(g.id)}
+                  aria-expanded={!isCollapsed}
+                  className="group flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel transition-colors hover:text-muted"
+                >
+                  <ChevronRight
+                    className={cn("h-3 w-3 transition-transform duration-150", !isCollapsed && "rotate-90")}
+                  />
+                  <span className={cn(g.id === "needs" && "text-warn/90")}>{g.label}</span>
+                  <span className="font-medium tabular text-steel/70">{g.agents.length}</span>
+                </button>
+                <AnimatePresence initial={false}>
+                  {!isCollapsed && (
+                    <motion.ul
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.12 }}
+                      className="space-y-px"
+                    >
+                      {g.agents.map((a) => {
+                        if (g.id !== "archived") index++;
+                        return (
+                          <AgentRow
+                            key={a.id}
+                            agent={a}
+                            account={accountMap.get(a.accountId)}
+                            selected={a.id === selected}
+                            now={now}
+                            hotkey={g.id !== "archived" && index <= 9 ? index : null}
+                            onNavigate={onNavigate}
+                          />
+                        );
+                      })}
+                    </motion.ul>
+                  )}
+                </AnimatePresence>
+              </div>
+            );
+          })}
+          {searching && groups.every((g) => g.agents.length === 0) && (
+            <div className="px-4 py-10 text-center text-[12.5px] text-steel">No agents match “{query}”.</div>
+          )}
+          {!searching && agents.length === 0 && (
+            <div className="px-4 py-10 text-center">
+              <p className="text-[13px] font-medium">No agents yet</p>
+              <p className="mt-1 text-[12px] text-steel">Launch your first one to get started.</p>
+              <Button size="sm" variant="primary" className="mt-4" onClick={() => openNewAgent()}>
+                <Plus className="!h-3.5 !w-3.5" /> New agent
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
     </aside>
   );
@@ -200,12 +242,14 @@ const AgentRow = memo(function AgentRow({
   selected,
   now,
   hotkey,
+  onNavigate,
 }: {
   agent: Agent;
   account: Account | undefined;
   selected: boolean;
   now: number;
   hotkey: number | null;
+  onNavigate?: () => void;
 }) {
   const openAgent = useUi((s) => s.openAgent);
   const setHandoffAgent = useUi((s) => s.setHandoffAgent);
@@ -233,9 +277,16 @@ const AgentRow = memo(function AgentRow({
             tabIndex={0}
             aria-current={selected ? "true" : undefined}
             aria-label={`${agent.title}, ${status.label}`}
-            onClick={() => !renaming && openAgent(agent.id)}
+            onClick={() => {
+              if (renaming) return;
+              openAgent(agent.id);
+              onNavigate?.();
+            }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !renaming) openAgent(agent.id);
+              if (e.key === "Enter" && !renaming) {
+                openAgent(agent.id);
+                onNavigate?.();
+              }
               if (e.key === "F2") setRenaming(true);
             }}
             className={cn(
@@ -303,9 +354,10 @@ const AgentRow = memo(function AgentRow({
                   </span>
                 </Tooltip>
               </div>
-              <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-steel">
+              <div className="mt-0.5 flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[11.5px] text-steel">
                 <StatusDot status={agent.status} size={6} />
                 <span
+                  className="shrink-0"
                   style={{ color: agent.status === "idle" || agent.status === "stopped" ? undefined : status.colorVar }}
                 >
                   {status.label}

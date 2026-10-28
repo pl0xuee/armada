@@ -5,6 +5,7 @@ import { InboxCard } from "@/components/inbox/InboxCard";
 import { InboxZero } from "@/components/inbox/InboxZero";
 import { PageHeader } from "@/components/PageHeader";
 import { Kbd } from "@/components/ui/kbd";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useNow } from "@/hooks/useNow";
 import { findOption, respondPermission } from "@/lib/actions";
 import { relativeTimeLong } from "@/lib/format";
@@ -130,7 +131,7 @@ export function InboxView() {
   const oldest = queue[0]?.item.ts;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="@container flex h-full flex-col">
       <PageHeader
         icon={<Inbox />}
         title="Inbox"
@@ -150,7 +151,7 @@ export function InboxView() {
         {queue.length === 0 ? (
           <InboxZero handled={handled} />
         ) : (
-          <div className="mx-auto max-w-3xl space-y-2 px-6 py-5">
+          <div className="mx-auto max-w-3xl space-y-2 px-3 py-4 @md:px-4 @2xl:px-6 @2xl:py-5">
             <AnimatePresence initial={false} mode="popLayout">
               {queue.map((p) => (
                 <motion.div
@@ -184,12 +185,35 @@ export function InboxView() {
       </div>
 
       {queue.length > 0 && (
-        <div className="texture flex h-10 shrink-0 items-center justify-center gap-5 border-t border-line bg-panel text-[11.5px] text-steel">
+        <div className="texture flex h-10 shrink-0 items-center justify-center gap-4 border-t border-line bg-panel px-3 text-[11.5px] text-steel @3xl:gap-5">
           <Hint keys={["J", "K"]} label="Move" />
           <Hint keys={["A"]} label="Allow" />
-          <Hint keys={["⇧", "A"]} label="Always allow" />
+          <span className="hidden @3xl:contents">
+            <Hint keys={["⇧", "A"]} label="Always allow" />
+          </span>
           <Hint keys={["D"]} label="Deny" />
-          <Hint keys={["↵"]} label="Open agent" />
+          <span className="hidden @3xl:contents">
+            <Hint keys={["↵"]} label="Open agent" />
+          </span>
+          <Tooltip
+            content={
+              <span className="flex flex-col gap-1 py-0.5">
+                <Hint keys={["J", "K"]} label="Move between requests" />
+                <Hint keys={["A"]} label="Allow once" />
+                <Hint keys={["⇧", "A"]} label="Always allow" />
+                <Hint keys={["D"]} label="Deny" />
+                <Hint keys={["↵"]} label="Open the agent" />
+              </span>
+            }
+          >
+            <button
+              type="button"
+              aria-label="All keyboard shortcuts"
+              className="flex h-6 w-6 items-center justify-center rounded-md border border-line-strong text-[11px] font-medium text-muted transition-colors hover:text-fg @3xl:hidden"
+            >
+              ?
+            </button>
+          </Tooltip>
         </div>
       )}
     </div>

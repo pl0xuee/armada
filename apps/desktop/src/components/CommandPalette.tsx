@@ -64,7 +64,7 @@ export function CommandPalette() {
         <D.Overlay className="anim-fade fixed inset-0 z-[70] bg-[var(--scrim)] backdrop-blur-[2px]" />
         <D.Content
           aria-describedby={undefined}
-          className="anim-pop fixed left-1/2 top-[12vh] z-[70] w-[min(640px,calc(100vw-32px))] -translate-x-1/2 overflow-hidden rounded-2xl border border-line-strong bg-card/95 shadow-[0_32px_100px_-12px_rgba(0,0,0,0.75)] backdrop-blur-xl edge-strong focus:outline-none"
+          className="anim-pop fixed left-1/2 top-[12vh] z-[70] w-[min(640px,calc(100vw-16px))] max-sm:top-2 -translate-x-1/2 overflow-hidden rounded-2xl border border-line-strong bg-card/95 shadow-[0_32px_100px_-12px_rgba(0,0,0,0.75)] backdrop-blur-xl edge-strong focus:outline-none"
         >
           <D.Title className="sr-only">Command palette</D.Title>
           {open && <Palette onClose={() => setOpen(false)} />}
@@ -123,7 +123,7 @@ function Palette({ onClose }: { onClose: () => void }) {
     <Command
       label="Command palette"
       loop
-      className="flex max-h-[min(560px,70vh)] flex-col"
+      className="flex max-h-[min(560px,70vh)] flex-col max-sm:max-h-[min(640px,calc(100dvh-16px))]"
       filter={(value, search, keywords) => {
         const hay = `${value} ${(keywords ?? []).join(" ")}`.toLowerCase();
         const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
@@ -201,7 +201,9 @@ function Palette({ onClose }: { onClose: () => void }) {
                 {a.archived && <span className="ml-2 text-[11px] text-steel">archived</span>}
               </span>
               <StatusDot status={a.status} size={6} />
-              <span className="w-24 truncate text-right text-[11.5px] text-steel">{basename(a.projectPath)}</span>
+              <span className="w-24 truncate text-right text-[11.5px] text-steel max-[480px]:hidden">
+                {basename(a.projectPath)}
+              </span>
               {i < 9 && !a.archived && (
                 <span className="hidden gap-0.5 group-data-[selected=true]:flex">
                   <Kbd>{modKey}</Kbd>
@@ -376,7 +378,7 @@ function Palette({ onClose }: { onClose: () => void }) {
           </Kbd>
           select
         </span>
-        <span className="ml-auto">Type 2+ characters to search history</span>
+        <span className="ml-auto max-[520px]:hidden">Type 2+ characters to search history</span>
       </div>
     </Command>
   );

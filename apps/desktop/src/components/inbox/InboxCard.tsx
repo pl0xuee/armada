@@ -66,7 +66,7 @@ export const InboxCard = forwardRef<
       tabIndex={-1}
       onClick={onSelect}
       className={cn(
-        "relative overflow-hidden rounded-xl border bg-card transition-[border-color,background-color] duration-150",
+        "@container/card relative overflow-hidden rounded-xl border bg-card transition-[border-color,background-color] duration-150",
         selected
           ? "border-warn/45 shadow-[0_0_0_1px_color-mix(in_srgb,var(--warn)_25%,transparent),0_14px_40px_-16px_color-mix(in_srgb,var(--warn)_45%,transparent)] edge-strong"
           : "border-line hover:border-line-strong edge",
@@ -76,7 +76,7 @@ export const InboxCard = forwardRef<
         <span className="absolute inset-y-0 left-0 w-[3px] bg-warn shadow-[0_0_10px_var(--warn)]" aria-hidden />
       )}
 
-      <div className="flex items-center gap-3 px-4 py-3">
+      <div className="flex items-center gap-3 px-3.5 py-3 @md/card:px-4">
         <span
           className={cn(
             "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border [&_svg]:h-4 [&_svg]:w-4",
@@ -90,11 +90,13 @@ export const InboxCard = forwardRef<
           <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11.5px] text-steel">
             <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="xs" />
             <span className="truncate text-muted">{agent.title}</span>
-            <span className="text-line-strong">·</span>
-            {account && <AccountAvatar account={account} size={12} showProvider={false} />}
-            <span className="truncate">{account?.name ?? identity.short}</span>
-            <span className="text-line-strong">·</span>
-            <span className="truncate">{basename(agent.projectPath)}</span>
+            <span className="hidden text-line-strong @md/card:inline">·</span>
+            <span className="hidden min-w-0 items-center gap-1.5 @md/card:flex">
+              {account && <AccountAvatar account={account} size={12} showProvider={false} />}
+              <span className="truncate">{account?.name ?? identity.short}</span>
+            </span>
+            <span className="hidden text-line-strong @lg/card:inline">·</span>
+            <span className="hidden truncate @lg/card:inline">{basename(agent.projectPath)}</span>
           </div>
         </div>
         <span
@@ -110,16 +112,16 @@ export const InboxCard = forwardRef<
       </div>
 
       {selected && (
-        <div className="space-y-3 px-4 pb-4" onClick={(e) => e.stopPropagation()}>
+        <div className="space-y-3 px-3.5 pb-3.5 @md/card:px-4 @md/card:pb-4" onClick={(e) => e.stopPropagation()}>
           {item.command && (
             <div className="overflow-hidden rounded-lg border border-line bg-code">
               <div className="flex h-7 items-center gap-1.5 border-b border-line bg-panel/60 px-3 text-[10.5px] uppercase tracking-wider text-steel">
                 <SquareTerminal className="h-3 w-3" /> Command
-                <span className="ml-auto font-mono normal-case tracking-normal">
+                <span className="ml-auto hidden truncate font-mono normal-case tracking-normal @md/card:inline">
                   {agent.cwd.split(/[\\/]/).slice(-2).join("/")}
                 </span>
               </div>
-              <pre className="selectable overflow-x-auto px-3 py-2.5 font-mono text-[12.5px] leading-relaxed text-fg">
+              <pre className="selectable whitespace-pre-wrap px-3 py-2.5 font-mono text-[12.5px] leading-relaxed text-fg [overflow-wrap:anywhere]">
                 <span className="select-none text-ok">$ </span>
                 {item.command}
               </pre>
@@ -135,8 +137,9 @@ export const InboxCard = forwardRef<
                   {o.name}
                   {sc && (
                     <Kbd
+                      aria-hidden
                       className={cn(
-                        "ml-0.5 h-4 min-w-4 border-transparent bg-black/15 text-[10px] shadow-none",
+                        "ml-0.5 hidden h-4 min-w-4 border-transparent bg-black/15 text-[10px] shadow-none @lg/card:inline-flex",
                         o.kind === "allow_once" ? "text-accent-fg" : "text-current",
                       )}
                     >
@@ -148,7 +151,7 @@ export const InboxCard = forwardRef<
             })}
             <Button size="sm" variant="ghost" className="ml-auto" onClick={onOpen}>
               Open agent <ArrowUpRight />
-              <Kbd className="ml-0.5 h-4 min-w-4 text-[10px]">↵</Kbd>
+              <Kbd className="ml-0.5 hidden h-4 min-w-4 text-[10px] @lg/card:inline-flex">↵</Kbd>
             </Button>
           </div>
         </div>

@@ -18,7 +18,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import { toast } from "sonner";
 import { AppMark } from "@/components/AppMark";
 import { GithubGlyph } from "@/components/settings/GithubGlyph";
@@ -84,42 +84,11 @@ export function SettingsView() {
   if (!settings) return null;
 
   return (
-    <div className="flex h-full">
-      <nav
-        aria-label="Settings sections"
-        className="flex w-[208px] shrink-0 flex-col gap-0.5 border-r border-line bg-panel/50 px-2.5 pt-7"
-      >
-        <h1 className="mb-3 px-2.5 text-[20px] font-semibold tracking-[-0.02em]">Settings</h1>
-        {SECTIONS.map((s) => {
-          const active = s.id === section;
-          const Icon = s.icon;
-          return (
-            <button
-              key={s.id}
-              type="button"
-              aria-current={active ? "page" : undefined}
-              onClick={() => openSettings(s.id)}
-              className={cn(
-                "relative flex h-8 items-center gap-2.5 rounded-lg px-2.5 text-[13px] transition-colors",
-                active ? "text-fg" : "text-muted hover:bg-raised/60 hover:text-fg",
-              )}
-            >
-              {active && (
-                <motion.span
-                  layoutId="settings-nav"
-                  transition={{ type: "spring", stiffness: 520, damping: 40 }}
-                  className="absolute inset-0 rounded-lg border border-line-strong bg-raised edge"
-                />
-              )}
-              <Icon className={cn("relative h-4 w-4", active ? "text-accent" : "text-steel")} />
-              <span className="relative">{s.label}</span>
-            </button>
-          );
-        })}
-      </nav>
+    <div className="flex h-full max-[860px]:flex-col">
+      <SettingsNav section={section} onSelect={openSettings} />
 
-      <div className="min-w-0 flex-1 overflow-y-auto">
-        <div key={section} className="view-enter mx-auto max-w-[720px] px-8 pb-16 pt-8">
+      <div className="@container min-h-0 min-w-0 flex-1 overflow-y-auto">
+        <div key={section} className="view-enter mx-auto max-w-[720px] px-4 pb-16 pt-6 @md:px-6 @2xl:px-8 @2xl:pt-8">
           {section === "appearance" && <Appearance settings={settings} />}
           {section === "sounds" && <Sounds settings={settings} />}
           {section === "notifications" && <Notifications settings={settings} />}
@@ -136,13 +105,81 @@ export function SettingsView() {
   );
 }
 
+/**
+ * Section navigation: a sidebar on wide windows, a horizontally scrolling pill
+ * strip below 860px (tiling window managers routinely give us narrow tiles).
+ */
+function SettingsNav({ section, onSelect }: { section: SettingsSection; onSelect: (s: SettingsSection) => void }) {
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  // Keep the active pill in view on the narrow strip (scroll only the strip itself).
+  useEffect(() => {
+    const strip = stripRef.current;
+    const el = strip?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!strip || !el || strip.scrollWidth <= strip.clientWidth) return;
+    const target = el.offsetLeft - (strip.clientWidth - el.offsetWidth) / 2;
+    strip.scrollTo({ left: Math.max(0, target), behavior: "smooth" });
+  }, [section]);
+
+  return (
+    <nav
+      aria-label="Settings sections"
+      className={cn(
+        "flex w-[208px] shrink-0 flex-col border-r border-line bg-panel/50 px-2.5 pt-7",
+        "max-[860px]:w-full max-[860px]:border-b max-[860px]:border-r-0 max-[860px]:px-0 max-[860px]:pt-4",
+      )}
+    >
+      <h1 className="mb-3 px-2.5 text-[20px] font-semibold tracking-[-0.02em] max-[860px]:mb-2.5 max-[860px]:px-4 max-[860px]:text-[18px]">
+        Settings
+      </h1>
+      <div
+        ref={stripRef}
+        className={cn(
+          "flex flex-col gap-0.5",
+          "max-[860px]:flex-row max-[860px]:gap-1 max-[860px]:overflow-x-auto max-[860px]:px-3 max-[860px]:pb-2.5",
+          "max-[860px]:[scrollbar-width:none] max-[860px]:[&::-webkit-scrollbar]:hidden",
+          "max-[860px]:[mask-image:linear-gradient(to_right,transparent,black_14px,black_calc(100%-14px),transparent)]",
+        )}
+      >
+        {SECTIONS.map((s) => {
+          const active = s.id === section;
+          const Icon = s.icon;
+          return (
+            <button
+              key={s.id}
+              type="button"
+              aria-current={active ? "page" : undefined}
+              onClick={() => onSelect(s.id)}
+              className={cn(
+                "relative flex h-8 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 text-[13px] transition-colors",
+                "max-[860px]:h-8 max-[860px]:gap-2 max-[860px]:rounded-full max-[860px]:px-3",
+                active ? "text-fg" : "text-muted hover:bg-raised/60 hover:text-fg",
+              )}
+            >
+              {active && (
+                <motion.span
+                  layoutId="settings-nav"
+                  transition={{ type: "spring", stiffness: 520, damping: 40 }}
+                  className="absolute inset-0 rounded-[inherit] border border-line-strong bg-raised edge"
+                />
+              )}
+              <Icon className={cn("relative h-4 w-4", active ? "text-accent" : "text-steel")} />
+              <span className="relative">{s.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
 // ---------------------------------------------------------------- Appearance
 
 function Appearance({ settings }: { settings: Settings }) {
   return (
     <>
       <SectionHeader title="Appearance" description="Pick the finish for your command deck." />
-      <div role="radiogroup" aria-label="Theme" className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div role="radiogroup" aria-label="Theme" className="grid grid-cols-1 gap-3 @md:grid-cols-3">
         {THEMES.map((t) => (
           <ThemeCard
             key={t.id}

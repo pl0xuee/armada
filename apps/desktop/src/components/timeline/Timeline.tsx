@@ -75,9 +75,12 @@ export function Timeline({
   const lastId = items?.[items.length - 1]?.id;
 
   return (
-    <div className="relative min-h-0 flex-1">
+    <div className="@container relative min-h-0 flex-1">
       <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto" aria-live="polite" aria-busy={live}>
-        <div ref={contentRef} className="mx-auto flex w-full max-w-[860px] flex-col gap-3 px-6 pb-6 pt-5">
+        <div
+          ref={contentRef}
+          className="mx-auto flex w-full max-w-[860px] flex-col gap-3 px-3 pb-6 pt-4 @lg:px-6 @lg:pt-5 @[1280px]:max-w-[1000px]"
+        >
           {loading && !items ? (
             <TimelineSkeleton />
           ) : (
