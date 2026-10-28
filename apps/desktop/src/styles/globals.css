@@ -175,6 +175,7 @@
   --animate-shimmer: shimmer 1.8s linear infinite;
   --animate-spin-slow: spin 1.4s linear infinite;
   --animate-breathe: breathe 2.4s ease-in-out infinite;
+  --animate-think-in: think-in 0.35s ease-out;
 }
 
 @keyframes pulse-ring {
@@ -205,6 +206,22 @@
   }
   50% {
     opacity: 1;
+  }
+}
+
+@keyframes think-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+@keyframes think-sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
   }
 }
 
@@ -345,6 +362,16 @@
 
   .tabular {
     font-variant-numeric: tabular-nums;
+  }
+
+  .think-text {
+    color: transparent;
+    background: linear-gradient(90deg, var(--steel) 40%, var(--text-1) 50%, var(--steel) 60%) 100% 0 / 250% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    animation:
+      var(--animate-think-in),
+      think-sweep 2.4s linear infinite;
   }
 
   .shimmer-bar {

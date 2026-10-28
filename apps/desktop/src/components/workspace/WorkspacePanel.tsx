@@ -7,6 +7,7 @@ import type { Agent } from "@/lib/types";
 import { cn, modKey } from "@/lib/utils";
 import { agentWs, useWorkspace } from "@/store/workspace";
 import { useUi, WORKSPACE_DEFAULT_HEIGHT, WORKSPACE_MIN_HEIGHT } from "@/store/ui";
+import { hasNewServer, previewOf, usePreview, usePreviewDetection } from "@/store/preview";
 import { WORKSPACE_TABS } from "./tabs";
 
 /** Vertical space the conversation and composer keep; the panel never takes it. */
@@ -28,6 +29,8 @@ export function WorkspacePanel({ agent, maxHeight }: { agent: Agent; maxHeight: 
   const setOpen = useUi((s) => s.setWorkspaceOpen);
   const tabId = useWorkspace((s) => agentWs(s, agent.id).tab);
   const setTab = useWorkspace((s) => s.setTab);
+  usePreviewDetection(agent.id);
+  const newServer = usePreview((s) => hasNewServer(previewOf(s, agent.id)));
   const tab = WORKSPACE_TABS.find((t) => t.id === tabId) ?? WORKSPACE_TABS[0];
 
   const [drag, setDrag] = useState<number | null>(null);
@@ -94,6 +97,9 @@ export function WorkspacePanel({ agent, maxHeight }: { agent: Agent; maxHeight: 
             >
               <t.icon />
               {t.label}
+              {t.id === "preview" && newServer && t.id !== tab.id && (
+                <span className="h-1.5 w-1.5 rounded-full bg-accent" role="img" aria-label="New server detected" />
+              )}
             </button>
           ))}
         </div>

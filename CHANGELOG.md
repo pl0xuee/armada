@@ -16,6 +16,12 @@ docs/RELEASING.md).
 - **Workspace panel.** Real terminals in each agent's folder, one-click project scripts (npm,
   pnpm, yarn, bun, cargo, make, just, pytest, go), and "Send to agent" to paste output into the
   message box. Toggle with Ctrl/Cmd+`.
+- **Live preview.** When an agent (or one of your terminals) starts a dev server, it appears in the
+  workspace panel's Preview tab, next to the conversation. Switch device widths, reload, or open it
+  in your browser. Only servers on your own computer are shown.
+- **You can see when the agent is thinking.** From the moment you send a message until the agent
+  replies, an animated indicator with elapsed time shows it's working, including pauses between
+  steps.
 - **Pull request and CI status.** Each agent shows its PR, check results and review state. "Fix
   CI" sends the failing logs to the agent; "Address comments" sends reviewers' feedback. You see
   and can edit the message first.
