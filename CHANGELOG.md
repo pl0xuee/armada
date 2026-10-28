@@ -92,7 +92,7 @@ by side, across several accounts.
 - Multiple accounts per provider, API keys in the OS keychain, and switching accounts when one
   hits its usage limit.
 - MCP servers for every provider, schedules, templates, slash commands, image attachments and
-  @file search.
+  `@file` search.
 - One-click setup that installs Node.js and the agent CLIs without admin rights.
 - Tray, sounds, notifications you can approve from, quiet hours, ntfy push, a global hotkey and
   autostart.
