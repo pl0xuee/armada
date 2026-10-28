@@ -140,6 +140,7 @@ pub fn run() {
             commands::terminal_kill,
             workspace::workspace_terminal_open,
             workspace::workspace_scripts,
+            workspace::probe_ports,
             commands::update_settings,
             commands::set_interface_zoom,
             commands::preview_sound,

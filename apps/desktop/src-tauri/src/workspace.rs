@@ -99,3 +99,46 @@ pub async fn workspace_scripts(
         .await
         .map_err(|e| e.to_string())
 }
+
+/// Which of `ports` accept a TCP connection on loopback right now (a quick connect with a
+/// short timeout, IPv4 then IPv6). Backs the Preview tab: only servers that are really up
+/// are offered. At most 32 ports are probed per call.
+#[tauri::command]
+pub async fn probe_ports(ports: Vec<u16>) -> Vec<u16> {
+    tauri::async_runtime::spawn_blocking(move || {
+        ports
+            .into_iter()
+            .take(32)
+            .filter(|&p| p != 0 && port_is_listening(p))
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+fn port_is_listening(port: u16) -> bool {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
+    use std::time::Duration;
+    [
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(Ipv6Addr::LOCALHOST),
+    ]
+    .into_iter()
+    .any(|ip| {
+        TcpStream::connect_timeout(&SocketAddr::new(ip, port), Duration::from_millis(250)).is_ok()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::port_is_listening;
+
+    #[test]
+    fn probe_sees_a_listener_and_a_closed_port() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        assert!(port_is_listening(port));
+        drop(l);
+        assert!(!port_is_listening(port));
+    }
+}

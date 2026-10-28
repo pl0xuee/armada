@@ -1641,6 +1641,10 @@ export const mockApi: ArmadaApi = {
     return delay(t.id, 60);
   },
 
+  async probePorts(ports) {
+    return delay(ports, 40);
+  },
+
   async workspaceScripts() {
     return delay(clone(MOCK_SCRIPTS), 80);
   },

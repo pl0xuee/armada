@@ -12,6 +12,8 @@ import { AgentMessage, NoticeBanner, PermissionCard, PlanCard, ThoughtBlock, Too
 import { ActivityGroup } from "./ActivityGroup";
 import { groupActivity } from "./activityGroups";
 import { SubagentCard } from "./SubagentCard";
+import { ThinkingIndicator } from "./ThinkingIndicator";
+import { shouldShowThinking, turnStart } from "./thinking";
 import { TurnSummaryCard, TurnSummaryLine } from "./TurnSummaryCard";
 import { latestPending, usePermissionKeys } from "./usePermissionKeys";
 
@@ -227,6 +229,24 @@ export function Timeline({
 
   const virtualRows = virtualizer.getVirtualItems();
 
+  // "Thinking" indicator: busy agent, but nothing at the end of the timeline is visibly streaming.
+  const lastRowItem = rows.length ? list[rows[rows.length - 1]] : undefined;
+  const messageSettled = useQuietFor(
+    lastRowItem?.kind === "agent_message" ? `${lastRowItem.id}:${lastRowItem.text.length}` : null,
+    MESSAGE_SETTLE_MS,
+  );
+  const showThinking =
+    !(loading && !items) &&
+    shouldShowThinking(agent.status, lastRowItem, !!lastRowItem && groupItems.has(lastRowItem.id), messageSettled);
+  const fallbackStart = useRef(Date.now());
+  useLayoutEffect(() => {
+    if (!showThinking) fallbackStart.current = Date.now();
+  }, [showThinking]);
+  // Keep it in view when it appears while following the stream.
+  useLayoutEffect(() => {
+    if (showThinking && stick.current) scrollToBottom();
+  }, [showThinking, scrollToBottom]);
+
   return (
     <div className="@container relative min-h-0 flex-1">
       <LiveAnnouncer agent={agent} items={items} />
@@ -302,6 +322,7 @@ export function Timeline({
               })}
             </div>
           )}
+          {showThinking && <ThinkingIndicator agent={agent} since={turnStart(list, fallbackStart.current)} />}
           {footer}
         </div>
       </div>
@@ -329,6 +350,20 @@ export function Timeline({
       </AnimatePresence>
     </div>
   );
+}
+
+/** An agent message that stopped growing this long ago is done; the model is on its next step. */
+const MESSAGE_SETTLE_MS = 1500;
+
+/** True once `key` (null = not watching) has stayed the same for `ms`. */
+function useQuietFor(key: string | null, ms: number): boolean {
+  const [quietKey, setQuietKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (key === null) return;
+    const t = setTimeout(() => setQuietKey(key), ms);
+    return () => clearTimeout(t);
+  }, [key, ms]);
+  return key !== null && quietKey === key;
 }
 
 /** Same object while the fields timeline rows read are unchanged. */

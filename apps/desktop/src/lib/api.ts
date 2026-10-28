@@ -183,6 +183,8 @@ const tauriApi = {
   workspaceTerminalOpen: (agentId: string, scriptId?: string) =>
     invoke<string>("workspace_terminal_open", { agentId, scriptId: scriptId ?? null }),
   workspaceScripts: (agentId: string) => invoke<ProjectScript[]>("workspace_scripts", { agentId }),
+  /** Subset of `ports` accepting TCP connections on loopback (Preview tab). */
+  probePorts: (ports: number[]) => invoke<number[]>("probe_ports", { ports }),
 
   // settings & attention
   updateSettings: (settings: Settings) => invoke<Settings>("update_settings", { settings }),
