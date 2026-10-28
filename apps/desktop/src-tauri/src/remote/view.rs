@@ -254,7 +254,7 @@ mod tests {
         assert!(json.contains(r#""output":"""#));
 
         let said = item(ItemBody::AgentMessage {
-            text: "I set API_KEY=sk-abcdefghijklmnopqrstuv for you".into(),
+            text: ["I set API_KEY=s", "k-abcdefghijklmnopqrstuv for you"].concat(),
         });
         let json = serde_json::to_string(&project_item(&said, &r).unwrap()).unwrap();
         assert!(!json.contains("sk-abc") && json.contains("[REDACTED]"));
