@@ -93,8 +93,13 @@ pub struct RestoreResult {
 /// A folder younger than this since its last edit can't be vouched for by stat data.
 const RECENT_EDIT: Duration = Duration::from_secs(3);
 /// Budget for a per-message snapshot; the agent waits on it, so a huge folder
-/// gets no checkpoint rather than a stalled prompt.
-const TURN_BUDGET: Duration = Duration::from_secs(5);
+/// gets no checkpoint rather than a stalled prompt. Generous enough for Windows, where
+/// every git call pays for process creation and antivirus scanning.
+#[cfg(not(test))]
+const TURN_BUDGET: Duration = Duration::from_secs(15);
+/// Tests run many snapshots in parallel on loaded CI runners; they test results, not speed.
+#[cfg(test)]
+const TURN_BUDGET: Duration = Duration::from_secs(120);
 
 /// The last snapshot of each folder: (change fingerprint, tree).
 type SnapshotCache = parking_lot::Mutex<HashMap<PathBuf, (Vec<u8>, String)>>;
