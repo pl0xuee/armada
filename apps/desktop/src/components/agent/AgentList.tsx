@@ -28,8 +28,11 @@ import { useIdentity } from "@/hooks/useIdentity";
 import { toggleAgentList } from "@/hooks/useAgentListLayout";
 import { useNow } from "@/hooks/useNow";
 import { useApp } from "@/store/app";
+import { usePr } from "@/store/pr";
+import { ciSummary, listIndicator } from "@/lib/pr";
 import { useUi } from "@/store/ui";
 import { ProviderGlyph } from "../ProviderGlyph";
+import { CiIcon } from "./PrChip";
 import { StatusDot } from "../StatusDot";
 import { Button } from "../ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "../ui/menu";
@@ -243,6 +246,23 @@ export function AgentList({
   );
 }
 
+/** "#12" + CI glyph for agents with an open PR. Nothing otherwise, so most rows stay clean. */
+function PrIndicator({ agentId }: { agentId: string }) {
+  const pr = usePr((s) => listIndicator(s.byAgent[agentId]));
+  if (!pr) return null;
+  return (
+    <Tooltip content={`PR #${pr.number} · ${ciSummary(pr)}`} side="right">
+      <span
+        className="flex shrink-0 items-center gap-0.5 text-[11px] tabular"
+        aria-label={`Pull request ${pr.number}, ${ciSummary(pr)}`}
+      >
+        #{pr.number}
+        <CiIcon pr={pr} />
+      </span>
+    </Tooltip>
+  );
+}
+
 const AgentRow = memo(function AgentRow({
   agent,
   account,
@@ -419,6 +439,7 @@ const AgentRow = memo(function AgentRow({
                     </span>
                   </Tooltip>
                 )}
+                <PrIndicator agentId={agent.id} />
                 <span className="text-line-strong">·</span>
                 <span className="truncate">
                   {agent.provider === "custom" ? identity.name : (account?.name ?? "—")} · {basename(agent.projectPath)}

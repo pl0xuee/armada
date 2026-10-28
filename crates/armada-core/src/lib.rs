@@ -2,10 +2,13 @@
 //! accounts and local storage. UI-agnostic; the Tauri shell wires it to the window.
 
 pub mod accounts;
+pub mod checkpoints;
 pub mod childenv;
 pub mod model;
 pub mod providers;
+pub mod scripts;
 pub mod toolchain;
+pub mod voice;
 
 mod acp;
 mod codex;

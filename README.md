@@ -58,7 +58,7 @@ See [`docs/PLAN.md`](docs/PLAN.md) for the full architecture and roadmap.
 
 ## Development
 
-Requirements: Rust (stable), Node.js 20+, and on Linux the Tauri system libraries (`webkit2gtk-4.1`, `libayatana-appindicator`, `librsvg`, `alsa-lib`).
+Requirements: Rust (stable), Node.js 20+, and on Linux the Tauri system libraries (`webkit2gtk-4.1`, `libayatana-appindicator`, `librsvg`, `alsa-lib`). Voice dictation builds whisper.cpp, so you also need `cmake` and a C++ compiler (preinstalled on GitHub runners).
 
 ```bash
 # The phone companion is embedded into the desktop binary; build it first

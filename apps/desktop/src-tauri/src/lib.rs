@@ -2,11 +2,14 @@
 //! OS notifications, sounds, PTY terminals and git review commands.
 
 mod attention;
+mod clipboard;
 mod commands;
+mod dictation;
 mod events;
 mod git_review;
 mod hotkey;
 mod notify;
+mod pr_status;
 mod remote;
 mod sound;
 mod state;
@@ -14,6 +17,7 @@ mod terminal;
 mod tray;
 mod updater;
 mod window;
+mod workspace;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -77,6 +81,15 @@ pub fn run() {
         .on_window_event(window::on_window_event)
         .invoke_handler(tauri::generate_handler![
             commands::get_state,
+            dictation::voice_status,
+            dictation::voice_list_devices,
+            dictation::voice_download_model,
+            dictation::voice_cancel_download,
+            dictation::voice_delete_model,
+            dictation::voice_start,
+            dictation::voice_stop,
+            dictation::voice_cancel,
+            clipboard::read_clipboard_images,
             commands::list_items,
             commands::search,
             commands::create_agent,
@@ -97,6 +110,9 @@ pub fn run() {
             commands::handoff_agent,
             commands::set_focus,
             commands::get_diff,
+            commands::list_checkpoints,
+            commands::preview_checkpoint,
+            commands::restore_checkpoint,
             commands::commit_agent,
             commands::merge_agent,
             commands::ship_agent,
@@ -107,6 +123,9 @@ pub fn run() {
             commands::discover_projects,
             commands::is_git_repo,
             commands::create_pr,
+            commands::pr_status,
+            commands::pr_fix_ci_prompt,
+            commands::pr_review_prompt,
             commands::discard_worktree,
             commands::create_account,
             commands::update_account,
@@ -119,7 +138,10 @@ pub fn run() {
             commands::terminal_write,
             commands::terminal_resize,
             commands::terminal_kill,
+            workspace::workspace_terminal_open,
+            workspace::workspace_scripts,
             commands::update_settings,
+            commands::set_interface_zoom,
             commands::preview_sound,
             commands::test_notification,
             commands::open_path,
@@ -180,6 +202,8 @@ fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()>
     app.manage(core.clone());
     app.manage(Shell::new(data_dir.clone()));
     app.manage(Terminals::default());
+    app.manage(dictation::Dictation::default());
+    app.manage(pr_status::PrCache::default());
     app.manage(updater::UpdateState::default());
     let remote = remote::Remote::new(
         core.clone(),

@@ -21,6 +21,7 @@ import {
   Pencil,
   Play,
   Square,
+  SquareTerminal,
   Trash2,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -38,7 +39,7 @@ import { agentDerived } from "./derived";
 import { canCompact, compactContext, contextRatio } from "./compact";
 import { api } from "@/lib/api";
 import { CUSTOM_ACCOUNT_ID, PROVIDERS } from "@/lib/providers";
-import type { Agent, CustomAgent, Provider } from "@/lib/types";
+import type { Account, Agent, CustomAgent, Provider } from "@/lib/types";
 import { basename, cn, modKey, prettyPath } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useAgentListLayout } from "@/hooks/useAgentListLayout";
@@ -62,6 +63,10 @@ import {
   DropdownMenuTrigger,
 } from "../ui/menu";
 import { Tooltip } from "../ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { PrChip } from "./PrChip";
+import { UsageMeters, pctTextTone, windowLabel } from "../UsageMeter";
+import { relativeTimeLong } from "@/lib/format";
 
 const EMPTY_CUSTOM: CustomAgent[] = [];
 
@@ -76,6 +81,7 @@ export function AgentHeader({ agent }: { agent: Agent }) {
   const inspectorPref = useUi((s) => s.inspectorOpen);
   const overlay = useUi((s) => s.inspectorOverlay);
   const inspectorOpen = wide ? inspectorPref : overlay;
+  const workspaceOpen = useUi((s) => s.workspaceOpen);
   const toggleInspector = () =>
     wide ? useUi.getState().setInspectorOpen(!inspectorPref) : useUi.getState().setInspectorOverlay(!overlay);
   const setReviewAgent = useUi((s) => s.setReviewAgent);
@@ -214,6 +220,17 @@ export function AgentHeader({ agent }: { agent: Agent }) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <Tooltip content={workspaceOpen ? "Hide workspace panel" : "Show workspace panel"} shortcut={[modKey, "`"]}>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Toggle workspace panel"
+              aria-pressed={workspaceOpen}
+              onClick={() => useUi.getState().setWorkspaceOpen(!workspaceOpen)}
+            >
+              <SquareTerminal />
+            </Button>
+          </Tooltip>
           <Tooltip content={inspectorOpen ? "Hide inspector" : "Show inspector"}>
             <Button
               size="icon-sm"
@@ -272,6 +289,7 @@ export function AgentHeader({ agent }: { agent: Agent }) {
             </Chip>
           )
         )}
+        {agent.provider !== "custom" && account && <UsageChip account={account} compact={tier === "compact"} />}
         <Tooltip content={prettyPath(agent.projectPath)}>
           <Chip>
             <FolderOpen className="h-3 w-3 text-steel" />
@@ -287,6 +305,7 @@ export function AgentHeader({ agent }: { agent: Agent }) {
             </Chip>
           </Tooltip>
         )}
+        <PrChip agent={agent} />
       </div>
       {tail && (
         <div
@@ -353,6 +372,50 @@ function ReviewPill({
           ))}
       </Button>
     </Tooltip>
+  );
+}
+
+function UsageChip({ account, compact }: { account: Account; compact: boolean }) {
+  const usage = account.usage;
+  const rawPlan = usage?.plan ?? null;
+  const plan = account.status?.label ?? (rawPlan ? rawPlan.charAt(0).toUpperCase() + rawPlan.slice(1) : null);
+  const windows = [usage?.primary, usage?.secondary].filter((w): w is NonNullable<typeof w> => !!w);
+  if (!plan && windows.length === 0) return null;
+  const short = (w: (typeof windows)[number]) => (w.windowMins === 300 ? "5h" : windowLabel(w).replace(" window", ""));
+  const shortLabel = (w: (typeof windows)[number]) => (w.windowMins === 10080 ? "Week" : short(w));
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Plan and usage limits${plan ? `, ${plan}` : ""}`}
+          className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border border-line bg-card/60 px-2 text-[11.5px] transition-colors hover:bg-raised/60 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25"
+        >
+          <Gauge className="h-3 w-3 shrink-0 text-steel" />
+          {!compact && plan && <span className="truncate text-fg/90">{plan}</span>}
+          {windows.map((w) => {
+            const pct = Math.max(0, Math.min(100, Math.round(w.usedPercent)));
+            return (
+              <span key={w.windowMins ?? "w"} className="tabular text-muted">
+                {!compact && <>{shortLabel(w)} </>}
+                <span className={cn("font-medium", pctTextTone(pct))}>{pct}%</span>
+              </span>
+            );
+          })}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-64">
+        <div className="mb-2 text-[12px] font-medium text-fg">{plan ?? "Usage limits"}</div>
+        {windows.length > 0 ? (
+          <UsageMeters usage={usage} compact />
+        ) : (
+          <div className="text-[11.5px] text-steel">Limits appear after the first reply.</div>
+        )}
+        {usage && windows.length > 0 && (
+          <div className="mt-2 text-[10.5px] text-steel">Updated {relativeTimeLong(usage.updatedAt)}</div>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 

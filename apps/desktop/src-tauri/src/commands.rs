@@ -16,6 +16,7 @@ use tracing::{info, warn};
 
 use crate::attention::Attention;
 use crate::git_review::{self, AgentDiff, CommitSummary};
+use crate::pr_status::{self, PrCache, PrStatus};
 use crate::remote::{Remote, RemoteStatus, ShareLink};
 use crate::state::Shell;
 use crate::terminal::{SpawnSpec, Terminals};
@@ -280,6 +281,41 @@ pub async fn get_diff(core: State<'_, Core>, agent_id: String) -> CmdResult<Agen
     git_review::get_diff(&agent).await.map_err(err)
 }
 
+// ---- checkpoints -------------------------------------------------------------
+
+#[tauri::command]
+pub async fn list_checkpoints(
+    core: State<'_, Core>,
+    agent_id: String,
+) -> CmdResult<armada_core::checkpoints::CheckpointList> {
+    core.list_checkpoints(&agent_id).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn preview_checkpoint(
+    core: State<'_, Core>,
+    agent_id: String,
+    checkpoint_id: String,
+) -> CmdResult<armada_core::checkpoints::RestorePreview> {
+    core.preview_checkpoint(&agent_id, &checkpoint_id)
+        .await
+        .map_err(err)
+}
+
+/// Restores the agent's files to a checkpoint. Also used to undo a restore (restore
+/// the `safety_id` it returned).
+#[tauri::command]
+pub async fn restore_checkpoint(
+    core: State<'_, Core>,
+    agent_id: String,
+    checkpoint_id: String,
+) -> CmdResult<armada_core::checkpoints::RestoreResult> {
+    let (_guard, _agent) = lock_idle_agent(&core, &agent_id, "restoring its files").map_err(err)?;
+    core.restore_checkpoint(&agent_id, &checkpoint_id)
+        .await
+        .map_err(err)
+}
+
 /// Refuses to change the agent's files or branch while its turn is running: it may be
 /// writing files at that very moment (or resume as soon as an approval is answered).
 fn ensure_not_working(agent: &Agent, doing: &str) -> anyhow::Result<()> {
@@ -456,6 +492,45 @@ pub async fn create_pr(
 ) -> CmdResult<String> {
     let agent = core.agent(&agent_id).map_err(err)?;
     git_review::create_pr(&agent, &title, &body)
+        .await
+        .map_err(err)
+}
+
+/// PR + CI status for the agent's branch. Quiet by design: problems come back as
+/// `state: "unknown"`, not as errors. Cached per agent (see `pr_status::PrCache`).
+#[tauri::command]
+pub async fn pr_status(
+    core: State<'_, Core>,
+    cache: State<'_, PrCache>,
+    agent_id: String,
+    force: Option<bool>,
+) -> CmdResult<PrStatus> {
+    let agent = core.agent(&agent_id).map_err(err)?;
+    Ok(cache.status(&agent, force.unwrap_or(false)).await)
+}
+
+/// The editable "Fix CI" prompt (failing checks + trimmed logs).
+#[tauri::command]
+pub async fn pr_fix_ci_prompt(
+    core: State<'_, Core>,
+    cache: State<'_, PrCache>,
+    agent_id: String,
+) -> CmdResult<String> {
+    let agent = core.agent(&agent_id).map_err(err)?;
+    pr_status::build_fix_ci_prompt(&cache, &agent)
+        .await
+        .map_err(err)
+}
+
+/// The editable "Address review comments" prompt.
+#[tauri::command]
+pub async fn pr_review_prompt(
+    core: State<'_, Core>,
+    cache: State<'_, PrCache>,
+    agent_id: String,
+) -> CmdResult<String> {
+    let agent = core.agent(&agent_id).map_err(err)?;
+    pr_status::build_review_prompt(&cache, &agent)
         .await
         .map_err(err)
 }
@@ -711,6 +786,20 @@ pub async fn update_settings(
         }
     }
     Ok(saved)
+}
+
+/// Zooms the whole webview (layout, scrollbars and measurements stay consistent).
+#[tauri::command]
+pub fn set_interface_zoom(app: AppHandle, percent: u32) -> CmdResult<()> {
+    let percent = percent.clamp(
+        armada_core::model::MIN_INTERFACE_SCALE,
+        armada_core::model::MAX_INTERFACE_SCALE,
+    );
+    if let Some(w) = crate::window::main_window(&app) {
+        w.set_zoom(f64::from(percent) / 100.0)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

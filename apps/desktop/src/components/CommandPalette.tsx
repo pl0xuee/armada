@@ -13,6 +13,7 @@ import {
   Play,
   Power,
   Square,
+  SquareTerminal,
   Sun,
   CalendarClock,
   Download,
@@ -62,6 +63,7 @@ import { toast } from "sonner";
 import { useDebounced } from "@/hooks/useDebounced";
 import { useApp, usePendingPermissions } from "@/store/app";
 import { useUi, type SettingsSection } from "@/store/ui";
+import { openTerminal } from "@/store/workspace";
 import { openShortcutHelp } from "./shell/ShortcutHelp";
 import { ProviderGlyph } from "./ProviderGlyph";
 import { StatusDot } from "./StatusDot";
@@ -351,6 +353,26 @@ function Palette({ onClose }: { onClose: () => void }) {
                     onSelect={() => run(() => void resumeAgent(current))}
                   />
                 )}
+                <PaletteAction
+                  icon={<SquareTerminal />}
+                  label="Toggle workspace panel"
+                  shortcut={[modKey, "`"]}
+                  keywords={["terminal", "scripts", "shell", "console"]}
+                  onSelect={() => run(() => ui.setWorkspaceOpen(!useUi.getState().workspaceOpen))}
+                />
+                <PaletteAction
+                  icon={<SquareTerminal />}
+                  label="New terminal"
+                  keywords={["terminal", "shell", "console", "workspace"]}
+                  onSelect={() =>
+                    run(() => {
+                      ui.setWorkspaceOpen(true);
+                      void openTerminal(current.id).catch((e: unknown) =>
+                        toast.error("Couldn't open a terminal", { description: errorMessage(e) }),
+                      );
+                    })
+                  }
+                />
                 {current.worktree && (
                   <PaletteAction
                     icon={<GitCompare />}

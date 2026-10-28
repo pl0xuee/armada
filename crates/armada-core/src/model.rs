@@ -76,7 +76,7 @@ pub struct Account {
     pub config_dir: Option<String>,
     pub created_at: i64,
     pub status: Option<AccountStatus>,
-    /// Latest usage-window snapshot, where the provider reports one (Codex).
+    /// Latest usage-window snapshot, where the provider reports one (Codex, Claude).
     #[serde(default)]
     pub usage: Option<AccountUsage>,
 }
@@ -698,6 +698,8 @@ pub struct QuietHours {
 pub struct Settings {
     pub onboarded: bool,
     pub theme: String,
+    /// Interface zoom in percent (`MIN_INTERFACE_SCALE`..=`MAX_INTERFACE_SCALE`).
+    pub interface_scale: u32,
     pub sounds: SoundSettings,
     pub notifications: NotificationSettings,
     pub quiet_hours: QuietHours,
@@ -719,6 +721,32 @@ pub struct Settings {
     /// or "ask" (the agent's default, which asks before acting).
     pub default_permission_mode: String,
     pub remote: RemoteSettings,
+    pub voice: VoiceSettings,
+}
+
+/// Voice dictation (local speech-to-text).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct VoiceSettings {
+    /// Input device name; `None` is the system default.
+    pub input_device: Option<String>,
+    /// Whisper model id (see `voice::MODELS`).
+    pub model: String,
+    /// "auto" or a language code (non-English needs a multilingual model).
+    pub language: String,
+    /// Send the message as soon as dictation finishes.
+    pub auto_send: bool,
+}
+
+impl Default for VoiceSettings {
+    fn default() -> Self {
+        VoiceSettings {
+            input_device: None,
+            model: crate::voice::DEFAULT_MODEL.into(),
+            language: "auto".into(),
+            auto_send: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -874,6 +902,9 @@ fn default_custom_color() -> String {
     "#B39DDB".into()
 }
 
+pub const MIN_INTERFACE_SCALE: u32 = 75;
+pub const MAX_INTERFACE_SCALE: u32 = 150;
+
 impl Settings {
     /// Rejects values the rest of Armada can't act on.
     pub fn validate(&self) -> Result<(), String> {
@@ -889,9 +920,15 @@ impl Settings {
                 self.default_permission_mode
             ));
         }
+        if !(MIN_INTERFACE_SCALE..=MAX_INTERFACE_SCALE).contains(&self.interface_scale) {
+            return Err(format!(
+                "Interface scale must be between {MIN_INTERFACE_SCALE}% and {MAX_INTERFACE_SCALE}%"
+            ));
+        }
         if self.remote.port == 0 {
             return Err("The remote control port must be between 1 and 65535".into());
         }
+        crate::voice::validate_voice(&self.voice.model, &self.voice.language)?;
         Ok(())
     }
 
@@ -909,9 +946,30 @@ impl Settings {
             self.default_permission_mode = defaults.default_permission_mode;
             reset.push("defaultPermissionMode");
         }
+        if !(MIN_INTERFACE_SCALE..=MAX_INTERFACE_SCALE).contains(&self.interface_scale) {
+            self.interface_scale = defaults.interface_scale;
+            reset.push("interfaceScale");
+        }
         if self.remote.port == 0 {
             self.remote.port = defaults.remote.port;
             reset.push("remote.port");
+        }
+        if self
+            .voice
+            .input_device
+            .as_deref()
+            .is_some_and(|d| d.trim().is_empty())
+        {
+            self.voice.input_device = None;
+            reset.push("voice.inputDevice");
+        }
+        if crate::voice::model_spec(&self.voice.model).is_none() {
+            self.voice.model = defaults.voice.model.clone();
+            reset.push("voice.model");
+        }
+        if crate::voice::validate_voice(&self.voice.model, &self.voice.language).is_err() {
+            self.voice.language = defaults.voice.language;
+            reset.push("voice.language");
         }
         reset
     }
@@ -922,6 +980,7 @@ impl Default for Settings {
         Settings {
             onboarded: false,
             theme: "gunmetal".into(),
+            interface_scale: 100,
             sounds: SoundSettings::default(),
             notifications: NotificationSettings::default(),
             quiet_hours: QuietHours::default(),
@@ -956,6 +1015,7 @@ impl Default for Settings {
             custom_agents: Vec::new(),
             default_permission_mode: "auto".into(),
             remote: RemoteSettings::default(),
+            voice: VoiceSettings::default(),
         }
     }
 }
@@ -1005,4 +1065,43 @@ pub fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod voice_settings_tests {
+    use super::*;
+
+    #[test]
+    fn defaults_validate() {
+        let s = Settings::default();
+        assert!(s.validate().is_ok());
+        assert_eq!(s.voice.model, "base.en");
+        assert!(!s.voice.auto_send);
+    }
+
+    #[test]
+    fn voice_settings_are_validated_and_sanitized() {
+        let mut s = Settings::default();
+        s.voice.language = "fr".into();
+        assert!(s.validate().is_err(), "English-only model with French");
+        s.voice.model = "small".into();
+        assert!(s.validate().is_ok());
+        s.voice.model = "gone".into();
+        assert!(s.validate().is_err());
+
+        // Sanitizing repairs it so one bad value can't block later saves.
+        s.voice.input_device = Some("  ".into());
+        let reset = s.sanitize();
+        assert!(reset.contains(&"voice.model"));
+        assert!(reset.contains(&"voice.language"));
+        assert!(reset.contains(&"voice.inputDevice"));
+        assert!(s.validate().is_ok());
+        assert_eq!(s.voice.language, "auto");
+    }
+
+    #[test]
+    fn old_settings_files_get_voice_defaults() {
+        let s: Settings = serde_json::from_str(r#"{"theme":"gunmetal"}"#).unwrap();
+        assert_eq!(s.voice.model, "base.en");
+    }
 }

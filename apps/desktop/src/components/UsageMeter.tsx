@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 export function windowLabel(w: UsageWindow): string {
   const m = w.windowMins;
   if (m === null) return "Usage";
+  if (m === 300) return "5-hour";
   if (m === 10080) return "Weekly";
   if (m === 1440) return "Daily";
   if (m % 60 === 0) return `${m / 60}h window`;
@@ -19,6 +20,11 @@ export function resetLabel(resetsAt: number | null, now = Date.now()): string | 
 
 function tone(pct: number) {
   return pct >= 90 ? "bg-err" : pct >= 70 ? "bg-warn" : "bg-accent";
+}
+
+/** Text color for a usage percentage (same thresholds as the meter bar). */
+export function pctTextTone(pct: number) {
+  return pct >= 90 ? "text-err" : pct >= 70 ? "text-warn" : "text-fg";
 }
 
 function Meter({ w, compact }: { w: UsageWindow; compact?: boolean }) {
@@ -53,7 +59,7 @@ function Meter({ w, compact }: { w: UsageWindow; compact?: boolean }) {
   );
 }
 
-/** Rate-limit window meters reported by the provider (Codex today). Renders nothing without data. */
+/** Rate-limit window meters reported by the provider (Codex and Claude). Renders nothing without data. */
 export function UsageMeters({
   usage,
   compact,

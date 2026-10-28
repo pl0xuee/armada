@@ -59,7 +59,12 @@ export function seedAccounts(): Account[] {
         checkedAt: min(3),
         error: null,
       },
-      usage: null,
+      usage: {
+        primary: { usedPercent: 12, windowMins: 300, resetsAt: NOW + 3 * 3600_000 + 40 * 60_000 },
+        secondary: { usedPercent: 74, windowMins: 10080, resetsAt: NOW + 3 * 86_400_000 },
+        plan: null,
+        updatedAt: min(1),
+      },
     },
     {
       id: "acc-codex-sys",
@@ -186,6 +191,7 @@ export function seedSettings(onboarded: boolean): Settings {
   return {
     onboarded,
     theme: "gunmetal",
+    interfaceScale: 100,
     sounds: {
       enabled: true,
       volume: 0.6,
@@ -221,6 +227,7 @@ export function seedSettings(onboarded: boolean): Settings {
     failover: "ask",
     defaultPermissionMode: "auto",
     remote: { enabled: false, lan: false, port: 47821 },
+    voice: { inputDevice: null, model: "base.en", language: "auto", autoSend: false },
     customAgents: [
       {
         id: "ca-gemini",

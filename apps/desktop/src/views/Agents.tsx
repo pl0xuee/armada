@@ -1,7 +1,7 @@
 import { Columns3, LayoutGrid, ListTodo, PanelLeftOpen, Play, RotateCcw, SlidersHorizontal } from "lucide-react";
 import * as D from "@radix-ui/react-dialog";
 import { AnimatePresence } from "motion/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentHeader } from "@/components/agent/AgentHeader";
 import { AgentList } from "@/components/agent/AgentList";
 import { Composer } from "@/components/agent/Composer";
@@ -11,6 +11,7 @@ import { HomeComposer } from "@/components/home/HomeComposer";
 import { RelTime } from "@/components/RelTime";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { Timeline } from "@/components/timeline/Timeline";
+import { WorkspacePanel, workspaceMaxHeight } from "@/components/workspace/WorkspacePanel";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useReturnFocus } from "@/components/ui/returnFocus";
@@ -99,6 +100,19 @@ function AgentPane({ agentId }: { agentId: string }) {
   const wide = useMediaQuery(INSPECTOR_DOCK_QUERY);
   const inspectorOpen = wide ? inspectorPref : overlay;
   const windowFocused = useUi((s) => s.windowFocused);
+  const workspaceOpen = useUi((s) => s.workspaceOpen);
+  // The panel only takes what the conversation and composer can spare (tiling WMs go down to 600px tall).
+  const sectionRef = useRef<HTMLElement>(null);
+  const [sectionH, setSectionH] = useState(0);
+  useEffect(() => {
+    const el = sectionRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setSectionH(el.clientHeight));
+    ro.observe(el);
+    setSectionH(el.clientHeight);
+    return () => ro.disconnect();
+  }, []);
+  const workspaceMax = workspaceMaxHeight(sectionH);
 
   useEffect(() => {
     void useApp.getState().ensureItems(agentId);
@@ -114,7 +128,7 @@ function AgentPane({ agentId }: { agentId: string }) {
 
   return (
     <div className="relative flex min-w-0 flex-1">
-      <section aria-label={agent.title} className="flex min-w-0 flex-1 flex-col bg-base">
+      <section ref={sectionRef} aria-label={agent.title} className="flex min-w-0 flex-1 flex-col bg-base">
         <AgentHeader agent={agent} />
         <Timeline
           agent={agent}
@@ -141,6 +155,7 @@ function AgentPane({ agentId }: { agentId: string }) {
             ) : null
           }
         />
+        {workspaceOpen && workspaceMax > 0 && <WorkspacePanel agent={agent} maxHeight={workspaceMax} />}
         <Composer agent={agent} />
       </section>
       <AnimatePresence initial={false}>

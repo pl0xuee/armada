@@ -42,6 +42,10 @@ tracing-appender = "0.2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 rodio = { version = "0.21", default-features = false, features = ["playback", "wav", "vorbis", "mp3", "flac"] }
 portable-pty = "0.9"
+# Voice dictation: mic capture (same cpal rodio uses) and local speech-to-text
+# (whisper.cpp, CPU only; needs cmake + a C++ compiler to build).
+cpal = "0.16"
+whisper-rs = "0.16"
 ureq = "3"
 tauri-plugin-single-instance = "2"
 tauri-plugin-global-shortcut = "2"
@@ -53,12 +57,15 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 tower = { version = "0.5", features = ["util"] }
 futures-util = "0.3"
 qrcode = "0.14"
+base64 = "0.22"
 
 [target.'cfg(unix)'.dependencies]
 # Signals for PTY process groups and polling the PTY.
 libc = "0.2"
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+arboard = { version = "3", default-features = false, features = ["wayland-data-control", "image-data"] }
+png = "0.18"
 # Desktop notifications + their actions over the session bus.
 zbus = "5"
 

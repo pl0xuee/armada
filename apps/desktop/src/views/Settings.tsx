@@ -13,6 +13,7 @@ import {
   Send,
   SlidersHorizontal,
   Volume2,
+  Mic,
   ExternalLink,
   Download,
   Sparkles,
@@ -29,6 +30,7 @@ import { CustomSoundLine } from "@/components/settings/CustomSound";
 import { McpSection } from "@/components/settings/McpSection";
 import { ProviderCard } from "@/components/settings/ProviderCard";
 import { RemoteSection } from "@/components/settings/RemoteSection";
+import { VoiceSection } from "@/components/settings/VoiceSection";
 import { SectionHeader, SettingGroup, SettingRow } from "@/components/settings/SettingRow";
 import { TemplatesSection } from "@/components/settings/TemplatesSection";
 import { ThemeCard, THEMES } from "@/components/settings/ThemeCard";
@@ -50,6 +52,7 @@ import { api } from "@/lib/api";
 import { relativeTimeLong } from "@/lib/format";
 import type { AttentionReason, Settings } from "@/lib/types";
 import { cn, errorMessage, modKey } from "@/lib/utils";
+import { MAX_SCALE, MIN_SCALE, DEFAULT_SCALE, SCALE_PRESETS, SCALE_STEP } from "@/lib/zoom";
 import { useApp } from "@/store/app";
 import { useUi, type SettingsSection } from "@/store/ui";
 
@@ -62,6 +65,7 @@ const SECTIONS: { id: SettingsSection; label: string; icon: ComponentType<{ clas
   { id: "mcp", label: "Tools (MCP)", icon: Plug },
   { id: "providers", label: "Providers", icon: Package },
   { id: "agents", label: "Agents", icon: Bot },
+  { id: "voice", label: "Voice", icon: Mic },
   { id: "remote", label: "Remote & mobile", icon: Smartphone },
   { id: "about", label: "About", icon: Info },
 ];
@@ -106,6 +110,7 @@ export function SettingsView() {
           {section === "mcp" && <McpSection servers={settings.mcpServers} />}
           {section === "providers" && <Providers />}
           {section === "agents" && <AgentsSection agents={settings.customAgents} />}
+          {section === "voice" && <VoiceSection settings={settings} />}
           {section === "remote" && <RemoteSection settings={settings} />}
           {section === "about" && <About />}
         </div>
@@ -185,6 +190,9 @@ function SettingsNav({ section, onSelect }: { section: SettingsSection; onSelect
 // ---------------------------------------------------------------- Appearance
 
 function Appearance({ settings }: { settings: Settings }) {
+  // Zoom applies on release: resizing the UI under the dragged thumb would make it jump.
+  const [dragScale, setDragScale] = useState<number | null>(null);
+  const shownScale = dragScale ?? settings.interfaceScale;
   return (
     <>
       <SectionHeader title="Appearance" description="Pick the finish for your command deck." />
@@ -198,6 +206,45 @@ function Appearance({ settings }: { settings: Settings }) {
           />
         ))}
       </div>
+      <SettingGroup className="mt-5">
+        <SettingRow
+          title="Interface scale"
+          description={`Make everything bigger or smaller. Also ${modKey} + / ${modKey} - and ${modKey} 0 to reset.`}
+          stack
+        >
+          <div className="flex w-full flex-wrap items-center gap-3">
+            <Slider
+              aria-label="Interface scale"
+              className="min-w-[140px] flex-1"
+              value={shownScale}
+              min={MIN_SCALE}
+              max={MAX_SCALE}
+              step={SCALE_STEP}
+              onValueChange={setDragScale}
+              onValueCommit={(v) => {
+                setDragScale(null);
+                void save({ interfaceScale: v });
+              }}
+            />
+            <span className="w-12 text-right font-mono text-[12px] tabular-nums text-fg">{shownScale}%</span>
+            <Segmented
+              size="sm"
+              aria-label="Scale presets"
+              value={String(settings.interfaceScale)}
+              onChange={(v) => void save({ interfaceScale: Number(v) })}
+              options={SCALE_PRESETS.map((p) => ({ value: String(p), label: `${p}%` }))}
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={settings.interfaceScale === DEFAULT_SCALE}
+              onClick={() => void save({ interfaceScale: DEFAULT_SCALE })}
+            >
+              Reset
+            </Button>
+          </div>
+        </SettingRow>
+      </SettingGroup>
       <p className="mt-4 text-[12px] text-steel">
         Animations follow your system's reduce-motion setting automatically.
       </p>

@@ -26,7 +26,7 @@ export interface Account {
   configDir: string | null; // isolated dir for non-system profiles
   createdAt: number;
   status: AccountStatus | null;
-  /** Rate-limit windows reported by the provider (Codex today). */
+  /** Rate-limit windows reported by the provider (Codex and Claude). */
   usage: AccountUsage | null;
 }
 
@@ -313,6 +313,8 @@ export interface QuietHours {
 export interface Settings {
   onboarded: boolean;
   theme: "gunmetal" | "carbon" | "titanium";
+  /** Interface zoom in percent, 75-150. */
+  interfaceScale: number;
   sounds: SoundSettings;
   notifications: NotificationSettings;
   quietHours: QuietHours;
@@ -332,6 +334,7 @@ export interface Settings {
   defaultPermissionMode: "auto" | "ask";
   customAgents: CustomAgent[];
   remote: RemoteSettings;
+  voice: VoiceSettings;
 }
 
 /** Any ACP agent the user configured (Gemini CLI, Goose, OpenCode, ...). */
@@ -350,6 +353,57 @@ export interface Attachment {
   name: string;
   mimeType: string;
   data: string;
+}
+
+/** Voice dictation (local speech-to-text). */
+export interface VoiceSettings {
+  /** Input device name; null = the system default. */
+  inputDevice: string | null;
+  /** Whisper model id (tiny.en, base.en, small.en, small). */
+  model: string;
+  /** "auto" or a language code; non-English needs a multilingual model. */
+  language: string;
+  /** Send the message as soon as dictation finishes. */
+  autoSend: boolean;
+}
+
+export interface VoiceModel {
+  id: string;
+  label: string;
+  description: string;
+  sizeBytes: number;
+  multilingual: boolean;
+  installed: boolean;
+  isDefault: boolean;
+}
+
+export interface VoiceStatus {
+  models: VoiceModel[];
+  /** [code, name] pairs for multilingual models. */
+  languages: [string, string][];
+  maxRecordingSecs: number;
+  /** The model chosen in settings, and whether it's downloaded. */
+  model: string;
+  ready: boolean;
+  downloading: string | null;
+}
+
+export interface VoiceInputDevice {
+  name: string;
+  isDefault: boolean;
+}
+
+export interface VoiceTranscript {
+  text: string;
+  autoSend: boolean;
+}
+
+export interface VoiceDownloadEvent {
+  id: string;
+  done: number;
+  total: number;
+  state: "progress" | "done" | "error" | "cancelled";
+  error: string | null;
 }
 
 export interface RemoteSettings {
@@ -476,6 +530,44 @@ export interface AgentDiff {
   truncated: boolean;
 }
 
+/** A snapshot of the agent's folder taken before a message ("turn") or before a restore ("safety"). */
+export interface Checkpoint {
+  id: string;
+  agentId: string;
+  seq: number;
+  /** The user message this checkpoint precedes. */
+  itemId: string | null;
+  createdAt: number;
+  kind: "turn" | "safety";
+}
+
+export interface CheckpointList {
+  /** False when the folder isn't (the root of) a git repository. */
+  available: boolean;
+  checkpoints: Checkpoint[];
+}
+
+export interface RestoreFile {
+  path: string;
+  /** "added": comes back; "deleted": created since, so removed; "modified". */
+  status: "added" | "deleted" | "modified";
+  additions: number;
+  deletions: number;
+}
+
+export interface RestorePreview {
+  files: RestoreFile[];
+  totalFiles: number;
+  additions: number;
+  deletions: number;
+}
+
+export interface RestoreResult {
+  /** Restore this checkpoint to undo the restore. */
+  safetyId: string;
+  filesChanged: number;
+}
+
 export interface SearchHit {
   agentId: string;
   itemId: string;
@@ -498,4 +590,42 @@ export interface ShipResult {
   committed: string | null;
   merged: string | null;
   error: string | null;
+}
+
+/** A runnable project command detected in an agent's folder. */
+export interface ProjectScript {
+  id: string;
+  /** Group: npm, pnpm, yarn, bun, cargo, make, just, python, go. */
+  source: string;
+  name: string;
+  command: string;
+}
+
+/** PR + CI status of an agent's branch (pr_status). Problems are quiet "unknown"/"none" states. */
+export interface PrStatus {
+  /** ok: a PR exists · none: the branch has no PR · unknown: couldn't ask (see reason). */
+  state: "ok" | "none" | "unknown";
+  reason: "gh_missing" | "not_authenticated" | "no_remote" | "rate_limited" | "error" | null;
+  pr: PrInfo | null;
+  fetchedAt: number;
+}
+
+export interface PrInfo {
+  number: number;
+  url: string;
+  title: string;
+  state: "open" | "draft" | "merged" | "closed";
+  review: "approved" | "changes_requested" | "review_required" | null;
+  mergeable: "mergeable" | "conflicting" | null;
+  checks: PrCheck[];
+  summary: { passing: number; failing: number; pending: number; overall: "none" | "passing" | "failing" | "pending" };
+}
+
+export interface PrCheck {
+  name: string;
+  workflow: string | null;
+  status: "passing" | "failing" | "pending" | "skipped";
+  url: string | null;
+  runId: string | null;
+  durationSecs: number | null;
 }

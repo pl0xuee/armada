@@ -284,7 +284,7 @@ export function UsageView() {
                 ))}
               </ul>
               <p className="border-t border-line/70 px-4 py-2 text-[11.5px] text-steel">
-                Reported by the provider runtime for accounts that expose rate-limit windows (Codex today).
+                Reported by the provider runtime for accounts that expose rate-limit windows (Codex and Claude).
               </p>
             </Panel>
           )}
