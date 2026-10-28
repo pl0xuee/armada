@@ -692,6 +692,8 @@ mod ipc_smoke {
         std::fs::read_to_string(dir.join(format!("{name}.rs")))
             .or_else(|_| std::fs::read_to_string(dir.join(name).join("mod.rs")))
             .unwrap_or_else(|_| panic!("no source for module {name}"))
+            // Windows checkouts may have CRLF line endings.
+            .replace("\r\n", "\n")
     }
 
     /// `(module, command)` for every entry of the `handler!` list.
