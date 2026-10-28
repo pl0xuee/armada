@@ -1096,9 +1096,13 @@ mod tests {
         let (core, events, dir) = test_core();
         let terminals = Terminals::default();
         let marker = dir.join("pid");
+        // The child writes its pid only once it ignores SIGHUP, and the login waits for
+        // that: exiting first could hang up the terminal before the trap is set (the
+        // kernel's hangup, not Armada, would then kill it — a flaky failure on macOS).
         let script = format!(
-            "(trap '' HUP; exec sleep 30) & echo $! > '{}'; exit 0",
-            marker.display()
+            "sh -c 'trap \"\" HUP; echo $$ > \"$0\"; exec sleep 30' '{m}' & \
+             while [ ! -s '{m}' ]; do sleep 0.01; done; exit 0",
+            m = marker.display()
         );
         let id = terminals.spawn(core, sh(&script), |_| {}).unwrap();
         assert!(
