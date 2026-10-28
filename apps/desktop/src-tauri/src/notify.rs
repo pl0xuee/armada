@@ -122,10 +122,11 @@ mod xdg {
     use std::time::{Duration, Instant};
 
     use armada_core::{AttentionReason, NavigateTarget};
+    use futures_util::StreamExt;
     use parking_lot::Mutex;
     use tauri::AppHandle;
     use tracing::{debug, warn};
-    use zbus::zvariant::Value;
+    use zbus::zvariant::Variant;
 
     use super::{request_body, request_command, respond_in_background, Toast};
     use crate::window;
@@ -172,7 +173,7 @@ mod xdg {
     }
 
     struct Bus {
-        conn: zbus::blocking::Connection,
+        conn: zbus::Connection,
         /// The server renders body markup, so agent text must be escaped.
         markup: bool,
         /// Cleared when the listener stops (connection gone): reconnect next time.
@@ -227,33 +228,41 @@ mod xdg {
     }
 
     fn connect() -> anyhow::Result<Bus> {
-        let conn = zbus::blocking::Connection::session()?;
+        // zbus 6 is async-only: drive it with `zbus::block_on` (a helper thread keeps
+        // the connection alive between calls).
+        let conn = zbus::block_on(zbus::Connection::session())?;
         let rule = zbus::MatchRule::builder()
             .msg_type(zbus::message::Type::Signal)
-            .interface(DEST)?
-            .path(PATH)?
-            .build();
+            .interface(DEST)
+            .path(PATH)
+            .build()?;
         // Subscribed before any notification is shown, so no click is missed.
-        let signals = zbus::blocking::MessageIterator::for_match_rule(rule, &conn, Some(256))?;
+        let mut signals = zbus::block_on(zbus::MessageStream::for_match_rule(
+            rule,
+            &conn,
+            std::num::NonZeroUsize::new(256),
+        ))?;
         let alive = Arc::new(AtomicBool::new(true));
         let listener_alive = alive.clone();
         std::thread::Builder::new()
             .name("armada-notify-actions".into())
             .spawn(move || {
-                for msg in signals {
-                    match msg {
-                        Ok(msg) => on_signal(&msg),
-                        Err(e) => debug!("notification signal: {e}"),
+                zbus::block_on(async {
+                    while let Some(msg) = signals.next().await {
+                        match msg {
+                            Ok(msg) => on_signal(&msg),
+                            Err(e) => debug!("notification signal: {e}"),
+                        }
                     }
-                }
+                });
                 listener_alive.store(false, Ordering::SeqCst);
                 warn!("stopped listening for notification actions; will reconnect");
             })?;
-        let markup = conn
-            .call_method(Some(DEST), PATH, Some(DEST), "GetCapabilities", &())
-            .and_then(|reply| reply.body().deserialize::<Vec<String>>())
-            .map(|caps| caps.iter().any(|c| c == "body-markup"))
-            .unwrap_or(true);
+        let markup =
+            zbus::block_on(conn.call_method(Some(DEST), PATH, Some(DEST), "GetCapabilities", &()))
+                .and_then(|reply| reply.body().deserialize::<Vec<String>>())
+                .map(|caps| caps.iter().any(|c| c == "body-markup"))
+                .unwrap_or(true);
         Ok(Bus {
             conn,
             markup,
@@ -330,8 +339,13 @@ mod xdg {
     pub(super) fn notify_for_test(title: &str, body: &str) -> anyhow::Result<u32> {
         let bus = bus().ok_or_else(|| anyhow::anyhow!("no session bus"))?;
         let id = notify(&bus, 0, "", title, body, &["default", "Open"])?;
-        bus.conn
-            .call_method(Some(DEST), PATH, Some(DEST), "CloseNotification", &(id,))?;
+        zbus::block_on(bus.conn.call_method(
+            Some(DEST),
+            PATH,
+            Some(DEST),
+            "CloseNotification",
+            &(id,),
+        ))?;
         Ok(id)
     }
 
@@ -351,34 +365,33 @@ mod xdg {
         body: &str,
         actions: &[&str],
     ) -> zbus::Result<u32> {
-        let mut hints: HashMap<&str, Value> = HashMap::new();
+        let mut hints: HashMap<&str, Variant> = HashMap::new();
         // Normal (not critical) so the user's Do-Not-Disturb is respected.
-        hints.insert("urgency", Value::U8(1));
-        hints.insert("category", Value::from("im.received"));
+        hints.insert("urgency", Variant::U8(1));
+        hints.insert("category", Variant::from("im.received"));
         let body = if bus.markup {
             escape_markup(body)
         } else {
             body.to_string()
         };
-        bus.conn
-            .call_method(
-                Some(DEST),
-                PATH,
-                Some(DEST),
-                "Notify",
-                &(
-                    "Armada",
-                    replaces,
-                    icon,
-                    title,
-                    body.as_str(),
-                    actions,
-                    hints,
-                    -1i32,
-                ),
-            )?
-            .body()
-            .deserialize::<u32>()
+        zbus::block_on(bus.conn.call_method(
+            Some(DEST),
+            PATH,
+            Some(DEST),
+            "Notify",
+            &(
+                "Armada",
+                replaces,
+                icon,
+                title,
+                body.as_str(),
+                actions,
+                hints,
+                -1i32,
+            ),
+        ))?
+        .body()
+        .deserialize::<u32>()
     }
 
     pub(super) fn close_for_request(request_id: &str) {
@@ -404,10 +417,13 @@ mod xdg {
             return;
         };
         for id in ids {
-            if let Err(e) =
-                bus.conn
-                    .call_method(Some(DEST), PATH, Some(DEST), "CloseNotification", &(id,))
-            {
+            if let Err(e) = zbus::block_on(bus.conn.call_method(
+                Some(DEST),
+                PATH,
+                Some(DEST),
+                "CloseNotification",
+                &(id,),
+            )) {
                 debug!("could not close notification {id}: {e}");
             }
         }
