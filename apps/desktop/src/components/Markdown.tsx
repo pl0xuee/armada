@@ -1,4 +1,4 @@
-import { memo, useDeferredValue, useMemo, useRef, type ReactNode } from "react";
+import { createContext, memo, useContext, useDeferredValue, useMemo, useRef, type ReactNode } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ImageOff } from "lucide-react";
@@ -9,17 +9,55 @@ import { CopyButton } from "./CopyButton";
 import { LocalImage } from "./LocalImage";
 import { CodeText } from "./CodeText";
 import { langFromFence } from "@/lib/highlight";
+import { commandText, isShellLang, looksLikeCommand } from "@/lib/shellRun";
+import { useApp } from "@/store/app";
+import { RunButton } from "./RunButton";
+
+/** Agent whose terminal shell code blocks can run in; null (default) hides the Run button. */
+const RunContext = createContext<string | null>(null);
 
 function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
   const isDiff = lang === "diff" || lang === "patch";
   const lines = code.replace(/\n$/, "").split("\n");
+  const runAgent = useContext(RunContext);
+  const platform = useApp((s) => s.platform);
+  const command = useMemo(() => {
+    if (!runAgent) return "";
+    if (!(lang ? isShellLang(lang, platform) : looksLikeCommand(code))) return "";
+    return commandText(code, lang);
+  }, [runAgent, lang, code, platform]);
+  const runFn = useRef<() => void>(() => {});
   return (
     <div className="group/code my-3 overflow-hidden rounded-xl border border-line bg-code edge">
       <div className="flex h-8 items-center justify-between border-b border-line bg-panel/60 pl-3 pr-1.5">
         <span className="font-mono text-[11px] lowercase tracking-wide text-steel">{lang ?? "text"}</span>
-        <CopyButton text={code} className="opacity-70 group-hover/code:opacity-100" />
+        <div className="flex items-center gap-0.5">
+          {runAgent && command && (
+            <RunButton
+              agentId={runAgent}
+              command={command}
+              runRef={(fn) => {
+                runFn.current = fn;
+              }}
+            />
+          )}
+          <CopyButton text={code} className="opacity-70 group-hover/code:opacity-100" />
+        </div>
       </div>
-      <pre className="selectable overflow-x-auto px-3.5 py-3 font-mono text-[12.5px] leading-[1.6]">
+      <pre
+        {...(command
+          ? {
+              tabIndex: 0,
+              onKeyDown: (e: React.KeyboardEvent) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  runFn.current();
+                }
+              },
+            }
+          : {})}
+        className="selectable overflow-x-auto px-3.5 py-3 font-mono text-[12.5px] leading-[1.6] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/50"
+      >
         <code>
           {isDiff ? (
             lines.map((l, i) => (
@@ -210,12 +248,15 @@ export const Markdown = memo(function Markdown({
   className,
   streaming,
   agentId,
+  runAgentId,
 }: {
   text: string;
   className?: string;
   streaming?: boolean;
   /** Enables inline images for files in this agent's folders (loaded via readImage). */
   agentId?: string;
+  /** Shows a Run button on shell code blocks that runs them in this agent's workspace terminal. */
+  runAgentId?: string;
 }) {
   // Under load React may skip intermediate frames of the growing tail.
   const deferred = useDeferredValue(text);
@@ -238,13 +279,15 @@ export const Markdown = memo(function Markdown({
   // The same block structure is rendered while streaming and after, so finishing a stream
   // doesn't remount (and re-parse) the whole message: unchanged blocks keep their memo.
   return (
-    <div className={cn("prose-armada selectable", streaming && "[&>*:last-child>*:last-child]:caret", className)}>
-      {ranges.map((r, i) => (
-        // Index keys are stable: blocks only ever append or grow at the end.
-        <div key={i} className="md-block contents">
-          <Block text={src.slice(r.start, r.end).replace(/\n+$/, "")} comps={comps} />
-        </div>
-      ))}
-    </div>
+    <RunContext.Provider value={runAgentId && !streaming ? runAgentId : null}>
+      <div className={cn("prose-armada selectable", streaming && "[&>*:last-child>*:last-child]:caret", className)}>
+        {ranges.map((r, i) => (
+          // Index keys are stable: blocks only ever append or grow at the end.
+          <div key={i} className="md-block contents">
+            <Block text={src.slice(r.start, r.end).replace(/\n+$/, "")} comps={comps} />
+          </div>
+        ))}
+      </div>
+    </RunContext.Provider>
   );
 });

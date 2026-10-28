@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { attachTerminal } from "@/lib/terminal-bus";
 import { errorMessage } from "@/lib/utils";
 import { useApp } from "@/store/app";
+import { useUi } from "@/store/ui";
 
 export interface WsTerm {
   id: string;
@@ -90,12 +91,15 @@ function setExit(agentId: string, id: string, code: number | null) {
 const opening = new Set<string>();
 
 /** Starts a shell (or a detected script) in the agent's folder and shows it. */
-export async function openTerminal(agentId: string, opts: { scriptId?: string; title?: string } = {}) {
+export async function openTerminal(
+  agentId: string,
+  opts: { scriptId?: string; title?: string } = {},
+): Promise<string | undefined> {
   const cur = useWorkspace.getState().byAgent[agentId] ?? EMPTY;
   if (cur.terms.length >= MAX_TERMINALS_PER_AGENT) {
     throw new Error(`At most ${MAX_TERMINALS_PER_AGENT} terminals per agent. Close one first.`);
   }
-  if (opening.has(agentId)) return;
+  if (opening.has(agentId)) return undefined;
   opening.add(agentId);
   try {
     patchAgent(agentId, { autoStarted: true });
@@ -103,7 +107,7 @@ export async function openTerminal(agentId: string, opts: { scriptId?: string; t
     // The agent may have been deleted while the shell started.
     if (!useApp.getState().agents[agentId]) {
       void api.terminalKill(id).catch(() => {});
-      return;
+      return undefined;
     }
     const rt: Runtime = { agentId, data: "", detach: () => {} };
     runtime.set(id, rt);
@@ -131,6 +135,7 @@ export async function openTerminal(agentId: string, opts: { scriptId?: string; t
       terms: [...now.terms, { id, title: opts.title ?? `Terminal ${n}` }],
       active: id,
     });
+    return id;
   } finally {
     opening.delete(agentId);
   }
@@ -173,6 +178,24 @@ useApp.subscribe((state, prev) => {
     if (prev.agents[id] && !state.agents[id]) disposeAgentTerminals(id);
   }
 });
+
+/**
+ * "Run" on a code block in an agent message: opens a NEW terminal (a login shell in the agent's
+ * own folder, via the same workspace_terminal_open as the + button, no script) and types the text
+ * into it through the existing terminal_write command. The webview thereby supplies arbitrary
+ * text to the user's own shell, which is acceptable only because it follows the user's explicit
+ * click on their own machine. No new Tauri command or capability; callers confirm destructive
+ * commands first (lib/shellRun isDestructive).
+ */
+export async function runInNewTerminal(agentId: string, title: string, payload: string): Promise<void> {
+  const id = await openTerminal(agentId, { title });
+  if (!id) throw new Error("A terminal is already starting. Try again in a moment.");
+  useUi.getState().setWorkspaceOpen(true);
+  // Wait for the shell's first output (its prompt) so the text isn't swallowed by startup.
+  for (let i = 0; i < 40 && !(runtime.get(id)?.data.length ?? 0); i++) await new Promise((r) => setTimeout(r, 50));
+  await new Promise((r) => setTimeout(r, 150));
+  await api.terminalWrite(id, payload);
+}
 
 /** Opens a shell, reporting failures as a message (for UI handlers). */
 export function openTerminalSafe(
