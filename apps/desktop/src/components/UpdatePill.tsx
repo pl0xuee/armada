@@ -1,6 +1,7 @@
 import { ArrowDownToLine, ExternalLink, FileText, Sparkles, X } from "lucide-react";
 import { useState } from "react";
-import { installUpdate } from "@/lib/actions";
+import { attempt } from "@/lib/actions";
+import { useGuardedInstall } from "./settings/useGuardedInstall";
 import { api } from "@/lib/api";
 import { useApp } from "@/store/app";
 import { Markdown } from "./Markdown";
@@ -15,6 +16,7 @@ export function UpdatePill() {
   const progress = useApp((s) => s.updateProgress);
   const [notesOpen, setNotesOpen] = useState(false);
   const [open, setOpen] = useState(false);
+  const guarded = useGuardedInstall();
 
   if (!update || (dismissed && !progress)) return null;
 
@@ -23,11 +25,19 @@ export function UpdatePill() {
 
   return (
     <>
+      {guarded.dialog}
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
             type="button"
-            aria-label={`Armada ${update.version} is available`}
+            // The accessible name starts with the visible text (WCAG 2.5.3).
+            aria-label={
+              installing
+                ? ratio !== null
+                  ? `Updating ${Math.round(ratio * 100)}%`
+                  : "Updating…"
+                : `Update ${update.version}: Armada ${update.version} is available`
+            }
             className="relative flex h-[24px] items-center gap-1.5 overflow-hidden rounded-full border border-accent/40 bg-accent/10 pl-2 pr-2.5 text-[11.5px] font-medium text-accent transition-colors hover:bg-accent/15"
           >
             {installing ? (
@@ -101,11 +111,15 @@ export function UpdatePill() {
             )}
             <div className="ml-auto" />
             {update.canInstall ? (
-              <Button size="sm" variant="primary" disabled={installing} onClick={() => void installUpdate()}>
+              <Button size="sm" variant="primary" disabled={installing} onClick={guarded.request}>
                 <ArrowDownToLine /> Install & restart
               </Button>
             ) : (
-              <Button size="sm" variant="primary" onClick={() => void api.openPath(update.url)}>
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => void attempt("Couldn't open the release page", () => api.openPath(update.url))}
+              >
                 <ExternalLink /> Download
               </Button>
             )}
@@ -119,7 +133,10 @@ export function UpdatePill() {
             <Markdown text={update.notes ?? "No release notes."} />
           </DialogBody>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => void api.openPath(update.url)}>
+            <Button
+              variant="ghost"
+              onClick={() => void attempt("Couldn't open the release page", () => api.openPath(update.url))}
+            >
               <ExternalLink /> View on GitHub
             </Button>
             {update.canInstall && (
@@ -128,7 +145,7 @@ export function UpdatePill() {
                 disabled={installing}
                 onClick={() => {
                   setNotesOpen(false);
-                  void installUpdate();
+                  guarded.request();
                 }}
               >
                 <ArrowDownToLine /> Install & restart

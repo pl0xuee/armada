@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { fileURLToPath, URL } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
-import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
 
@@ -78,12 +77,21 @@ const remote = process.env.ARMADA_REMOTE_URL;
 const proxied = ["/api", "/manifest.webmanifest", "/icon.png"];
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), viteSingleFile({ removeViteModuleLoader: true }), cspMeta(), devPwaStubs()],
+  plugins: [tailwindcss(), viteSingleFile({ removeViteModuleLoader: true }), cspMeta(), devPwaStubs()],
   resolve: {
-    alias: {
-      "@": fileURLToPath(new URL("./src", import.meta.url)),
-      "@shared": fileURLToPath(new URL("../desktop/src/lib", import.meta.url)),
-    },
+    alias: [
+      { find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) },
+      { find: "@shared", replacement: fileURLToPath(new URL("../desktop/src/lib", import.meta.url)) },
+      // The UI is written against React's API (and type-checked with @types/react) but
+      // runs on Preact: same hooks/components, ~40 KB less JavaScript for a phone on Wi-Fi.
+      { find: /^react$/, replacement: "preact/compat" },
+      { find: /^react-dom$/, replacement: "preact/compat" },
+      { find: /^react-dom\/client$/, replacement: "preact/compat/client" },
+      { find: /^react\/jsx-(dev-)?runtime$/, replacement: "preact/jsx-runtime" },
+    ],
+  },
+  oxc: {
+    jsx: { runtime: "automatic", importSource: "preact" },
   },
   server: {
     port: 5180,

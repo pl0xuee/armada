@@ -1,3 +1,4 @@
+import { confirmAction } from "./confirm";
 import type { Agent, AgentStatus, PermissionItem, PermissionOption, Provider, RemoteCustomAgent } from "./types";
 
 export interface ProviderMeta {
@@ -72,7 +73,19 @@ export function isAllow(o: PermissionOption) {
   return o.kind === "allow_once" || o.kind === "allow_always";
 }
 
-/** The option behind the big "Approve" button: first allow_once, else first allow. */
+/**
+ * The one-shot options, which are the only ones bound to the inbox's generic
+ * "Approve"/"Deny" buttons and swipes (a swipe must never grant "always").
+ */
+export function allowOnce(item: PermissionItem): PermissionOption | null {
+  return item.options.find((o) => o.kind === "allow_once") ?? null;
+}
+
+export function rejectOnce(item: PermissionItem): PermissionOption | null {
+  return item.options.find((o) => o.kind === "reject_once") ?? null;
+}
+
+/** First allow option, preferring allow_once (timeline buttons show its real name). */
 export function primaryAllow(item: PermissionItem): PermissionOption | null {
   return item.options.find((o) => o.kind === "allow_once") ?? item.options.find(isAllow) ?? null;
 }
@@ -82,6 +95,32 @@ export function primaryReject(item: PermissionItem): PermissionOption | null {
   return (
     item.options.find((o) => o.kind === "reject_once") ?? item.options.find((o) => !isAllow(o)) ?? null
   );
+}
+
+export const isAlways = (o: PermissionOption) => o.kind === "allow_always" || o.kind === "reject_always";
+
+/**
+ * Swiping answers without looking at the details, so only allow it for small,
+ * self-explanatory requests: no file changes, and a short one-line command.
+ */
+export function swipeable(item: PermissionItem): boolean {
+  if (item.diffs.length) return false;
+  const cmd = item.command ?? "";
+  return cmd.length <= 80 && !cmd.includes("\n");
+}
+
+/** Confirm before an "always" answer (it changes future behaviour). */
+export async function confirmOption(o: PermissionOption): Promise<boolean> {
+  if (!isAlways(o)) return true;
+  return confirmAction({
+    title: o.name,
+    body:
+      o.kind === "allow_always"
+        ? "The agent won't ask again for requests like this one in this session."
+        : "Requests like this one will be denied without asking for the rest of this session.",
+    confirmLabel: o.kind === "allow_always" ? "Always allow" : "Always deny",
+    destructive: o.kind === "reject_always",
+  });
 }
 
 export const OPTION_HINT: Record<PermissionOption["kind"], string> = {

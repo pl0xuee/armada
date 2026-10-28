@@ -1,5 +1,6 @@
 /** Realistic sample fleet for the dev mock. Dev-only; never bundled in production. */
 import type { Agent, AgentStatus, FileDiff, RemoteAccount, RemoteCustomAgent, TimelineItem } from "@/lib/types";
+import { CHECKOUT_PNG, ORDERS_PNG } from "./images";
 
 const MIN = 60_000;
 
@@ -7,10 +8,91 @@ export const accounts: RemoteAccount[] = [
   { id: "acc-work", name: "Work", provider: "claude", color: "#4FC3F7", label: "Claude Max" },
   { id: "acc-personal", name: "Personal", provider: "claude", color: "#F472B6", label: "Claude Pro" },
   { id: "acc-openai", name: "ChatGPT", provider: "codex", color: "#3DDC97", label: "ChatGPT Pro" },
-  { id: "acc-grok", name: "xAI", provider: "grok", color: "#E5E7EB", label: "SuperGrok" },
+  { id: "acc-grok", name: "xAI", provider: "grok", color: "#E5E7EB", label: "SuperGrok", loggedIn: false, error: null },
+  { id: "custom-gemini", name: "Local agents", provider: "custom", color: "#B39DDB", label: null },
 ];
 
-export const customAgents: RemoteCustomAgent[] = [{ id: "gemini", name: "Gemini CLI", color: "#8AB4F8" }];
+export const customAgents: RemoteCustomAgent[] = [
+  { id: "gemini", name: "Gemini CLI", color: "#8AB4F8", enabled: true },
+  { id: "goose", name: "Goose", color: "#F5B544", enabled: true },
+  { id: "opencode", name: "OpenCode", color: "#3DDC97", enabled: false },
+];
+
+export const projects = [
+  "/home/dev/code/acme-web",
+  "/home/dev/code/acme-api",
+  "/home/dev/code/docs",
+  "/home/dev/code/research",
+  "/home/dev/code/infra",
+  "/home/dev/code/mobile-app",
+  "/home/dev/code/design-system",
+];
+
+export const templates = [
+  { id: "t-review", name: "Review PR", text: "Review the open changes on this branch. Flag bugs, risky changes and missing tests." },
+  { id: "t-tests", name: "Write tests", text: "Add tests for the code you just changed and make sure the suite passes." },
+  { id: "t-fix-ci", name: "Fix CI", text: "CI is failing on main. Find the cause and fix it with the smallest change." },
+];
+
+type Choice = [value: string, name: string, description?: string];
+function option(id: string, name: string, category: string, current: string, choices: Choice[]) {
+  return {
+    id,
+    name,
+    category,
+    currentValue: current,
+    options: choices.map(([value, n, description]) => ({ value, name: n, description: description ?? null })),
+  };
+}
+
+/** What each provider typically advertises (ids differ per provider, as in reality). */
+export function providerConfig(provider: Agent["provider"], modelValue?: string) {
+  switch (provider) {
+    case "claude":
+      return [
+        option("mode", "Mode", "mode", "default", [
+          ["default", "Default", "Ask before edits and commands"],
+          ["acceptEdits", "Accept edits", "Edit files without asking"],
+          ["plan", "Plan", "Read and plan only, no changes"],
+          ["bypassPermissions", "Bypass permissions", "Never ask (use with care)"],
+        ]),
+        option("model", "Model", "model", modelValue ?? "claude-opus", [
+          ["claude-opus", "Opus", "Most capable"],
+          ["claude-sonnet", "Sonnet", "Fast and capable"],
+          ["claude-haiku", "Haiku", "Fastest"],
+        ]),
+      ];
+    case "codex":
+      return [
+        option("approval_preset", "Approvals", "mode", "auto", [
+          ["read-only", "Read only", "Ask before any change"],
+          ["auto", "Auto", "Edit in the workspace, ask for network and outside access"],
+          ["full-access", "Full access", "No prompts"],
+        ]),
+        option("model", "Model", "model", modelValue ?? "gpt-5-codex", [
+          ["gpt-5-codex", "GPT-5 Codex"],
+          ["gpt-5", "GPT-5"],
+        ]),
+        option("reasoning_effort", "Effort", "thought_level", "medium", [
+          ["low", "Low"],
+          ["medium", "Medium"],
+          ["high", "High"],
+        ]),
+      ];
+    case "grok":
+      return [option("model", "Model", "model", "grok-code-fast", [["grok-code-fast", "Grok Code Fast"], ["grok-4", "Grok 4"]])];
+    default:
+      return [option("mode", "Mode", "mode", "default", [["default", "Default"], ["yolo", "Auto-approve"]])];
+  }
+}
+
+export const slashCommands = [
+  { name: "compact", description: "Summarize the conversation to free up context", hint: null },
+  { name: "review", description: "Review the current changes", hint: "[focus]" },
+  { name: "init", description: "Create an AGENTS.md / CLAUDE.md for this project", hint: null },
+  { name: "clear", description: "Start a fresh conversation", hint: null },
+  { name: "cost", description: "Show usage for this session", hint: null },
+];
 
 function agent(
   now: number,
@@ -36,6 +118,7 @@ function agent(
     baseBranch: "main",
     baseCommit: "9f2c1ab",
     sessionId: `sess-${id}`,
+    queuedPrompts: 0,
     status,
     running: status !== "stopped" && status !== "interrupted",
     groupId: null,
@@ -59,18 +142,6 @@ function agent(
   };
 }
 
-function model(value: string, name: string) {
-  return [
-    {
-      id: "model",
-      name: "Model",
-      category: "model",
-      currentValue: value,
-      options: [{ value, name, description: null }],
-    },
-  ];
-}
-
 export function buildAgents(now: number): Agent[] {
   return [
     agent(now, "a1", "Fix token refresh race", "claude", "acc-work", "needs_permission", {
@@ -84,7 +155,8 @@ export function buildAgents(now: number): Agent[] {
       contextUsed: 61_000,
       contextSize: 200_000,
       lastMessage: "Found it. refreshToken() isn't single-flight: when two requests get a 401 at the same moment, both start a refresh.",
-      configOptions: model("claude-opus", "Opus"),
+      configOptions: providerConfig("claude", "claude-opus"),
+      availableCommands: slashCommands,
     }),
     agent(now, "a2", "Migrate billing to Stripe Payment Element", "codex", "acc-openai", "needs_permission", {
       agoMin: 4,
@@ -96,7 +168,8 @@ export function buildAgents(now: number): Agent[] {
       contextUsed: 88_000,
       contextSize: 272_000,
       lastMessage: "Swapping redirectToCheckout for the Payment Element; the plan IDs stay the same.",
-      configOptions: model("gpt-5-codex", "GPT-5 Codex"),
+      configOptions: providerConfig("codex"),
+      availableCommands: slashCommands.slice(1, 3),
     }),
     agent(now, "a3", "Refactor API client into hooks", "claude", "acc-personal", "working", {
       agoMin: 0,
@@ -107,7 +180,13 @@ export function buildAgents(now: number): Agent[] {
       contextUsed: 74_000,
       contextSize: 200_000,
       lastMessage: "Moving request deduplication into a shared cache so every hook reuses in-flight requests.",
-      configOptions: model("claude-sonnet", "Sonnet"),
+      configOptions: providerConfig("claude", "claude-sonnet"),
+      availableCommands: slashCommands,
+      queuedPrompts: 2,
+      queue: [
+        { id: "q1", text: "After the refactor, migrate Settings.tsx to useApi as well.", attachments: 0 },
+        { id: "q2", text: "Then compare the bundle size before and after.", attachments: 1 },
+      ],
     }),
     agent(now, "a4", "Compare vector DBs for search", "grok", "acc-grok", "working", {
       agoMin: 2,
@@ -115,12 +194,14 @@ export function buildAgents(now: number): Agent[] {
       costUsd: 0.31,
       tokensUsed: 40_900,
       lastMessage: "pgvector is the simplest fit up to ~5M rows; past that Qdrant's filtering wins.",
+      configOptions: providerConfig("grok"),
     }),
     agent(now, "a9", "Summarize open PRs", "custom", "custom-gemini", "starting", {
       agoMin: 0,
       projectPath: "/home/dev/code/acme-web",
       customAgentId: "gemini",
       lastMessage: null,
+      configOptions: providerConfig("custom"),
     }),
     agent(now, "a5", "Add e2e tests for checkout", "codex", "acc-openai", "idle", {
       agoMin: 18,
@@ -130,6 +211,7 @@ export function buildAgents(now: number): Agent[] {
       tokensUsed: 210_500,
       unread: true,
       lastMessage: "All 14 checkout tests pass locally and in CI mode. Two flaky waits were replaced with explicit assertions.",
+      configOptions: providerConfig("codex"),
     }),
     agent(now, "a6", "Upgrade to React 19", "claude", "acc-work", "error", {
       agoMin: 34,
@@ -137,6 +219,7 @@ export function buildAgents(now: number): Agent[] {
       costUsd: 3.6,
       tokensUsed: 402_000,
       lastMessage: "Usage limit reached for this account.",
+      configOptions: providerConfig("claude", "claude-opus"),
     }),
     agent(now, "a7", "Dark mode for the docs site", "claude", "acc-personal", "interrupted", {
       agoMin: 95,
@@ -424,6 +507,18 @@ export function buildTimelines(now: number): Record<string, TimelineItem[]> {
       text: "I'll keep `client.ts` as the transport and build `useApi` on top with a tiny cache keyed by URL.",
     },
     tool("a3", at(8.5), "read", "Read src/api/client.ts", { locations: ["src/api/client.ts"] }),
+    tool("a3", at(8.4), "other", "Task: Audit API call sites", {
+      toolCallId: "sa-audit",
+      subagent: {
+        kind: "Explore",
+        description: "Find every component that calls the API client directly",
+        prompt: "Search src/ for direct uses of api.get / api.post. For each, note the component, the endpoint and whether it handles loading and errors. Report a table; don't change any files.",
+      },
+    }),
+    tool("a3", at(8.35), "search", "Search for api.get(", { parentToolCallId: "sa-audit", output: "12 matches in 6 files" }),
+    tool("a3", at(8.3), "read", "Read src/pages/Orders.tsx", { parentToolCallId: "sa-audit", locations: ["src/pages/Orders.tsx"] }),
+    tool("a3", at(8.28), "read", "Read src/pages/Customers.tsx", { parentToolCallId: "sa-audit", locations: ["src/pages/Customers.tsx"] }),
+    tool("a3", at(8.25), "read", "Read src/pages/Dashboard.tsx", { parentToolCallId: "sa-audit", locations: ["src/pages/Dashboard.tsx"] }),
     tool("a3", at(8.2), "search", "Find usages of api.get", {
       output: "src/pages/Orders.tsx:22\nsrc/pages/Customers.tsx:17\nsrc/pages/Dashboard.tsx:41\nsrc/pages/Settings.tsx:12",
     }),
@@ -431,6 +526,13 @@ export function buildTimelines(now: number): Record<string, TimelineItem[]> {
       command: "npx tsc --noEmit",
       output: "src/pages/Orders.tsx(31,18): error TS2339: Property 'items' does not exist on type 'unknown'.\nFound 1 error in src/pages/Orders.tsx:31",
       status: "failed",
+    }),
+    tool("a3", at(5), "other", "Screenshot localhost:5173/orders", {
+      locations: ["http://localhost:5173/orders"],
+      images: [
+        { name: "orders.png", mimeType: "image/png", data: ORDERS_PNG },
+        { name: "checkout-mobile.png", mimeType: "image/png", data: CHECKOUT_PNG },
+      ],
     }),
     tool("a3", at(4), "edit", "Edit src/pages/Orders.tsx", {
       locations: ["src/pages/Orders.tsx"],
@@ -442,6 +544,13 @@ export function buildTimelines(now: number): Record<string, TimelineItem[]> {
         ),
       ],
     }),
+    tool("a3", at(2), "other", "Task: Migrate Customers.tsx", {
+      toolCallId: "sa-customers",
+      status: "in_progress",
+      subagent: { kind: "general-purpose", description: "Migrate Customers.tsx to useApi", prompt: "Replace the manual fetch in Customers.tsx with useApi. Keep pagination behaviour identical." },
+    }),
+    tool("a3", at(1.8), "read", "Read src/pages/Customers.tsx", { parentToolCallId: "sa-customers", locations: ["src/pages/Customers.tsx"] }),
+    tool("a3", at(1.2), "edit", "Edit src/pages/Customers.tsx", { parentToolCallId: "sa-customers", status: "in_progress" }),
     {
       ...base("a3", at(0.5)),
       kind: "agent_message",
@@ -484,7 +593,17 @@ export function buildTimelines(now: number): Record<string, TimelineItem[]> {
     {
       ...base("a5", at(18)),
       kind: "agent_message",
-      text: "All **14** checkout tests pass locally and in CI mode.\n\n- Card success, 3-D Secure, declined card and expired card paths\n- Coupon codes, including an expired one\n- Two flaky `waitForTimeout` calls were replaced with explicit assertions\n\nRun them with `npx playwright test e2e/checkout.spec.ts`.",
+      text: "All **14** checkout tests pass locally and in CI mode.\n\n- Card success, 3-D Secure, declined card and expired card paths\n- Coupon codes, including an expired one\n- Two flaky `waitForTimeout` calls were replaced with explicit assertions\n\nRun them with `npx playwright test e2e/checkout.spec.ts`.\n\nThe success page after a test payment:\n\n![checkout success](/home/dev/code/acme-web/test-results/checkout.png)",
+    },
+    {
+      ...base("a5", at(17.9)),
+      kind: "turn_summary",
+      durationMs: 22 * MIN + 14_000,
+      files: ["e2e/checkout.spec.ts", "e2e/fixtures/cards.ts", "e2e/helpers/payment.ts", "playwright.config.ts", "package.json", "README.md"],
+      toolCalls: 23,
+      commands: 7,
+      costUsd: 2.04,
+      tokens: 210_500,
     },
   ];
 

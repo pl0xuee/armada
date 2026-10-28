@@ -67,6 +67,7 @@ async fn prompt_permission_and_resume_flow() {
             model: None,
             group_id: None,
             custom_agent_id: None,
+            permission_mode: None,
             attachments: vec![],
         })
         .await
@@ -137,10 +138,12 @@ async fn prompt_permission_and_resume_flow() {
     assert!((a.cost_usd - 0.0123).abs() < 1e-9);
     assert_eq!(a.context_used, Some(1200));
     assert_eq!(a.pending_permissions, 0);
-    assert!(a
-        .config_options
-        .iter()
-        .any(|o| o.id == "mode" && o.current_value == "ask"));
+    assert!(
+        a.config_options
+            .iter()
+            .any(|o| o.id == "mode" && o.current_value == "auto"),
+        "new agents start in Auto mode by default"
+    );
 
     let items = core.items(&agent.id).unwrap();
     let kinds: Vec<&str> = items.iter().map(|i| i.body.kind_str()).collect();
@@ -152,9 +155,25 @@ async fn prompt_permission_and_resume_flow() {
             "plan",
             "tool_call",
             "permission",
-            "agent_message"
+            "agent_message",
+            "turn_summary"
         ]
     );
+    // The "review" of what the turn did.
+    match &items.last().unwrap().body {
+        ItemBody::TurnSummary {
+            tool_calls,
+            commands,
+            cost_usd,
+            tokens,
+            ..
+        } => {
+            assert_eq!((*tool_calls, *commands), (1, 1));
+            assert!((cost_usd - 0.0123).abs() < 1e-9);
+            assert_eq!(*tokens, 42);
+        }
+        other => panic!("expected a turn summary, got {other:?}"),
+    }
     match &items[3].body {
         ItemBody::ToolCall {
             status,
@@ -174,7 +193,7 @@ async fn prompt_permission_and_resume_flow() {
     }
 
     // Mode switch goes through session/set_mode.
-    core.set_agent_config(&agent.id, "mode", "auto")
+    core.set_agent_config(&agent.id, "mode", "ask")
         .await
         .unwrap();
     assert!(core
@@ -182,7 +201,7 @@ async fn prompt_permission_and_resume_flow() {
         .unwrap()
         .config_options
         .iter()
-        .any(|o| o.id == "mode" && o.current_value == "auto"));
+        .any(|o| o.id == "mode" && o.current_value == "ask"));
 
     // Search finds the conversation.
     assert!(!core.search("hello there").unwrap().is_empty());
@@ -244,7 +263,7 @@ async fn prompt_permission_and_resume_flow() {
     );
 
     // Delete cleans everything up.
-    core.delete_agent(&agent.id, true).await.unwrap();
+    core.delete_agent(&agent.id, true, false).await.unwrap();
     assert!(core.agent(&agent.id).is_err());
     assert!(core.items(&agent.id).unwrap().is_empty());
     core.shutdown().await;
@@ -266,6 +285,9 @@ fn wire_format_matches_typescript_contract() {
             diffs: vec![],
             output: String::new(),
             command: None,
+            images: vec![],
+            subagent: None,
+            parent_tool_call_id: None,
         },
     };
     let v = serde_json::to_value(&item).unwrap();
@@ -290,11 +312,13 @@ fn wire_format_matches_typescript_contract() {
         item_id: "i".into(),
         field: DeltaField::Output,
         delta: "d".into(),
+        offset: 7,
     };
     let v = serde_json::to_value(&ev).unwrap();
     assert_eq!(v["type"], "text_delta");
     assert_eq!(v["itemId"], "i");
     assert_eq!(v["field"], "output");
+    assert_eq!(v["offset"], 7);
 
     // Older settings rows missing new fields still load.
     let s: Settings = serde_json::from_str(r#"{"onboarded":true}"#).unwrap();
@@ -315,6 +339,7 @@ async fn failover_mcp_commands_and_export() {
     // One enabled stdio server, one disabled, one HTTP (mock lacks HTTP support).
     let mut settings = core.settings().unwrap();
     settings.failover = "auto".into();
+    settings.default_permission_mode = "ask".into();
     let server = |id: &str, enabled: bool, transport: McpTransport| McpServer {
         id: id.into(),
         name: id.into(),
@@ -407,6 +432,7 @@ async fn failover_mcp_commands_and_export() {
             model: None,
             group_id: None,
             custom_agent_id: None,
+            permission_mode: None,
             attachments: vec![],
         })
         .await
@@ -423,6 +449,12 @@ async fn failover_mcp_commands_and_export() {
         "custom titles aren't replaced by agent suggestions"
     );
     assert_eq!(a.available_commands.len(), 2);
+    assert!(
+        a.config_options
+            .iter()
+            .any(|o| o.id == "mode" && o.current_value == "ask"),
+        "with the default set to ask, agents keep their own default mode"
+    );
     assert_eq!(a.available_commands[1].hint.as_deref(), Some("path"));
 
     // Hitting a usage limit with failover = auto moves the agent to the other account
@@ -483,6 +515,8 @@ async fn failover_mcp_commands_and_export() {
         last_agent_id: None,
         custom_agent_id: None,
         updated_at: 0,
+        last_error: None,
+        permission_mode: None,
     };
     assert!(core.save_schedule(bad.clone()).is_err());
     let saved = core
@@ -560,6 +594,7 @@ async fn custom_agents_attachments_and_files() {
         model: None,
         group_id: None,
         custom_agent_id: custom.map(str::to_string),
+        permission_mode: None,
         attachments,
     };
     assert!(
@@ -629,5 +664,371 @@ async fn custom_agents_attachments_and_files() {
         .unwrap()
         .is_empty());
 
+    core.shutdown().await;
+}
+
+/// Streamed text carries UTF-16 offsets that line up with the concatenated text,
+/// and every stream ends with the full item (so a client that missed deltas heals).
+#[tokio::test]
+async fn stream_offsets_and_final_item() {
+    let mock = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/mock_acp.py").to_string();
+    let data = temp_dir("data-offsets");
+    let project = temp_dir("project-offsets");
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let core = Core::open(data, Arc::new(Sink(tx))).unwrap();
+    let mut settings = core.settings().unwrap();
+    settings.custom_agents = vec![CustomAgent {
+        id: "mock".into(),
+        name: "Mock".into(),
+        command: "python3".into(),
+        args: vec![mock],
+        env: vec![],
+        color: "#B39DDB".into(),
+        enabled: true,
+    }];
+    core.save_settings(settings).unwrap();
+    let account = core
+        .accounts()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.provider == Provider::Custom)
+        .unwrap();
+    // Non-ASCII text: "é" is 1 UTF-16 unit, "😀" is 2.
+    let agent = core
+        .create_agent(CreateAgentRequest {
+            provider: Provider::Custom,
+            account_id: account.id,
+            project_path: project.to_string_lossy().into_owned(),
+            prompt: "héllo 😀".into(),
+            title: None,
+            worktree: false,
+            model: None,
+            group_id: None,
+            custom_agent_id: Some("mock".into()),
+            // Per-agent override of the "auto" default.
+            permission_mode: Some("ask".into()),
+            attachments: vec![],
+        })
+        .await
+        .unwrap();
+
+    let mut message_id = None;
+    let mut rebuilt = String::new();
+    let mut final_text = None;
+    loop {
+        let ev = next_matching(&mut rx, |_| true).await;
+        match ev {
+            ArmadaEvent::ItemUpserted { item } => {
+                if let ItemBody::Permission {
+                    request_id,
+                    resolution: None,
+                    ..
+                } = &item.body
+                {
+                    core.respond_permission(&agent.id, request_id, "yes")
+                        .await
+                        .unwrap();
+                }
+                if let ItemBody::AgentMessage { text } = &item.body {
+                    message_id = Some(item.id.clone());
+                    if !text.is_empty() {
+                        final_text = Some(text.clone());
+                    }
+                }
+            }
+            ArmadaEvent::TextDelta {
+                item_id,
+                field: DeltaField::Text,
+                delta,
+                offset,
+                ..
+            } if Some(&item_id) == message_id.as_ref() => {
+                assert_eq!(
+                    offset,
+                    rebuilt.encode_utf16().count(),
+                    "offset of {delta:?}"
+                );
+                rebuilt.push_str(&delta);
+            }
+            ArmadaEvent::Attention {
+                reason: AttentionReason::Done,
+                ..
+            } => break,
+            _ => {}
+        }
+    }
+    assert_eq!(rebuilt, "You said: héllo 😀");
+    assert_eq!(
+        final_text.as_deref(),
+        Some("You said: héllo 😀"),
+        "full item after the stream"
+    );
+    let a = core.agent(&agent.id).unwrap();
+    assert_eq!(a.permission_mode.as_deref(), Some("ask"));
+    assert!(
+        a.config_options
+            .iter()
+            .any(|o| o.id == "mode" && o.current_value != "auto"),
+        "an agent launched in Ask mode stays out of Auto"
+    );
+    core.acknowledge_agent(&agent.id).unwrap();
+    let a = core.agent(&agent.id).unwrap();
+    assert!(a.acknowledged_at.is_some() && !a.unread);
+    core.shutdown().await;
+}
+
+async fn custom_mock_core(
+    name: &str,
+) -> (
+    Core,
+    mpsc::UnboundedReceiver<ArmadaEvent>,
+    String,
+    std::path::PathBuf,
+) {
+    let mock = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/mock_acp.py").to_string();
+    let data = temp_dir(&format!("{name}-data"));
+    let project = temp_dir(&format!("{name}-project"));
+    let (tx, rx) = mpsc::unbounded_channel();
+    let core = Core::open(data, Arc::new(Sink(tx))).unwrap();
+    let mut settings = core.settings().unwrap();
+    settings.custom_agents = vec![CustomAgent {
+        id: "mock".into(),
+        name: "Mock".into(),
+        command: "python3".into(),
+        args: vec![mock],
+        env: vec![],
+        color: "#B39DDB".into(),
+        enabled: true,
+    }];
+    core.save_settings(settings).unwrap();
+    let account = core
+        .accounts()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.provider == Provider::Custom)
+        .unwrap()
+        .id;
+    (core, rx, account, project)
+}
+
+/// Claude-style sub-agents: the Task call carries the sub-agent, the calls it
+/// makes nest under it, its own text stays out of the main conversation, and the
+/// turn summary counts only the agent's own (top-level) steps and commands.
+#[tokio::test]
+async fn subagent_calls_nest_under_their_task() {
+    let (core, mut rx, account, project) = custom_mock_core("subagent").await;
+    let agent = core
+        .create_agent(CreateAgentRequest {
+            provider: Provider::Custom,
+            account_id: account,
+            project_path: project.to_string_lossy().into_owned(),
+            prompt: "SUBAGENT please".into(),
+            title: None,
+            worktree: false,
+            model: None,
+            group_id: None,
+            custom_agent_id: Some("mock".into()),
+            permission_mode: None,
+            attachments: vec![],
+        })
+        .await
+        .unwrap();
+    let mut output_deltas = Vec::new();
+    loop {
+        match next_matching(&mut rx, |_| true).await {
+            ArmadaEvent::TextDelta {
+                field: DeltaField::Output,
+                delta,
+                ..
+            } => output_deltas.push(delta),
+            ArmadaEvent::Attention {
+                reason: AttentionReason::Done,
+                ..
+            } => break,
+            _ => {}
+        }
+    }
+    // The growing Task output went out as a delta, not as full re-sends.
+    assert_eq!(output_deltas, ["found", " it"]);
+    let items = core.items(&agent.id).unwrap();
+    let calls: Vec<(&str, bool, Option<&str>, &str)> = items
+        .iter()
+        .filter_map(|i| match &i.body {
+            ItemBody::ToolCall {
+                tool_call_id,
+                subagent,
+                parent_tool_call_id,
+                output,
+                ..
+            } => Some((
+                tool_call_id.as_str(),
+                subagent.is_some(),
+                parent_tool_call_id.as_deref(),
+                output.as_str(),
+            )),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        calls,
+        [
+            ("task1", true, None, "found it"),
+            ("sub1", false, Some("task1"), ""),
+            ("sub2", false, Some("task1"), ""),
+        ]
+    );
+    let task = items
+        .iter()
+        .find_map(|i| match &i.body {
+            ItemBody::ToolCall {
+                subagent: Some(sa), ..
+            } => Some(sa.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(task.kind.as_deref(), Some("Explore"));
+    assert_eq!(task.description.as_deref(), Some("Explore the repo"));
+    let texts: Vec<&str> = items
+        .iter()
+        .filter_map(|i| match &i.body {
+            ItemBody::AgentMessage { text } | ItemBody::Thought { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(texts, ["Done with the sub-agent"], "sub-agent text leaked");
+    match &items.last().unwrap().body {
+        ItemBody::TurnSummary {
+            tool_calls,
+            commands,
+            ..
+        } => assert_eq!((*tool_calls, *commands), (1, 0)),
+        other => panic!("expected a summary, got {other:?}"),
+    }
+    core.shutdown().await;
+}
+
+/// Codex: "ask" agents start with the untrusted policy; permission requests,
+/// legacy approvals, user-input and elicitation requests all get an answer of
+/// the right shape; a sub-agent item that arrives before its collaborator call
+/// is re-parented once the call is known.
+#[tokio::test]
+async fn codex_server_requests_and_ask_mode() {
+    let mock = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/mock_codex_full.py");
+    std::env::set_var("ARMADA_CODEX_COMMAND", format!("python3 {mock}"));
+    let data = temp_dir("codex-full-data");
+    let project = temp_dir("codex-full-project");
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let core = Core::open(data, Arc::new(Sink(tx))).unwrap();
+    let account = core
+        .accounts()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.provider == Provider::Codex && a.is_system)
+        .unwrap();
+    let agent = core
+        .create_agent(CreateAgentRequest {
+            provider: Provider::Codex,
+            account_id: account.id,
+            project_path: project.to_string_lossy().into_owned(),
+            prompt: "go".into(),
+            title: None,
+            worktree: false,
+            model: None,
+            group_id: None,
+            custom_agent_id: None,
+            permission_mode: Some("ask".into()),
+            attachments: vec![],
+        })
+        .await
+        .unwrap();
+    let mut answered = Vec::new();
+    loop {
+        match next_matching(&mut rx, |_| true).await {
+            ArmadaEvent::ItemUpserted { item } => {
+                if let ItemBody::Permission {
+                    request_id,
+                    title,
+                    resolution: None,
+                    ..
+                } = &item.body
+                {
+                    // Allow the network grant, decline the legacy command.
+                    let choice = if answered.is_empty() {
+                        "accept"
+                    } else {
+                        "decline"
+                    };
+                    answered.push(title.clone());
+                    core.respond_permission(&agent.id, request_id, choice)
+                        .await
+                        .unwrap();
+                }
+            }
+            ArmadaEvent::Attention {
+                reason: AttentionReason::Done,
+                ..
+            } => break,
+            ArmadaEvent::Attention {
+                reason: AttentionReason::Error,
+                body,
+                ..
+            } => panic!("turn failed: {body}"),
+            _ => {}
+        }
+    }
+    assert_eq!(answered, ["Allow network access", "Run rm -rf build"]);
+    let items = core.items(&agent.id).unwrap();
+    let reply = items
+        .iter()
+        .find_map(|i| match &i.body {
+            ItemBody::AgentMessage { text } => Some(text.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(reply.starts_with("policy=untrusted "), "{reply}");
+    let answers: serde_json::Value =
+        serde_json::from_str(reply.split_once("answers=").unwrap().1).unwrap();
+    assert_eq!(
+        answers["perm"],
+        serde_json::json!({ "permissions": { "network": { "enabled": true } }, "scope": "turn" })
+    );
+    assert!(
+        answers["exec"]["decision"]["denied"].is_object(),
+        "{answers}"
+    );
+    assert_eq!(answers["input"], serde_json::json!({ "answers": {} }));
+    assert_eq!(answers["elicit"]["action"], "decline");
+    let notices: Vec<&str> = items
+        .iter()
+        .filter_map(|i| match &i.body {
+            ItemBody::Notice { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        notices
+            .iter()
+            .filter(|n| n.starts_with("Codex asked for input Armada can't show yet"))
+            .count(),
+        2,
+        "{notices:?}"
+    );
+    let orphan = items
+        .iter()
+        .find_map(|i| match &i.body {
+            ItemBody::ToolCall {
+                tool_call_id,
+                parent_tool_call_id,
+                ..
+            } if tool_call_id == "c-orphan" => Some(parent_tool_call_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(orphan.as_deref(), Some("collab1"));
+    let a = core.agent(&agent.id).unwrap();
+    assert!(a
+        .config_options
+        .iter()
+        .any(|o| o.id == "approval" && o.current_value == "untrusted"));
     core.shutdown().await;
 }

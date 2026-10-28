@@ -13,6 +13,7 @@ import type { AuthKind } from "@/lib/types";
 import { cn, errorMessage } from "@/lib/utils";
 import { useApp } from "@/store/app";
 import { ColorSwatches } from "./ColorSwatches";
+import { onRadioGroupKeyDown } from "../ui/radioKeys";
 
 const SUBSCRIPTION: Record<BuiltinProvider, string> = {
   claude: "Claude Pro or Max",
@@ -142,7 +143,12 @@ export function AddAccountDialog({
 
             <div>
               <Label>Sign-in method</Label>
-              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Sign-in method">
+              <div
+                className="grid grid-cols-2 gap-2"
+                role="radiogroup"
+                aria-label="Sign-in method"
+                onKeyDown={onRadioGroupKeyDown}
+              >
                 <AuthOption
                   active={auth === "oauth"}
                   onClick={() => setAuth("oauth")}
@@ -232,6 +238,7 @@ function AuthOption({
       type="button"
       role="radio"
       aria-checked={active}
+      tabIndex={active ? 0 : -1}
       onClick={onClick}
       className={cn(
         "flex items-start gap-2.5 rounded-xl border p-3 text-left transition-[border-color,background-color,transform] duration-150 active:scale-[0.98] [&_svg]:mt-0.5 [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0",

@@ -1,12 +1,12 @@
 import { ArrowRightLeft, Repeat } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { CUSTOM_ACCOUNT_ID, PROVIDER_ORDER, PROVIDERS } from "@/lib/providers";
 import type { Agent, CustomAgent, Provider } from "@/lib/types";
 
 const EMPTY_CUSTOM: CustomAgent[] = [];
-import { CONTINUE_PROMPT, switchAccount } from "@/lib/actions";
+import { CONTINUE_PROMPT, deleteAgentWithUndo, switchAccount } from "@/lib/actions";
 import { cn, errorMessage } from "@/lib/utils";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
@@ -63,23 +63,37 @@ function HandoffDialog({ agent, onClose }: { agent: Agent | null; onClose: () =>
   const [accountId, setAccountId] = useState("");
   const [instruction, setInstruction] = useState(PRESETS[0].text);
   const [busy, setBusy] = useState(false);
+  // Synchronous re-entry guard: ⌘/Ctrl+Enter and a click can land before `busy` re-renders.
+  const busyRef = useRef(false);
 
-  // Default to a different provider than the source agent.
+  const preferredAccount = (p: Provider) => {
+    const list = useApp.getState().accounts.filter((a) => a.provider === p);
+    return (list.find((a) => a.status?.loggedIn) ?? list[0])?.id ?? "";
+  };
+
+  // Initialise once per opened agent (account updates mustn't reset the user's choice).
+  const agentId = agent?.id;
+  const sourceProvider = agent?.provider;
   useEffect(() => {
-    if (!agent) return;
-    const p = PROVIDER_ORDER.find((x) => x !== agent.provider) ?? "claude";
+    if (!agentId) return;
+    const p = PROVIDER_ORDER.find((x) => x !== sourceProvider) ?? "claude";
     setChoice(p);
+    setAccountId(preferredAccount(p));
     setInstruction(PRESETS[0].text);
-  }, [agent]);
+    busyRef.current = false;
+    setBusy(false);
+  }, [agentId, sourceProvider]);
+
+  const chooseAgent = (key: string) => {
+    setChoice(key);
+    if (!key.startsWith("custom:")) setAccountId(preferredAccount(key as Provider));
+  };
 
   const providerAccounts = useMemo(() => accounts.filter((a) => a.provider === provider), [accounts, provider]);
-  useEffect(() => {
-    const preferred = providerAccounts.find((a) => a.status?.loggedIn) ?? providerAccounts[0];
-    setAccountId(preferred?.id ?? "");
-  }, [providerAccounts]);
 
   const submit = async () => {
-    if (!agent || (!custom && !accountId) || !instruction.trim()) return;
+    if (busyRef.current || !agent || (!custom && !accountId) || !instruction.trim()) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       const created = await api.handoffAgent(
@@ -98,6 +112,7 @@ function HandoffDialog({ agent, onClose }: { agent: Agent | null; onClose: () =>
     } catch (e) {
       toast.error("Hand-off failed", { description: errorMessage(e) });
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -114,7 +129,7 @@ function HandoffDialog({ agent, onClose }: { agent: Agent | null; onClose: () =>
             <Segmented
               aria-label="Agent"
               value={choice}
-              onChange={setChoice}
+              onChange={chooseAgent}
               className="w-full max-w-full overflow-x-auto"
               options={[
                 ...PROVIDER_ORDER.map((p) => ({
@@ -199,7 +214,6 @@ function HandoffDialog({ agent, onClose }: { agent: Agent | null; onClose: () =>
 
 function DeleteDialog({ agent, onClose }: { agent: Agent | null; onClose: () => void }) {
   const [removeWorktree, setRemoveWorktree] = useState(true);
-  const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (agent) setRemoveWorktree(true);
   }, [agent]);
@@ -209,7 +223,6 @@ function DeleteDialog({ agent, onClose }: { agent: Agent | null; onClose: () => 
       open={!!agent}
       onOpenChange={(o) => !o && onClose()}
       danger
-      busy={busy}
       title="Delete agent?"
       description={
         agent ? (
@@ -222,16 +235,8 @@ function DeleteDialog({ agent, onClose }: { agent: Agent | null; onClose: () => 
       confirmLabel="Delete"
       onConfirm={async () => {
         if (!agent) return;
-        setBusy(true);
-        try {
-          await api.deleteAgent(agent.id, agent.worktree && removeWorktree);
-          toast(`Deleted “${agent.title}”`);
-          onClose();
-        } catch (e) {
-          toast.error("Couldn't delete agent", { description: errorMessage(e) });
-        } finally {
-          setBusy(false);
-        }
+        deleteAgentWithUndo(agent, agent.worktree && removeWorktree);
+        onClose();
       }}
     >
       {agent?.worktree && (
@@ -240,6 +245,9 @@ function DeleteDialog({ agent, onClose }: { agent: Agent | null; onClose: () => 
           <span>
             Also remove the worktree
             <span className="mt-0.5 block font-mono text-[11px] text-steel">{agent.branch}</span>
+            <span className="mt-1 block text-[11.5px] text-steel">
+              If it has uncommitted or unmerged work, Armada checks with you before discarding it.
+            </span>
           </span>
         </label>
       )}
@@ -257,21 +265,35 @@ function MoveAccountDialog({ agent, onClose }: { agent: Agent | null; onClose: (
     [accounts, agent],
   );
 
+  const busyRef = useRef(false);
+  // Initialise once per opened agent; later account updates keep the user's selection.
+  const agentId = agent?.id;
   useEffect(() => {
-    if (!agent) return;
-    setTarget(options.find((a) => a.status?.loggedIn)?.id ?? null);
-    setCont(agent.rateLimited);
-  }, [agent, options]);
+    if (!agentId) return;
+    const a = useUi.getState().moveAgent;
+    const first = useApp
+      .getState()
+      .accounts.find((x) => x.provider === a?.provider && x.id !== a?.accountId && x.status?.loggedIn);
+    setTarget(first?.id ?? null);
+    setCont(a?.rateLimited ?? false);
+    busyRef.current = false;
+    setBusy(false);
+  }, [agentId]);
 
   const current = agent ? accounts.find((a) => a.id === agent.accountId) : undefined;
   const chosen = options.find((a) => a.id === target);
 
   const submit = async () => {
-    if (!agent || !chosen) return;
+    if (busyRef.current || !agent || !chosen) return;
+    busyRef.current = true;
     setBusy(true);
-    const ok = await switchAccount(agent, chosen, cont);
-    setBusy(false);
-    if (ok) onClose();
+    try {
+      const ok = await switchAccount(agent, chosen, cont);
+      if (ok) onClose();
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
   };
 
   return (

@@ -9,6 +9,7 @@ import { Segmented } from "@/components/ui/segmented";
 import { BarList, ShareBar, type BarDatum } from "@/components/usage/BarList";
 import { KpiTile } from "@/components/usage/KpiTile";
 import { UsageMeters } from "@/components/UsageMeter";
+import { splitCost } from "@/lib/costSplit";
 import { formatCost, formatTokens, relativeTimeLong } from "@/lib/format";
 import { identityFor } from "@/lib/identity";
 import { providerRank, PROVIDERS } from "@/lib/providers";
@@ -169,6 +170,7 @@ export function UsageView() {
   ).length;
   const priciest = providerData.length ? [...byProvider.values()].sort((a, b) => b.cost - a.cost)[0] : null;
   const accountsInUse = new Set(agents.filter((a) => a.provider !== "custom").map((a) => a.accountId)).size;
+  const split = splitCost(agents, accounts);
   const metered = accounts.filter((a) => a.usage && (a.usage.primary || a.usage.secondary));
 
   if (agents.length === 0) {
@@ -195,7 +197,7 @@ export function UsageView() {
       <PageHeader
         icon={<ChartColumn />}
         title="Usage"
-        subtitle="Spend and tokens as reported by each agent runtime, all time"
+        subtitle="Cost and tokens as reported by each agent runtime, since your agents were created"
         right={
           <Segmented<Metric>
             size="sm"
@@ -203,7 +205,7 @@ export function UsageView() {
             value={metric}
             onChange={setMetric}
             options={[
-              { value: "cost", label: "Cost" },
+              { value: "cost", label: "Cost (USD)" },
               { value: "tokens", label: "Tokens" },
             ]}
           />
@@ -215,9 +217,21 @@ export function UsageView() {
           <div className="grid grid-cols-2 gap-3 @3xl:grid-cols-4">
             <KpiTile
               icon={<Coins />}
-              label="Total spend"
-              value={formatCost(total.cost)}
-              sub={priciest ? `Most on ${identity(priciest.key).short}` : undefined}
+              label="Billed (API keys)"
+              value={formatCost(split.billed)}
+              sub={split.billed > 0 ? "Charged per token" : "No API-key usage"}
+            />
+            <KpiTile
+              icon={<Gauge />}
+              label="API-equivalent cost"
+              value={formatCost(split.equivalent)}
+              sub={
+                split.equivalent > 0
+                  ? "Subscription usage, not billed per token"
+                  : priciest
+                    ? `Most on ${identity(priciest.key).short}`
+                    : undefined
+              }
             />
             <KpiTile
               icon={<Cpu />}
@@ -229,13 +243,7 @@ export function UsageView() {
               icon={<Bot />}
               label="Agents"
               value={agents.length}
-              sub={`${live} live · ${agents.filter((a) => a.archived).length} archived`}
-            />
-            <KpiTile
-              icon={<Gauge />}
-              label="Avg / agent"
-              value={formatCost(total.cost / agents.length)}
-              sub={`${accountsInUse} ${accountsInUse === 1 ? "account" : "accounts"} in use`}
+              sub={`${live} live · ${accountsInUse} ${accountsInUse === 1 ? "account" : "accounts"}`}
             />
           </div>
 

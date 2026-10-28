@@ -101,6 +101,32 @@ export interface Agent {
   scheduleId: string | null;
   /** Set when provider === "custom". */
   customAgentId: string | null;
+  /** Messages sent while a turn was running; they run in order right after it. */
+  queuedPrompts: number;
+  /** The queued messages themselves (not in the timeline until they run). */
+  queue: QueuedPrompt[];
+  /** Queue held after a stop/error; sending a new message resumes it. */
+  queuePaused: boolean;
+  /** When the user last marked this agent "Done" in triage (ms); dismissed while >= lastActivityAt. */
+  acknowledgedAt: number | null;
+  /** Permission mode chosen at launch ("auto" | "ask"), null = settings default at the time. */
+  permissionMode: string | null;
+  /** Backend-internal (handoff briefing pending); not shown in the UI. */
+  needsBriefing: boolean;
+}
+
+export interface QueuedPrompt {
+  id: string;
+  text: string;
+  /** Number of image attachments. */
+  attachments: number;
+}
+
+/** Set on tool calls that spawned a sub-agent (Claude Task tool, etc.). */
+export interface SubagentInfo {
+  kind?: string | null;
+  description?: string | null;
+  prompt?: string | null;
 }
 
 export interface SlashCommand {
@@ -158,6 +184,12 @@ export type TimelineItem = ItemBase &
         diffs: FileDiff[];
         output: string;
         command: string | null;
+        /** Screenshots/images returned by the tool (omitted when empty). */
+        images?: Attachment[];
+        /** Present when this call runs a sub-agent. */
+        subagent?: SubagentInfo;
+        /** The sub-agent call this call ran inside. */
+        parentToolCallId?: string;
       }
     | {
         kind: "permission";
@@ -172,6 +204,16 @@ export type TimelineItem = ItemBase &
       }
     | { kind: "plan"; entries: PlanEntry[] }
     | { kind: "notice"; level: "info" | "warn" | "error"; text: string }
+    | {
+        /** Pushed after a completed turn that used tools. */
+        kind: "turn_summary";
+        durationMs: number;
+        files: string[];
+        toolCalls: number;
+        commands: number;
+        costUsd: number;
+        tokens: number;
+      }
   );
 
 export type TimelineKind = TimelineItem["kind"];
@@ -189,6 +231,8 @@ export type ArmadaEvent =
       itemId: string;
       field: "text" | "output";
       delta: string;
+      /** Field length (UTF-16 code units) before this delta; see store/app.ts for the apply rules. */
+      offset: number;
     }
   | { type: "account_updated"; account: Account }
   | { type: "account_removed"; accountId: string }
@@ -206,6 +250,8 @@ export type ArmadaEvent =
   | { type: "providers_changed"; providers: ProviderInfo[] }
   /** Backend asks the UI to navigate (tray menu, notification click, hotkey). */
   | { type: "navigate"; to: NavigateTarget }
+  | { type: "schedule_updated"; schedule: Schedule }
+  | { type: "schedule_removed"; scheduleId: string }
   | { type: "update_available"; update: UpdateInfo }
   | { type: "update_progress"; downloaded: number; total: number | null };
 
@@ -282,6 +328,8 @@ export interface Settings {
   templates: PromptTemplate[];
   mcpServers: McpServer[];
   failover: "off" | "ask" | "auto";
+  /** How new agents start: the agent's own Auto mode, or its ask-first default. */
+  defaultPermissionMode: "auto" | "ask";
   customAgents: CustomAgent[];
   remote: RemoteSettings;
 }
@@ -372,6 +420,10 @@ export interface Schedule {
   days: number[]; // 0=Sun..6=Sat; [] = every day
   lastRunAt: number | null;
   lastAgentId: string | null;
+  /** Why the last scheduled run failed to start (null if it started). */
+  lastError: string | null;
+  /** Permission mode for the agents this schedule starts; null = settings default at run time. */
+  permissionMode: "auto" | "ask" | null;
   customAgentId: string | null;
   updatedAt: number;
 }
@@ -396,6 +448,8 @@ export interface CreateAgentRequest {
   groupId: string | null;
   customAgentId: string | null;
   attachments: Attachment[];
+  /** null = settings.defaultPermissionMode. */
+  permissionMode?: "auto" | "ask" | null;
 }
 
 export interface CreateAccountRequest {
@@ -417,6 +471,9 @@ export interface AgentDiff {
   files: ChangedFile[];
   patch: string; // full unified diff vs. baseCommit (includes uncommitted work)
   ahead: number; // commits on the agent branch not in base
+  uncommitted: number; // dirty (uncommitted) files in the worktree
+  /** The patch was cut at 8 MB (the file list is still complete). */
+  truncated: boolean;
 }
 
 export interface SearchHit {
@@ -425,4 +482,20 @@ export interface SearchHit {
   kind: TimelineKind;
   snippet: string;
   ts: number;
+}
+
+export interface CommitSummary {
+  hash: string;
+  files: string[];
+  leftUncommitted: number;
+  skipped: string[];
+  /** Human summary, e.g. "Committed 3 files (abc1234); 5 other changed files were left uncommitted". */
+  message: string;
+}
+
+/** ship_agent result. A rejection means nothing changed; `error` means the commit landed but the merge failed. */
+export interface ShipResult {
+  committed: string | null;
+  merged: string | null;
+  error: string | null;
 }

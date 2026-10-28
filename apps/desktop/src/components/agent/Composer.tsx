@@ -1,24 +1,33 @@
-import { ArrowUp, BookText, FileText, Play, RotateCcw, Square } from "lucide-react";
+import { ArrowUp, BookText, FileText, ListPlus, Play, RotateCcw, Square } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { cancelTurn, resumeAgent } from "@/lib/actions";
 import { api } from "@/lib/api";
-import type { Agent, SlashCommand } from "@/lib/types";
+import { MAX_ATTACHMENTS } from "@/lib/attachments";
+import type { Agent, SlashCommand, Attachment } from "@/lib/types";
 import { cn, errorMessage } from "@/lib/utils";
 import { useDebounced } from "@/hooks/useDebounced";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useAttachments } from "@/hooks/useAttachments";
 import { useUi } from "@/store/ui";
+import { getDraft, setDraft } from "./drafts";
 import { AttachButton, DropOverlay } from "../AttachControls";
 import { AttachmentStrip } from "../AttachmentStrip";
 import { TemplatePicker } from "../TemplatePicker";
 import { Button } from "../ui/button";
 import { Kbd } from "../ui/kbd";
+import { Tooltip } from "../ui/tooltip";
 import { ConfigOverflowMenu, ConfigSelect } from "./ConfigSelect";
+import { QueueStack } from "./QueueStack";
 import { RateLimitBanner } from "./RateLimitBanner";
 
-const drafts = new Map<string, string>();
+const ESC_ARM_MS = 1500;
+
+/** IME composition in progress (WebKit reports keyCode 229 and may not set isComposing). */
+function composing(e: React.KeyboardEvent): boolean {
+  return e.nativeEvent.isComposing || e.keyCode === 229;
+}
 
 interface Suggestion {
   key: string;
@@ -39,13 +48,19 @@ function slashQuery(text: string): string | null {
 }
 
 export function Composer({ agent }: { agent: Agent }) {
-  const [text, setText] = useState(() => drafts.get(agent.id) ?? "");
+  const [text, setText] = useState(() => getDraft(agent.id));
+  // Latest text for async callbacks (queue Edit resolves after an await).
+  const textRef = useRef(text);
+  textRef.current = text;
+  const [escArmed, setEscArmed] = useState(false);
+  const escTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<{ prefix: string; hint: string } | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
   const [caret, setCaret] = useState(0);
-  const [files, setFiles] = useState<string[]>([]);
+  // Results tagged with the query they answer, so a fast Enter never picks a stale file.
+  const [files, setFiles] = useState<{ query: string; list: string[] }>({ query: "", list: [] });
   const attach = useAttachments();
   const [wrapRef, width] = useElementWidth<HTMLDivElement>();
   // Toolbar tiers by available width: labels → icons → extra options in a "+" menu.
@@ -58,7 +73,8 @@ export function Composer({ agent }: { agent: Agent }) {
   const blocked = agent.status === "needs_permission";
   const resumable = agent.status === "interrupted" || agent.status === "stopped";
   const busy = working || blocked;
-  const canSend = !busy && !resumable && (text.trim().length > 0 || attach.attachments.length > 0) && !sending;
+  // Sending while the agent works queues the message; it runs right after this turn.
+  const canSend = !resumable && (text.trim().length > 0 || attach.attachments.length > 0) && !sending;
 
   const query = slashQuery(text);
   const matches = useMemo(() => {
@@ -73,14 +89,15 @@ export function Composer({ agent }: { agent: Agent }) {
   const debouncedMention = useDebounced(mention, 120);
   useEffect(() => {
     if (debouncedMention === null) {
-      setFiles([]);
+      setFiles({ query: "", list: [] });
       return;
     }
     let cancelled = false;
+    const q = debouncedMention;
     api
-      .listFiles(agent.id, debouncedMention)
-      .then((f) => !cancelled && setFiles(f))
-      .catch(() => !cancelled && setFiles([]));
+      .listFiles(agent.id, q)
+      .then((f) => !cancelled && setFiles({ query: q, list: f }))
+      .catch(() => !cancelled && setFiles({ query: q, list: [] }));
     return () => {
       cancelled = true;
     };
@@ -90,9 +107,10 @@ export function Composer({ agent }: { agent: Agent }) {
     ? null
     : matches.length > 0
       ? "slash"
-      : mention !== null && files.length > 0
+      : mention !== null && files.query === mention && files.list.length > 0
         ? "mention"
         : null;
+  const fileList = mode === "mention" ? files.list.slice(0, 50) : [];
   const suggestions: Suggestion[] =
     mode === "slash"
       ? matches.map((c) => ({
@@ -106,7 +124,7 @@ export function Composer({ agent }: { agent: Agent }) {
           detail: c.description,
         }))
       : mode === "mention"
-        ? files.slice(0, 50).map((f) => {
+        ? fileList.map((f) => {
             const base = f.slice(f.lastIndexOf("/") + 1);
             const dir = f.slice(0, f.length - base.length);
             return {
@@ -122,16 +140,38 @@ export function Composer({ agent }: { agent: Agent }) {
           })
         : [];
   const slashOpen = suggestions.length > 0;
+  // The list can shrink under a stale index (commands/files update); always clamp.
+  const activeIndex = slashOpen ? Math.min(slashIndex, suggestions.length - 1) : 0;
 
   // Per-agent drafts survive switching agents.
   useEffect(() => {
-    setText(drafts.get(agent.id) ?? "");
+    setText(getDraft(agent.id));
     setHint(null);
+    setEscArmed(false);
   }, [agent.id]);
 
+  useEffect(
+    () => () => {
+      if (escTimer.current) clearTimeout(escTimer.current);
+    },
+    [],
+  );
+
+  // Focus the composer on open, except while an approval is pending: then Y/A/N go to the
+  // approval card (keyboard approvals), so keep focus off the textarea.
+  const focusedForTick = useRef(focusTick);
   useEffect(() => {
-    if (!resumable) ref.current?.focus();
+    if (resumable) return;
+    const explicit = focusTick !== focusedForTick.current;
+    focusedForTick.current = focusTick;
+    if (blocked && !explicit) return;
+    ref.current?.focus();
   }, [agent.id, focusTick, resumable]);
+
+  // An approval arriving while the composer is focused with an empty draft releases focus.
+  useEffect(() => {
+    if (blocked && document.activeElement === ref.current && !ref.current?.value) ref.current?.blur();
+  }, [blocked]);
 
   useEffect(() => setSlashIndex(0), [query, debouncedMention, mode]);
 
@@ -144,9 +184,10 @@ export function Composer({ agent }: { agent: Agent }) {
 
   const update = (v: string, nextCaret = v.length) => {
     setText(v);
+    textRef.current = v;
     setCaret(nextCaret);
-    if (v) drafts.set(agent.id, v);
-    else drafts.delete(agent.id);
+    setDraft(agent.id, v);
+    if (escArmed) setEscArmed(false);
     if (hint && v !== hint.prefix) setHint(null);
     if (slashQuery(v) === null && mentionQuery(v, nextCaret) === null) setSlashDismissed(false);
   };
@@ -169,8 +210,13 @@ export function Composer({ agent }: { agent: Agent }) {
   };
 
   const pick = (i: number) => {
-    if (mode === "slash") pickCommand(matches[i]);
-    else if (mode === "mention" && files[i]) pickFile(files[i]);
+    if (mode === "slash") {
+      const c = matches[i];
+      if (c) pickCommand(c);
+    } else if (mode === "mention") {
+      const f = fileList[i];
+      if (f) pickFile(f);
+    }
   };
 
   const pickCommand = (c: SlashCommand) => {
@@ -182,6 +228,25 @@ export function Composer({ agent }: { agent: Agent }) {
       if (el) {
         el.focus();
         el.setSelectionRange(prefix.length, prefix.length);
+      }
+    });
+  };
+
+  /** Text taken back from the queue: replace an empty draft, otherwise append (never overwrite). */
+  const takeBack = (body: string, images: Attachment[] = []) => {
+    const cur = textRef.current;
+    const next = cur.trim() ? `${cur.trimEnd()}\n\n${body}` : body;
+    update(next);
+    if (images.length) attach.setAttachments((cur) => [...cur, ...images].slice(0, MAX_ATTACHMENTS));
+    if (resumable) {
+      toast("Moved to your draft", { description: "Resume the agent to edit and send it." });
+      return;
+    }
+    requestAnimationFrame(() => {
+      const el = ref.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(next.length, next.length);
       }
     });
   };
@@ -217,17 +282,31 @@ export function Composer({ agent }: { agent: Agent }) {
     }
   };
 
+  /** Esc on an empty draft stops the turn, but only on a second press (never by accident). */
+  const onEscape = () => {
+    if (escArmed) {
+      if (escTimer.current) clearTimeout(escTimer.current);
+      setEscArmed(false);
+      void cancelTurn(agent);
+      return;
+    }
+    setEscArmed(true);
+    if (escTimer.current) clearTimeout(escTimer.current);
+    escTimer.current = setTimeout(() => setEscArmed(false), ESC_ARM_MS);
+  };
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (composing(e)) return;
     if (slashOpen) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const d = e.key === "ArrowDown" ? 1 : -1;
-        setSlashIndex((i) => (i + d + suggestions.length) % suggestions.length);
+        setSlashIndex((activeIndex + d + suggestions.length) % suggestions.length);
         return;
       }
       if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
         e.preventDefault();
-        pick(slashIndex);
+        pick(activeIndex);
         return;
       }
       if (e.key === "Escape") {
@@ -237,20 +316,20 @@ export function Composer({ agent }: { agent: Agent }) {
         return;
       }
     }
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void send();
-    } else if (e.key === "Escape" && busy) {
+    } else if (e.key === "Escape" && busy && text.trim() === "" && attach.attachments.length === 0) {
       e.preventDefault();
-      void cancelTurn(agent);
+      onEscape();
     }
   };
 
   const name = useIdentity(agent.provider, agent.customAgentId).short;
   const placeholder = blocked
-    ? `${name} is waiting for your approval above`
+    ? `Waiting for your approval above. Queue a message to run after this turn…`
     : working
-      ? `${name} is working…`
+      ? `${name} is working. Queue a follow-up message…`
       : agent.availableCommands.length > 0
         ? `Message ${name}…  / for commands, @ for files`
         : `Message ${name}…  @ to mention files`;
@@ -259,6 +338,7 @@ export function Composer({ agent }: { agent: Agent }) {
     <div ref={wrapRef} className={cn("shrink-0 pb-4 pt-1", tight ? "px-3" : "px-6")}>
       <div className={cn("mx-auto w-full", width >= 1330 ? "max-w-[1000px]" : "max-w-[860px]")}>
         {agent.rateLimited && !resumable && <RateLimitBanner agent={agent} />}
+        <QueueStack agent={agent} onEdit={takeBack} />
         {resumable ? (
           <ResumeBanner agent={agent} />
         ) : (
@@ -270,12 +350,23 @@ export function Composer({ agent }: { agent: Agent }) {
             )}
           >
             {attach.dragging && <DropOverlay />}
+            {escArmed && (
+              <div
+                role="status"
+                className="flex items-center gap-2 rounded-t-2xl border-b border-warn/25 bg-warn/[0.08] px-4 py-1.5 text-[12px] font-medium text-warn"
+              >
+                <Kbd>Esc</Kbd>
+                {blocked
+                  ? "Answer the approval above, or press Esc again to stop the turn"
+                  : "Press Esc again to stop the turn"}
+              </div>
+            )}
             <input {...attach.inputProps} />
             {slashOpen && mode && (
               <SuggestMenu
                 title={mode === "slash" ? `${name} commands` : "Files"}
                 items={suggestions}
-                active={slashIndex}
+                active={activeIndex}
                 onHover={setSlashIndex}
                 onPick={pick}
                 mono={mode === "slash"}
@@ -308,7 +399,7 @@ export function Composer({ agent }: { agent: Agent }) {
                 aria-autocomplete="list"
                 aria-expanded={slashOpen}
                 aria-controls={slashOpen ? "slash-menu" : undefined}
-                aria-activedescendant={slashOpen ? `suggest-${slashIndex}` : undefined}
+                aria-activedescendant={slashOpen ? `suggest-${activeIndex}` : undefined}
                 placeholder={placeholder}
                 onChange={(e) => update(e.target.value, e.target.selectionStart ?? e.target.value.length)}
                 onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
@@ -354,12 +445,15 @@ export function Composer({ agent }: { agent: Agent }) {
                       />
                       <span className={cn("relative h-2 w-2 rounded-full", blocked ? "bg-warn" : "bg-accent")} />
                     </span>
-                    <span className={cn("truncate", tight && "sr-only")}>
+                    <span className={cn("truncate whitespace-nowrap", tight && "sr-only")}>
                       {blocked ? "Waiting for approval" : `${name} is working…`}
                     </span>
-                    <span className="hidden items-center gap-1 xl:flex">
-                      <Kbd>Esc</Kbd> to cancel
-                    </span>
+                    {width >= 900 && (
+                      <span className="flex shrink-0 items-center gap-1 whitespace-nowrap">
+                        <Kbd>Esc</Kbd>
+                        <Kbd>Esc</Kbd> to stop
+                      </span>
+                    )}
                   </>
                 ) : (
                   <span className="hidden items-center gap-1 xl:flex">
@@ -369,28 +463,50 @@ export function Composer({ agent }: { agent: Agent }) {
                 )}
               </div>
               <div className="ml-auto flex items-center gap-1.5">
+                {busy && (
+                  <Tooltip content="Stop this turn" shortcut={["Esc ×2"]}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void cancelTurn(agent)}
+                      aria-label="Stop this turn"
+                      className="gap-1.5"
+                    >
+                      <Square className="!h-3 !w-3 fill-current" />
+                      {!tight && "Stop"}
+                    </Button>
+                  </Tooltip>
+                )}
                 {busy ? (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => void cancelTurn(agent)}
-                    aria-label="Stop the current turn"
-                    className="gap-1.5"
-                  >
-                    <Square className="!h-3 !w-3 fill-current" />
-                    Stop
-                  </Button>
+                  <Tooltip content="Queue message: runs right after the current turn" shortcut={["⏎"]}>
+                    <Button
+                      size={tight ? "icon-sm" : "sm"}
+                      variant="primary"
+                      disabled={!canSend}
+                      onClick={() => void send()}
+                      aria-label="Queue message (runs after the current turn)"
+                      className="rounded-lg"
+                    >
+                      <ListPlus className="!h-4 !w-4" />
+                      {!tight && "Queue"}
+                    </Button>
+                  </Tooltip>
                 ) : (
-                  <Button
-                    size="icon-sm"
-                    variant="primary"
-                    disabled={!canSend}
-                    onClick={() => void send()}
-                    aria-label="Send"
-                    className="rounded-lg"
+                  <Tooltip
+                    content={agent.queuePaused && agent.queue.length > 0 ? "Send (resumes the paused queue)" : "Send"}
+                    shortcut={["⏎"]}
                   >
-                    <ArrowUp className="!h-4 !w-4" strokeWidth={2.5} />
-                  </Button>
+                    <Button
+                      size="icon-sm"
+                      variant="primary"
+                      disabled={!canSend}
+                      onClick={() => void send()}
+                      aria-label={agent.queuePaused && agent.queue.length > 0 ? "Send and resume queue" : "Send"}
+                      className="rounded-lg"
+                    >
+                      <ArrowUp className="!h-4 !w-4" strokeWidth={2.5} />
+                    </Button>
+                  </Tooltip>
                 )}
               </div>
             </div>
@@ -491,7 +607,7 @@ function ResumeBanner({ agent }: { agent: Agent }) {
         <RotateCcw className="h-3.5 w-3.5" />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium">{interrupted ? "Interrupted mid-turn" : "Agent stopped"}</div>
+        <div className="text-[13px] font-medium">{interrupted ? "Interrupted mid-turn" : "Agent shut down"}</div>
         <div className="truncate text-[12px] text-muted">
           {interrupted
             ? "The session is saved. Resume continues the turn from exactly where it stopped."

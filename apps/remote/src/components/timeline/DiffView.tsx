@@ -7,13 +7,13 @@ import { Icon } from "../Icon";
 
 const COLLAPSED_LINES = 14;
 
-function FileBlock({ file, defaultOpen }: { file: ParsedDiff; defaultOpen: boolean }) {
+export function FileBlock({ file, defaultOpen, id }: { file: ParsedDiff; defaultOpen: boolean; id?: string }) {
   const [expanded, setExpanded] = useState(false);
   const [open, setOpen] = useState(defaultOpen);
   const long = file.lines.length > COLLAPSED_LINES;
   const lines = expanded || !long ? file.lines : file.lines.slice(0, COLLAPSED_LINES);
   return (
-    <div className="overflow-hidden rounded-xl border border-line bg-code">
+    <div id={id} className="scroll-mt-28 overflow-hidden rounded-xl border border-line bg-code">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -39,7 +39,12 @@ function FileBlock({ file, defaultOpen }: { file: ParsedDiff; defaultOpen: boole
         </span>
         <Icon name="chevronDown" size={16} className={cn("shrink-0 text-steel transition-transform duration-150", !open && "-rotate-90")} />
       </button>
-      {open && (
+      {open && file.tooLarge && (
+        <p className="border-t border-line/80 px-3 py-3 text-[12.5px] leading-snug text-muted">
+          This change is too large to show on a phone. Review it in Armada on your computer.
+        </p>
+      )}
+      {open && !file.tooLarge && (
         <>
           <div className="scroll-x border-t border-line/80 py-1">
             <div className="min-w-max font-mono text-[12px] leading-[1.6]">

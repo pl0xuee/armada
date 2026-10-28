@@ -114,7 +114,13 @@ export function CompareView() {
   const active = group.agents.filter((a) => !a.archived);
   const archived = group.agents.filter((a) => a.archived);
   const columns = showArchived ? group.agents : active.length ? active : group.agents;
-  const minCost = Math.min(...columns.map((a) => a.costUsd));
+  const costs = columns.map((a) => a.costUsd);
+  const minCost = Math.min(...costs);
+  // "Cheapest" only means something once every answer is in and the costs actually differ.
+  const anyWorking = columns.some(
+    (a) => a.status === "working" || a.status === "starting" || a.status === "needs_permission",
+  );
+  const showCheapest = columns.length > 1 && !anyWorking && minCost < Math.max(...costs);
   const activeTab = columns.find((a) => a.id === tabId) ?? columns[0];
   const bp = columns.length <= 2 ? WIDE[2] : columns.length === 3 ? WIDE[3] : WIDE[4];
 
@@ -122,17 +128,26 @@ export function CompareView() {
     const losers = group.agents.filter((a) => a.id !== winner.id && !a.archived);
     setKeeping(true);
     try {
+      // Stop the others' turns first so they don't keep spending in the background.
+      await Promise.all(
+        losers
+          .filter((a) => a.status === "working" || a.status === "starting" || a.status === "needs_permission")
+          .map((a) => api.cancelTurn(a.id).catch(() => {})),
+      );
       await Promise.all(losers.map((a) => api.archiveAgent(a.id, true)));
       if (winner.archived) await api.archiveAgent(winner.id, false);
       const who = identityFor(winner.provider, winner.customAgentId, useApp.getState().settings?.customAgents);
       toast.success(`Kept ${who.short}'s answer`, {
         description: losers.length
-          ? `Archived ${losers.length} other ${losers.length === 1 ? "agent" : "agents"}.`
+          ? `Stopped and archived ${losers.length} other ${losers.length === 1 ? "agent" : "agents"}.`
           : undefined,
         action: losers.length
           ? {
               label: "Undo",
-              onClick: () => void Promise.all(losers.map((a) => api.archiveAgent(a.id, false))),
+              onClick: () =>
+                void Promise.all(losers.map((a) => api.archiveAgent(a.id, false))).catch((e: unknown) =>
+                  toast.error("Couldn't restore the other agents", { description: errorMessage(e) }),
+                ),
             }
           : undefined,
       });
@@ -154,15 +169,30 @@ export function CompareView() {
         }
       >
         {groups.length > 1 && (
-          <div role="tablist" aria-label="Comparison groups" className="-mb-1 flex gap-1.5 overflow-x-auto pb-1">
+          <div
+            role="tablist"
+            aria-label="Comparison groups"
+            onKeyDown={(e) =>
+              tabKeys(
+                e,
+                groups.map((g) => g.id),
+                group.id,
+                (id) => openCompare(id),
+                "cmp-group-",
+              )
+            }
+            className="-mb-1 flex gap-1.5 overflow-x-auto pb-1"
+          >
             {groups.map((g) => {
               const sel = g.id === group.id;
               return (
                 <button
                   key={g.id}
+                  id={`cmp-group-${g.id}`}
                   type="button"
                   role="tab"
                   aria-selected={sel}
+                  tabIndex={sel ? 0 : -1}
                   onClick={() => openCompare(g.id)}
                   className={cn(
                     "flex h-8 max-w-[260px] shrink-0 items-center gap-2 rounded-lg border px-2.5 text-[12.5px] transition-colors",
@@ -211,6 +241,15 @@ export function CompareView() {
           <div
             role="tablist"
             aria-label="Agents in this comparison"
+            onKeyDown={(e) =>
+              tabKeys(
+                e,
+                columns.map((a) => a.id),
+                activeTab.id,
+                setTabId,
+                "cmp-tab-",
+              )
+            }
             className={cn(
               "-mx-1 flex shrink-0 gap-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
               bp.tabs,
@@ -222,9 +261,11 @@ export function CompareView() {
               return (
                 <button
                   key={a.id}
+                  id={`cmp-tab-${a.id}`}
                   type="button"
                   role="tab"
                   aria-selected={sel}
+                  tabIndex={sel ? 0 : -1}
                   aria-controls={`cmp-col-${a.id}`}
                   onClick={() => setTabId(a.id)}
                   className={cn(
@@ -242,7 +283,7 @@ export function CompareView() {
                       className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent animate-breathe"
                       aria-label="Working"
                     />
-                  ) : columns.length > 1 && a.costUsd === minCost ? (
+                  ) : showCheapest && a.costUsd === minCost ? (
                     <span className="hidden text-[10.5px] font-normal text-ok @md:inline">cheapest</span>
                   ) : null}
                 </button>
@@ -257,6 +298,7 @@ export function CompareView() {
               key={a.id}
               id={`cmp-col-${a.id}`}
               role="tabpanel"
+              aria-labelledby={columns.length > 1 ? `cmp-tab-${a.id}` : undefined}
               className={cn(
                 "min-h-0 min-w-0 flex-1 basis-0",
                 bp.col,
@@ -269,7 +311,7 @@ export function CompareView() {
                 account={accountMap.get(a.accountId)}
                 items={items[a.id]}
                 now={now}
-                cheapest={columns.length > 1 && a.costUsd === minCost}
+                cheapest={showCheapest && a.costUsd === minCost}
                 onOpen={() => openAgent(a.id)}
                 onKeep={() => void keep(a)}
                 keeping={keeping || (active.length === 1 && active[0].id === a.id)}
@@ -280,4 +322,24 @@ export function CompareView() {
       </div>
     </div>
   );
+}
+
+/** WAI-ARIA tabs: ←/→ (wrapping), Home/End move the selection and focus. */
+function tabKeys(
+  e: React.KeyboardEvent<HTMLElement>,
+  ids: string[],
+  current: string,
+  select: (id: string) => void,
+  idPrefix: string,
+) {
+  const i = ids.indexOf(current);
+  let next = -1;
+  if (e.key === "ArrowRight") next = (i + 1) % ids.length;
+  else if (e.key === "ArrowLeft") next = (i - 1 + ids.length) % ids.length;
+  else if (e.key === "Home") next = 0;
+  else if (e.key === "End") next = ids.length - 1;
+  if (next < 0 || ids.length === 0) return;
+  e.preventDefault();
+  select(ids[next]);
+  requestAnimationFrame(() => document.getElementById(`${idPrefix}${ids[next]}`)?.focus());
 }

@@ -11,8 +11,65 @@ permissions:
   contents: read
 
 jobs:
+  # Nothing is built or signed unless the tag matches the version and the tests pass.
+  verify:
+    name: Verify
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Tag matches the app version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          for pkg in apps/desktop/package.json apps/remote/package.json; do
+            v=$(node -p "require('./$pkg').version")
+            if [ "$v" != "$version" ]; then
+              echo "::error::$pkg is $v but Cargo.toml is $version"
+              exit 1
+            fi
+          done
+          if [ "${GITHUB_REF_NAME}" != "v$version" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} doesn't match version $version (expected v$version)"
+            exit 1
+          fi
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev libasound2-dev libdbus-1-dev patchelf
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+
+      - name: Test mobile companion
+        working-directory: apps/remote
+        run: |
+          npm ci
+          npm run build
+          npm test
+
+      - name: Type-check desktop UI
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npx tsc --noEmit
+
+      - name: Test
+        run: cargo test --workspace
+
   release:
     name: ${{ matrix.name }}
+    needs: verify
     # Repository environment: add required reviewers / tag-protection rules and move the
     # signing secrets here (Settings → Environments → release) to gate every release.
     environment: release

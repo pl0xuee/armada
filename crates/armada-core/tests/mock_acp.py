@@ -53,6 +53,27 @@ while True:
             send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32000,
                   "message": "You've hit your usage limit for this account"}})
             continue
+        if "SUBAGENT" in text:
+            # A Claude Code style sub-agent: a Task call, tool calls made under it, and
+            # the sub-agent's own text (which must stay out of the main stream).
+            task_meta = {"claudeCode": {"toolName": "Task"}}
+            sub_meta = {"claudeCode": {"parentToolUseId": "task1"}}
+            update(sid, {"sessionUpdate": "tool_call", "toolCallId": "task1", "title": "Task", "kind": "think",
+                         "status": "in_progress", "_meta": task_meta,
+                         "rawInput": {"description": "Explore the repo", "subagent_type": "Explore", "prompt": "look around"}})
+            update(sid, {"sessionUpdate": "tool_call", "toolCallId": "sub1", "title": "Read a.txt", "kind": "read",
+                         "status": "completed", "_meta": sub_meta})
+            update(sid, {"sessionUpdate": "tool_call", "toolCallId": "sub2", "title": "Run ls", "kind": "execute",
+                         "status": "completed", "rawInput": {"command": "ls"}, "_meta": sub_meta})
+            update(sid, {"sessionUpdate": "agent_thought_chunk", "_meta": sub_meta, "content": {"type": "text", "text": "sub thinking"}})
+            update(sid, {"sessionUpdate": "agent_message_chunk", "_meta": sub_meta, "content": {"type": "text", "text": "sub-agent chatter"}})
+            for part in ["found", " it"]:
+                update(sid, {"sessionUpdate": "tool_call_update", "toolCallId": "task1",
+                             "content": [{"type": "content", "content": {"type": "text", "text": "found" if part == "found" else "found it"}}]})
+            update(sid, {"sessionUpdate": "tool_call_update", "toolCallId": "task1", "status": "completed"})
+            update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Done with the sub-agent"}})
+            send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+            continue
         update(sid, {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "thinking"}})
         update(sid, {"sessionUpdate": "plan", "entries": [
             {"content": "Look around", "status": "completed", "priority": "high"},

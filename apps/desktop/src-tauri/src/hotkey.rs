@@ -14,14 +14,15 @@ pub fn on_shortcut(app: &AppHandle, _shortcut: &Shortcut, event: ShortcutEvent) 
     }
 }
 
-/// (Re-)registers the hotkey if it changed. Failure (e.g. Wayland compositors that
-/// don't allow global grabs, or a combo taken by another app) is logged, not fatal.
-pub fn apply(app: &AppHandle, hotkey: &str) {
+/// (Re-)registers the hotkey if it changed; an empty hotkey disables it. Errors when
+/// the combination is invalid or can't be grabbed (taken by another app, or a Wayland
+/// compositor that doesn't allow global grabs); the old hotkey is released either way.
+pub fn apply(app: &AppHandle, hotkey: &str) -> Result<(), String> {
     let hotkey = hotkey.trim();
     let shell = app.state::<Shell>();
     let mut current = shell.hotkey.lock();
     if current.as_deref() == Some(hotkey) {
-        return;
+        return Ok(());
     }
     let gs = app.global_shortcut();
     if let Some(old) = current.take() {
@@ -30,13 +31,17 @@ pub fn apply(app: &AppHandle, hotkey: &str) {
         }
     }
     if hotkey.is_empty() {
-        return;
+        return Ok(());
     }
     match gs.register(hotkey) {
         Ok(()) => {
             info!(%hotkey, "registered global hotkey");
             *current = Some(hotkey.to_string());
+            Ok(())
         }
-        Err(e) => warn!(%hotkey, "could not register global hotkey: {e}"),
+        Err(e) => {
+            warn!(%hotkey, "could not register global hotkey: {e}");
+            Err(e.to_string())
+        }
     }
 }

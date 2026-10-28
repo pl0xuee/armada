@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
+import { useOverlay } from "@/lib/overlay";
 import { Icon } from "./Icon";
 
 const CLOSE_MS = 180;
@@ -26,11 +27,8 @@ export function Sheet({
   const [closing, setClosing] = useState(false);
   const [drag, setDrag] = useState(0);
   const panel = useRef<HTMLDivElement>(null);
-  const restore = useRef<HTMLElement | null>(null);
   const dragStart = useRef<number | null>(null);
   const titleId = useId();
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (open) {
@@ -48,39 +46,14 @@ export function Sheet({
     return () => clearTimeout(t);
   }, [open, mounted]);
 
+  // Back closes, background inert, focus trapped (while open, not while animating out).
+  useOverlay(open, onClose, panel);
   useEffect(() => {
     if (!mounted) return;
-    restore.current = document.activeElement as HTMLElement | null;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const raf = requestAnimationFrame(() => panel.current?.focus({ preventScroll: true }));
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onCloseRef.current();
-      } else if (e.key === "Tab" && panel.current) {
-        // Keep focus inside the dialog.
-        const focusable = panel.current.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), a[href], textarea, input, [tabindex]:not([tabindex="-1"])',
-        );
-        if (!focusable.length) return;
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (e.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    document.addEventListener("keydown", onKey);
     return () => {
-      cancelAnimationFrame(raf);
-      document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
-      restore.current?.focus?.({ preventScroll: true });
     };
   }, [mounted]);
 

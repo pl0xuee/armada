@@ -3,8 +3,10 @@
 // including simulated streaming, permissions, login terminals and installs.
 
 import type { ArmadaApi } from "./api";
+import { isStressMode, STRESS_AGENTS, STRESS_TICK_MS, stressAgents, stressItems, stressWords } from "./mock-stress";
 import {
   commandsFor,
+  mockScreenshot,
   configFor,
   seedAccounts,
   seedAgents,
@@ -12,19 +14,25 @@ import {
   seedItems,
   seedProviders,
   seedSchedules,
+  MOCK_PROJECTS,
   seedSettings,
 } from "./mock-data";
 import type {
   Account,
+  ShipResult,
+  CommitSummary,
   Agent,
+  AgentDiff,
   AppState,
   ArmadaEvent,
+  Attachment,
   AttentionReason,
   FileDiff,
   PermissionOption,
   PlanEntry,
   Provider,
   ProviderInfo,
+  QueuedPrompt,
   Schedule,
   SearchHit,
   Settings,
@@ -33,7 +41,7 @@ import type {
   UpdateInfo,
 } from "./types";
 
-type Listener = (e: ArmadaEvent) => void;
+type Listener = (e: ArmadaEvent | ArmadaEvent[]) => void;
 
 const listeners = new Set<Listener>();
 
@@ -42,10 +50,18 @@ export function subscribeMock(cb: Listener): () => void {
   return () => listeners.delete(cb);
 }
 
+// Like the real core: events emitted in one tick are delivered as one array.
+let outbox: ArmadaEvent[] = [];
 function emit(e: ArmadaEvent) {
+  if (outbox.length === 0) queueMicrotask(flushOutbox);
+  outbox.push(e);
+}
+function flushOutbox() {
+  const batch = outbox;
+  outbox = [];
   for (const l of listeners) {
     try {
-      l(e);
+      l(batch);
     } catch (err) {
       console.error("[mock] listener failed", err);
     }
@@ -114,8 +130,9 @@ function updateItem(agentId: string, itemId: string, patch: Record<string, unkno
 function appendDelta(agentId: string, itemId: string, field: "text" | "output", delta: string) {
   const item = itemsOf(agentId).find((i) => i.id === itemId) as Record<string, unknown> | undefined;
   if (!item) return;
-  item[field] = String(item[field] ?? "") + delta;
-  emit({ type: "text_delta", agentId, itemId, field, delta });
+  const before = String(item[field] ?? "");
+  item[field] = before + delta;
+  emit({ type: "text_delta", agentId, itemId, field, delta, offset: before.length });
 }
 
 function bumpUsage(agentId: string, tokens: number) {
@@ -166,6 +183,8 @@ async function streamField(
     i += n;
     await sleep(rand(28, 70) / speed);
   }
+  // Like the backend: every stream ends with the full item, so dropped deltas self-heal.
+  updateItem(agentId, itemId, {});
 }
 
 async function streamLines(
@@ -180,6 +199,7 @@ async function streamLines(
     appendDelta(agentId, itemId, "output", `${l}\n`);
     await sleep(rand(delay[0], delay[1]));
   }
+  updateItem(agentId, itemId, {});
 }
 
 async function pause(ms: number, turn: { cancelled: boolean }) {
@@ -215,6 +235,7 @@ async function runTurn(agentId: string, body: (turn: { cancelled: boolean }) => 
   if (prev) prev.cancelled = true;
   const turn = { cancelled: false };
   turns.set(agentId, turn);
+  turnStarts.set(agentId, { at: Date.now(), from: itemsOf(agentId).length });
   try {
     await body(turn);
   } catch (e) {
@@ -225,7 +246,39 @@ async function runTurn(agentId: string, body: (turn: { cancelled: boolean }) => 
     }
   } finally {
     if (turns.get(agentId) === turn) turns.delete(agentId);
+    setTimeout(() => drainQueue(agentId), 400);
   }
+}
+
+const turnStarts = new Map<string, { at: number; from: number }>();
+
+// ---------------------------------------------------------------- prompt queue
+
+const BUSY = new Set(["working", "needs_permission", "starting"]);
+const queueImages = new Map<string, Attachment[]>();
+
+function setQueue(agentId: string, queue: QueuedPrompt[], extra: Partial<Agent> = {}) {
+  patchAgent(agentId, { queue, queuedPrompts: queue.length, ...extra });
+}
+
+/** Run the next queued prompt once the agent is idle (unless the queue is paused). */
+function drainQueue(agentId: string) {
+  const a = db.agents.find((x) => x.id === agentId);
+  if (!a || !a.running || BUSY.has(a.status) || a.status === "stopped" || a.status === "interrupted") return;
+  if (a.queuePaused || a.queue.length === 0) return;
+  const [next, ...rest] = a.queue;
+  const images = queueImages.get(next.id) ?? [];
+  queueImages.delete(next.id);
+  setQueue(agentId, rest);
+  startPrompt(agentId, next.text, images);
+}
+
+function startPrompt(agentId: string, text: string, attachments: Attachment[]) {
+  addItem(agentId, { kind: "user_message", text, ...(attachments.length ? { attachments } : {}) });
+  patchAgent(agentId, { status: "working", lastActivityAt: Date.now() });
+  const n = attachments.length;
+  const described = n ? `${text || "Take a look at this"} (with ${n} image${n === 1 ? "" : "s"} attached)` : text;
+  void runTurn(agentId, (turn) => scriptedTurn(agentId, described, turn));
 }
 
 // ---------------------------------------------------------------- scripted responses
@@ -378,6 +431,29 @@ function finishTurn(agentId: string, text: string) {
     .trim()
     .slice(0, 140);
   bumpUsage(agentId, Math.round(rand(800, 3000)));
+  const start = turnStarts.get(agentId);
+  if (start) {
+    const turnItems = itemsOf(agentId).slice(start.from);
+    const tools = turnItems.filter((i) => i.kind === "tool_call");
+    if (tools.length > 0) {
+      const files = new Set<string>();
+      for (const t of tools) {
+        if (t.kind !== "tool_call") continue;
+        if (t.toolKind === "edit" || t.toolKind === "delete" || t.toolKind === "move" || t.diffs.length) {
+          for (const p of [...t.locations, ...t.diffs.map((d) => d.path)]) files.add(p);
+        }
+      }
+      addItem(agentId, {
+        kind: "turn_summary",
+        durationMs: Date.now() - start.at,
+        files: [...files],
+        toolCalls: tools.length,
+        commands: tools.filter((t) => t.kind === "tool_call" && t.toolKind === "execute").length,
+        costUsd: Math.round(rand(0.05, 0.6) * 100) / 100,
+        tokens: Math.round(rand(8000, 60000)),
+      });
+    }
+  }
   patchAgent(agentId, {
     status: "idle",
     lastMessage: preview,
@@ -447,6 +523,50 @@ function startLiveActivity() {
       ['Search "pgvector 4M vectors p95 latency"', "8 results · 3 relevant benchmarks (2025)"],
       ["Fetch qdrant.tech/pricing", "200 OK · 61 KB · managed cloud tiers"],
     ];
+    // A sub-agent that explores in parallel, with child calls nested under it.
+    await pause(1200, turn);
+    const sa = addItem("a-research", {
+      kind: "tool_call",
+      toolCallId: "gk-sub",
+      title: "Benchmark notes for Qdrant",
+      toolKind: "other",
+      status: "in_progress",
+      locations: [],
+      diffs: [],
+      output: "",
+      command: null,
+      subagent: {
+        kind: "general-purpose",
+        description: "Collect Qdrant filtered-search benchmarks at 1–10M vectors",
+        prompt:
+          "Find recent (2025+) public benchmarks for Qdrant filtered vector search between 1M and 10M vectors. Summarize p50/p95 latency, hardware, and recall settings. Cite sources.",
+      },
+    });
+    const childTitles = [
+      ['Search "qdrant filtered search benchmark 2025"', "search"],
+      ["Fetch qdrant.tech/benchmarks/filtered", "fetch"],
+      ["Fetch github.com/erikbern/ann-benchmarks", "fetch"],
+    ] as const;
+    for (const [ct, kind] of childTitles) {
+      const c = addItem("a-research", {
+        kind: "tool_call",
+        toolCallId: newId("gk-c"),
+        title: ct,
+        toolKind: kind,
+        status: "in_progress",
+        locations: [],
+        diffs: [],
+        output: "",
+        command: null,
+        parentToolCallId: "gk-sub",
+      });
+      patchAgent("a-research", { lastMessage: ct });
+      await pause(rand(1600, 2600), turn);
+      updateItem("a-research", c.id, { status: "completed" });
+    }
+    appendDelta("a-research", sa.id, "output", "Qdrant p95 ≈ 9 ms at 4M × 1536 with payload filters (HNSW m=16).");
+    updateItem("a-research", sa.id, { status: "completed" });
+
     for (const [title, out] of sources) {
       await pause(rand(2500, 4500), turn);
       const kind: ToolKind = title.startsWith("Search") ? "search" : "fetch";
@@ -652,6 +772,7 @@ function delay<T>(v: T, ms = 120): Promise<T> {
 export const mockApi: ArmadaApi = {
   async getState(): Promise<AppState> {
     setTimeout(startLiveActivity, 600);
+    if (isStressMode()) setupStress();
     const platform =
       platformParam === "macos" || platformParam === "windows" || platformParam === "linux"
         ? platformParam
@@ -673,8 +794,11 @@ export const mockApi: ArmadaApi = {
     );
   },
 
-  async listItems(agentId) {
-    return delay(clone(itemsOf(agentId)), 220);
+  async listItems(agentId, opts) {
+    let list = itemsOf(agentId);
+    if (opts?.beforeSeq !== undefined) list = list.filter((i) => i.seq < (opts.beforeSeq ?? Infinity));
+    if (opts?.limit !== undefined) list = list.slice(Math.max(0, list.length - opts.limit));
+    return delay(clone(list), 220);
   },
 
   async search(query) {
@@ -710,14 +834,19 @@ export const mockApi: ArmadaApi = {
   async createAgent(req) {
     const now = Date.now();
     const id = newId("a");
-    const slug = (req.title ?? req.prompt)
+    const folder = req.projectPath.split("/").filter(Boolean).pop() ?? "";
+    const hasPrompt = req.prompt.trim() !== "" || req.attachments.length > 0;
+    const slug = (req.title || req.prompt || folder)
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .slice(0, 28)
       .replace(/-+$/, "");
     const agent: Agent = {
       id,
-      title: req.title?.trim() || req.prompt.split(/[.\n]/)[0].slice(0, 60) || "New agent",
+      title:
+        req.title?.trim() ||
+        req.prompt.trim().split(/[.\n]/)[0].slice(0, 60) ||
+        (folder ? `New agent · ${folder}` : "New agent"),
       provider: req.provider,
       accountId: req.accountId,
       projectPath: req.projectPath,
@@ -746,6 +875,12 @@ export const mockApi: ArmadaApi = {
       rateLimited: false,
       scheduleId: null,
       customAgentId: req.provider === "custom" ? req.customAgentId : null,
+      queuedPrompts: 0,
+      queue: [],
+      queuePaused: false,
+      acknowledgedAt: null,
+      needsBriefing: false,
+      permissionMode: req.permissionMode ?? db.settings.defaultPermissionMode,
     };
     db.agents.unshift(agent);
     db.items[id] = [];
@@ -754,6 +889,11 @@ export const mockApi: ArmadaApi = {
     }
     emit({ type: "agent_updated", agent: clone(agent) });
     setTimeout(() => {
+      if (!hasPrompt) {
+        // Started without a prompt: warm up and wait for the first message.
+        patchAgent(id, { sessionId: `ses_${id.slice(-8)}`, status: "idle" });
+        return;
+      }
       patchAgent(id, { sessionId: `ses_${id.slice(-8)}`, status: "working" });
       addItem(id, {
         kind: "user_message",
@@ -768,12 +908,71 @@ export const mockApi: ArmadaApi = {
   async sendPrompt(agentId, text, attachments) {
     const a = getAgent(agentId);
     if (!a.running) throw new Error("Agent is not running. Resume it first.");
-    addItem(agentId, { kind: "user_message", text, ...(attachments?.length ? { attachments } : {}) });
-    patchAgent(agentId, { status: "working", lastActivityAt: Date.now() });
-    const n = attachments?.length ?? 0;
-    const described = n ? `${text || "Take a look at this"} (with ${n} image${n === 1 ? "" : "s"} attached)` : text;
-    void runTurn(agentId, (turn) => scriptedTurn(agentId, described, turn));
+    // Like the real backend: messages sent mid-turn queue (outside the timeline) and run after it.
+    if (BUSY.has(a.status)) {
+      const q: QueuedPrompt = { id: newId("q"), text, attachments: attachments?.length ?? 0 };
+      if (attachments?.length) queueImages.set(q.id, attachments);
+      setQueue(agentId, [...a.queue, q]);
+      return delay(undefined, 40);
+    }
+    // Agents started without a prompt are named after their first message.
+    if (!itemsOf(agentId).some((i) => i.kind === "user_message") && text.trim() && a.title.startsWith("New agent")) {
+      patchAgent(agentId, { title: text.trim().split(/[.\n]/)[0].slice(0, 60) });
+    }
+    // Sending resumes a paused queue (this message first, then the queue).
+    if (a.queuePaused) patchAgent(agentId, { queuePaused: false });
+    startPrompt(agentId, text, attachments ?? []);
     return delay(undefined, 40);
+  },
+
+  async removeQueued(agentId, queuedId) {
+    const a = getAgent(agentId);
+    const q = a.queue.find((x) => x.id === queuedId);
+    if (!q) return delay(null, 40);
+    const images = queueImages.get(queuedId) ?? [];
+    queueImages.delete(queuedId);
+    setQueue(
+      agentId,
+      a.queue.filter((x) => x.id !== queuedId),
+    );
+    return delay({ text: q.text, attachments: images }, 60);
+  },
+
+  async resumeQueue(agentId) {
+    const a = getAgent(agentId);
+    patchAgent(agentId, { queuePaused: false });
+    // Like the core: a shut-down agent restarts to run its queue.
+    if (!a.running) patchAgent(agentId, { running: true, status: "idle" });
+    setTimeout(() => drainQueue(agentId), 200);
+    return delay(undefined, 60);
+  },
+
+  async clearQueue(agentId) {
+    const a = getAgent(agentId);
+    const n = a.queue.length;
+    for (const q of a.queue) queueImages.delete(q.id);
+    setQueue(agentId, [], { queuePaused: false });
+    return delay(n, 60);
+  },
+
+  async sendQueuedNow(agentId, queuedId) {
+    const a = getAgent(agentId);
+    const q = a.queue.find((x) => x.id === queuedId);
+    if (!q) throw new Error("That message already ran.");
+    // Move it to the front, stop the current turn, and let the queue run it.
+    setQueue(agentId, [q, ...a.queue.filter((x) => x.id !== queuedId)], { queuePaused: false });
+    const t = turns.get(agentId);
+    if (t) t.cancelled = true;
+    for (const it of itemsOf(agentId)) {
+      if (it.kind === "permission" && it.resolution === null) updateItem(agentId, it.id, { resolution: "cancelled" });
+      if (it.kind === "tool_call" && (it.status === "in_progress" || it.status === "pending")) {
+        updateItem(agentId, it.id, { status: "failed" });
+      }
+    }
+    addItem(agentId, { kind: "notice", level: "info", text: "Interrupted to run your queued message now." });
+    patchAgent(agentId, { status: "idle", pendingPermissions: 0 });
+    setTimeout(() => drainQueue(agentId), 300);
+    return delay(undefined, 60);
   },
 
   async cancelTurn(agentId) {
@@ -789,7 +988,9 @@ export const mockApi: ArmadaApi = {
       }
     }
     addItem(agentId, { kind: "notice", level: "info", text: "Turn cancelled." });
-    patchAgent(agentId, { status: "idle", pendingPermissions: 0 });
+    const cur = getAgent(agentId);
+    // Stopping holds the queue; the next message you send resumes it.
+    patchAgent(agentId, { status: "idle", pendingPermissions: 0, queuePaused: cur.queue.length > 0 });
     return delay(undefined, 60);
   },
 
@@ -908,12 +1109,17 @@ export const mockApi: ArmadaApi = {
   async stopAgent(agentId) {
     const t = turns.get(agentId);
     if (t) t.cancelled = true;
-    addItem(agentId, { kind: "notice", level: "info", text: "Stopped by you." });
+    addItem(agentId, { kind: "notice", level: "info", text: "Shut down by you." });
     patchAgent(agentId, { status: "stopped", running: false, pendingPermissions: 0 });
     return delay(undefined);
   },
 
-  async deleteAgent(agentId) {
+  async deleteAgent(agentId, removeWorktree, force) {
+    const a = getAgent(agentId);
+    if (removeWorktree && a.worktree && !force && UNSAVED_WORK[agentId]) {
+      await sleep(300);
+      throw new Error(`Unsaved work: ${UNSAVED_WORK[agentId]} Delete anyway to discard them.`);
+    }
     const t = turns.get(agentId);
     if (t) t.cancelled = true;
     db.agents = db.agents.filter((a) => a.id !== agentId);
@@ -929,6 +1135,12 @@ export const mockApi: ArmadaApi = {
 
   async archiveAgent(agentId, archived) {
     patchAgent(agentId, { archived });
+    return delay(undefined, 40);
+  },
+
+  async acknowledgeAgent(agentId) {
+    getAgent(agentId);
+    patchAgent(agentId, { unread: false, acknowledgedAt: Date.now() });
     return delay(undefined, 40);
   },
 
@@ -1001,6 +1213,9 @@ export const mockApi: ArmadaApi = {
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(schedule.time))
       throw new Error(`"${schedule.time}" isn't a valid time (HH:MM).`);
     if (schedule.days.some((d) => d < 0 || d > 6)) throw new Error("Days must be 0 (Sun) to 6 (Sat).");
+    if (schedule.permissionMode !== null && !["auto", "ask"].includes(schedule.permissionMode)) {
+      throw new Error(`Unknown permission mode “${schedule.permissionMode}”`);
+    }
     const acc = db.accounts.find((x) => x.id === schedule.accountId);
     if (!acc || acc.provider !== schedule.provider) throw new Error("Choose an account for the selected provider.");
     const saved: Schedule = {
@@ -1012,17 +1227,21 @@ export const mockApi: ArmadaApi = {
     const i = db.schedules.findIndex((x) => x.id === saved.id);
     if (i >= 0) db.schedules[i] = saved;
     else db.schedules.push(saved);
+    emit({ type: "schedule_updated", schedule: clone(saved) });
     return clone(saved);
   },
 
   async deleteSchedule(scheduleId) {
     db.schedules = db.schedules.filter((x) => x.id !== scheduleId);
+    emit({ type: "schedule_removed", scheduleId });
     return delay(undefined, 150);
   },
 
   async runSchedule(scheduleId) {
     const sch = db.schedules.find((x) => x.id === scheduleId);
     if (!sch) throw new Error("Schedule not found");
+    sch.lastRunAt = Date.now();
+    emit({ type: "schedule_updated", schedule: clone(sch) });
     const agent = await mockApi.createAgent({
       provider: sch.provider,
       accountId: sch.accountId,
@@ -1034,12 +1253,13 @@ export const mockApi: ArmadaApi = {
       groupId: null,
       customAgentId: sch.customAgentId,
       attachments: [],
+      permissionMode: sch.permissionMode,
     });
     const a = getAgent(agent.id);
     a.scheduleId = sch.id;
     emit({ type: "agent_updated", agent: clone(a) });
-    sch.lastRunAt = Date.now();
     sch.lastAgentId = agent.id;
+    emit({ type: "schedule_updated", schedule: clone(sch) });
     return clone(a);
   },
 
@@ -1048,25 +1268,83 @@ export const mockApi: ArmadaApi = {
   },
 
   async getDiff(agentId) {
-    return delay(seedDiff(itemsOf(agentId)), 400);
+    return delay(withoutReverted(seedDiff(itemsOf(agentId)), revertedPatches.get(agentId) ?? []), 400);
   },
 
-  async commitAgent(agentId) {
+  async commitAgent(agentId, message) {
+    const a = getAgent(agentId);
+    assertIdle(a, "committing");
+    await gitLock(agentId, 600);
+    const files = seedDiff(itemsOf(agentId)).files.map((f) => f.path);
+    if (files.length === 0) throw new Error("Nothing to commit: the worktree is clean.");
+    const committed = files.slice(0, Math.max(1, files.length - 1));
+    const left = files.length - committed.length;
+    const summary: CommitSummary = {
+      hash: "3f9a1c2",
+      files: committed,
+      leftUncommitted: left,
+      skipped: [],
+      message:
+        `Committed ${committed.length} file${committed.length === 1 ? "" : "s"} (3f9a1c2)` +
+        (left ? `; ${left} other changed file${left === 1 ? " was" : "s were"} left uncommitted` : "") +
+        ".",
+    };
+    addItem(agentId, { kind: "notice", level: "info", text: `${summary.message} “${message.trim() || a.title}”` });
+    return summary;
+  },
+
+  async revertPatch(agentId, patch) {
+    assertIdle(getAgent(agentId), "reverting");
+    await gitLock(agentId, 500);
+    if (!/^diff --git |^--- /m.test(patch) || !/^@@ /m.test(patch))
+      throw new Error("Invalid patch: missing file header or hunk.");
+    if (/STALE/.test(patch)) throw new Error("The change couldn't be reverted (the file has changed since).");
+    const file = /^\+\+\+ b\/(.+)$/m.exec(patch)?.[1] ?? "file";
+    const hunks = (patch.match(/^@@ /gm) ?? []).length;
+    revertedPatches.set(agentId, [...(revertedPatches.get(agentId) ?? []), patch]);
     addItem(agentId, {
       kind: "notice",
       level: "info",
-      text: `Committed 3f9a1c2 on ${getAgent(agentId).branch ?? "HEAD"}.`,
+      text: `Reverted ${hunks === 1 ? "a change" : `${hunks} changes`} in ${file}.`,
     });
-    return delay("3f9a1c2", 600);
+  },
+
+  async shipAgent(agentId, message): Promise<ShipResult> {
+    const a = getAgent(agentId);
+    if (!a.worktree) throw new Error("Only worktree agents can be merged. Commit from your own branch instead.");
+    assertIdle(a, "merging");
+    await gitLock(agentId, 900);
+    const msg = message.trim() || a.title;
+    // The billing agent's branch conflicts with main: the commit lands, the merge fails.
+    if (agentId === "a-billing") {
+      addItem(agentId, { kind: "notice", level: "warn", text: `Committed “${msg}” (3f9a1c2); the merge failed.` });
+      return {
+        committed: "3f9a1c2",
+        merged: null,
+        error: `Committed 3f9a1c2 on ${a.branch}, but the merge failed: CONFLICT (content): Merge conflict in prisma/schema.prisma`,
+      };
+    }
+    addItem(agentId, {
+      kind: "notice",
+      level: "info",
+      text: `Committed “${msg}” and merged ${a.branch ?? "branch"} into ${a.baseBranch ?? "main"}.`,
+    });
+    return { committed: "3f9a1c2", merged: "8b04de1", error: null };
   },
 
   async mergeAgent(agentId) {
     const a = getAgent(agentId);
-    return delay(`Merged ${a.branch ?? "branch"} into ${a.baseBranch ?? "main"} (fast-forward).`, 700);
+    assertIdle(a, "merging");
+    await gitLock(agentId, 700);
+    return `Merged ${a.branch ?? "branch"} into ${a.baseBranch ?? "main"} (fast-forward).`;
   },
 
-  async createPr() {
-    return delay("https://github.com/acme/atlas-api/pull/128", 900);
+  async createPr(agentId) {
+    const a = getAgent(agentId);
+    if (!a.worktree) throw new Error("Pull requests need a worktree agent with its own branch.");
+    await sleep(900);
+    if (agentId === "a-e2e") return "A pull request already exists: https://github.com/acme/storefront/pull/77";
+    return "https://github.com/acme/atlas-api/pull/128";
   },
 
   async discardWorktree(agentId) {
@@ -1095,6 +1373,25 @@ export const mockApi: ArmadaApi = {
     return delay(clone(acc), 200);
   },
 
+  async updateAccountKey(accountId, apiKey) {
+    const acc = db.accounts.find((a) => a.id === accountId);
+    if (!acc) throw new Error("Unknown account");
+    if (acc.authKind !== "api_key") throw new Error("Only API-key accounts have a key to replace.");
+    const key = apiKey.trim();
+    if (key.length < 20) throw new Error("That doesn't look like a valid API key (too short).");
+    await sleep(600);
+    acc.status = {
+      loggedIn: true,
+      label: acc.status?.label ?? "API key",
+      email: null,
+      plan: acc.status?.plan ?? "Pay as you go",
+      checkedAt: Date.now(),
+      error: null,
+    };
+    emit({ type: "account_updated", account: clone(acc) });
+    return clone(acc);
+  },
+
   async updateAccount(accountId, name, color) {
     const acc = db.accounts.find((a) => a.id === accountId);
     if (!acc) throw new Error("Unknown account");
@@ -1104,6 +1401,17 @@ export const mockApi: ArmadaApi = {
   },
 
   async deleteAccount(accountId) {
+    const archived = db.agents.filter((a) => a.accountId === accountId && a.archived).length;
+    if (archived > 0) {
+      throw new Error(
+        `${archived} archived agent${archived === 1 ? " still uses" : "s still use"} this account; delete ${archived === 1 ? "it" : "them"} first.`,
+      );
+    }
+    const scheds = db.schedules.filter((s) => s.accountId === accountId).map((s) => `“${s.name}”`);
+    if (scheds.length)
+      throw new Error(
+        `Used by schedule${scheds.length === 1 ? "" : "s"} ${scheds.join(", ")}; change or delete ${scheds.length === 1 ? "it" : "them"} first.`,
+      );
     db.accounts = db.accounts.filter((a) => a.id !== accountId);
     emit({ type: "account_removed", accountId });
     return delay(undefined);
@@ -1122,10 +1430,16 @@ export const mockApi: ArmadaApi = {
     if (db.accounts.find((a) => a.id === accountId)?.provider === "custom") {
       throw new Error("Custom agents don't need a sign-in.");
     }
+    // Like the core: a login already running for this account is reused (its output isn't replayed).
+    for (const existing of terminals.values()) {
+      if (existing.kind === "login" && existing.accountId === accountId && !existing.done) {
+        return delay({ terminalId: existing.id, reused: true }, 40);
+      }
+    }
     const t: MockTerminal = { id: newId("term"), kind: "login", accountId, buffer: "", stage: 0, done: false };
     terminals.set(t.id, t);
     void runLogin(t);
-    return delay(t.id, 80);
+    return delay({ terminalId: t.id, reused: false }, 80);
   },
 
   async detectProviders(): Promise<ProviderInfo[]> {
@@ -1149,6 +1463,7 @@ export const mockApi: ArmadaApi = {
   },
 
   async terminalWrite(terminalId, data) {
+    if (data.length > 65_536) throw new Error("That's too much input at once (over 64 KB).");
     const t = terminals.get(terminalId);
     if (!t || t.done) return;
     if (t.kind === "login" && t.stage === 1) {
@@ -1184,6 +1499,11 @@ export const mockApi: ArmadaApi = {
   },
 
   async updateSettings(settings: Settings) {
+    const invalid = validateSettings(settings);
+    if (invalid) {
+      await sleep(150);
+      throw new Error(invalid);
+    }
     const prevRemote = db.settings.remote;
     db.settings = clone(settings);
     const r = settings.remote;
@@ -1204,7 +1524,8 @@ export const mockApi: ArmadaApi = {
     playTone(reason);
   },
 
-  async testNotification() {
+  async testNotification(ntfyUrl) {
+    const url = ntfyUrl ?? db.settings.ntfyUrl;
     emit({
       type: "attention",
       agentId: db.agents[0]?.id ?? "",
@@ -1213,11 +1534,58 @@ export const mockApi: ArmadaApi = {
       body: "Notifications are working. You'll hear from us when an agent needs you.",
       requestId: null,
     });
+    if (url) {
+      await sleep(700);
+      const problem = ntfyProblem(url);
+      if (problem) throw new Error(`The notification was shown, but the phone push failed: ${problem}`);
+    }
   },
 
   async openPath(path) {
     if (/^https?:\/\//.test(path)) window.open(path, "_blank", "noopener");
     else console.info("[mock] open path", path);
+  },
+
+  async readImage(agentId, path) {
+    getAgent(agentId);
+    await sleep(rand(250, 600));
+    if (!/\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(path)) throw new Error(`${path} is not an image file`);
+    if (/missing|deleted/i.test(path)) throw new Error(`No such file: ${path}`);
+    if (/^\/tmp\//.test(path) && !JSON.stringify(itemsOf(agentId)).includes(path)) {
+      throw new Error(`${path} is in a temporary folder and this agent's conversation doesn't mention it.`);
+    }
+    const name = path.split(/[\\/]/).pop() ?? path;
+    return mockScreenshot(name, path);
+  },
+
+  async testMcpServer(server) {
+    await sleep(rand(700, 1300));
+    if (server.transport === "http") {
+      if (!/^https?:\/\//.test(server.url)) throw new Error("URL must start with http:// or https://");
+      if (/localhost:9/.test(server.url)) throw new Error(`connect ECONNREFUSED ${server.url}`);
+      return `${server.name || "server"} · 18 tools (HTTP, MCP 2025-06-18)`;
+    }
+    const cmd = server.command.trim();
+    if (!cmd) throw new Error("Command is empty.");
+    if (!["npx", "uvx", "node", "python", "docker", "bunx"].includes(cmd)) {
+      throw new Error(`spawn ${cmd}: No such file or directory (os error 2)`);
+    }
+    const pkg = server.args.find((a) => !a.startsWith("-")) ?? server.name;
+    return `${pkg.split("/").pop()} 1.2.0 · ${8 + (pkg.length % 9)} tools`;
+  },
+
+  async isGitRepo(path) {
+    await sleep(120);
+    const p = path
+      .trim()
+      .replace(/^~(?=\/|$)/, "/home/sam")
+      .replace(/\/+$/, "");
+    return MOCK_PROJECTS.some((r) => p === r || p.startsWith(`${r}/`));
+  },
+
+  async discoverProjects() {
+    await sleep(500);
+    return [...MOCK_PROJECTS];
   },
 
   async listFiles(agentId, query) {
@@ -1400,4 +1768,131 @@ function remoteStatus() {
     error: r.enabled ? remote.error : null,
     shares: remote.shares,
   });
+}
+
+// ---------------------------------------------------------------- stress mode (?stress)
+
+let stressStarted = false;
+
+function setupStress() {
+  if (stressStarted) return;
+  stressStarted = true;
+  const base = db.agents[0];
+  for (const a of stressAgents(base)) {
+    db.agents.unshift(a);
+    db.items[a.id] = stressItems(a.id);
+  }
+  setTimeout(() => {
+    let tick = 0;
+    const current = new Map<string, string>();
+    setInterval(() => {
+      tick++;
+      for (let i = 1; i <= STRESS_AGENTS; i++) {
+        const id = `stress-${i}`;
+        let itemId = current.get(id);
+        const list = itemsOf(id);
+        const cur = itemId ? list.find((x) => x.id === itemId) : undefined;
+        // Start a new streaming message every ~400 deltas (keeps the timeline growing too).
+        if (!cur || (cur.kind === "agent_message" && cur.text.length > 2400)) {
+          if (cur) updateItem(id, cur.id, {});
+          addItem(id, {
+            kind: "tool_call",
+            toolCallId: newId("stc"),
+            title: `Edit src/stress/file${tick % 50}.ts`,
+            toolKind: "edit",
+            status: "completed",
+            locations: [`src/stress/file${tick % 50}.ts`],
+            diffs: [],
+            output: "",
+            command: null,
+          });
+          itemId = addItem(id, { kind: "agent_message", text: "" }).id;
+          current.set(id, itemId);
+        }
+        if (itemId) appendDelta(id, itemId, "text", stressWords(1 + (tick % 3), tick + i));
+      }
+    }, STRESS_TICK_MS);
+  }, 1500);
+}
+
+// ---------------------------------------------------------------- revert_patch (mock)
+
+const revertedPatches = new Map<string, string[]>();
+
+/** Drop reverted hunks/files from the mock diff so the UI sees the change disappear. */
+function withoutReverted(diff: AgentDiff, reverted: string[]): AgentDiff {
+  if (reverted.length === 0) return diff;
+  let patch = diff.patch;
+  for (const r of reverted) {
+    const header = r.slice(0, r.indexOf("\n@@") + 1);
+    const hunks = r
+      .slice(header.length)
+      .split(/(?=^@@ )/m)
+      .filter(Boolean);
+    for (const h of hunks) patch = patch.replace(h, "");
+    // A file with no hunks left disappears entirely.
+    if (!patch.slice(patch.indexOf(header) + header.length).startsWith("@@")) patch = patch.replace(header, "");
+  }
+  const files = diff.files.filter((f) => patch.includes(`b/${f.path}`));
+  return { ...diff, patch, files, uncommitted: Math.min(diff.uncommitted, files.length) };
+}
+
+// ---------------------------------------------------------------- git busy/lock & validation (mock)
+
+const gitBusy = new Set<string>();
+
+function assertIdle(a: Agent, what: string) {
+  if (a.status === "working" || a.status === "needs_permission" || a.status === "starting") {
+    throw new Error(`The agent is still working; stop it or wait before ${what} changes.`);
+  }
+}
+
+async function gitLock(agentId: string, ms: number) {
+  if (gitBusy.has(agentId)) {
+    throw new Error("Armada is already committing, merging or reverting this agent's work; wait for it to finish.");
+  }
+  gitBusy.add(agentId);
+  try {
+    await sleep(ms);
+  } finally {
+    gitBusy.delete(agentId);
+  }
+}
+
+const UNSAVED_WORK: Record<string, string> = {
+  "a-e2e": "1 uncommitted change in the worktree and 2 commits on armada/e2e-checkout that no other branch contains.",
+  "a-billing": "3 uncommitted changes in the worktree.",
+};
+
+function ntfyProblem(url: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return "that isn't a valid URL";
+  }
+  if (u.username || u.password) return "remove the user:password part (use an access token instead)";
+  const lan = /^(localhost|127\.|10\.|192\.168\.|100\.|[^.]+\.ts\.net$|[^.]+$)/.test(u.hostname);
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && lan))
+    return "use https:// (http is only allowed for LAN or Tailscale hosts)";
+  if (u.pathname.replace(/\//g, "") === "") return "include a topic, like https://ntfy.sh/my-topic";
+  if (/fail/.test(u.pathname)) return "ntfy.sh answered 403 Forbidden";
+  return null;
+}
+
+function validateSettings(s: Settings): string | null {
+  if (!["off", "ask", "auto"].includes(s.failover)) return `Unknown failover setting “${s.failover}”`;
+  if (!["auto", "ask"].includes(s.defaultPermissionMode)) return `Unknown permission mode “${s.defaultPermissionMode}”`;
+  if (!Number.isInteger(s.remote.port) || s.remote.port < 1 || s.remote.port > 65535) {
+    return "The remote control port must be between 1 and 65535";
+  }
+  const hhmm = /^([01]\d|2[0-3]):[0-5]\d$/;
+  for (const t of [s.quietHours.start, s.quietHours.end]) {
+    if (!hhmm.test(t)) return `Quiet hours must be times like 22:00 (00:00 to 23:59), not “${t}”`;
+  }
+  if (s.ntfyUrl) {
+    const p = ntfyProblem(s.ntfyUrl);
+    if (p && !/403/.test(p)) return `Phone push URL: ${p}`;
+  }
+  return null;
 }

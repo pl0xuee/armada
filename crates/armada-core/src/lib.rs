@@ -2,6 +2,7 @@
 //! accounts and local storage. UI-agnostic; the Tauri shell wires it to the window.
 
 pub mod accounts;
+pub mod childenv;
 pub mod model;
 pub mod providers;
 pub mod toolchain;
@@ -13,8 +14,16 @@ mod files;
 mod git;
 mod jsonrpc;
 mod manager;
+mod mcp;
 mod session;
 
+pub use jsonrpc::kill_all_children;
+
+/// Whether `path` is inside a git work tree with at least one commit (what
+/// worktree agents need).
+pub async fn git_work_tree(path: &std::path::Path) -> bool {
+    git::repo_info(path).await.is_some()
+}
 pub use manager::Core;
 pub use model::*;
 

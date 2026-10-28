@@ -13,9 +13,11 @@ export function ImageLightbox({
   index: number | null;
   onIndexChange: (i: number | null) => void;
 }) {
-  const current = index !== null ? images[index] : undefined;
+  // The list can shrink while open (e.g. an attachment removed): stay on a valid image.
+  const at = index !== null && images.length > 0 ? Math.min(index, images.length - 1) : null;
+  const current = at !== null ? images[at] : undefined;
   const many = images.length > 1;
-  const step = (d: number) => index !== null && onIndexChange((index + d + images.length) % images.length);
+  const step = (d: number) => at !== null && onIndexChange((at + d + images.length) % images.length);
 
   return (
     <D.Root open={!!current} onOpenChange={(o) => !o && onIndexChange(null)}>
@@ -41,9 +43,9 @@ export function ImageLightbox({
           )}
           <div className="mt-3 flex items-center gap-3 text-[12px] text-white/70">
             <span className="max-w-[60vw] truncate">{current?.name}</span>
-            {many && index !== null && (
+            {many && at !== null && (
               <span className="tabular">
-                {index + 1} / {images.length}
+                {at + 1} / {images.length}
               </span>
             )}
           </div>

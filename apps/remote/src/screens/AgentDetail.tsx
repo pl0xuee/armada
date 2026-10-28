@@ -1,21 +1,24 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AccountDot, ProviderBadge, StatusDot } from "@/components/Identity";
-import { Composer, loadDraft } from "@/components/Composer";
-import { Icon } from "@/components/Icon";
+import { Composer, type ComposerHandle } from "@/components/Composer";
+import { ImageSource } from "@/components/LocalImage";
+import { Icon, Spinner } from "@/components/Icon";
 import { Sheet } from "@/components/Sheet";
 import { Timeline } from "@/components/timeline/Timeline";
 import { TopBar } from "@/components/TopBar";
 import { Button, IconButton } from "@/components/ui";
-import { cancelTurn, loadTimeline, resumeAgent } from "@/lib/controller";
+import { loadTimeline, markRead, resumeAgent, unpair } from "@/lib/controller";
 import { devParam } from "@/lib/dev";
-import { basename, formatCost, formatTokens, relativeTimeLong } from "@/lib/format";
+import { basename, formatCost, formatTokens, plainPreview, relativeTimeLong } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
 import { agentIdentity, isBusy, isResumable, safeColor, statusMeta } from "@/lib/meta";
+import { useDelayed } from "@/lib/hooks";
 import { goBack, navigate } from "@/lib/router";
 import { isUserLayoutChange } from "@/lib/scroll";
-import { useInbox } from "@/lib/selectors";
+import { accountOf, useOtherPendingCount } from "@/lib/selectors";
 import { useStore, type PendingPrompt, type Timeline as TimelineState } from "@/lib/store";
-import type { Agent } from "@/lib/types";
+import type { Agent, TimelineItem } from "@/lib/types";
+import { AccountSheet, AgentActions, OptionSheet, SettingsChips, switchableAccounts } from "./AgentControls";
 import { EmptyState, ErrorState } from "./States";
 
 const NO_PENDING: PendingPrompt[] = [];
@@ -59,14 +62,23 @@ function Screen({ agent, readOnly, children }: { agent: Agent | null; readOnly: 
   );
 }
 
-function DetailHeader({ agent, readOnly, onDetails }: { agent: Agent | null; readOnly: boolean; onDetails?: () => void }) {
+const DetailHeader = memo(function DetailHeader({
+  agent,
+  readOnly,
+  onDetails,
+  below,
+}: {
+  agent: Agent | null;
+  readOnly: boolean;
+  onDetails?: () => void;
+  below?: ReactNode;
+}) {
   const accounts = useStore((s) => s.accounts);
   const customAgents = useStore((s) => s.customAgents);
-  const inbox = useInbox();
-  const account = agent ? accounts[agent.accountId] : undefined;
+  const otherPending = useOtherPendingCount(agent?.id ?? null);
+  const account = agent ? accountOf(accounts, agent) : undefined;
   const id = agent ? agentIdentity(agent, customAgents) : null;
   const meta = agent ? statusMeta(agent.status) : null;
-  const otherPending = agent ? inbox.count - inbox.entries.filter((e) => e.agent.id === agent.id).length : 0;
 
   return (
     <TopBar
@@ -79,14 +91,7 @@ function DetailHeader({ agent, readOnly, onDetails }: { agent: Agent | null; rea
           {agent && onDetails && <IconButton icon="more" label="Agent details" onClick={onDetails} />}
         </>
       }
-      below={
-        readOnly ? (
-          <div className="flex items-center justify-center gap-1.5 border-t border-line/60 bg-accent/[0.06] py-1.5 text-[12.5px] font-medium text-accent">
-            <Icon name="eye" size={15} />
-            Live view · read-only
-          </div>
-        ) : null
-      }
+      below={readOnly ? <ViewerBar /> : below}
     >
       {agent && id && meta ? (
         <div className="flex min-w-0 items-center gap-2.5">
@@ -107,6 +112,21 @@ function DetailHeader({ agent, readOnly, onDetails }: { agent: Agent | null; rea
         <div className="skeleton h-5 w-40" />
       )}
     </TopBar>
+  );
+});
+
+function ViewerBar() {
+  const shared = useStore((s) => s.sharedView);
+  return (
+    <div className="flex min-h-9 items-center justify-center gap-1.5 border-t border-line/60 bg-accent/[0.06] px-safe text-[12.5px] font-medium text-accent">
+      <Icon name="eye" size={15} />
+      Live view · read-only
+      {shared && (
+        <button type="button" onClick={unpair} className="press hit relative ml-2 h-9 rounded-lg px-2 font-semibold text-fg underline-offset-2">
+          Back to my agents
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -152,7 +172,7 @@ function AgentView({
   pending: PendingPrompt[];
   readOnly: boolean;
 }) {
-  const [draft, setDraft] = useState(() => loadDraft(agent.id));
+  const composer = useRef<ComposerHandle>(null);
   const [details, setDetails] = useState(devParam("sheet") === "details");
   const [jump, setJump] = useState<null | "idle" | "new">(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -163,10 +183,17 @@ function AgentView({
 
   // Track whether the reader is following the bottom.
   useEffect(() => {
+    // Pinned state must be current immediately (so auto-follow never fights the
+    // reader's finger); the button state only changes when crossing the threshold.
+    let away = false;
     const onScroll = () => {
       const d = distanceFromBottom();
       pinned.current = d < PIN_THRESHOLD;
-      setJump((j) => (d > 320 ? (j ?? "idle") : null));
+      const nowAway = d > 320;
+      if (nowAway !== away) {
+        away = nowAway;
+        setJump((j) => (nowAway ? (j ?? "idle") : null));
+      }
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
@@ -199,15 +226,37 @@ function AgentView({
     return () => ro.disconnect();
   }, []);
 
-  const editPrompt = useCallback((text: string) => setDraft(text), []);
+  const editPrompt = useCallback((text: string) => composer.current?.setText(text), []);
+  const [optionSheet, setOptionSheet] = useState<string | null>(null);
+  const [accountSheet, setAccountSheet] = useState(devParam("sheet") === "account");
 
-  const banner = !readOnly ? <StatusBanner agent={agent} readOnly={false} /> : null;
+  // Opening an agent (or new activity while it's open) marks it read; if the
+  // app was in the background then, retry when it comes back.
+  useEffect(() => {
+    if (readOnly || !agent.unread) return;
+    const tryMark = () => {
+      if (document.visibilityState === "visible") markRead(agent.id);
+    };
+    tryMark();
+    document.addEventListener("visibilitychange", tryMark);
+    return () => document.removeEventListener("visibilitychange", tryMark);
+  }, [agent.id, agent.unread, readOnly]);
+
+  const openDetails = useCallback(() => setDetails(true), []);
+  const chips = useMemo(() => <SettingsChips agent={agent} onPick={setOptionSheet} />, [agent]);
+  const banner = useMemo(
+    () => (readOnly ? null : <StatusBanner agent={agent} readOnly={false} onSwitchAccount={() => setAccountSheet(true)} />),
+    [agent, readOnly],
+  );
 
   return (
     <div className="flex min-h-dvh flex-col">
-      <DetailHeader agent={agent} readOnly={readOnly} onDetails={() => setDetails(true)} />
+      <DetailHeader agent={agent} readOnly={readOnly} onDetails={openDetails} below={chips} />
       <main className="mx-auto w-full max-w-[860px] flex-1 px-safe pt-4 pb-6">
-        <div ref={listRef}>
+        {timeline && <StaleNotice agentId={agent.id} stale={timeline.stale} error={timeline.status === "ready" ? timeline.error : null} />}
+        <LiveAnnouncer agent={agent} items={items} />
+        {/* A log; announcements come from LiveAnnouncer (rows mount/unmount while scrolling). */}
+        <div ref={listRef} role="log" aria-live="off" aria-label="Conversation">
           {!timeline || (timeline.status === "loading" && !timeline.items.length) ? (
             <TimelineSkeleton />
           ) : timeline.status === "error" ? (
@@ -219,14 +268,19 @@ function AgentView({
               body={readOnly ? "Messages will appear here as the agent works." : "Send a prompt to get this agent started."}
             />
           ) : (
-            <Timeline agent={agent} items={items ?? []} pending={pending} readOnly={readOnly} onEditPrompt={editPrompt} />
+            <ImageSource.Provider value={agent.id}>
+              <Timeline agent={agent} items={items ?? []} pending={pending} readOnly={readOnly} onEditPrompt={editPrompt} />
+            </ImageSource.Provider>
           )}
           {readOnly && <StatusBanner agent={agent} readOnly inline />}
         </div>
       </main>
 
       {jump && (
-        <div className="pointer-events-none sticky bottom-[calc(76px+var(--safe-bottom))] z-20 flex justify-center">
+        <div
+          className="pointer-events-none sticky z-20 flex justify-center"
+          style={{ bottom: "calc(var(--composer-h, 0px) + var(--kb, 0px) + max(8px, var(--safe-bottom)))" }}
+        >
           <button
             type="button"
             onClick={() => {
@@ -244,17 +298,91 @@ function AgentView({
         </div>
       )}
 
-      {!readOnly && <Composer agent={agent} value={draft} onChange={setDraft} banner={banner} />}
+      {!readOnly && <Composer agent={agent} banner={banner} handle={composer} />}
       {readOnly && <div className="h-[var(--safe-bottom)]" />}
 
-      <AgentDetailsSheet agent={agent} open={details} onClose={() => setDetails(false)} readOnly={readOnly} />
+      <AgentDetailsSheet
+        agent={agent}
+        open={details}
+        onClose={() => setDetails(false)}
+        readOnly={readOnly}
+        onPickOption={(id) => {
+          setDetails(false);
+          setOptionSheet(id);
+        }}
+        onSwitchAccount={() => {
+          setDetails(false);
+          setAccountSheet(true);
+        }}
+      />
+      {!readOnly && <OptionSheet agent={agent} optionId={optionSheet} onClose={() => setOptionSheet(null)} />}
+      {!readOnly && <AccountSheet agent={agent} open={accountSheet} onClose={() => setAccountSheet(false)} />}
+    </div>
+  );
+}
+
+/** The conversation shown may be out of date (refresh pending or failed). */
+function StaleNotice({ agentId, stale, error }: { agentId: string; stale: boolean; error: string | null }) {
+  const show = useDelayed(stale, 1_500);
+  if (!stale || !show) return null;
+  return (
+    <div className="animate-fade mb-3 flex min-h-10 items-center gap-2 rounded-xl border border-line bg-panel px-3 text-[12.5px] text-muted" role="status">
+      {error ? <Icon name="alertCircle" size={15} className="shrink-0 text-warn" /> : <Spinner size={13} className="shrink-0" />}
+      <span className="min-w-0 flex-1">{error ? "Couldn't refresh this conversation." : "Updating…"}</span>
+      {error && (
+        <button type="button" onClick={() => void loadTimeline(agentId)} className="press h-10 shrink-0 rounded-lg px-2 font-semibold text-accent">
+          Retry
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Announces each finished agent message to screen readers (once, politely). */
+function LiveAnnouncer({ agent, items }: { agent: Agent; items: TimelineItem[] | undefined }) {
+  const [text, setText] = useState("");
+  const announced = useRef<string | null>(null);
+  useEffect(() => {
+    if (!items) return;
+    let last: TimelineItem | undefined;
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (items[i].kind === "agent_message") {
+        last = items[i];
+        break;
+      }
+    }
+    if (!last || last.kind !== "agent_message") return;
+    const streaming = isBusy(agent.status) && items[items.length - 1] === last;
+    if (announced.current === null) {
+      announced.current = last.id; // don't read out history on open
+      return;
+    }
+    if (streaming || announced.current === last.id || !last.text.trim()) return;
+    announced.current = last.id;
+    setText(`${agent.title}: ${plainPreview(last.text).slice(0, 280)}`);
+  }, [items, agent.status, agent.title]);
+  return (
+    <div className="sr-only" role="status" aria-live="polite">
+      {text}
     </div>
   );
 }
 
 /** Resume / error context shown just above the composer. */
-function StatusBanner({ agent, readOnly, inline = false }: { agent: Agent; readOnly: boolean; inline?: boolean }) {
+function StatusBanner({
+  agent,
+  readOnly,
+  inline = false,
+  onSwitchAccount,
+}: {
+  agent: Agent;
+  readOnly: boolean;
+  inline?: boolean;
+  onSwitchAccount?: () => void;
+}) {
   const resuming = useStore((s) => !!s.busy[`resume:${agent.id}`]);
+  const accounts = useStore((s) => s.accounts);
+  const canSwitch = !readOnly && !!onSwitchAccount && switchableAccounts(agent, accounts).length > 1;
   let tone: "violet" | "err" | "steel" | null = null;
   let text = "";
   if (agent.status === "interrupted") {
@@ -266,8 +394,13 @@ function StatusBanner({ agent, readOnly, inline = false }: { agent: Agent; readO
   } else if (agent.status === "error") {
     tone = "err";
     text = agent.rateLimited
-      ? "Usage limit reached on this account. Try again later or switch accounts on your computer."
+      ? canSwitch
+        ? "Usage limit reached on this account. Switch accounts to keep going."
+        : "Usage limit reached on this account. Try again later."
       : "The last turn failed. Send a message to try again.";
+  } else if (agent.rateLimited && canSwitch) {
+    tone = "err";
+    text = "Usage limit reached on this account. Switch accounts to keep going.";
   }
   if (!tone) return null;
   const color = tone === "violet" ? "var(--violet)" : tone === "err" ? "var(--err)" : "var(--steel)";
@@ -285,13 +418,63 @@ function StatusBanner({ agent, readOnly, inline = false }: { agent: Agent; readO
       >
         <Icon name={tone === "err" ? "alertCircle" : "info"} size={18} className="shrink-0" />
         <p className="min-w-0 flex-1 py-1 text-[13px] leading-snug text-fg/90">{text}</p>
-        {resumable && (
-          <Button size="sm" variant="primary" icon="play" loading={resuming} onClick={() => void resumeAgent(agent.id)}>
-            Resume
+        {agent.rateLimited && canSwitch ? (
+          <Button size="sm" variant="primary" icon="user" onClick={onSwitchAccount}>
+            Switch
           </Button>
+        ) : (
+          resumable && (
+            <Button size="sm" variant="primary" icon="play" loading={resuming} onClick={() => void resumeAgent(agent.id)}>
+              Resume
+            </Button>
+          )
         )}
       </div>
     </div>
+  );
+}
+
+/** Share-link viewers can leave the shared view or unpair this device. */
+function ViewerAccess({ onDone }: { onDone: () => void }) {
+  const shared = useStore((s) => s.sharedView);
+  const [confirm, setConfirm] = useState(false);
+  if (shared) {
+    return (
+      <div className="mt-4">
+        <p className="mb-3 text-[13px] leading-relaxed text-muted">
+          You're viewing a shared link. This device's own pairing is unchanged.
+        </p>
+        <Button
+          variant="secondary"
+          size="lg"
+          icon="unlink"
+          className="w-full"
+          onClick={() => {
+            onDone();
+            unpair();
+          }}
+        >
+          Leave shared view
+        </Button>
+      </div>
+    );
+  }
+  return confirm ? (
+    <div className="mt-4 rounded-2xl border border-err/30 bg-err/[0.06] p-3">
+      <p className="text-[14px] text-fg">Unpair this device? You'll need the link again to watch this agent.</p>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <Button variant="secondary" onClick={() => setConfirm(false)}>
+          Cancel
+        </Button>
+        <Button variant="danger" icon="unlink" onClick={unpair}>
+          Unpair
+        </Button>
+      </div>
+    </div>
+  ) : (
+    <Button variant="danger" size="lg" icon="unlink" className="mt-4 w-full" onClick={() => setConfirm(true)}>
+      Unpair this device
+    </Button>
   );
 }
 
@@ -304,13 +487,25 @@ function DetailRow({ label, children, mono }: { label: string; children: ReactNo
   );
 }
 
-function AgentDetailsSheet({ agent, open, onClose, readOnly }: { agent: Agent; open: boolean; onClose: () => void; readOnly: boolean }) {
+function AgentDetailsSheet({
+  agent,
+  open,
+  onClose,
+  readOnly,
+  onPickOption,
+  onSwitchAccount,
+}: {
+  agent: Agent;
+  open: boolean;
+  onClose: () => void;
+  readOnly: boolean;
+  onPickOption: (optionId: string) => void;
+  onSwitchAccount: () => void;
+}) {
   const accounts = useStore((s) => s.accounts);
   const customAgents = useStore((s) => s.customAgents);
   const now = useNow();
-  const resuming = useStore((s) => !!s.busy[`resume:${agent.id}`]);
-  const cancelling = useStore((s) => !!s.busy[`cancel:${agent.id}`]);
-  const account = accounts[agent.accountId];
+  const account = accountOf(accounts, agent);
   const id = agentIdentity(agent, customAgents);
   const modelOpt = agent.configOptions?.find((o) => o.category === "model");
   const model = modelOpt ? (modelOpt.options.find((o) => o.value === modelOpt.currentValue)?.name ?? modelOpt.currentValue) : null;
@@ -318,6 +513,8 @@ function AgentDetailsSheet({ agent, open, onClose, readOnly }: { agent: Agent; o
 
   return (
     <Sheet open={open} onClose={onClose} title={agent.title} description={`${id.name}${model ? ` · ${model}` : ""}`}>
+      {!readOnly && <AgentActions agent={agent} onClose={onClose} onPickOption={onPickOption} onSwitchAccount={onSwitchAccount} />}
+      {!readOnly && <h3 className="mt-5 mb-1 px-0.5 text-[12px] font-semibold tracking-[0.08em] text-steel uppercase">Details</h3>}
       <dl className="divide-y divide-line/70">
         <DetailRow label="Status">
           <span className="inline-flex items-center gap-1.5">
@@ -334,17 +531,21 @@ function AgentDetailsSheet({ agent, open, onClose, readOnly }: { agent: Agent; o
             </span>
           </DetailRow>
         )}
-        <DetailRow label="Project">
-          <span title={agent.projectPath}>{basename(agent.projectPath)}</span>
-        </DetailRow>
+        {agent.projectPath && (
+          <DetailRow label="Project">
+            <span title={agent.projectPath}>{basename(agent.projectPath)}</span>
+          </DetailRow>
+        )}
         {agent.branch && (
           <DetailRow label={agent.worktree ? "Worktree branch" : "Branch"} mono>
             {agent.branch}
           </DetailRow>
         )}
-        <DetailRow label="Folder" mono>
-          {agent.cwd}
-        </DetailRow>
+        {agent.cwd && (
+          <DetailRow label="Folder" mono>
+            {agent.cwd}
+          </DetailRow>
+        )}
         <DetailRow label="Cost">
           <span className="tabular">{formatCost(agent.costUsd)}</span>
         </DetailRow>
@@ -367,36 +568,7 @@ function AgentDetailsSheet({ agent, open, onClose, readOnly }: { agent: Agent; o
         <DetailRow label="Last activity">{relativeTimeLong(agent.lastActivityAt, now)}</DetailRow>
         {agent.scheduleId && <DetailRow label="Started by">A schedule</DetailRow>}
       </dl>
-      {!readOnly && isResumable(agent.status) && (
-        <Button
-          variant="primary"
-          size="lg"
-          icon="play"
-          className="mt-4 w-full"
-          loading={resuming}
-          onClick={() => {
-            void resumeAgent(agent.id);
-            onClose();
-          }}
-        >
-          Resume session
-        </Button>
-      )}
-      {!readOnly && isBusy(agent.status) && (
-        <Button
-          variant="danger"
-          size="lg"
-          icon="stop"
-          className="mt-4 w-full"
-          loading={cancelling}
-          onClick={() => {
-            void cancelTurn(agent.id);
-            onClose();
-          }}
-        >
-          Stop this turn
-        </Button>
-      )}
+      {readOnly && <ViewerAccess onDone={onClose} />}
     </Sheet>
   );
 }

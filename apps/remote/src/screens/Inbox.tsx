@@ -8,14 +8,25 @@ import { TOOL_ICON } from "@/components/timeline/Items";
 import { ConnectionPill, TopBar } from "@/components/TopBar";
 import { Button, IconButton } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { loadInboxTimelines, loadTimeline, respondToPermission, retryState } from "@/lib/controller";
+import { loadPermissions, respondToPermission, respondWithUndo, retryState } from "@/lib/controller";
 import { devParam } from "@/lib/dev";
 import { diffStats } from "@/lib/diff";
 import { basename, plural, relativeTime } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
-import { agentIdentity, OPTION_HINT, primaryAllow, primaryReject, safeColor } from "@/lib/meta";
+import {
+  agentIdentity,
+  allowOnce,
+  confirmOption,
+  isAlways,
+  OPTION_HINT,
+  primaryAllow,
+  primaryReject,
+  rejectOnce,
+  safeColor,
+  swipeable,
+} from "@/lib/meta";
 import { goBack, navigate } from "@/lib/router";
-import { useInbox, type InboxEntry } from "@/lib/selectors";
+import { accountOf, useInbox, type InboxEntry } from "@/lib/selectors";
 import { useStore } from "@/lib/store";
 import type { PermissionOption } from "@/lib/types";
 import { EmptyState, ErrorState } from "./States";
@@ -32,7 +43,7 @@ export function Inbox() {
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
-    loadInboxTimelines();
+    void loadPermissions();
   }, []);
 
   // Answered requests leave the list immediately (and come back if sending fails).
@@ -48,7 +59,7 @@ export function Inbox() {
   let body;
   if (stateStatus !== "ready" && !entries.length) {
     body = stateStatus === "error" ? <ErrorState title="Couldn't load approvals" body={stateError} onRetry={retryState} /> : <InboxSkeleton count={2} />;
-  } else if (!entries.length && !inbox.loading && !inbox.failed.length) {
+  } else if (!entries.length && !inbox.loading && !inbox.failed) {
     body = (
       <EmptyState
         icon="shieldCheck"
@@ -61,7 +72,7 @@ export function Inbox() {
   } else {
     body = (
       <div className="space-y-3">
-        {entries.length > 0 && (
+        {entries.some((e) => swipeable(e.item) && (allowOnce(e.item) || rejectOnce(e.item))) && (
           <p className="flex items-center justify-center gap-1.5 pb-1 text-center text-[12.5px] text-steel [@media(pointer:fine)]:hidden">
             Swipe right to approve, left to deny
           </p>
@@ -69,18 +80,16 @@ export function Inbox() {
         {entries.map((e) => (
           <InboxCard key={e.item.requestId} entry={e} now={now} onMore={() => setOptionsFor(e.item.requestId)} />
         ))}
-        {inbox.loading > 0 && <InboxSkeleton count={Math.min(inbox.loading, 2)} />}
-        {inbox.failed.map((a) => (
-          <div key={a.id} className="flex items-center gap-3 rounded-2xl border border-err/30 bg-err/[0.06] p-3">
+        {inbox.loading && <InboxSkeleton count={2} />}
+        {inbox.failed && (
+          <div className="flex items-center gap-3 rounded-2xl border border-err/30 bg-err/[0.06] p-3" role="alert">
             <Icon name="alertCircle" size={18} className="shrink-0 text-err" />
-            <p className="min-w-0 flex-1 text-[13.5px] text-fg">
-              Couldn't load requests from <span className="font-semibold">{a.title}</span>
-            </p>
-            <Button size="sm" variant="secondary" onClick={() => void loadTimeline(a.id)}>
+            <p className="min-w-0 flex-1 text-[13.5px] text-fg">Couldn't load the approval requests.</p>
+            <Button size="sm" variant="secondary" onClick={() => void loadPermissions()}>
               Retry
             </Button>
           </div>
-        ))}
+        )}
       </div>
     );
   }
@@ -116,24 +125,32 @@ function useExit(): [boolean, (fn: () => void) => void] {
 
 const InboxCard = memo(function InboxCard({ entry, now, onMore }: { entry: InboxEntry; now: number; onMore: () => void }) {
   const { agent, item } = entry;
-  const account = useStore((s) => s.accounts[agent.accountId]);
+  const account = useStore((s) => accountOf(s.accounts, agent));
   const customAgents = useStore((s) => s.customAgents);
   const [leaving, exit] = useExit();
   const [showDiff, setShowDiff] = useState(false);
-  const allow = primaryAllow(item);
-  const reject = primaryReject(item);
+  // Generic "Approve"/"Deny" (and swipes) only ever mean the one-shot options.
+  // Without one, the button names the real option and swiping is disabled.
+  const allowSafe = allowOnce(item);
+  const rejectSafe = rejectOnce(item);
+  const allow = allowSafe ?? primaryAllow(item);
+  const reject = rejectSafe ?? primaryReject(item);
   const extra = item.options.length - (allow ? 1 : 0) - (reject ? 1 : 0);
   const waitingMin = (now - item.ts) / 60_000;
   const stats = useMemo(() => (item.diffs.length ? diffStats(item.diffs) : null), [item.diffs]);
-  const respond = (o: PermissionOption) => void respondToPermission(agent.id, item.requestId, o.id);
+  const respond = async (o: PermissionOption) => {
+    if (await confirmOption(o)) void respondToPermission(agent.id, item.requestId, o.id);
+  };
+  const canSwipe = swipeable(item);
+  const swipe = (o: PermissionOption, verb: string) => () => respondWithUndo(agent.id, item.requestId, o.id, verb, item.title);
 
   return (
     <div className={cn("transition-[opacity,transform] duration-150", leaving ? "scale-[0.98] opacity-0" : "animate-enter")}>
       <Swipeable
         rightLabel="Approve"
         leftLabel="Deny"
-        onSwipeRight={allow ? () => respond(allow) : undefined}
-        onSwipeLeft={reject ? () => respond(reject) : undefined}
+        onSwipeRight={canSwipe && allowSafe ? swipe(allowSafe, "Approved") : undefined}
+        onSwipeLeft={canSwipe && rejectSafe ? swipe(rejectSafe, "Denied") : undefined}
       >
         <article
           aria-label={`${agent.title}: ${item.title}`}
@@ -156,8 +173,12 @@ const InboxCard = memo(function InboxCard({ entry, now, onMore }: { entry: Inbox
                 ) : (
                   <span className="truncate">{agentIdentity(agent, customAgents).short}</span>
                 )}
-                <span className="text-line-strong">·</span>
-                <span className="truncate text-steel">{basename(agent.projectPath)}</span>
+                {agent.projectPath && (
+                  <>
+                    <span className="text-line-strong">·</span>
+                    <span className="truncate text-steel">{basename(agent.projectPath)}</span>
+                  </>
+                )}
               </span>
             </span>
             <span
@@ -208,9 +229,9 @@ const InboxCard = memo(function InboxCard({ entry, now, onMore }: { entry: Inbox
                 icon="x"
                 disabled={!reject}
                 aria-label={reject ? `Deny: ${reject.name}` : "Deny"}
-                onClick={() => reject && exit(() => respond(reject))}
+                onClick={() => reject && (isAlways(reject) ? void respond(reject) : exit(() => void respond(reject)))}
               >
-                Deny
+                <span className="truncate">{reject && !rejectSafe ? reject.name : "Deny"}</span>
               </Button>
               <Button
                 size="lg"
@@ -218,9 +239,9 @@ const InboxCard = memo(function InboxCard({ entry, now, onMore }: { entry: Inbox
                 icon="check"
                 disabled={!allow}
                 aria-label={allow ? `Approve: ${allow.name}` : "Approve"}
-                onClick={() => allow && exit(() => respond(allow))}
+                onClick={() => allow && (isAlways(allow) ? void respond(allow) : exit(() => void respond(allow)))}
               >
-                Approve
+                <span className="truncate">{allow && !allowSafe ? allow.name : "Approve"}</span>
               </Button>
             </div>
             <div className="-mx-2 -mb-2 flex items-center justify-between">
@@ -269,9 +290,9 @@ function OptionsSheet({ entry, onClose }: { entry: InboxEntry | null; onClose: (
                 size="lg"
                 variant={OPTION_VARIANT[o.kind]}
                 className="h-auto min-h-[56px] w-full flex-col !items-start gap-0 py-2.5 text-left"
-                onClick={() => {
+                onClick={async () => {
                   onClose();
-                  void respondToPermission(e.agent.id, e.item.requestId, o.id);
+                  if (await confirmOption(o)) void respondToPermission(e.agent.id, e.item.requestId, o.id);
                 }}
               >
                 <span className="block w-full truncate">{o.name}</span>

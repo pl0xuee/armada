@@ -197,6 +197,12 @@ const PATHS = {
       <path d="M14 14h2.5v2.5H14zM17.5 17.5H20V20h-2.5zM14 19.5v.5M19.5 14h.5" />
     </>
   ),
+  phone: (
+    <>
+      <rect x="7" y="2.5" width="10" height="19" rx="2.5" />
+      <path d="M11 18.5h2" />
+    </>
+  ),
   laptop: (
     <>
       <rect x="4.5" y="5" width="15" height="10.5" rx="1.8" />
@@ -220,6 +226,42 @@ const PATHS = {
     <>
       <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
       <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+    </>
+  ),
+  image: (
+    <>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
+      <circle cx="9" cy="10" r="1.7" />
+      <path d="M20.5 15.5l-4.8-4.6L6 19.5" />
+    </>
+  ),
+  plus: <path d="M12 5v14M5 12h14" />,
+  camera: (
+    <>
+      <path d="M4 8.5a2 2 0 0 1 2-2h2.2l1.4-2h4.8l1.4 2H18a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
+      <circle cx="12" cy="12.5" r="3.4" />
+    </>
+  ),
+  power: (
+    <>
+      <path d="M12 3.5v8" />
+      <path d="M7.2 6.6a7.5 7.5 0 1 0 9.6 0" />
+    </>
+  ),
+  user: (
+    <>
+      <circle cx="12" cy="8.5" r="3.8" />
+      <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
+    </>
+  ),
+  bot: (
+    <>
+      <rect x="4" y="7.5" width="16" height="12" rx="3" />
+      <path d="M12 4v3.5" />
+      <circle cx="12" cy="3.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="13" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="13" r="1.2" fill="currentColor" stroke="none" />
+      <path d="M9.5 16.5h5" />
     </>
   ),
   calendar: (

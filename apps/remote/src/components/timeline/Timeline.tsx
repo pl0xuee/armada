@@ -1,30 +1,47 @@
-import { useMemo, useState } from "react";
-import { discardPrompt, sendPrompt } from "@/lib/controller";
+import { memo, useCallback, useMemo } from "react";
+import { discardPrompt, loadOlder, sendPrompt } from "@/lib/controller";
+import { useStore } from "@/lib/store";
+import { Spinner } from "../Icon";
 import { isBusy } from "@/lib/meta";
-import { noteUserLayoutChange } from "@/lib/scroll";
+import { buildRows, estimateRow, sameRow, type Row } from "@/lib/rows";
 import type { PendingPrompt } from "@/lib/store";
-import type { Agent, TimelineItem, ToolCallItem } from "@/lib/types";
+import type { Agent, TimelineItem } from "@/lib/types";
+import { VirtualList } from "../VirtualList";
 import { AgentMessage, NoticeRow, PlanCard, ThoughtRow, ToolGroup, TypingDots, UserBubble } from "./Items";
 import { PermissionCard } from "./Permission";
+import { SubagentCard, TurnSummaryCard } from "./Subagents";
 
-type Row = { key: string; item: TimelineItem } | { key: string; tools: ToolCallItem[] };
+const rowKey = (r: Row) => r.key;
 
-/** Consecutive tool calls are shown as one stacked card. */
-function buildRows(items: TimelineItem[]): Row[] {
-  const rows: Row[] = [];
-  for (const item of items) {
-    const last = rows[rows.length - 1];
-    if (item.kind === "tool_call") {
-      if (last && "tools" in last) last.tools.push(item);
-      else rows.push({ key: item.id, tools: [item] });
-    } else rows.push({ key: item.id, item });
-  }
-  return rows;
-}
+/** Rows are rebuilt on every change; this skips re-rendering the ones whose items didn't change. */
+const TimelineRow = memo(
+  function TimelineRow({ row, streaming, readOnly, latest }: { row: Row; streaming: boolean; readOnly: boolean; latest: boolean }) {
+    if (row.kind === "tools") return <ToolGroup items={row.tools} />;
+    if (row.kind === "subagent") return <SubagentCard node={row.node} />;
+    const it = row.item;
+    switch (it.kind) {
+      case "user_message":
+        return <UserBubble text={it.text} ts={it.ts} attachments={it.attachments} />;
+      case "agent_message":
+        return <AgentMessage item={it} streaming={streaming} />;
+      case "thought":
+        return <ThoughtRow item={it} streaming={streaming} />;
+      case "permission":
+        return <PermissionCard item={it} readOnly={readOnly} />;
+      case "plan":
+        return <PlanCard item={it} />;
+      case "notice":
+        return <NoticeRow item={it} />;
+      case "turn_summary":
+        return <TurnSummaryCard item={it} latest={latest} />;
+      default:
+        return null; // item kinds from a newer desktop version
+    }
+  },
+  (a, b) => a.streaming === b.streaming && a.readOnly === b.readOnly && a.latest === b.latest && sameRow(a.row, b.row),
+);
 
-const PAGE = 120;
-
-export function Timeline({
+export const Timeline = memo(function Timeline({
   agent,
   items,
   pending,
@@ -38,67 +55,63 @@ export function Timeline({
   onEditPrompt: (text: string) => void;
 }) {
   const rows = useMemo(() => buildRows(items), [items]);
-  const [limit, setLimit] = useState(PAGE);
-  const hidden = Math.max(0, rows.length - limit);
-  const visible = hidden ? rows.slice(hidden) : rows;
   const busy = isBusy(agent.status) && agent.status !== "needs_permission";
   const lastItem = items[items.length - 1];
   const streamingId =
     busy && !pending.length && lastItem && (lastItem.kind === "agent_message" || lastItem.kind === "thought") ? lastItem.id : null;
   const showWorking = busy && !streamingId;
 
+  const latestSummary = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) if (items[i].kind === "turn_summary") return items[i].id;
+    return null;
+  }, [items]);
+  const render = useCallback(
+    (row: Row) => <TimelineRow row={row} streaming={row.key === streamingId} readOnly={readOnly} latest={row.key === latestSummary} />,
+    [streamingId, readOnly, latestSummary],
+  );
+
+  const hasMore = useStore((s) => !!s.timelines[agent.id]?.hasMore);
+  const loadingOlder = useStore((s) => !!s.timelines[agent.id]?.loadingOlder);
+  const onReachTop = useCallback(() => void loadOlder(agent.id), [agent.id]);
+
   return (
-    <div className="space-y-4">
-      {hidden > 0 && (
-        <button
-          type="button"
-          onClick={() => {
-            noteUserLayoutChange();
-            setLimit((l) => l + PAGE);
-          }}
-          className="press mx-auto flex h-10 items-center rounded-full border border-line bg-panel px-4 text-[13px] font-medium text-muted"
-        >
-          Show {Math.min(PAGE, hidden)} earlier
-        </button>
-      )}
-      {visible.map((row) => {
-        if ("tools" in row) return <ToolGroup key={row.key} items={row.tools} />;
-        const it = row.item;
-        switch (it.kind) {
-          case "user_message":
-            return <UserBubble key={row.key} text={it.text} ts={it.ts} />;
-          case "agent_message":
-            return <AgentMessage key={row.key} item={it} streaming={it.id === streamingId} />;
-          case "thought":
-            return <ThoughtRow key={row.key} item={it} streaming={it.id === streamingId} />;
-          case "permission":
-            return <PermissionCard key={row.key} item={it} readOnly={readOnly} />;
-          case "plan":
-            return <PlanCard key={row.key} item={it} />;
-          case "notice":
-            return <NoticeRow key={row.key} item={it} />;
-          default:
-            return null; // item kinds from a newer desktop version
-        }
-      })}
-      {pending.map((p) => (
-        <UserBubble
-          key={p.id}
-          text={p.text}
-          state={p.failed ? "failed" : "sending"}
-          onRetry={() => void sendPrompt(agent.id, p.text, p.id)}
-          onEdit={() => {
-            discardPrompt(agent.id, p.id);
-            onEditPrompt(p.text);
-          }}
-        />
-      ))}
-      {showWorking && (
-        <div className="flex items-center gap-2 pl-0.5 text-[13px] text-steel">
-          <TypingDots />
-          <span>{agent.status === "starting" ? "Starting session…" : "Working…"}</span>
+    <div>
+      {(hasMore || loadingOlder) && (
+        <div className="flex h-10 items-center justify-center gap-2 text-[12.5px] text-steel" role="status">
+          {loadingOlder ? (
+            <>
+              <Spinner size={14} /> Loading earlier messages…
+            </>
+          ) : (
+            <button type="button" onClick={onReachTop} className="press h-11 px-3 font-medium text-accent">
+              Load earlier messages
+            </button>
+          )}
         </div>
       )}
+      <VirtualList items={rows} getKey={rowKey} estimate={estimateRow} render={render} onReachTop={hasMore ? onReachTop : undefined} />
+      <div className="space-y-4">
+        {pending.map((p) => (
+          <UserBubble
+            key={p.id}
+            text={p.text}
+            attachments={p.attachments}
+            progress={p.progress}
+            state={p.failed ? "failed" : "sending"}
+            onRetry={() => void sendPrompt(agent.id, p.text, p.attachments, p.id)}
+            onEdit={() => {
+              discardPrompt(agent.id, p.id);
+              onEditPrompt(p.text);
+            }}
+          />
+        ))}
+        {showWorking && (
+          <div className="flex items-center gap-2 pl-0.5 text-[13px] text-steel">
+            <TypingDots />
+            <span>{agent.status === "starting" ? "Starting session…" : "Working…"}</span>
+          </div>
+        )}
+      </div>
     </div>
   );
-}
+});

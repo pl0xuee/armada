@@ -3,6 +3,10 @@ import {
   ArchiveRestore,
   ArrowRightLeft,
   CalendarClock,
+  CalendarPlus,
+  Shrink,
+  Power,
+  Workflow,
   Radio,
   Download,
   Gauge,
@@ -29,11 +33,12 @@ import {
   resumeAgent,
   stopAgent,
 } from "@/lib/actions";
+import { liveTail } from "@/lib/agents";
+import { agentDerived } from "./derived";
+import { canCompact, compactContext, contextRatio } from "./compact";
 import { api } from "@/lib/api";
 import { CUSTOM_ACCOUNT_ID, PROVIDERS } from "@/lib/providers";
 import type { Agent, CustomAgent, Provider } from "@/lib/types";
-
-const EMPTY_CUSTOM: CustomAgent[] = [];
 import { basename, cn, modKey, prettyPath } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useAgentListLayout } from "@/hooks/useAgentListLayout";
@@ -45,7 +50,9 @@ import { useUi } from "@/store/ui";
 import { AccountAvatar } from "../AccountAvatar";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { StatusPill } from "../StatusDot";
+import { ConfirmDialog } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
+import { Spinner } from "../ui/misc";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,6 +62,8 @@ import {
   DropdownMenuTrigger,
 } from "../ui/menu";
 import { Tooltip } from "../ui/tooltip";
+
+const EMPTY_CUSTOM: CustomAgent[] = [];
 
 export function AgentHeader({ agent }: { agent: Agent }) {
   const account = useApp((s) => s.accounts.find((a) => a.id === agent.accountId));
@@ -74,6 +83,25 @@ export function AgentHeader({ agent }: { agent: Agent }) {
   const setDeleteAgent = useUi((s) => s.setDeleteAgent);
   const busy = agent.status === "working" || agent.status === "starting" || agent.status === "needs_permission";
   const resumable = agent.status === "interrupted" || agent.status === "stopped";
+  const live = agent.status === "working" || agent.status === "starting";
+  // Primitive selectors: only re-render when the derived value changes, not on every delta.
+  const tail = useApp((s) => (live ? liveTail(s.items[agent.id]) : null));
+  const subagents = useApp((s) => agentDerived(agent.id, s.items[agent.id]).runningSubagents);
+  const changed = useApp((s) => (agent.worktree ? agentDerived(agent.id, s.items[agent.id]).changedCount : 0));
+  const [confirmShutdown, setConfirmShutdown] = useState(false);
+
+  const scheduleThis = () => {
+    const first = useApp.getState().items[agent.id]?.find((i) => i.kind === "user_message");
+    useUi.getState().openScheduleFor({
+      name: agent.title,
+      provider: agent.provider,
+      accountId: agent.accountId,
+      customAgentId: agent.customAgentId,
+      projectPath: agent.projectPath,
+      prompt: first && first.kind === "user_message" ? first.text : "",
+      worktree: agent.worktree,
+    });
+  };
 
   return (
     <header
@@ -96,8 +124,9 @@ export function AgentHeader({ agent }: { agent: Agent }) {
           {busy ? (
             <ActionButton
               tier={tier}
-              label="Cancel"
-              tooltip="Cancel the current turn"
+              label="Stop"
+              tooltip="Stop this turn"
+              shortcut={["Esc"]}
               onClick={() => void cancelTurn(agent)}
             >
               <Square className="!h-3 !w-3 fill-current" />
@@ -113,9 +142,7 @@ export function AgentHeader({ agent }: { agent: Agent }) {
             </ActionButton>
           ) : null}
           {agent.worktree && tier !== "compact" && (
-            <ActionButton tier={tier} label="Review" tooltip="Review changes" onClick={() => setReviewAgent(agent.id)}>
-              <GitCompare className="!h-3.5 !w-3.5" />
-            </ActionButton>
+            <ReviewPill tier={tier} count={changed} onClick={() => setReviewAgent(agent.id)} />
           )}
           {tier !== "compact" && (
             <HandoffMenu agent={agent} onCustom={() => setHandoffAgent(agent)} showLabel={tier === "full"} />
@@ -131,7 +158,7 @@ export function AgentHeader({ agent }: { agent: Agent }) {
                 <>
                   {agent.worktree && (
                     <DropdownMenuItem onSelect={() => setReviewAgent(agent.id)}>
-                      <GitCompare /> Review changes…
+                      <GitCompare /> Review diff{changed > 0 ? ` (${changed} file${changed === 1 ? "" : "s"})` : "…"}
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem onSelect={() => setHandoffAgent(agent)}>
@@ -140,7 +167,9 @@ export function AgentHeader({ agent }: { agent: Agent }) {
                   <DropdownMenuSeparator />
                 </>
               )}
-              <DropdownMenuItem onSelect={() => void api.openPath(agent.cwd)}>
+              <DropdownMenuItem
+                onSelect={() => void attempt("Couldn't open the folder", () => api.openPath(agent.cwd))}
+              >
                 <FolderOpen /> Open folder
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void exportConversation(agent)}>
@@ -154,10 +183,26 @@ export function AgentHeader({ agent }: { agent: Agent }) {
               <DropdownMenuItem onSelect={() => useUi.getState().setShareAgent(agent)}>
                 <Radio /> Share live view…
               </DropdownMenuItem>
-              {agent.running && (
-                <DropdownMenuItem onSelect={() => void stopAgent(agent)}>
-                  <Square /> Stop agent
+              <DropdownMenuItem onSelect={scheduleThis}>
+                <CalendarPlus /> Schedule this…
+              </DropdownMenuItem>
+              {canCompact(agent) && agent.running && (
+                <DropdownMenuItem onSelect={() => void compactContext(agent)}>
+                  <Shrink /> Compact context
+                  {agent.contextSize ? (
+                    <span className="ml-auto pl-3 text-[11px] text-steel tabular">
+                      {Math.round(contextRatio(agent) * 100)}%
+                    </span>
+                  ) : null}
                 </DropdownMenuItem>
+              )}
+              {agent.running && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => setConfirmShutdown(true)}>
+                    <Power /> Shut down agent…
+                  </DropdownMenuItem>
+                </>
               )}
               <DropdownMenuItem onSelect={() => void archiveAgent(agent, !agent.archived)}>
                 {agent.archived ? <ArchiveRestore /> : <Archive />}
@@ -190,6 +235,14 @@ export function AgentHeader({ agent }: { agent: Agent }) {
         )}
       >
         <StatusPill status={agent.status} />
+        {subagents > 0 && (
+          <Tooltip content="Sub-agents working in parallel inside this turn">
+            <Chip className="border-accent/30 bg-accent/[0.08] text-accent">
+              <Workflow className="h-3 w-3" />
+              <span className="tabular">{subagents}</span> sub-agent{subagents === 1 ? "" : "s"} running
+            </Chip>
+          </Tooltip>
+        )}
         {agent.rateLimited && (
           <Chip className="border-warn/35 bg-warn/10 text-warn">
             <Gauge className="h-3 w-3" />
@@ -235,7 +288,71 @@ export function AgentHeader({ agent }: { agent: Agent }) {
           </Tooltip>
         )}
       </div>
+      {tail && (
+        <div
+          className={cn(
+            "mt-1.5 flex min-w-0 items-center gap-2 text-[12px] text-muted",
+            tier !== "compact" && (!list.docked || !list.open ? "pl-[72px]" : "pl-[38px]"),
+          )}
+        >
+          <Spinner className="h-3 w-3 shrink-0" />
+          <Tooltip content={tail} side="bottom" align="start">
+            <span className="min-w-0 truncate" aria-live="off">
+              {tail}
+            </span>
+          </Tooltip>
+        </div>
+      )}
+      <ConfirmDialog
+        open={confirmShutdown}
+        onOpenChange={setConfirmShutdown}
+        title="Shut down this agent?"
+        description="This ends the agent's process. The session is saved: Resume brings it back with its full history. To only end the current turn, use Stop instead."
+        confirmLabel="Shut down"
+        danger
+        onConfirm={async () => {
+          setConfirmShutdown(false);
+          await stopAgent(agent);
+        }}
+      />
     </header>
+  );
+}
+
+/** Header "Review diff" pill: changed-file count for worktree agents. */
+function ReviewPill({
+  tier,
+  count,
+  onClick,
+}: {
+  tier: "full" | "icons" | "compact";
+  count: number;
+  onClick: () => void;
+}) {
+  const label = count > 0 ? `${count} file${count === 1 ? "" : "s"} changed` : "No changes yet";
+  return (
+    <Tooltip content={`Review diff · ${label}`}>
+      <Button
+        size={tier === "full" ? "sm" : "icon-sm"}
+        variant="secondary"
+        onClick={onClick}
+        aria-label={`Review diff, ${label}`}
+        className={cn("relative", tier === "full" && "gap-1.5")}
+      >
+        <GitCompare className="!h-3.5 !w-3.5" />
+        {tier === "full" && <span>Review</span>}
+        {count > 0 &&
+          (tier === "full" ? (
+            <span className="rounded-full bg-accent/15 px-1.5 text-[10.5px] font-semibold text-accent tabular">
+              {count}
+            </span>
+          ) : (
+            <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-accent px-0.5 text-[9px] font-bold text-accent-fg tabular">
+              {count}
+            </span>
+          ))}
+      </Button>
+    </Tooltip>
   );
 }
 
@@ -261,15 +378,29 @@ function EditableTitle({ agent }: { agent: Agent }) {
     if (!editing) setValue(agent.title);
   }, [agent.title, editing]);
 
+  // Each edit session ends exactly once: Enter commits, Esc cancels, blur commits only if
+  // neither happened (so Esc→blur doesn't save and Enter→blur doesn't save twice).
+  const settled = useRef(false);
   useEffect(() => {
-    if (editing) inputRef.current?.select();
+    if (editing) {
+      settled.current = false;
+      inputRef.current?.select();
+    }
   }, [editing]);
 
   const commit = async () => {
+    if (settled.current) return;
+    settled.current = true;
     setEditing(false);
     const t = value.trim();
     if (t && t !== agent.title) await renameAgent(agent, t);
     else setValue(agent.title);
+  };
+
+  const cancel = () => {
+    settled.current = true;
+    setValue(agent.title);
+    setEditing(false);
   };
 
   if (editing) {
@@ -281,11 +412,14 @@ function EditableTitle({ agent }: { agent: Agent }) {
         onChange={(e) => setValue(e.target.value)}
         onBlur={() => void commit()}
         onKeyDown={(e) => {
-          if (e.key === "Enter") void commit();
-          if (e.key === "Escape") {
+          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void commit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
             e.stopPropagation();
-            setValue(agent.title);
-            setEditing(false);
+            cancel();
           }
         }}
         className="-ml-1.5 h-8 w-full rounded-md border border-accent/50 bg-base/60 px-1.5 text-[16px] font-semibold tracking-tight text-fg focus:outline-none focus:ring-3 focus:ring-accent/15"
@@ -361,28 +495,30 @@ function ActionButton({
   tier,
   label,
   tooltip,
+  shortcut,
   onClick,
   children,
 }: {
   tier: "full" | "icons" | "compact";
   label: string;
   tooltip: string;
+  shortcut?: string[];
   onClick: () => void;
   children: React.ReactNode;
 }) {
-  if (tier === "full") {
-    return (
-      <Button size="sm" variant="secondary" onClick={onClick}>
-        {children}
-        {label}
-      </Button>
-    );
-  }
   return (
-    <Tooltip content={tooltip}>
-      <Button size="icon-sm" variant="secondary" aria-label={tooltip} onClick={onClick}>
-        {children}
-      </Button>
+    <Tooltip content={tooltip} shortcut={shortcut}>
+      {tier === "full" ? (
+        // The visible label is the accessible name (the tooltip adds detail).
+        <Button size="sm" variant="secondary" onClick={onClick}>
+          {children}
+          {label}
+        </Button>
+      ) : (
+        <Button size="icon-sm" variant="secondary" aria-label={tooltip} onClick={onClick}>
+          {children}
+        </Button>
+      )}
     </Tooltip>
   );
 }

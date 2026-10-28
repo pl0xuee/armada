@@ -39,6 +39,7 @@ async fn main() -> anyhow::Result<()> {
             model: None,
             group_id: None,
             custom_agent_id: None,
+            permission_mode: None,
             attachments: vec![],
         })
         .await?;

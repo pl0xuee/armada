@@ -2,6 +2,7 @@ import * as D from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { useReturnFocus } from "./returnFocus";
 
 export const Dialog = D.Root;
 export const DialogTrigger = D.Trigger;
@@ -16,6 +17,10 @@ export function DialogContent({
   onOpenAutoFocus,
   overlayClassName,
   sheet,
+  onEscapeKeyDown,
+  onPointerDownOutside,
+  onInteractOutside,
+  onCloseAutoFocus,
 }: {
   children: ReactNode;
   className?: string;
@@ -26,14 +31,23 @@ export function DialogContent({
   overlayClassName?: string;
   /** On narrow windows, take the full height (forms with a growing body). */
   sheet?: boolean;
+  onEscapeKeyDown?: (e: KeyboardEvent) => void;
+  onPointerDownOutside?: (e: Event) => void;
+  onInteractOutside?: (e: Event) => void;
+  onCloseAutoFocus?: (e: Event) => void;
 }) {
+  const focus = useReturnFocus({ onOpenAutoFocus, onCloseAutoFocus });
   return (
     <D.Portal>
       <D.Overlay
         className={cn("anim-fade fixed inset-0 z-50 bg-[var(--scrim)] backdrop-blur-[3px]", overlayClassName)}
       />
       <D.Content
-        onOpenAutoFocus={onOpenAutoFocus}
+        onOpenAutoFocus={focus.onOpenAutoFocus}
+        onEscapeKeyDown={onEscapeKeyDown}
+        onPointerDownOutside={onPointerDownOutside}
+        onInteractOutside={onInteractOutside}
+        onCloseAutoFocus={focus.onCloseAutoFocus}
         className={cn(
           "anim-dialog fixed left-1/2 top-1/2 z-50 flex max-h-[min(88vh,820px)] w-[min(560px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-line-strong bg-card shadow-[0_24px_80px_-12px_rgba(0,0,0,0.6)] edge-strong focus:outline-none",
           className,
