@@ -16,7 +16,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
-parking_lot = "0.12"
+parking_lot = "0.13"
 which = "8"
 
 [profile.release]
