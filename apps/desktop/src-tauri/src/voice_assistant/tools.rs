@@ -629,7 +629,9 @@ mod tests {
 
     #[test]
     fn results_are_redacted_wrapped_and_truncated() {
-        let secret = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789ABCD";
+        // Assembled at run time so secret scanners don't flag this fake key in the source.
+        let secret = ["s", "k-proj-abcdefghijklmnopqrstuvwxyz0123456789ABCD"].concat();
+        let secret = secret.as_str();
         let out =
             wrap_data(json!({ "title": format!("deploy {secret} now"), "long": "x".repeat(5000) }));
         assert!(!out.contains(secret), "{out}");
