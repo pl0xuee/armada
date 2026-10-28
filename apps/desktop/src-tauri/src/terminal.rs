@@ -905,6 +905,8 @@ pub fn decode_utf8_chunk(pending: &mut Vec<u8>) -> String {
 }
 
 #[cfg(test)]
+// Most PTY tests drive /bin/sh, so their helpers are unused elsewhere.
+#[cfg_attr(not(unix), allow(dead_code, unused_imports))]
 mod tests {
     use super::*;
     use armada_core::EventSink;
