@@ -7,6 +7,8 @@ docs/RELEASING.md).
 
 ## Unreleased
 
+## v0.1.3 — 2026-10-28
+
 ### New
 
 - **Talk to Armada with the voice assistant.** Press Ctrl/Cmd+Shift+A (or the new title bar button) and
@@ -28,8 +30,8 @@ docs/RELEASING.md).
   supports the OpenAI Responses API.
 - **Run commands from the chat.** Shell code blocks in an agent's replies now have a Run button
   (Ctrl/Cmd+Enter when the block is focused) that opens a new terminal in the agent's workspace
-  panel and runs the commands there. Risky ones (like `rm -rf` or `sudo`) ask first, and "Paste
-  without running" puts the text on the prompt for you to edit.
+  panel and runs the commands there. Anything beyond plain common commands asks first, and "Paste
+  without running" puts the commands in the terminal and leaves pressing Enter to you.
 - **You can tell when an agent is done.** The thinking indicator now turns into a "Done" line with
   the turn's time (or "Stopped" / "Stopped with an error"), the status pill shows a green "Done"
   until your next message, the window title shows what the selected agent is doing, the taskbar
@@ -72,8 +74,13 @@ docs/RELEASING.md).
 
 ### Fixed
 
-- UI polish: the pull request chip reads "2 failing" instead of a bare count, the Run button's shortcut hint matches your platform, and the Mission Control list and account rows line up their status glyphs and action icons.
-
+- **Faster while agents work.** Streaming replies no longer re-render the whole agent view, sending a
+  message waits much less for its checkpoint on large projects (and never more than a few seconds), and
+  very long code blocks stay smooth while they stream in.
+- **UI polish.** The workspace panel never pushes the message box off screen, background sub-agents show
+  as running, dictation types into the message box you're using, the pull request chip says "2 failing",
+  shortcut hints match your platform, and lists line up their status icons and actions. Buttons that only
+  had an icon now have labels for screen readers.
 - **Safer git and pull-request prompts.** Armada's own git commands (commit, merge, push, delete) no longer
   run programs or hooks that a project's `.git/config` configures, such as filters, pagers, editors, SSH
   commands or a repository-local hooks folder (such as husky's; run those hooks from your terminal), and refuse to push when the project's config rewrites push
@@ -84,8 +91,7 @@ docs/RELEASING.md).
   before sending. Restored conversation history is quoted as history, not instructions. Committing from the
   review sheet asks first when new files look like secrets (`.env`, `*.pem`, `id_rsa`, ...) and can leave
   them out. New schedules start in Ask mode in their own worktree, and choosing Auto explains the risk.
-  Codex agents that reattach to an earlier thread keep the same sandbox and approval settings, with
-  network access in the sandbox off.
+  Codex agents that reattach to an earlier thread keep the same sandbox and approval settings.
 - **Safer phone pairing and share links.** The pairing QR code no longer contains a permanent key: it holds a
   one-time code that works once and expires after 5 minutes, and each phone gets its own key. Settings, Remote
   lists your paired devices (name and last seen) with a Revoke button for each, plus "Unpair all". Phones that
