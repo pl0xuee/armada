@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useIdentity } from "@/hooks/useIdentity";
 import { findOption, respondPermission } from "@/lib/actions";
-import { formatCost } from "@/lib/format";
+import { agentCostText } from "@/lib/format";
 import { DONE_META, STATUS } from "@/lib/providers";
 import { useIsDone } from "@/store/completion";
 import type { Account, Agent, PermissionOption, TimelineItem } from "@/lib/types";
@@ -165,7 +165,7 @@ export const AgentRowCompact = memo(function AgentRowCompact({
           </div>
         ) : (
           <span className="hidden w-14 text-right text-[11.5px] tabular text-steel @xl:inline">
-            {formatCost(agent.costUsd)}
+            {agentCostText(agent)}
           </span>
         )}
         <span className="w-9 text-right text-[11px] text-steel">

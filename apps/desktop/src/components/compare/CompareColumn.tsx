@@ -8,7 +8,7 @@ import { StatusPill } from "@/components/StatusDot";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { diffStats } from "@/lib/diff";
-import { formatCost, formatTokens, relativeTime } from "@/lib/format";
+import { agentCostText, formatTokens, relativeTime } from "@/lib/format";
 import { STATUS } from "@/lib/providers";
 import { useIsDone } from "@/store/completion";
 import { useIdentity } from "@/hooks/useIdentity";
@@ -105,7 +105,7 @@ export function CompareColumn({
         </div>
         <div className="relative mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-muted tabular">
           <span className={cn("flex items-center gap-1", cheapest && "text-ok")}>
-            {formatCost(agent.costUsd)}
+            {agentCostText(agent)}
             {cheapest && <span className="text-[10px] uppercase tracking-wider">cheapest</span>}
           </span>
           <span>{formatTokens(agent.tokensUsed)} tokens</span>

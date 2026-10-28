@@ -32,6 +32,9 @@ import type {
   AppState,
   ArmadaEvent,
   Attachment,
+  LocalKind,
+  LocalModel,
+  LocalProbe,
   AttentionReason,
   FileDiff,
   PermissionOption,
@@ -825,6 +828,78 @@ function delay<T>(v: T, ms = 120): Promise<T> {
   return new Promise((r) => setTimeout(() => r(v), ms + Math.random() * 80));
 }
 
+// ---- local model servers ------------------------------------------------------
+
+const mockOllamaModels: LocalModel[] = [
+  {
+    id: "qwen3-coder:30b",
+    sizeBytes: 18_556_701_776,
+    parameters: "30.5B",
+    quantization: "Q4_K_M",
+    contextLength: 262144,
+    tools: true,
+  },
+  {
+    id: "gpt-oss:20b",
+    sizeBytes: 13_780_173_920,
+    parameters: "20.9B",
+    quantization: "MXFP4",
+    contextLength: 131072,
+    tools: true,
+  },
+  {
+    id: "devstral:24b",
+    sizeBytes: 14_333_927_918,
+    parameters: "23.6B",
+    quantization: "Q4_K_M",
+    contextLength: 131072,
+    tools: true,
+  },
+  {
+    id: "llama3.2:3b",
+    sizeBytes: 2_019_393_189,
+    parameters: "3.2B",
+    quantization: "Q4_K_M",
+    contextLength: 131072,
+    tools: true,
+  },
+];
+
+/** Downloads in flight: pull id -> cancelled. */
+const mockPulls = new Map<string, boolean>();
+
+function mockProbe(kind: LocalKind, baseUrl: string): LocalProbe {
+  const loopback = /^https?:\/\/(localhost|127\.|\[::1\])/i.test(baseUrl);
+  const running = kind === "ollama" || (kind === "custom" && !baseUrl.includes("down"));
+  const models: LocalModel[] =
+    kind === "ollama"
+      ? mockOllamaModels.map((m) => ({ ...m }))
+      : kind === "custom"
+        ? [
+            {
+              id: "meta-llama/Llama-3.1-8B-Instruct",
+              sizeBytes: null,
+              parameters: null,
+              quantization: null,
+              contextLength: 131072,
+              tools: null,
+            },
+          ]
+        : [];
+  return {
+    kind,
+    baseUrl,
+    running,
+    models: running ? models : [],
+    error: running
+      ? null
+      : kind === "lmstudio"
+        ? "LM Studio's server isn't running. Open LM Studio and start the local server (https://lmstudio.ai)"
+        : "Couldn't reach the server. Check the address and that it's running",
+    remote: !loopback,
+  };
+}
+
 export const mockApi: ArmadaApi = {
   async getState(): Promise<AppState> {
     setTimeout(startLiveActivity, 600);
@@ -1545,6 +1620,21 @@ export const mockApi: ArmadaApi = {
           : { loggedIn: false, label: null, email: null, plan: null, checkedAt: Date.now(), error: null },
       usage: null,
     };
+    if (req.provider === "local" && req.local) {
+      const probe = mockProbe(req.local.kind, req.local.baseUrl);
+      acc.authKind = "default";
+      acc.local = req.local;
+      acc.status = {
+        loggedIn: probe.running,
+        label: probe.running
+          ? `${req.local.kind === "ollama" ? "Ollama" : req.local.kind === "lmstudio" ? "LM Studio" : "Local server"} · ${probe.models.length} models`
+          : null,
+        email: null,
+        plan: null,
+        checkedAt: Date.now(),
+        error: probe.error,
+      };
+    }
     db.accounts.push(acc);
     emit({ type: "account_updated", account: clone(acc) });
     return delay(clone(acc), 200);
@@ -1598,9 +1688,69 @@ export const mockApi: ArmadaApi = {
     const acc = db.accounts.find((a) => a.id === accountId);
     if (!acc) throw new Error("Unknown account");
     await sleep(900);
+    if (acc.local) {
+      const probe = mockProbe(acc.local.kind, acc.local.baseUrl);
+      acc.status = {
+        loggedIn: probe.running,
+        label: probe.running ? `Ollama · ${probe.models.length} models` : null,
+        email: null,
+        plan: null,
+        checkedAt: Date.now(),
+        error: probe.error,
+      };
+      emit({ type: "account_updated", account: clone(acc) });
+      return clone(acc);
+    }
     acc.status = acc.status ? { ...acc.status, checkedAt: Date.now() } : null;
     emit({ type: "account_updated", account: clone(acc) });
     return clone(acc);
+  },
+
+  async detectLocalServers() {
+    await sleep(500);
+    return [mockProbe("ollama", "http://127.0.0.1:11434"), mockProbe("lmstudio", "http://127.0.0.1:1234")];
+  },
+
+  async probeLocalServer(kind, baseUrl) {
+    await sleep(400);
+    return mockProbe(kind, baseUrl.trim().replace(/\/+$/, ""));
+  },
+
+  async probeLocalAccount(accountId) {
+    const acc = db.accounts.find((a) => a.id === accountId);
+    if (!acc?.local) throw new Error("This isn't a local model account");
+    await sleep(250);
+    return mockProbe(acc.local.kind, acc.local.baseUrl);
+  },
+
+  async pullLocalModel(_baseUrl, model, pullId, onProgress) {
+    const total = 5_200_000_000;
+    mockPulls.set(pullId, false);
+    onProgress({ status: "pulling manifest", total: null, completed: null, done: false, error: null });
+    try {
+      for (let completed = 0; completed < total; completed += total / 20) {
+        await sleep(220);
+        if (mockPulls.get(pullId)) throw new Error("Cancelled");
+        onProgress({ status: "pulling 8934d96d3f08", total, completed, done: false, error: null });
+      }
+      if (!mockOllamaModels.some((m) => m.id === model)) {
+        mockOllamaModels.push({
+          id: model,
+          sizeBytes: total,
+          parameters: null,
+          quantization: "Q4_K_M",
+          contextLength: 40960,
+          tools: true,
+        });
+      }
+      onProgress({ status: "success", total: null, completed: null, done: true, error: null });
+    } finally {
+      mockPulls.delete(pullId);
+    }
+  },
+
+  async cancelLocalPull(pullId) {
+    if (mockPulls.has(pullId)) mockPulls.set(pullId, true);
   },
 
   async loginAccount(accountId) {

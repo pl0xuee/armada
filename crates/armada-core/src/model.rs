@@ -8,6 +8,9 @@ pub enum Provider {
     Claude,
     Codex,
     Grok,
+    /// A model running on this machine (or a LAN box) behind an OpenAI-compatible
+    /// server. Driven by the Codex CLI, pointed at the server instead of OpenAI.
+    Local,
     /// Any other Agent Client Protocol agent, defined in `Settings::custom_agents`.
     Custom,
 }
@@ -21,6 +24,7 @@ impl Provider {
             Provider::Claude => "claude",
             Provider::Codex => "codex",
             Provider::Grok => "grok",
+            Provider::Local => "local",
             Provider::Custom => "custom",
         }
     }
@@ -30,6 +34,7 @@ impl Provider {
             "claude" => Some(Provider::Claude),
             "codex" => Some(Provider::Codex),
             "grok" => Some(Provider::Grok),
+            "local" => Some(Provider::Local),
             "custom" => Some(Provider::Custom),
             _ => None,
         }
@@ -40,6 +45,7 @@ impl Provider {
             Provider::Claude => "Claude",
             Provider::Codex => "ChatGPT (Codex)",
             Provider::Grok => "Grok",
+            Provider::Local => "Local model",
             Provider::Custom => "Custom agent",
         }
     }
@@ -79,6 +85,68 @@ pub struct Account {
     /// Latest usage-window snapshot, where the provider reports one (Codex, Claude).
     #[serde(default)]
     pub usage: Option<AccountUsage>,
+    /// For `Provider::Local`: the model server this account talks to.
+    #[serde(default)]
+    pub local: Option<LocalServer>,
+}
+
+/// Which kind of local model server an account points at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalKind {
+    Ollama,
+    Lmstudio,
+    /// Any OpenAI-compatible server (llama.cpp, vLLM, ...), by URL.
+    Custom,
+}
+
+/// A local model server. `base_url` is the server root for Ollama / LM Studio
+/// (e.g. `http://127.0.0.1:11434`) and the OpenAI-compatible base for custom
+/// servers (e.g. `http://gpu-box:8000/v1`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalServer {
+    pub kind: LocalKind,
+    pub base_url: String,
+}
+
+/// One model a local server offers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalModel {
+    pub id: String,
+    pub size_bytes: Option<u64>,
+    /// e.g. "30.5B"
+    pub parameters: Option<String>,
+    /// e.g. "Q4_K_M"
+    pub quantization: Option<String>,
+    pub context_length: Option<i64>,
+    /// Whether the server says the model supports tool calling (None = unknown).
+    pub tools: Option<bool>,
+}
+
+/// The result of probing a local model server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalProbe {
+    pub kind: LocalKind,
+    pub base_url: String,
+    pub running: bool,
+    pub models: Vec<LocalModel>,
+    pub error: Option<String>,
+    /// The server isn't on this machine: prompts and code are sent over the network.
+    pub remote: bool,
+}
+
+/// One progress update of an Ollama model download.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullProgress {
+    pub status: String,
+    pub total: Option<u64>,
+    pub completed: Option<u64>,
+    pub done: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,6 +273,9 @@ pub struct Agent {
     /// For `Provider::Custom`: which `CustomAgent` definition runs this agent.
     #[serde(default)]
     pub custom_agent_id: Option<String>,
+    /// For `Provider::Local`: the model the server runs for this agent.
+    #[serde(default)]
+    pub model: Option<String>,
     /// Messages sent while a turn was running; they run, in order, right after it.
     #[serde(default)]
     pub queued_prompts: i64,
@@ -1063,6 +1134,10 @@ pub struct CreateAccountRequest {
     pub color: String,
     pub auth_kind: AuthKind,
     pub api_key: Option<String>,
+    /// For `Provider::Local`: the server to talk to (`api_key` is then an optional
+    /// bearer token for it).
+    #[serde(default)]
+    pub local: Option<LocalServer>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

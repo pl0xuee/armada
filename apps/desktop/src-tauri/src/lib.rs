@@ -8,6 +8,7 @@ mod dictation;
 mod events;
 mod git_review;
 mod hotkey;
+mod local;
 mod notify;
 mod pr_status;
 mod remote;
@@ -133,6 +134,11 @@ pub fn run() {
             commands::update_account,
             commands::delete_account,
             commands::check_account,
+            local::detect_local_servers,
+            local::probe_local_server,
+            local::probe_local_account,
+            local::pull_local_model,
+            local::cancel_local_pull,
             commands::login_account,
             commands::detect_providers,
             commands::install_provider,

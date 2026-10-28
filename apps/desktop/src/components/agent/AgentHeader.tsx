@@ -284,7 +284,9 @@ export function AgentHeader({ agent }: { agent: Agent }) {
             </Chip>
           )
         )}
-        {agent.provider !== "custom" && account && <UsageChip account={account} compact={tier === "compact"} />}
+        {agent.provider !== "custom" && agent.provider !== "local" && account && (
+          <UsageChip account={account} compact={tier === "compact"} />
+        )}
         <Tooltip content={prettyPath(agent.projectPath)}>
           <Chip>
             <FolderOpen className="h-3 w-3 text-steel" />

@@ -48,6 +48,7 @@ fn provider_env_vars(provider: Provider) -> &'static [&'static str] {
             "CLAUDE_CODE_USE_VERTEX",
         ],
         Provider::Codex => &["OPENAI_API_KEY", "CODEX_HOME"],
+        Provider::Local => &["OPENAI_API_KEY", "CODEX_HOME", crate::local::KEY_ENV],
         Provider::Grok => &["XAI_API_KEY", "GROK_HOME"],
         Provider::Custom => &[],
     }
@@ -78,7 +79,7 @@ pub fn account_env(account: &Account) -> Vec<(String, String)> {
     if let Some(dir) = account.config_dir.as_deref().filter(|_| !account.is_system) {
         let var = match account.provider {
             Provider::Claude => Some("CLAUDE_CONFIG_DIR"),
-            Provider::Codex => Some("CODEX_HOME"),
+            Provider::Codex | Provider::Local => Some("CODEX_HOME"),
             Provider::Grok => Some("GROK_HOME"),
             Provider::Custom => None,
         };
@@ -86,14 +87,19 @@ pub fn account_env(account: &Account) -> Vec<(String, String)> {
             env.push((var.to_string(), dir.to_string()));
         }
     }
-    if account.auth_kind == AuthKind::ApiKey {
+    if account.provider == Provider::Local {
+        // The optional bearer token for the model server (never OpenAI's).
+        if let Some(key) = get_api_key(&account.id) {
+            env.push((crate::local::KEY_ENV.into(), key));
+        }
+    } else if account.auth_kind == AuthKind::ApiKey {
         if let Some(key) = get_api_key(&account.id) {
             match account.provider {
                 Provider::Claude => env.push(("ANTHROPIC_API_KEY".into(), key)),
                 Provider::Grok => env.push(("XAI_API_KEY".into(), key)),
                 // Codex reads the key stored by `codex login --with-api-key` in CODEX_HOME.
                 Provider::Codex => env.push(("OPENAI_API_KEY".into(), key)),
-                Provider::Custom => {}
+                Provider::Custom | Provider::Local => {}
             }
         }
     }
@@ -122,7 +128,7 @@ pub fn login_command(provider: Provider) -> Option<(String, Vec<String>)> {
         Provider::Claude => Some(("claude".into(), vec!["auth".into(), "login".into()])),
         Provider::Codex => Some(("codex".into(), vec!["login".into()])),
         Provider::Grok => Some(("grok".into(), vec!["login".into()])),
-        Provider::Custom => None,
+        Provider::Custom | Provider::Local => None,
     }
 }
 
@@ -205,6 +211,9 @@ pub async fn check_status(account: &Account) -> AccountStatus {
         checked_at: now_ms(),
         error: None,
     };
+    if account.provider == Provider::Local {
+        return check_local(account, status).await;
+    }
     if account.auth_kind == AuthKind::ApiKey {
         status.logged_in = get_api_key(&account.id).is_some();
         status.label = Some("API key".into());
@@ -214,6 +223,7 @@ pub async fn check_status(account: &Account) -> AccountStatus {
         return status;
     }
     match account.provider {
+        Provider::Local => unreachable!("handled above"),
         Provider::Custom => {
             status.logged_in = true;
             status.label = Some("Managed by each agent".into());
@@ -290,6 +300,33 @@ pub async fn check_status(account: &Account) -> AccountStatus {
     status
 }
 
+/// A local model account is "signed in" when its server answers.
+async fn check_local(account: &Account, mut status: AccountStatus) -> AccountStatus {
+    let Some(server) = account.local.clone() else {
+        status.error = Some("This account has no model server configured".into());
+        return status;
+    };
+    let key = get_api_key(&account.id);
+    let probe = tokio::task::spawn_blocking(move || crate::local::probe(&server, key.as_deref()))
+        .await
+        .ok();
+    match probe {
+        Some(p) if p.running => {
+            status.logged_in = true;
+            let n = p.models.len();
+            status.label = Some(format!(
+                "{} · {} {}",
+                p.kind.label(),
+                n,
+                if n == 1 { "model" } else { "models" }
+            ));
+        }
+        Some(p) => status.error = p.error,
+        None => status.error = Some("Couldn't check the model server".into()),
+    }
+    status
+}
+
 fn find_str(v: &serde_json::Value, key: &str) -> Option<String> {
     match v {
         serde_json::Value::Object(m) => m
@@ -362,5 +399,53 @@ mod tier_tests {
             Some("Claude Max")
         );
         assert_eq!(claude_tier_label("default"), None);
+    }
+}
+
+#[cfg(test)]
+mod local_tests {
+    use super::*;
+    use crate::model::{LocalKind, LocalServer};
+
+    fn local_account(url: &str) -> Account {
+        Account {
+            id: "acc-local-test".into(),
+            provider: Provider::Local,
+            name: "Local".into(),
+            color: "#4FC3F7".into(),
+            auth_kind: AuthKind::Default,
+            is_system: false,
+            config_dir: Some("/tmp/armada-local-profile".into()),
+            created_at: 0,
+            status: None,
+            usage: None,
+            local: Some(LocalServer {
+                kind: LocalKind::Ollama,
+                base_url: url.into(),
+            }),
+        }
+    }
+
+    #[test]
+    fn local_accounts_are_isolated_from_openai_credentials() {
+        let a = local_account("http://127.0.0.1:11434");
+        let removed = env_to_remove(&a);
+        assert!(removed.contains(&"OPENAI_API_KEY".to_string()));
+        assert!(removed.contains(&"CODEX_HOME".to_string()));
+        let env = account_env(&a);
+        assert!(env.contains(&(
+            "CODEX_HOME".to_string(),
+            "/tmp/armada-local-profile".to_string()
+        )));
+        assert!(login_command(Provider::Local).is_none());
+    }
+
+    #[tokio::test]
+    async fn local_status_is_server_reachability() {
+        // Nothing listens on port 9.
+        let a = local_account("http://127.0.0.1:9");
+        let s = check_status(&a).await;
+        assert!(!s.logged_in);
+        assert!(s.error.unwrap().contains("Ollama"));
     }
 }

@@ -9,6 +9,14 @@ docs/RELEASING.md).
 
 ### New
 
+- **Run models on your own computer.** A new "Local" provider runs agents on Ollama, LM Studio, or any
+  OpenAI-compatible server (llama.cpp, vLLM, a GPU box on your network) instead of a cloud account. Add
+  a server in Accounts and Armada detects Ollama and LM Studio for you, shows what's running and which
+  models it has, and lets you pick one (and switch later) when you start an agent. With Ollama you can
+  download a recommended coding model from inside the app. Local agents are free, need no sign-in, and
+  nothing leaves your computer unless you point at another machine, which Armada warns about. Small
+  models can struggle with tool use and long tasks. Needs the Codex CLI installed, and a server that
+  supports the OpenAI Responses API.
 - **Run commands from the chat.** Shell code blocks in an agent's replies now have a Run button
   (Ctrl/Cmd+Enter when the block is focused) that opens a new terminal in the agent's workspace
   panel and runs the commands there. Risky ones (like `rm -rf` or `sudo`) ask first, and "Paste

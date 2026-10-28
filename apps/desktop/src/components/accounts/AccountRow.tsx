@@ -1,4 +1,4 @@
-import { CircleAlert, Coins, KeyRound, LogIn, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { CircleAlert, Coins, Download, KeyRound, LogIn, Pencil, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AccountAvatar } from "@/components/AccountAvatar";
@@ -10,6 +10,8 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { useFreshNow } from "@/components/schedules/useFreshNow";
 import { startLogin } from "@/lib/actions";
 import { api } from "@/lib/api";
+import { openExternal } from "@/lib/external";
+import { INSTALL_URL, isLoopbackUrl, serverLabel } from "@/lib/local";
 import { relativeTimeLong } from "@/lib/format";
 import type { Account } from "@/lib/types";
 import { cn, errorMessage } from "@/lib/utils";
@@ -54,7 +56,9 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
       setChecking(false);
     }
   };
+  const local = account.provider === "local";
   const apiKey = account.authKind === "api_key";
+  const remote = local && !!account.local && !isLoopbackUrl(account.local.baseUrl);
   const [replacingKey, setReplacingKey] = useState(false);
   const everSignedIn = !!st?.email || !!st?.label;
 
@@ -81,7 +85,32 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="truncate text-[13.5px] font-medium text-fg">{account.name}</span>
-            {account.isSystem ? <Badge>System (default login)</Badge> : <Badge>{AUTH_LABEL[account.authKind]}</Badge>}
+            {local ? (
+              <Badge>{serverLabel(account.local)}</Badge>
+            ) : account.isSystem ? (
+              <Badge>System (default login)</Badge>
+            ) : (
+              <Badge>{AUTH_LABEL[account.authKind]}</Badge>
+            )}
+            {local && (
+              <Tooltip
+                content={
+                  remote
+                    ? "This server is on another machine, so prompts and code travel over the network."
+                    : "Runs on this computer: free, and nothing leaves it."
+                }
+              >
+                <span tabIndex={0} className="rounded-md">
+                  {remote ? (
+                    <Badge tone="warn">
+                      <TriangleAlert /> Remote
+                    </Badge>
+                  ) : (
+                    <Badge tone="ok">Free · on-device</Badge>
+                  )}
+                </span>
+              </Tooltip>
+            )}
             {apiKey && (
               <Tooltip content="API-key accounts are charged per token by the provider, not covered by a subscription.">
                 <span tabIndex={0} className="rounded-md">
@@ -137,6 +166,18 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
               </Button>
             </div>
           )}
+          {local && !loggedIn && st !== null && account.local && INSTALL_URL[account.local.kind] && (
+            <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11.5px] text-steel">
+              Not installed?
+              <button
+                type="button"
+                onClick={() => void openExternal(INSTALL_URL[account.local!.kind] as string)}
+                className="inline-flex items-center gap-1 font-medium text-accent underline-offset-2 hover:underline"
+              >
+                <Download className="h-3 w-3" /> {INSTALL_URL[account.local.kind]?.replace("https://", "")}
+              </button>
+            </p>
+          )}
           {!loggedIn && st !== null && apiKey && !checkError && (
             <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11.5px] text-steel">
               The key was rejected.
@@ -162,7 +203,7 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5 @lg/acct:gap-1">
-          {(!loggedIn || !compact) && !apiKey && (
+          {(!loggedIn || !compact) && !apiKey && !local && (
             <Tooltip
               content={loggedIn ? "Sign in again" : everSignedIn ? "Your session expired. Sign in again." : "Sign in"}
             >
@@ -243,11 +284,17 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
           title={`Remove “${account.name}”?`}
           description={
             <>
-              Armada will delete this profile's isolated config directory
-              {account.authKind === "api_key"
-                ? " and remove its API key from your OS keychain"
-                : " and its saved login"}
-              .
+              {local ? (
+                "Armada will forget this server and delete its profile directory. Your models stay where they are."
+              ) : (
+                <>
+                  Armada will delete this profile's isolated config directory
+                  {account.authKind === "api_key"
+                    ? " and remove its API key from your OS keychain"
+                    : " and its saved login"}
+                  .
+                </>
+              )}
               {archivedCount > 0 &&
                 ` ${archivedCount} archived agent${archivedCount === 1 ? " still uses" : "s still use"} this account; delete ${archivedCount === 1 ? "it" : "them"} first.`}
             </>
