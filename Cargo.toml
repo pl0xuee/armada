@@ -17,7 +17,7 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 parking_lot = "0.12"
-which = "7"
+which = "8"
 
 [profile.release]
 lto = true
