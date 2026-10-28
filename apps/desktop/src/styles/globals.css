@@ -39,6 +39,19 @@
   --code-bg: #0e1115;
   --diff-add: rgba(61, 220, 151, 0.11);
   --diff-del: rgba(255, 92, 108, 0.11);
+
+  /* Syntax highlighting (Shiki css-variables theme, see lib/highlight.ts). */
+  --syntax-foreground: currentColor;
+  --syntax-background: transparent;
+  --syntax-token-comment: #6b7886;
+  --syntax-token-keyword: #c4a7ff;
+  --syntax-token-string: #8fdcb0;
+  --syntax-token-string-expression: #8fdcb0;
+  --syntax-token-constant: #f5b544;
+  --syntax-token-parameter: #e6eaef;
+  --syntax-token-function: #6cc9f5;
+  --syntax-token-punctuation: #8693a1;
+  --syntax-token-link: #4fc3f7;
 }
 
 [data-theme="carbon"] {
@@ -70,6 +83,19 @@
   --code-bg: #0a0a0b;
   --diff-add: rgba(61, 220, 151, 0.1);
   --diff-del: rgba(255, 92, 108, 0.1);
+
+  /* Syntax highlighting (Shiki css-variables theme, see lib/highlight.ts). */
+  --syntax-foreground: currentColor;
+  --syntax-background: transparent;
+  --syntax-token-comment: #6e7681;
+  --syntax-token-keyword: #c9a9ff;
+  --syntax-token-string: #93e0b4;
+  --syntax-token-string-expression: #93e0b4;
+  --syntax-token-constant: #f7b955;
+  --syntax-token-parameter: #e8e8ea;
+  --syntax-token-function: #72cdf7;
+  --syntax-token-punctuation: #8a8f98;
+  --syntax-token-link: #5ec8f8;
 }
 
 [data-theme="titanium"] {
@@ -101,6 +127,19 @@
   --code-bg: #f1f3f6;
   --diff-add: rgba(16, 133, 92, 0.1);
   --diff-del: rgba(212, 47, 67, 0.09);
+
+  /* Syntax highlighting (Shiki css-variables theme, see lib/highlight.ts). */
+  --syntax-foreground: currentColor;
+  --syntax-background: transparent;
+  --syntax-token-comment: #69727e;
+  --syntax-token-keyword: #6d4fd8;
+  --syntax-token-string: #0c7652;
+  --syntax-token-string-expression: #0c7652;
+  --syntax-token-constant: #8f5609;
+  --syntax-token-parameter: #12161b;
+  --syntax-token-function: #0268a4;
+  --syntax-token-punctuation: #56616e;
+  --syntax-token-link: #0268a4;
 }
 
 @theme inline {
@@ -136,6 +175,10 @@
   --animate-shimmer: shimmer 1.8s linear infinite;
   --animate-spin-slow: spin 1.4s linear infinite;
   --animate-breathe: breathe 2.4s ease-in-out infinite;
+  --animate-think-in: think-in 0.35s ease-out;
+  --animate-done-pop: done-pop 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.25);
+  --animate-done-glow: done-glow 1.4s ease-out;
+  --animate-done-draw: done-draw 0.45s 0.12s ease-out both;
 }
 
 @keyframes pulse-ring {
@@ -166,6 +209,51 @@
   }
   50% {
     opacity: 1;
+  }
+}
+
+@keyframes think-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+@keyframes done-pop {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes done-glow {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--ok) 0%, transparent);
+  }
+}
+
+@keyframes done-draw {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes think-sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
   }
 }
 
@@ -306,6 +394,16 @@
 
   .tabular {
     font-variant-numeric: tabular-nums;
+  }
+
+  .think-text {
+    color: transparent;
+    background: linear-gradient(90deg, var(--steel) 40%, var(--text-1) 50%, var(--steel) 60%) 100% 0 / 250% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    animation:
+      var(--animate-think-in),
+      think-sweep 2.4s linear infinite;
   }
 
   .shimmer-bar {

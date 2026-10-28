@@ -2,7 +2,7 @@
 // Field names are camelCase on the wire; Rust uses #[serde(rename_all = "camelCase")].
 // Keep this file in sync with crates/armada-core/src/model.rs.
 
-export type Provider = "claude" | "codex" | "grok" | "custom";
+export type Provider = "claude" | "codex" | "grok" | "local" | "custom";
 
 export type AuthKind = "default" | "oauth" | "api_key";
 
@@ -26,8 +26,46 @@ export interface Account {
   configDir: string | null; // isolated dir for non-system profiles
   createdAt: number;
   status: AccountStatus | null;
-  /** Rate-limit windows reported by the provider (Codex today). */
+  /** Rate-limit windows reported by the provider (Codex and Claude). */
   usage: AccountUsage | null;
+  /** Provider "local": the model server this account talks to. */
+  local?: LocalServer | null;
+}
+
+export type LocalKind = "ollama" | "lmstudio" | "custom";
+
+/** baseUrl is the server root for Ollama / LM Studio, the OpenAI-compatible base for custom. */
+export interface LocalServer {
+  kind: LocalKind;
+  baseUrl: string;
+}
+
+export interface LocalModel {
+  id: string;
+  sizeBytes: number | null;
+  parameters: string | null;
+  quantization: string | null;
+  contextLength: number | null;
+  /** null = the server doesn't say. */
+  tools: boolean | null;
+}
+
+export interface LocalProbe {
+  kind: LocalKind;
+  baseUrl: string;
+  running: boolean;
+  models: LocalModel[];
+  error: string | null;
+  /** The server is not on this machine: prompts and code travel over the network. */
+  remote: boolean;
+}
+
+export interface PullProgress {
+  status: string;
+  total: number | null;
+  completed: number | null;
+  done: boolean;
+  error: string | null;
 }
 
 export interface UsageWindow {
@@ -101,6 +139,8 @@ export interface Agent {
   scheduleId: string | null;
   /** Set when provider === "custom". */
   customAgentId: string | null;
+  /** Set when provider === "local": the model the server runs for this agent. */
+  model?: string | null;
   /** Messages sent while a turn was running; they run in order right after it. */
   queuedPrompts: number;
   /** The queued messages themselves (not in the timeline until they run). */
@@ -127,6 +167,10 @@ export interface SubagentInfo {
   kind?: string | null;
   description?: string | null;
   prompt?: string | null;
+  /** Launched in the background: the call completes at launch, the sub-agent keeps running. */
+  background?: boolean;
+  /** A management call (Codex wait/close/send), not a sub-agent of its own: never counted. */
+  control?: boolean;
 }
 
 export interface SlashCommand {
@@ -293,6 +337,8 @@ export interface SoundSettings {
   customPermission: string | null;
   customDone: string | null;
   customError: string | null;
+  /** Soft chime when the agent you are watching finishes a task longer than 30 s. */
+  chimeWhenWatching: boolean;
 }
 
 export interface NotificationSettings {
@@ -313,6 +359,8 @@ export interface QuietHours {
 export interface Settings {
   onboarded: boolean;
   theme: "gunmetal" | "carbon" | "titanium";
+  /** Interface zoom in percent, 75-150. */
+  interfaceScale: number;
   sounds: SoundSettings;
   notifications: NotificationSettings;
   quietHours: QuietHours;
@@ -323,6 +371,7 @@ export interface Settings {
   globalHotkey: string; // e.g. "CmdOrCtrl+Shift+Space"
   escalateAfterMins: number; // re-ping pending approvals; 0 = off
   ntfyUrl: string | null; // optional phone push, e.g. https://ntfy.sh/my-topic
+  ntfyDetail: "minimal" | "full"; // what a phone push says: generic text, or the agent's own (scrubbed) text
   recentProjects: string[];
   autoCheckUpdates: boolean;
   templates: PromptTemplate[];
@@ -332,6 +381,27 @@ export interface Settings {
   defaultPermissionMode: "auto" | "ask";
   customAgents: CustomAgent[];
   remote: RemoteSettings;
+  voice: VoiceSettings;
+  voiceAssistant: VoiceAssistantSettings;
+}
+
+/** The OpenAI Realtime voice assistant (off by default; audio is sent to OpenAI). */
+export interface VoiceAssistantSettings {
+  enabled: boolean;
+  /** The OpenAI API-key account that pays for sessions. */
+  accountId: string | null;
+  voice: string;
+  model: string;
+  maxSessionMins: number;
+  silenceTimeoutSecs: number;
+}
+
+export interface VoiceAssistantUsage {
+  /** "YYYY-MM" */
+  month: string;
+  seconds: number;
+  costUsd: number;
+  sessions: number;
 }
 
 /** Any ACP agent the user configured (Gemini CLI, Goose, OpenCode, ...). */
@@ -352,6 +422,57 @@ export interface Attachment {
   data: string;
 }
 
+/** Voice dictation (local speech-to-text). */
+export interface VoiceSettings {
+  /** Input device name; null = the system default. */
+  inputDevice: string | null;
+  /** Whisper model id (tiny.en, base.en, small.en, small). */
+  model: string;
+  /** "auto" or a language code; non-English needs a multilingual model. */
+  language: string;
+  /** Send the message as soon as dictation finishes. */
+  autoSend: boolean;
+}
+
+export interface VoiceModel {
+  id: string;
+  label: string;
+  description: string;
+  sizeBytes: number;
+  multilingual: boolean;
+  installed: boolean;
+  isDefault: boolean;
+}
+
+export interface VoiceStatus {
+  models: VoiceModel[];
+  /** [code, name] pairs for multilingual models. */
+  languages: [string, string][];
+  maxRecordingSecs: number;
+  /** The model chosen in settings, and whether it's downloaded. */
+  model: string;
+  ready: boolean;
+  downloading: string | null;
+}
+
+export interface VoiceInputDevice {
+  name: string;
+  isDefault: boolean;
+}
+
+export interface VoiceTranscript {
+  text: string;
+  autoSend: boolean;
+}
+
+export interface VoiceDownloadEvent {
+  id: string;
+  done: number;
+  total: number;
+  state: "progress" | "done" | "error" | "cancelled";
+  error: string | null;
+}
+
 export interface RemoteSettings {
   enabled: boolean;
   lan: boolean;
@@ -359,11 +480,24 @@ export interface RemoteSettings {
 }
 
 export interface ShareLink {
-  token: string;
+  /** Identifies the link for revoking (the token itself is not kept). */
+  id: string;
   agentId: string;
   agentTitle: string | null;
+  /** The link; only present right after it is created (Armada keeps just a hash). */
   url: string | null;
   createdAt: number;
+  /** Unix ms; the link stops working then. */
+  expiresAt: number;
+}
+
+/** A paired phone or tablet. */
+export interface RemoteDevice {
+  id: string;
+  name: string;
+  createdAt: number;
+  /** Unix ms of its last request; 0 when it hasn't connected since pairing. */
+  lastSeen: number;
 }
 
 export interface RemoteStatus {
@@ -372,11 +506,15 @@ export interface RemoteStatus {
   lan: boolean;
   port: number;
   url: string | null;
+  /** One-time pairing link (single use, valid 5 minutes). */
   pairingUrl: string | null;
   /** Server-generated SVG markup of a QR code for pairingUrl. */
   qrSvg: string | null;
+  /** Unix ms when the pairing code stops working. */
+  pairingExpiresAt: number | null;
   error: string | null;
   shares: ShareLink[];
+  devices: RemoteDevice[];
 }
 
 /** `body` may contain {{placeholders}}. */
@@ -458,6 +596,8 @@ export interface CreateAccountRequest {
   color: string;
   authKind: AuthKind; // "oauth" -> isolated profile + browser login; "api_key" -> key in OS keychain
   apiKey: string | null;
+  /** Provider "local": the server (apiKey is then an optional bearer token for it). */
+  local?: LocalServer | null;
 }
 
 export interface ChangedFile {
@@ -474,6 +614,44 @@ export interface AgentDiff {
   uncommitted: number; // dirty (uncommitted) files in the worktree
   /** The patch was cut at 8 MB (the file list is still complete). */
   truncated: boolean;
+}
+
+/** A snapshot of the agent's folder taken before a message ("turn") or before a restore ("safety"). */
+export interface Checkpoint {
+  id: string;
+  agentId: string;
+  seq: number;
+  /** The user message this checkpoint precedes. */
+  itemId: string | null;
+  createdAt: number;
+  kind: "turn" | "safety";
+}
+
+export interface CheckpointList {
+  /** False when the folder isn't (the root of) a git repository. */
+  available: boolean;
+  checkpoints: Checkpoint[];
+}
+
+export interface RestoreFile {
+  path: string;
+  /** "added": comes back; "deleted": created since, so removed; "modified". */
+  status: "added" | "deleted" | "modified";
+  additions: number;
+  deletions: number;
+}
+
+export interface RestorePreview {
+  files: RestoreFile[];
+  totalFiles: number;
+  additions: number;
+  deletions: number;
+}
+
+export interface RestoreResult {
+  /** Restore this checkpoint to undo the restore. */
+  safetyId: string;
+  filesChanged: number;
 }
 
 export interface SearchHit {
@@ -498,4 +676,49 @@ export interface ShipResult {
   committed: string | null;
   merged: string | null;
   error: string | null;
+}
+
+/** A runnable project command detected in an agent's folder. */
+export interface ProjectScript {
+  id: string;
+  /** Group: npm, pnpm, yarn, bun, cargo, make, just, python, go. */
+  source: string;
+  name: string;
+  command: string;
+}
+
+/** PR + CI status of an agent's branch (pr_status). Problems are quiet "unknown"/"none" states. */
+/** An editable prompt built from third-party text (CI logs, review comments). */
+export interface PrPrompt {
+  text: string;
+  /** Review comments left out because their authors are outside the project. */
+  omitted: number;
+}
+
+export interface PrStatus {
+  /** ok: a PR exists · none: the branch has no PR · unknown: couldn't ask (see reason). */
+  state: "ok" | "none" | "unknown";
+  reason: "gh_missing" | "not_authenticated" | "no_remote" | "rate_limited" | "error" | null;
+  pr: PrInfo | null;
+  fetchedAt: number;
+}
+
+export interface PrInfo {
+  number: number;
+  url: string;
+  title: string;
+  state: "open" | "draft" | "merged" | "closed";
+  review: "approved" | "changes_requested" | "review_required" | null;
+  mergeable: "mergeable" | "conflicting" | null;
+  checks: PrCheck[];
+  summary: { passing: number; failing: number; pending: number; overall: "none" | "passing" | "failing" | "pending" };
+}
+
+export interface PrCheck {
+  name: string;
+  workflow: string | null;
+  status: "passing" | "failing" | "pending" | "skipped";
+  url: string | null;
+  runId: string | null;
+  durationSecs: number | null;
 }

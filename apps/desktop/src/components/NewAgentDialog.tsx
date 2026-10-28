@@ -5,6 +5,7 @@ import { ProjectPicker } from "./home/ProjectPicker";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { recallLocalModel, rememberLocalModel } from "@/lib/local";
 import { CUSTOM_ACCOUNT_ID, PROVIDER_ORDER, PROVIDERS } from "@/lib/providers";
 import type { Account, Agent, Provider } from "@/lib/types";
 import { cn, errorMessage, modKey, uuid, isMac } from "@/lib/utils";
@@ -17,9 +18,11 @@ import { useAttachments } from "@/hooks/useAttachments";
 import { AttachButton, DropOverlay } from "./AttachControls";
 import { AttachmentStrip } from "./AttachmentStrip";
 import { ProviderGlyph } from "./ProviderGlyph";
+import { LocalModelPicker } from "./local/LocalModelPicker";
 import { TemplatePicker } from "./TemplatePicker";
 import { Button } from "./ui/button";
 import { Dialog, DialogBody, DialogContent, DialogFooter } from "./ui/dialog";
+import { DictateButton } from "./DictateButton";
 import { Input, Label, Textarea } from "./ui/input";
 import { Kbd } from "./ui/kbd";
 import { Spinner } from "./ui/misc";
@@ -42,6 +45,12 @@ export function NewAgentDialog() {
       </DialogContent>
     </Dialog>
   );
+}
+
+/** One-line state of an account: its plan/label, or why it can't be used yet. */
+function accountStateText(a: Account): string {
+  if (a.status?.loggedIn) return a.status.label ?? "Signed in";
+  return a.provider === "local" ? "Not running" : "Not signed in";
 }
 
 function defaultAccount(accounts: Account[], provider: Provider): Account | undefined {
@@ -96,6 +105,21 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+
+  // Dictated text goes in at the caret of the prompt.
+  const insertDictation = (spoken: string) => {
+    const el = promptRef.current;
+    const cur = el?.value ?? "";
+    const start = Math.min(el?.selectionStart ?? cur.length, cur.length);
+    const end = Math.min(el?.selectionEnd ?? start, cur.length);
+    const before = cur.slice(0, start);
+    const inserted = `${before && !/\s$/.test(before) ? " " : ""}${spoken}`;
+    setPrompt(`${before}${inserted}${cur.slice(end)}`);
+    requestAnimationFrame(() => {
+      promptRef.current?.focus();
+      promptRef.current?.setSelectionRange(start + inserted.length, start + inserted.length);
+    });
+  };
   const submittingRef = useRef(false);
   /** Compare group for this dialog session, reused when retrying failed targets. */
   const groupRef = useRef<string | null>(null);
@@ -116,7 +140,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
     return () => clearTimeout(t);
   }, []);
 
-  // Alt+1..4 picks the agent: Claude, Codex, Grok, then the first custom agent.
+  // Alt+1..5 picks the agent: Claude, Codex, Grok, Local, then the first custom agent.
   const keyChoices = useMemo<string[]>(
     () => [...PROVIDER_ORDER, ...(customAgents[0] ? [`custom:${customAgents[0].id}`] : [])],
     [customAgents],
@@ -128,6 +152,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
 
   const chooseProvider = (key: string) => {
     setChoice(key);
+    setModel("");
     if (!key.startsWith("custom:")) setAccountId(defaultAccount(accounts, key as Provider)?.id ?? "");
   };
 
@@ -143,7 +168,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
       }
       if (!e.altKey || e.ctrlKey || e.metaKey || e.repeat || compare) return;
       // e.code: Alt+digit types symbols on macOS.
-      const m = /^Digit([1-4])$/.exec(e.code);
+      const m = /^Digit([1-5])$/.exec(e.code);
       const key = m ? keyChoices[Number(m[1]) - 1] : undefined;
       if (!key) return;
       e.preventDefault();
@@ -186,7 +211,16 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
     // The prompt is optional (the agent starts and waits), except in Compare mode,
     // which exists to send one prompt to several agents.
     // After a partial Compare launch, retrying the failed targets joins the same group.
-    (!compare || ((chosen.length >= 2 || launched.length > 0) && prompt.trim() !== ""));
+    (!compare || ((chosen.length >= 2 || launched.length > 0) && prompt.trim() !== "")) &&
+    // A local agent needs to know which of its server's models to run.
+    (compare || provider !== "local" || model.trim() !== "");
+
+  /** The model to start a target with: typed/picked (single launch), or a local account's last one. */
+  const modelFor = (t: LaunchTarget): string | null => {
+    if (t.provider === "custom") return null;
+    if (compare) return t.provider === "local" ? recallLocalModel(t.accountId) : null;
+    return model.trim() || null;
+  };
 
   const submit = async () => {
     if (!canSubmit || submittingRef.current) return;
@@ -205,7 +239,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
             prompt: prompt.trim(),
             title: title.trim() || null,
             worktree,
-            model: !compare && t.provider !== "custom" && model.trim() ? model.trim() : null,
+            model: modelFor(t),
             groupId,
             permissionMode: mode,
             attachments: attach.attachments,
@@ -219,6 +253,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
         else failed.push({ target: chosen[i], error: errorMessage(r.reason) });
       });
       for (const a of created) useApp.getState().upsertAgent(a);
+      if (!compare && provider === "local" && model.trim()) rememberLocalModel(accountId, model.trim());
       const allLaunched = [...launched, ...created];
 
       if (failed.length === 0) {
@@ -379,7 +414,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                           <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: a.color }} />
                           <span className="truncate">{a.name}</span>
                           <span className={cn("text-[11px]", a.status?.loggedIn ? "text-steel" : "text-warn")}>
-                            {a.status?.loggedIn ? (a.status.label ?? "Signed in") : "Not signed in"}
+                            {accountStateText(a)}
                           </span>
                         </span>
                       ),
@@ -395,7 +430,9 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                   }}
                   className="h-9 min-w-[200px] flex-1 rounded-lg border border-dashed border-line-strong px-3 text-left text-[12.5px] text-muted hover:text-fg"
                 >
-                  No {PROVIDERS[provider].short} accounts. Add one →
+                  {provider === "local"
+                    ? "No local model servers. Add one →"
+                    : `No ${PROVIDERS[provider].short} accounts. Add one →`}
                 </button>
               )}
             </div>
@@ -423,7 +460,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                       <span
                         className={cn("block truncate text-[11px]", a.status?.loggedIn ? "text-steel" : "text-warn")}
                       >
-                        {a.status?.loggedIn ? (a.status.label ?? "Signed in") : "Not signed in"}
+                        {accountStateText(a)}
                       </span>
                     </span>
                     <span
@@ -473,6 +510,9 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
             </div>
           )}
 
+          {!compare && provider === "local" && account && (
+            <LocalModelPicker key={account.id} account={account} value={model} onChange={setModel} />
+          )}
           {!compare && <PreflightNotes issues={issues} className="mt-2" />}
           {compare && chosen.length < 2 && launched.length === 0 && (
             <p className="mt-2 text-[12px] text-steel">Pick at least two agents to compare.</p>
@@ -487,6 +527,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
               {!compare && <span className="ml-1.5 font-normal text-steel">optional</span>}
             </Label>
             <div className="flex items-center gap-1">
+              <DictateButton onText={insertDictation} iconOnly />
               <AttachButton onClick={attach.openPicker} count={attach.attachments.length} />
               <TemplatePicker
                 side="bottom"
@@ -554,8 +595,14 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                 id="na-model"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
-                disabled={compare || !!custom}
-                placeholder={compare || custom ? "Agent default" : "e.g. opus, gpt-5.1-codex"}
+                disabled={compare || !!custom || provider === "local"}
+                placeholder={
+                  provider === "local"
+                    ? "Chosen above"
+                    : compare || custom
+                      ? "Agent default"
+                      : "e.g. opus, gpt-5.1-codex"
+                }
                 className="font-mono text-[12.5px]"
               />
             </div>

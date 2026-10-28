@@ -12,7 +12,7 @@ export interface ProviderMeta {
   tagline: string;
 }
 
-/** The three first-party runtimes (custom ACP agents are configured by the user). */
+/** The first-party runtimes, local models included (custom ACP agents are configured by the user). */
 export type BuiltinProvider = Exclude<Provider, "custom">;
 
 export const PROVIDERS: Record<Provider, ProviderMeta> = {
@@ -43,6 +43,15 @@ export const PROVIDERS: Record<Provider, ProviderMeta> = {
     hex: "#E5E7EB",
     tagline: "Grok Build",
   },
+  local: {
+    id: "local",
+    name: "Local model",
+    short: "Local",
+    vendor: "Your hardware",
+    colorVar: "var(--accent)",
+    hex: "#4FC3F7",
+    tagline: "Ollama, LM Studio, llama.cpp",
+  },
   custom: {
     id: "custom",
     name: "Custom agent",
@@ -54,7 +63,7 @@ export const PROVIDERS: Record<Provider, ProviderMeta> = {
   },
 };
 
-export const PROVIDER_ORDER: BuiltinProvider[] = ["claude", "codex", "grok"];
+export const PROVIDER_ORDER: BuiltinProvider[] = ["claude", "codex", "grok", "local"];
 
 export const CUSTOM_ACCOUNT_ID = "system-custom";
 
@@ -70,6 +79,9 @@ export interface StatusMeta {
   /** Live states get pulse + glow. */
   live: boolean;
 }
+
+/** Presentation for an idle agent whose last turn just completed. */
+export const DONE_META: StatusMeta = { label: "Done", colorVar: "var(--ok)", live: false };
 
 export const STATUS: Record<AgentStatus, StatusMeta> = {
   starting: { label: "Starting", colorVar: "var(--accent)", live: true },

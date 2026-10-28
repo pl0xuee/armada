@@ -59,7 +59,12 @@ export function seedAccounts(): Account[] {
         checkedAt: min(3),
         error: null,
       },
-      usage: null,
+      usage: {
+        primary: { usedPercent: 12, windowMins: 300, resetsAt: NOW + 3 * 3600_000 + 40 * 60_000 },
+        secondary: { usedPercent: 74, windowMins: 10080, resetsAt: NOW + 3 * 86_400_000 },
+        plan: null,
+        updatedAt: min(1),
+      },
     },
     {
       id: "acc-codex-sys",
@@ -124,6 +129,19 @@ export function seedAccounts(): Account[] {
       usage: null,
     },
     {
+      id: "acc-local-ollama",
+      provider: "local",
+      name: "Ollama",
+      color: "#4FC3F7",
+      authKind: "default",
+      isSystem: false,
+      configDir: "~/.local/share/armada/profiles/acc-local-ollama",
+      createdAt: min(60 * 24 * 2),
+      status: { loggedIn: true, label: "Ollama · 4 models", email: null, plan: null, checkedAt: min(3), error: null },
+      usage: null,
+      local: { kind: "ollama", baseUrl: "http://127.0.0.1:11434" },
+    },
+    {
       id: "system-custom",
       provider: "custom",
       name: "Default",
@@ -186,6 +204,7 @@ export function seedSettings(onboarded: boolean): Settings {
   return {
     onboarded,
     theme: "gunmetal",
+    interfaceScale: 100,
     sounds: {
       enabled: true,
       volume: 0.6,
@@ -195,6 +214,7 @@ export function seedSettings(onboarded: boolean): Settings {
       customPermission: null,
       customDone: null,
       customError: null,
+      chimeWhenWatching: true,
     },
     notifications: {
       enabled: true,
@@ -211,6 +231,7 @@ export function seedSettings(onboarded: boolean): Settings {
     globalHotkey: "CmdOrCtrl+Shift+Space",
     escalateAfterMins: 5,
     ntfyUrl: null,
+    ntfyDetail: "minimal",
     recentProjects: [
       "/home/sam/Projects/atlas-api",
       "/home/sam/Projects/storefront",
@@ -221,6 +242,15 @@ export function seedSettings(onboarded: boolean): Settings {
     failover: "ask",
     defaultPermissionMode: "auto",
     remote: { enabled: false, lan: false, port: 47821 },
+    voice: { inputDevice: null, model: "base.en", language: "auto", autoSend: false },
+    voiceAssistant: {
+      enabled: true,
+      accountId: null,
+      voice: "marin",
+      model: "gpt-realtime",
+      maxSessionMins: 10,
+      silenceTimeoutSecs: 60,
+    },
     customAgents: [
       {
         id: "ca-gemini",
@@ -300,6 +330,33 @@ export function seedSettings(onboarded: boolean): Settings {
 
 export function configFor(provider: Provider, model?: string | null): ConfigOption[] {
   if (provider === "custom") return [];
+  if (provider === "local") {
+    return [
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        currentValue: model ?? "qwen3-coder:30b",
+        options: [
+          { value: "qwen3-coder:30b", name: "qwen3-coder:30b", description: "30.5B · Q4_K_M · 256k context" },
+          { value: "gpt-oss:20b", name: "gpt-oss:20b", description: "20.9B · MXFP4 · 128k context" },
+          { value: "devstral:24b", name: "devstral:24b", description: "23.6B · Q4_K_M · 128k context" },
+          { value: "llama3.2:3b", name: "llama3.2:3b", description: "3.2B · Q4_K_M · 128k context" },
+        ],
+      },
+      {
+        id: "approval",
+        name: "Approvals",
+        category: "mode",
+        currentValue: "on-request",
+        options: [
+          { value: "untrusted", name: "Untrusted", description: "Ask for anything non-trivial" },
+          { value: "on-request", name: "On request", description: "Model decides when to ask" },
+          { value: "never", name: "Full auto", description: "Never ask" },
+        ],
+      },
+    ];
+  }
   if (provider === "claude") {
     return [
       {

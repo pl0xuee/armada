@@ -73,6 +73,13 @@ export function hasText(dt: DataTransfer | null): boolean {
   return types.includes("text/plain") || types.includes("text/html");
 }
 
+/** True for a paste of files copied in a file manager (uri-list / gnome-copied-files). */
+export function isFileListPaste(dt: DataTransfer | null): boolean {
+  if (!dt) return false;
+  const types = Array.from(dt.types ?? []);
+  return types.includes("text/uri-list") || types.includes("x-special/gnome-copied-files");
+}
+
 /** Image files from a paste or drop event. */
 export function imageFilesFrom(dt: DataTransfer | null): File[] {
   if (!dt) return [];

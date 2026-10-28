@@ -1,5 +1,5 @@
 import { FitAddon } from "@xterm/addon-fit";
-import { Terminal, type ITheme } from "@xterm/xterm";
+import { Terminal } from "@xterm/xterm";
 import { CircleCheck, CircleX, SquareTerminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/misc";
 import { api } from "@/lib/api";
 import { attachTerminal } from "@/lib/terminal-bus";
+import { themeFromCss, XTERM_FONT, XTERM_LINK_HANDLER } from "@/lib/xterm-theme";
 import { errorMessage, isMac } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
 import { useApp } from "@/store/app";
@@ -33,38 +34,6 @@ function appendTranscript(tr: { data: string }, d: string) {
     const nl = tr.data.indexOf("\n", cut);
     tr.data = tr.data.slice(nl >= 0 ? nl + 1 : cut);
   }
-}
-
-function cssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
-function themeFromCss(): ITheme {
-  const fg = cssVar("--text-1");
-  const accent = cssVar("--accent");
-  return {
-    background: cssVar("--code-bg"),
-    foreground: fg,
-    cursor: accent,
-    cursorAccent: cssVar("--code-bg"),
-    selectionBackground: `${accent}55`,
-    black: cssVar("--bg-3"),
-    brightBlack: cssVar("--steel"),
-    red: cssVar("--err"),
-    brightRed: cssVar("--err"),
-    green: cssVar("--ok"),
-    brightGreen: cssVar("--ok"),
-    yellow: cssVar("--warn"),
-    brightYellow: cssVar("--warn"),
-    blue: accent,
-    brightBlue: accent,
-    magenta: cssVar("--violet"),
-    brightMagenta: cssVar("--violet"),
-    cyan: accent,
-    brightCyan: accent,
-    white: cssVar("--text-2"),
-    brightWhite: fg,
-  };
 }
 
 /** Global modal hosting a PTY (provider login / CLI install). */
@@ -104,7 +73,8 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
   useEffect(() => {
     if (!host) return;
     const term = new Terminal({
-      fontFamily: '"JetBrains Mono Variable", ui-monospace, Menlo, monospace',
+      linkHandler: XTERM_LINK_HANDLER,
+      fontFamily: XTERM_FONT,
       fontSize: 12.5,
       lineHeight: 1.35,
       cursorBlink: true,

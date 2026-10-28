@@ -7,6 +7,8 @@ export interface SegmentOption<T extends string> {
   value: T;
   label: ReactNode;
   disabled?: boolean;
+  /** Accessible name when `label` is an icon. */
+  ariaLabel?: string;
 }
 
 export function Segmented<T extends string>({
@@ -42,6 +44,7 @@ export function Segmented<T extends string>({
             type="button"
             role="radio"
             aria-checked={active}
+            aria-label={o.ariaLabel}
             // Roving tabindex: only the checked radio is in the tab order (first enabled one if none is).
             tabIndex={active || (!hasActive && o.value === firstEnabled) ? 0 : -1}
             disabled={o.disabled}

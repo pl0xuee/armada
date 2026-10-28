@@ -2,10 +2,11 @@ import { Cpu, FilePen, FileSearch, FolderOpen, GitBranch, Hash, ListChecks, Shri
 import { m } from "motion/react";
 import { useState, type ReactNode } from "react";
 import { agentDerived } from "./derived";
+import { isBusy } from "@/lib/agents";
 import { canCompact, COMPACT_SUGGEST_RATIO, compactContext, contextRatio } from "./compact";
 import { attempt } from "@/lib/actions";
 import { api } from "@/lib/api";
-import { formatCost, formatTokens } from "@/lib/format";
+import { agentCostText, formatTokens } from "@/lib/format";
 import type { Agent, TimelineItem } from "@/lib/types";
 import { cn, prettyPath } from "@/lib/utils";
 import { ContextRing } from "../ContextRing";
@@ -49,7 +50,7 @@ export function Inspector({
   className?: string;
 }) {
   // Cached on tool-call structure: streaming text doesn't recompute (or re-sort) these.
-  const { files, runningSubagents: subagents, plan } = agentDerived(agent.id, items);
+  const { files, runningSubagents: subagents, plan } = agentDerived(agent.id, items, isBusy(agent));
   const done = plan?.entries.filter((e) => e.status === "completed").length ?? 0;
 
   return (
@@ -74,7 +75,7 @@ export function Inspector({
             </div>
           )}
           <dl className="grid flex-1 grid-cols-1 gap-2 text-[12px]">
-            <Stat label="Cost" value={formatCost(agent.costUsd)} />
+            <Stat label="Cost" value={agentCostText(agent)} />
             <Stat label="Tokens" value={formatTokens(agent.tokensUsed)} />
             {agent.contextSize ? (
               <Stat
@@ -179,7 +180,7 @@ export function Inspector({
             {agent.sessionId ? (
               <span className="flex min-w-0 items-center gap-1">
                 <span className="selectable truncate font-mono text-[11px] text-fg/90">{agent.sessionId}</span>
-                <CopyButton text={agent.sessionId} label="" className="h-5 px-1" />
+                <CopyButton text={agent.sessionId} label="" ariaLabel="Copy session id" className="h-5 px-1" />
               </span>
             ) : (
               <span className="text-steel">Starting…</span>

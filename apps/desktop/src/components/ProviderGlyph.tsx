@@ -51,6 +51,16 @@ export function ProviderMark({
       </svg>
     );
   }
+  if (provider === "local") {
+    // A chip on a board: the model runs on your own hardware.
+    return (
+      <svg {...common}>
+        <rect x="6.5" y="6.5" width="11" height="11" rx="2" />
+        <rect x="9.5" y="9.5" width="5" height="5" rx="0.8" />
+        <path d="M9.5 3.5v3M14.5 3.5v3M9.5 17.5v3M14.5 17.5v3M3.5 9.5h3M3.5 14.5h3M17.5 9.5h3M17.5 14.5h3" />
+      </svg>
+    );
+  }
   if (provider === "custom") {
     // Generic ACP agent: a node joined to two peers.
     return (

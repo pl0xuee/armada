@@ -62,6 +62,17 @@ CREATE TABLE IF NOT EXISTS queues (
     agent_id TEXT PRIMARY KEY,
     data     TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS checkpoints (
+    id         TEXT PRIMARY KEY,
+    agent_id   TEXT NOT NULL,
+    seq        INTEGER NOT NULL,
+    item_id    TEXT,
+    created_at INTEGER NOT NULL,
+    kind       TEXT NOT NULL,
+    tree       TEXT NOT NULL,
+    commit_oid TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS checkpoints_agent_seq ON checkpoints(agent_id, seq);
 CREATE TABLE IF NOT EXISTS settings (
     id   INTEGER PRIMARY KEY CHECK (id = 1),
     data TEXT NOT NULL
@@ -377,6 +388,7 @@ impl Db {
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM items WHERE agent_id = ?1", params![id])?;
         tx.execute("DELETE FROM queues WHERE agent_id = ?1", params![id])?;
+        tx.execute("DELETE FROM checkpoints WHERE agent_id = ?1", params![id])?;
         tx.execute("DELETE FROM agents WHERE id = ?1", params![id])?;
         tx.commit()?;
         // Give the freed pages back to the OS where the database supports it (new
@@ -389,6 +401,61 @@ impl Db {
                 tracing::debug!("incremental vacuum: {e}");
             }
         }
+        Ok(())
+    }
+
+    // ---- checkpoints ----
+
+    pub fn add_checkpoint(&self, c: &crate::checkpoints::Checkpoint) -> anyhow::Result<()> {
+        self.conn.lock().execute(
+            "INSERT INTO checkpoints (id, agent_id, seq, item_id, created_at, kind, tree, commit_oid)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                c.id,
+                c.agent_id,
+                c.seq,
+                c.item_id,
+                c.created_at,
+                c.kind,
+                c.tree,
+                c.commit
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The agent's checkpoints, oldest first.
+    pub fn checkpoints(
+        &self,
+        agent_id: &str,
+    ) -> anyhow::Result<Vec<crate::checkpoints::Checkpoint>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, agent_id, seq, item_id, created_at, kind, tree, commit_oid
+             FROM checkpoints WHERE agent_id = ?1 ORDER BY seq",
+        )?;
+        let rows = stmt.query_map(params![agent_id], |r| {
+            Ok(crate::checkpoints::Checkpoint {
+                id: r.get(0)?,
+                agent_id: r.get(1)?,
+                seq: r.get(2)?,
+                item_id: r.get(3)?,
+                created_at: r.get(4)?,
+                kind: r.get(5)?,
+                tree: r.get(6)?,
+                commit: r.get(7)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn delete_checkpoints(&self, ids: &[String]) -> anyhow::Result<()> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        for id in ids {
+            tx.execute("DELETE FROM checkpoints WHERE id = ?1", params![id])?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -657,6 +724,13 @@ impl Db {
             Ok(v) => from_value_lenient::<Settings>(&v),
             Err(e) => (Settings::default(), vec![format!("(not JSON: {e})")]),
         };
+        // Secrets live in the OS keychain; bring plaintext left by older versions (or a
+        // keychain outage) into it now.
+        if crate::secrets::resolve(&mut settings, crate::secrets::vault()) {
+            if let Err(e) = self.put_settings(&settings) {
+                tracing::warn!("couldn't move secrets to the keychain: {e:#}");
+            }
+        }
         dropped.extend(settings.sanitize().into_iter().map(str::to_string));
         if !dropped.is_empty() {
             // Keep the user's data recoverable, once per distinct content (not on
@@ -681,6 +755,7 @@ impl Db {
     }
 
     pub fn put_settings(&self, settings: &Settings) -> anyhow::Result<()> {
+        let settings = &crate::secrets::externalize(settings, crate::secrets::vault());
         self.conn.lock().execute(
             "INSERT INTO settings (id, data) VALUES (1, ?1)
              ON CONFLICT(id) DO UPDATE SET data = excluded.data",

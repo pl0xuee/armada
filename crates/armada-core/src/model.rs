@@ -8,6 +8,9 @@ pub enum Provider {
     Claude,
     Codex,
     Grok,
+    /// A model running on this machine (or a LAN box) behind an OpenAI-compatible
+    /// server. Driven by the Codex CLI, pointed at the server instead of OpenAI.
+    Local,
     /// Any other Agent Client Protocol agent, defined in `Settings::custom_agents`.
     Custom,
 }
@@ -21,6 +24,7 @@ impl Provider {
             Provider::Claude => "claude",
             Provider::Codex => "codex",
             Provider::Grok => "grok",
+            Provider::Local => "local",
             Provider::Custom => "custom",
         }
     }
@@ -30,6 +34,7 @@ impl Provider {
             "claude" => Some(Provider::Claude),
             "codex" => Some(Provider::Codex),
             "grok" => Some(Provider::Grok),
+            "local" => Some(Provider::Local),
             "custom" => Some(Provider::Custom),
             _ => None,
         }
@@ -40,6 +45,7 @@ impl Provider {
             Provider::Claude => "Claude",
             Provider::Codex => "ChatGPT (Codex)",
             Provider::Grok => "Grok",
+            Provider::Local => "Local model",
             Provider::Custom => "Custom agent",
         }
     }
@@ -76,9 +82,71 @@ pub struct Account {
     pub config_dir: Option<String>,
     pub created_at: i64,
     pub status: Option<AccountStatus>,
-    /// Latest usage-window snapshot, where the provider reports one (Codex).
+    /// Latest usage-window snapshot, where the provider reports one (Codex, Claude).
     #[serde(default)]
     pub usage: Option<AccountUsage>,
+    /// For `Provider::Local`: the model server this account talks to.
+    #[serde(default)]
+    pub local: Option<LocalServer>,
+}
+
+/// Which kind of local model server an account points at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalKind {
+    Ollama,
+    Lmstudio,
+    /// Any OpenAI-compatible server (llama.cpp, vLLM, ...), by URL.
+    Custom,
+}
+
+/// A local model server. `base_url` is the server root for Ollama / LM Studio
+/// (e.g. `http://127.0.0.1:11434`) and the OpenAI-compatible base for custom
+/// servers (e.g. `http://gpu-box:8000/v1`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalServer {
+    pub kind: LocalKind,
+    pub base_url: String,
+}
+
+/// One model a local server offers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalModel {
+    pub id: String,
+    pub size_bytes: Option<u64>,
+    /// e.g. "30.5B"
+    pub parameters: Option<String>,
+    /// e.g. "Q4_K_M"
+    pub quantization: Option<String>,
+    pub context_length: Option<i64>,
+    /// Whether the server says the model supports tool calling (None = unknown).
+    pub tools: Option<bool>,
+}
+
+/// The result of probing a local model server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalProbe {
+    pub kind: LocalKind,
+    pub base_url: String,
+    pub running: bool,
+    pub models: Vec<LocalModel>,
+    pub error: Option<String>,
+    /// The server isn't on this machine: prompts and code are sent over the network.
+    pub remote: bool,
+}
+
+/// One progress update of an Ollama model download.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullProgress {
+    pub status: String,
+    pub total: Option<u64>,
+    pub completed: Option<u64>,
+    pub done: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,6 +273,9 @@ pub struct Agent {
     /// For `Provider::Custom`: which `CustomAgent` definition runs this agent.
     #[serde(default)]
     pub custom_agent_id: Option<String>,
+    /// For `Provider::Local`: the model the server runs for this agent.
+    #[serde(default)]
+    pub model: Option<String>,
     /// Messages sent while a turn was running; they run, in order, right after it.
     #[serde(default)]
     pub queued_prompts: i64,
@@ -293,6 +364,17 @@ pub struct SubAgent {
     pub kind: Option<String>,
     pub description: Option<String>,
     pub prompt: Option<String>,
+    /// Launched in the background (Claude `run_in_background`): the call
+    /// completes as soon as the sub-agent starts, but the sub-agent keeps
+    /// running. The adapter reports no per-sub-agent end to us, so the UI treats
+    /// it as running until the turn ends (the adapter holds the turn open while
+    /// background sub-agents live).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub background: bool,
+    /// A management call on existing sub-agents (Codex wait / close / send
+    /// input), not a sub-agent of its own: shown, but never counted as running.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub control: bool,
 }
 
 /// An image attached to a prompt (base64 payload, no data: prefix).
@@ -673,6 +755,9 @@ pub struct SoundSettings {
     pub custom_done: Option<String>,
     #[serde(default)]
     pub custom_error: Option<String>,
+    /// A soft chime when the agent you're watching finishes a long task (smart mute
+    /// otherwise keeps that silent).
+    pub chime_when_watching: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -698,6 +783,8 @@ pub struct QuietHours {
 pub struct Settings {
     pub onboarded: bool,
     pub theme: String,
+    /// Interface zoom in percent (`MIN_INTERFACE_SCALE`..=`MAX_INTERFACE_SCALE`).
+    pub interface_scale: u32,
     pub sounds: SoundSettings,
     pub notifications: NotificationSettings,
     pub quiet_hours: QuietHours,
@@ -708,6 +795,9 @@ pub struct Settings {
     pub global_hotkey: String,
     pub escalate_after_mins: u32,
     pub ntfy_url: Option<String>,
+    /// How much a phone push (ntfy) says: "minimal" (generic text) or "full"
+    /// (the agent's own text, secrets scrubbed).
+    pub ntfy_detail: String,
     pub recent_projects: Vec<String>,
     pub auto_check_updates: bool,
     pub templates: Vec<PromptTemplate>,
@@ -719,6 +809,62 @@ pub struct Settings {
     /// or "ask" (the agent's default, which asks before acting).
     pub default_permission_mode: String,
     pub remote: RemoteSettings,
+    pub voice: VoiceSettings,
+    /// The OpenAI Realtime voice assistant (off by default).
+    pub voice_assistant: VoiceAssistantSettings,
+}
+
+/// The voice assistant: talk to Armada through OpenAI's Realtime API. Off by default;
+/// audio and the agent information it reads are sent to OpenAI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct VoiceAssistantSettings {
+    pub enabled: bool,
+    /// The OpenAI API-key account (provider Codex) that pays for the sessions.
+    pub account_id: Option<String>,
+    pub voice: String,
+    pub model: String,
+    pub max_session_mins: u32,
+    /// End the session after this long without anyone speaking.
+    pub silence_timeout_secs: u32,
+}
+
+impl Default for VoiceAssistantSettings {
+    fn default() -> Self {
+        VoiceAssistantSettings {
+            enabled: false,
+            account_id: None,
+            voice: "marin".into(),
+            model: "gpt-realtime".into(),
+            max_session_mins: 10,
+            silence_timeout_secs: 60,
+        }
+    }
+}
+
+/// Voice dictation (local speech-to-text).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct VoiceSettings {
+    /// Input device name; `None` is the system default.
+    pub input_device: Option<String>,
+    /// Whisper model id (see `voice::MODELS`).
+    pub model: String,
+    /// "auto" or a language code (non-English needs a multilingual model).
+    pub language: String,
+    /// Send the message as soon as dictation finishes.
+    pub auto_send: bool,
+}
+
+impl Default for VoiceSettings {
+    fn default() -> Self {
+        VoiceSettings {
+            input_device: None,
+            model: crate::voice::DEFAULT_MODEL.into(),
+            language: "auto".into(),
+            auto_send: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -840,6 +986,7 @@ impl Default for SoundSettings {
             custom_permission: None,
             custom_done: None,
             custom_error: None,
+            chime_when_watching: true,
         }
     }
 }
@@ -874,6 +1021,9 @@ fn default_custom_color() -> String {
     "#B39DDB".into()
 }
 
+pub const MIN_INTERFACE_SCALE: u32 = 75;
+pub const MAX_INTERFACE_SCALE: u32 = 150;
+
 impl Settings {
     /// Rejects values the rest of Armada can't act on.
     pub fn validate(&self) -> Result<(), String> {
@@ -889,9 +1039,15 @@ impl Settings {
                 self.default_permission_mode
             ));
         }
+        if !(MIN_INTERFACE_SCALE..=MAX_INTERFACE_SCALE).contains(&self.interface_scale) {
+            return Err(format!(
+                "Interface scale must be between {MIN_INTERFACE_SCALE}% and {MAX_INTERFACE_SCALE}%"
+            ));
+        }
         if self.remote.port == 0 {
             return Err("The remote control port must be between 1 and 65535".into());
         }
+        crate::voice::validate_voice(&self.voice.model, &self.voice.language)?;
         Ok(())
     }
 
@@ -909,9 +1065,30 @@ impl Settings {
             self.default_permission_mode = defaults.default_permission_mode;
             reset.push("defaultPermissionMode");
         }
+        if !(MIN_INTERFACE_SCALE..=MAX_INTERFACE_SCALE).contains(&self.interface_scale) {
+            self.interface_scale = defaults.interface_scale;
+            reset.push("interfaceScale");
+        }
         if self.remote.port == 0 {
             self.remote.port = defaults.remote.port;
             reset.push("remote.port");
+        }
+        if self
+            .voice
+            .input_device
+            .as_deref()
+            .is_some_and(|d| d.trim().is_empty())
+        {
+            self.voice.input_device = None;
+            reset.push("voice.inputDevice");
+        }
+        if crate::voice::model_spec(&self.voice.model).is_none() {
+            self.voice.model = defaults.voice.model.clone();
+            reset.push("voice.model");
+        }
+        if crate::voice::validate_voice(&self.voice.model, &self.voice.language).is_err() {
+            self.voice.language = defaults.voice.language;
+            reset.push("voice.language");
         }
         reset
     }
@@ -922,6 +1099,7 @@ impl Default for Settings {
         Settings {
             onboarded: false,
             theme: "gunmetal".into(),
+            interface_scale: 100,
             sounds: SoundSettings::default(),
             notifications: NotificationSettings::default(),
             quiet_hours: QuietHours::default(),
@@ -932,6 +1110,7 @@ impl Default for Settings {
             global_hotkey: "CmdOrCtrl+Shift+Space".into(),
             escalate_after_mins: 5,
             ntfy_url: None,
+            ntfy_detail: "minimal".into(),
             recent_projects: Vec::new(),
             auto_check_updates: true,
             templates: vec![
@@ -956,6 +1135,8 @@ impl Default for Settings {
             custom_agents: Vec::new(),
             default_permission_mode: "auto".into(),
             remote: RemoteSettings::default(),
+            voice: VoiceSettings::default(),
+            voice_assistant: VoiceAssistantSettings::default(),
         }
     }
 }
@@ -988,6 +1169,10 @@ pub struct CreateAccountRequest {
     pub color: String,
     pub auth_kind: AuthKind,
     pub api_key: Option<String>,
+    /// For `Provider::Local`: the server to talk to (`api_key` is then an optional
+    /// bearer token for it).
+    #[serde(default)]
+    pub local: Option<LocalServer>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1005,4 +1190,43 @@ pub fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod voice_settings_tests {
+    use super::*;
+
+    #[test]
+    fn defaults_validate() {
+        let s = Settings::default();
+        assert!(s.validate().is_ok());
+        assert_eq!(s.voice.model, "base.en");
+        assert!(!s.voice.auto_send);
+    }
+
+    #[test]
+    fn voice_settings_are_validated_and_sanitized() {
+        let mut s = Settings::default();
+        s.voice.language = "fr".into();
+        assert!(s.validate().is_err(), "English-only model with French");
+        s.voice.model = "small".into();
+        assert!(s.validate().is_ok());
+        s.voice.model = "gone".into();
+        assert!(s.validate().is_err());
+
+        // Sanitizing repairs it so one bad value can't block later saves.
+        s.voice.input_device = Some("  ".into());
+        let reset = s.sanitize();
+        assert!(reset.contains(&"voice.model"));
+        assert!(reset.contains(&"voice.language"));
+        assert!(reset.contains(&"voice.inputDevice"));
+        assert!(s.validate().is_ok());
+        assert_eq!(s.voice.language, "auto");
+    }
+
+    #[test]
+    fn old_settings_files_get_voice_defaults() {
+        let s: Settings = serde_json::from_str(r#"{"theme":"gunmetal"}"#).unwrap();
+        assert_eq!(s.voice.model, "base.en");
+    }
 }

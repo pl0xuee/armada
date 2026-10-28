@@ -106,14 +106,14 @@ const REPEAT_WINDOW: Duration = Duration::from_millis(400);
 const IDLE_CLOSE: Duration = Duration::from_secs(45);
 
 /// The open output stream, and whether it has reported an error since.
-struct Output {
-    stream: MixerDeviceSink,
+pub(crate) struct Output {
+    pub(crate) stream: MixerDeviceSink,
     broken: Arc<AtomicBool>,
     last_used: Instant,
 }
 
 impl Output {
-    fn open() -> Result<Output, String> {
+    pub(crate) fn open() -> Result<Output, String> {
         let broken = Arc::new(AtomicBool::new(false));
         let flag = broken.clone();
         let stream = DeviceSinkBuilder::from_default_device()
@@ -244,9 +244,14 @@ impl AudioPlayer {
     }
 
     pub fn play(&self, reason: AttentionReason, settings: &SoundSettings) {
+        self.play_scaled(reason, settings, 1.0);
+    }
+
+    /// Like [`play`](Self::play), at `scale` times the configured volume.
+    pub fn play_scaled(&self, reason: AttentionReason, settings: &SoundSettings, scale: f32) {
         let _ = self.tx.send(PlayRequest {
             reason,
-            volume: settings.volume,
+            volume: settings.volume * scale,
             custom: custom_sound(settings, reason),
         });
     }

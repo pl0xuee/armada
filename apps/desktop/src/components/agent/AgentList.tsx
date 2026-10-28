@@ -14,6 +14,7 @@ import {
   Plus,
   Search,
   Trash2,
+  Workflow,
   X,
 } from "lucide-react";
 import { m, AnimatePresence } from "motion/react";
@@ -21,15 +22,20 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { archiveAgent, exportConversation, renameAgent, resumeAgent, stopAgent } from "@/lib/actions";
 import { groupAgents, orderedAgents, type AgentGroupId } from "@/lib/agents";
 import { relativeTime, relativeTimeLong } from "@/lib/format";
-import { STATUS } from "@/lib/providers";
+import { DONE_META, STATUS } from "@/lib/providers";
+import { useIsDone } from "@/store/completion";
 import type { Account, Agent } from "@/lib/types";
 import { basename, cn, modKey } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
 import { toggleAgentList } from "@/hooks/useAgentListLayout";
 import { useNow } from "@/hooks/useNow";
 import { useApp } from "@/store/app";
+import { usePr } from "@/store/pr";
+import { ciSummary, listIndicator } from "@/lib/pr";
 import { useUi } from "@/store/ui";
 import { ProviderGlyph } from "../ProviderGlyph";
+import { useRunningSubagentCount } from "./useSubagents";
+import { CiIcon } from "./PrChip";
 import { StatusDot } from "../StatusDot";
 import { Button } from "../ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "../ui/menu";
@@ -243,6 +249,40 @@ export function AgentList({
   );
 }
 
+/** Running sub-agent count. Nothing when there are none. */
+function SubagentBadge({ agentId }: { agentId: string }) {
+  const n = useRunningSubagentCount(agentId);
+  if (n === 0) return null;
+  return (
+    <Tooltip content={`${n} sub-agent${n === 1 ? "" : "s"} running`} side="right">
+      <span
+        className="flex shrink-0 items-center gap-0.5 text-[11px] text-accent tabular"
+        aria-label={`${n} sub-agent${n === 1 ? "" : "s"} running`}
+      >
+        <Workflow className="h-3 w-3" />
+        {n}
+      </span>
+    </Tooltip>
+  );
+}
+
+/** "#12" + CI glyph for agents with an open PR. Nothing otherwise, so most rows stay clean. */
+function PrIndicator({ agentId }: { agentId: string }) {
+  const pr = usePr((s) => listIndicator(s.byAgent[agentId]));
+  if (!pr) return null;
+  return (
+    <Tooltip content={`PR #${pr.number} · ${ciSummary(pr)}`} side="right">
+      <span
+        className="flex shrink-0 items-center gap-0.5 text-[11px] tabular"
+        aria-label={`Pull request ${pr.number}, ${ciSummary(pr)}`}
+      >
+        #{pr.number}
+        <CiIcon pr={pr} />
+      </span>
+    </Tooltip>
+  );
+}
+
 const AgentRow = memo(function AgentRow({
   agent,
   account,
@@ -263,7 +303,8 @@ const AgentRow = memo(function AgentRow({
   const setDeleteAgent = useUi((s) => s.setDeleteAgent);
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(agent.title);
-  const status = STATUS[agent.status];
+  const done = useIsDone(agent);
+  const status = done ? DONE_META : STATUS[agent.status];
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const resumable = agent.status === "interrupted" || agent.status === "stopped";
   const live = agent.status === "working" || agent.status === "needs_permission" || agent.status === "starting";
@@ -385,7 +426,13 @@ const AgentRow = memo(function AgentRow({
                     aria-label="Unread"
                   />
                 )}
-                <span className="shrink-0 text-[11px] text-steel">
+                <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-steel">
+                  {hotkey !== null && (
+                    <span aria-hidden className="hidden text-[10px] text-steel/70 group-hover:inline">
+                      {modKey}
+                      {hotkey}
+                    </span>
+                  )}
                   <span className="sr-only">Last active </span>
                   <Tooltip
                     content={`${relativeTimeLong(agent.lastActivityAt, now)} · ${new Date(agent.lastActivityAt).toLocaleString()}`}
@@ -398,10 +445,13 @@ const AgentRow = memo(function AgentRow({
                 </span>
               </div>
               <div className="mt-0.5 flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[11.5px] text-steel">
-                <StatusDot status={agent.status} size={6} />
+                <StatusDot status={agent.status} size={6} done={done} />
                 <span
                   className="shrink-0"
-                  style={{ color: agent.status === "idle" || agent.status === "stopped" ? undefined : status.colorVar }}
+                  style={{
+                    color:
+                      !done && (agent.status === "idle" || agent.status === "stopped") ? undefined : status.colorVar,
+                  }}
                 >
                   {status.label}
                 </span>
@@ -419,6 +469,8 @@ const AgentRow = memo(function AgentRow({
                     </span>
                   </Tooltip>
                 )}
+                <SubagentBadge agentId={agent.id} />
+                <PrIndicator agentId={agent.id} />
                 <span className="text-line-strong">·</span>
                 <span className="truncate">
                   {agent.provider === "custom" ? identity.name : (account?.name ?? "—")} · {basename(agent.projectPath)}
@@ -445,12 +497,6 @@ const AgentRow = memo(function AgentRow({
                 </button>
               )}
             </div>
-            {hotkey !== null && (
-              <span className="pointer-events-none absolute bottom-2 right-2.5 hidden text-[10px] text-steel/70 group-hover:block">
-                {modKey}
-                {hotkey}
-              </span>
-            )}
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent onCloseAutoFocus={(e) => renaming && e.preventDefault()}>

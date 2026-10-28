@@ -18,12 +18,184 @@ async fn git(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
     git_with_timeout(cwd, args, GIT_TIMEOUT).await
 }
 
-async fn git_with_timeout(cwd: &Path, args: &[&str], timeout: Duration) -> anyhow::Result<String> {
+// ---- hardening -----------------------------------------------------------------
+//
+// An agent (or a repository it cloned) can write `.git/config`, so every git command
+// Armada runs on its behalf must first neutralize the config keys that execute
+// programs or redirect traffic. Only REPO-controlled scopes (local, worktree) are
+// touched; the user's global and system config (git-lfs filters, credential helpers,
+// their ssh command, their hooks) keep working.
+
+/// What to pass to git (`-c key=value` pairs, in order) so repo-local config can't run
+/// anything, plus the things that can't be neutralized and must refuse instead.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Hardening {
+    pub args: Vec<String>,
+    /// Set when pushing would go somewhere the repo's own config chose (URL rewrites,
+    /// custom transports). The message is user-facing.
+    pub push_blocker: Option<String>,
+    /// Set when the repo defines a custom merge driver (which can't be disabled by `-c`).
+    pub merge_blocker: Option<String>,
+}
+
+/// The message shown when a repo's config rewrites push URLs.
+pub const PUSH_REDIRECT_ERROR: &str =
+    "The repository's git config redirects pushes; review .git/config";
+
+#[derive(Debug)]
+struct ConfigEntry {
+    scope: String,
+    key: String,
+    value: String,
+}
+
+impl ConfigEntry {
+    fn repo_controlled(&self) -> bool {
+        matches!(self.scope.as_str(), "local" | "worktree")
+    }
+    fn user_level(&self) -> bool {
+        matches!(self.scope.as_str(), "system" | "global" | "command")
+    }
+}
+
+/// Parses `git config --list -z --show-scope`: `scope NUL key NL value NUL` repeated.
+fn parse_config_list(raw: &str) -> Vec<ConfigEntry> {
+    let mut parts = raw.split('\0');
+    let mut out = Vec::new();
+    while let (Some(scope), Some(kv)) = (parts.next(), parts.next()) {
+        if scope.is_empty() {
+            break;
+        }
+        let (key, value) = kv.split_once('\n').unwrap_or((kv, ""));
+        out.push(ConfigEntry {
+            scope: scope.to_string(),
+            key: key.to_string(),
+            value: value.to_string(),
+        });
+    }
+    out
+}
+
+/// `section.sub.name` split into (section, subsection, name); all lowercase except sub.
+fn split_key(key: &str) -> (&str, &str, &str) {
+    let Some((section, rest)) = key.split_once('.') else {
+        return (key, "", "");
+    };
+    match rest.rsplit_once('.') {
+        Some((sub, name)) => (section, sub, name),
+        None => (section, "", rest),
+    }
+}
+
+/// How an executable-ish key is neutralized.
+enum Neutral {
+    /// Single value: the user's own (global/system) value, else this default.
+    Single(&'static str),
+    /// Fixed value whatever the user has.
+    Fixed(&'static str),
+    /// Multi-valued (credential helpers): reset, then re-add the user's values.
+    Multi,
+    /// The hooks directory: the user's value, else `<git dir>/hooks`.
+    Hooks,
+}
+
+fn neutral_for(key: &str) -> Option<Neutral> {
+    let (section, sub, name) = split_key(key);
+    Some(match (section, sub.is_empty(), name) {
+        ("core", true, "pager") => Neutral::Single("cat"),
+        ("core", true, "editor") | ("sequence", true, "editor") => Neutral::Single("true"),
+        ("core", true, "sshcommand") => Neutral::Single("ssh"),
+        ("core", true, "gitproxy") | ("core", true, "askpass") => Neutral::Single(""),
+        ("core", true, "fsmonitor") => Neutral::Fixed("false"),
+        ("core", true, "hookspath") => Neutral::Hooks,
+        // diff.external / diff.*.command / diff.*.textconv can't be blanked with `-c`
+        // (an empty program is run, and fails the diff). Callers that show diffs pass
+        // --no-ext-diff --no-textconv instead.
+        ("gpg", true, "program") | ("gpg", false, "program") => match sub {
+            "x509" => Neutral::Single("gpgsm"),
+            "ssh" => Neutral::Single("ssh-keygen"),
+            _ => Neutral::Single("gpg"),
+        },
+        ("gpg", false, "defaultkeycommand") => Neutral::Single(""),
+        ("filter", false, "clean") | ("filter", false, "smudge") | ("filter", false, "process") => {
+            Neutral::Single("")
+        }
+        ("filter", false, "required") => Neutral::Single("false"),
+        ("credential", _, "helper") => Neutral::Multi,
+        _ => return None,
+    })
+}
+
+/// Pure planning step, so it can be tested without git: `config` is the raw output of
+/// `git config --list -z --show-scope`, `default_hooks` the repo's own hooks directory.
+pub fn plan_hardening(config: &str, default_hooks: Option<&str>) -> anyhow::Result<Hardening> {
+    let entries = parse_config_list(config);
+    let mut plan = Hardening::default();
+    for fixed in ["core.fsmonitor=false", "protocol.ext.allow=never"] {
+        plan.args.push("-c".into());
+        plan.args.push(fixed.into());
+    }
+    // Keys the repo sets, each handled once.
+    let mut seen: Vec<&str> = Vec::new();
+    for e in entries.iter().filter(|e| e.repo_controlled()) {
+        let key = e.key.as_str();
+        let (section, sub, name) = split_key(key);
+        if (section == "url" && (name == "insteadof" || name == "pushinsteadof"))
+            || (section == "remote" && matches!(name, "receivepack" | "uploadpack" | "vcs"))
+        {
+            plan.push_blocker = Some(PUSH_REDIRECT_ERROR.to_string());
+        }
+        if section == "merge" && name == "driver" && !sub.is_empty() {
+            plan.merge_blocker = Some(
+                "The repository defines a custom merge driver; review .git/config".to_string(),
+            );
+        }
+        let Some(how) = neutral_for(key) else {
+            continue;
+        };
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        if key.contains('=') {
+            // `-c` splits at the first '=', so this key can't be overridden.
+            bail!("The repository's git config has an unsupported key: {key:?}");
+        }
+        let user: Vec<&str> = entries
+            .iter()
+            .filter(|u| u.user_level() && u.key == key)
+            .map(|u| u.value.as_str())
+            .collect();
+        let mut set = |value: &str| {
+            plan.args.push("-c".into());
+            plan.args.push(format!("{key}={value}"));
+        };
+        match how {
+            Neutral::Single(default) => set(user.last().copied().unwrap_or(default)),
+            Neutral::Fixed(v) => set(v),
+            Neutral::Multi => {
+                set("");
+                for v in user {
+                    set(v);
+                }
+            }
+            Neutral::Hooks => match user.last().copied().or(default_hooks) {
+                Some(v) => set(v),
+                None => bail!("couldn't work out the repository's hooks directory"),
+            },
+        }
+    }
+    Ok(plan)
+}
+
+/// Plain `git` with the app's environment hygiene, for the config read itself (which
+/// executes nothing, but must not be hardened recursively).
+async fn raw_git(cwd: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
     let mut cmd = tokio::process::Command::new("git");
     crate::childenv::sanitize_child_env(&mut cmd);
-    cmd.args(args)
+    cmd.args(["-c", "core.fsmonitor=false"])
+        .args(args)
         .current_dir(cwd)
-        // Never wait for credentials or an editor nobody can see.
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -31,6 +203,59 @@ async fn git_with_timeout(cwd: &Path, args: &[&str], timeout: Duration) -> anyho
         .kill_on_drop(true);
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000);
+    tokio::time::timeout(GIT_TIMEOUT, cmd.output())
+        .await
+        .map_err(|_| anyhow!("git didn't finish within {} seconds", GIT_TIMEOUT.as_secs()))?
+        .context("running git")
+}
+
+/// Reads the repo's config at `cwd` and plans how to neutralize it. Outside a repo only
+/// the fixed flags are returned.
+pub async fn hardening(cwd: &Path) -> anyhow::Result<Hardening> {
+    let out = raw_git(cwd, &["config", "--list", "-z", "--show-scope"]).await?;
+    if !out.status.success() {
+        bail!(
+            "git config: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    let raw = String::from_utf8_lossy(&out.stdout).into_owned();
+    let needs_hooks = parse_config_list(&raw)
+        .iter()
+        .any(|e| e.repo_controlled() && e.key == "core.hookspath");
+    let default_hooks = if needs_hooks {
+        let common = raw_git(cwd, &["rev-parse", "--git-common-dir"]).await?;
+        let dir = String::from_utf8_lossy(&common.stdout).trim().to_string();
+        if common.status.success() && !dir.is_empty() {
+            Some(cwd.join(dir).join("hooks").to_string_lossy().into_owned())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    plan_hardening(&raw, default_hooks.as_deref())
+}
+
+/// A `git` command for `cwd` with the repo-config hardening applied: no prompts,
+/// sanitized environment, stdin closed, `kill_on_drop`. The caller adds the subcommand.
+pub async fn hardened_command(cwd: &Path) -> anyhow::Result<tokio::process::Command> {
+    let plan = hardening(cwd).await?;
+    let mut cmd = tokio::process::Command::new("git");
+    crate::childenv::sanitize_child_env(&mut cmd);
+    cmd.args(&plan.args)
+        .current_dir(cwd)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000);
+    Ok(cmd)
+}
+
+async fn git_with_timeout(cwd: &Path, args: &[&str], timeout: Duration) -> anyhow::Result<String> {
+    let mut cmd = hardened_command(cwd).await?;
+    cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
     let out = tokio::time::timeout(timeout, cmd.output())
         .await
         .map_err(|_| {
@@ -265,6 +490,7 @@ pub async fn unsaved_work(project_path: &Path, cwd: &Path, branch: Option<&str>)
 /// branch with `git branch -d`. With `force` the worktree and branch go regardless.
 /// A worktree folder that's already gone is pruned from git's records.
 pub async fn remove_worktree(
+    data_dir: &Path,
     project_path: &Path,
     cwd: &Path,
     branch: Option<&str>,
@@ -287,7 +513,7 @@ pub async fn remove_worktree(
         return Ok(());
     }
     match worktree_top(cwd).await {
-        Some(top) => remove_checkout(project_path, &top, force).await?,
+        Some(top) => remove_checkout(data_dir, project_path, &top, force).await?,
         None => {
             // The folder is gone already; forget it so the branch can be deleted.
             if let Err(e) = git(project_path, &["worktree", "prune"]).await {
@@ -308,9 +534,52 @@ pub async fn remove_worktree(
     Ok(())
 }
 
+/// Whether `top` is a worktree Armada manages: its real path lies inside
+/// `<data_dir>/worktrees/` and the project's `git worktree list` names it.
+async fn check_managed_worktree(
+    data_dir: &Path,
+    project_path: &Path,
+    top: &Path,
+) -> Result<(), String> {
+    let real = top
+        .canonicalize()
+        .map_err(|e| format!("not deleting {}: {e}", top.display()))?;
+    let root = data_dir.join("worktrees").canonicalize().map_err(|e| {
+        format!(
+            "not deleting {}: no managed worktrees folder ({e})",
+            top.display()
+        )
+    })?;
+    if real == root || !real.starts_with(&root) {
+        return Err(format!(
+            "not deleting {}: it isn't inside Armada's worktrees folder",
+            real.display()
+        ));
+    }
+    let list = git(project_path, &["worktree", "list", "--porcelain"])
+        .await
+        .map_err(|e| format!("not deleting {}: {e:#}", real.display()))?;
+    let listed = list
+        .lines()
+        .filter_map(|l| l.strip_prefix("worktree "))
+        .any(|p| Path::new(p).canonicalize().is_ok_and(|p| p == real));
+    if !listed {
+        return Err(format!(
+            "not deleting {}: the project doesn't list it as a worktree",
+            real.display()
+        ));
+    }
+    Ok(())
+}
+
 /// `git worktree remove`, retried briefly: on Windows, antivirus scanners and
 /// indexers hold files in a fresh checkout open for a moment.
-async fn remove_checkout(project_path: &Path, top: &Path, force: bool) -> anyhow::Result<()> {
+async fn remove_checkout(
+    data_dir: &Path,
+    project_path: &Path,
+    top: &Path,
+    force: bool,
+) -> anyhow::Result<()> {
     let top_str = top.to_string_lossy().into_owned();
     let mut args = vec!["-c", "core.longpaths=true", "worktree", "remove"];
     if force {
@@ -335,6 +604,11 @@ async fn remove_checkout(project_path: &Path, top: &Path, force: bool) -> anyhow
     // linked worktree (its `.git` is a file), never a main checkout.
     if !top.join(".git").is_file() {
         return Err(err.context(format!("{top_str} isn't a linked worktree")));
+    }
+    // Deleting a folder recursively is only for checkouts Armada made: inside its own
+    // worktrees folder (symlinks resolved) and registered with the project's git.
+    if let Err(refusal) = check_managed_worktree(data_dir, project_path, top).await {
+        return Err(err.context(refusal));
     }
     tracing::warn!("git worktree remove failed ({err:#}); deleting {top_str} directly");
     std::fs::remove_dir_all(top).with_context(|| format!("deleting {top_str}"))?;
@@ -389,7 +663,7 @@ mod tests {
         assert!(unsaved_work(&repo_dir, &wt.cwd, Some(&wt.branch))
             .await
             .is_none());
-        remove_worktree(&repo_dir, &wt.cwd, Some(&wt.branch), false)
+        remove_worktree(&data, &repo_dir, &wt.cwd, Some(&wt.branch), false)
             .await
             .unwrap();
         assert!(!wt.cwd.exists());
@@ -400,7 +674,7 @@ mod tests {
             .await
             .unwrap();
         std::fs::write(wt.cwd.join("b.txt"), "b").unwrap();
-        let err = remove_worktree(&repo_dir, &wt.cwd, Some(&wt.branch), false)
+        let err = remove_worktree(&data, &repo_dir, &wt.cwd, Some(&wt.branch), false)
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -426,7 +700,7 @@ mod tests {
         assert!(unsaved_work(&repo_dir, &wt.cwd, Some(&wt.branch))
             .await
             .is_some());
-        remove_worktree(&repo_dir, &wt.cwd, Some(&wt.branch), true)
+        remove_worktree(&data, &repo_dir, &wt.cwd, Some(&wt.branch), true)
             .await
             .unwrap();
         assert!(!wt.cwd.exists());
@@ -437,7 +711,7 @@ mod tests {
             .await
             .unwrap();
         std::fs::remove_dir_all(&wt.cwd).unwrap();
-        remove_worktree(&repo_dir, &wt.cwd, Some(&wt.branch), false)
+        remove_worktree(&data, &repo_dir, &wt.cwd, Some(&wt.branch), false)
             .await
             .unwrap();
         assert!(!branch_exists(&repo_dir, &wt.branch).await);
@@ -446,6 +720,242 @@ mod tests {
             .unwrap();
         assert_eq!(list.matches("worktree ").count(), 1, "{list}");
 
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    fn cfg(entries: &[(&str, &str, &str)]) -> String {
+        entries
+            .iter()
+            .map(|(scope, key, value)| format!("{scope}\0{key}\n{value}\0"))
+            .collect()
+    }
+
+    #[test]
+    fn plan_neutralizes_only_repo_config() {
+        let raw = cfg(&[
+            ("global", "core.sshcommand", "ssh -i mykey"),
+            ("global", "filter.lfs.clean", "git-lfs clean -- %f"),
+            ("global", "credential.helper", "store"),
+            ("local", "core.sshcommand", "evil"),
+            ("local", "core.pager", "evil"),
+            ("local", "core.editor", "evil"),
+            ("local", "filter.lfs.clean", "evil"),
+            ("local", "filter.lfs.smudge", "evil"),
+            ("local", "filter.lfs.required", "true"),
+            ("local", "credential.helper", "!evil"),
+            ("local", "core.hookspath", ".evil"),
+            ("local", "gpg.program", "evil"),
+        ]);
+        let plan = plan_hardening(&raw, Some("/r/.git/hooks")).unwrap();
+        let args = plan.args.join(" ");
+        assert!(args.contains("core.fsmonitor=false"));
+        assert!(args.contains("protocol.ext.allow=never"));
+        assert!(args.contains("core.sshcommand=ssh -i mykey"), "{args}");
+        assert!(args.contains("core.pager=cat"));
+        assert!(args.contains("core.editor=true"));
+        assert!(args.contains("filter.lfs.clean=git-lfs clean -- %f"));
+        assert!(args.contains("filter.lfs.smudge= "), "{args}");
+        assert!(args.contains("filter.lfs.required=false"));
+        assert!(args.contains("credential.helper= -c credential.helper=store"));
+        assert!(args.contains("core.hookspath=/r/.git/hooks"));
+        assert!(args.contains("gpg.program=gpg"));
+        assert!(!args.contains("evil"));
+        assert!(plan.push_blocker.is_none());
+    }
+
+    #[test]
+    fn plan_leaves_user_config_alone_and_flags_redirects() {
+        let raw = cfg(&[
+            ("global", "core.pager", "less"),
+            ("global", "core.hookspath", "/home/me/hooks"),
+            (
+                "global",
+                "url.git@github.com:.insteadof",
+                "https://github.com/",
+            ),
+        ]);
+        let plan = plan_hardening(&raw, None).unwrap();
+        assert_eq!(plan.args.len(), 4, "{:?}", plan.args);
+        assert!(plan.push_blocker.is_none());
+
+        let raw = cfg(&[(
+            "local",
+            "url.https://evil/.pushinsteadof",
+            "https://github.com/",
+        )]);
+        let plan = plan_hardening(&raw, None).unwrap();
+        assert_eq!(plan.push_blocker.as_deref(), Some(PUSH_REDIRECT_ERROR));
+        let raw = cfg(&[("worktree", "merge.x.driver", "evil %A")]);
+        assert!(plan_hardening(&raw, None).unwrap().merge_blocker.is_some());
+        let raw = cfg(&[("local", "filter.a=b.clean", "evil")]);
+        assert!(plan_hardening(&raw, None).is_err());
+    }
+
+    /// A repository whose local config tries every way to run `marker`.
+    fn booby_trapped_repo(base: &Path) -> (PathBuf, PathBuf) {
+        let repo = base.join("trap");
+        std::fs::create_dir_all(&repo).unwrap();
+        sh_git(&repo, &["init", "-q", "-b", "main"]);
+        let marker = base.join("ran");
+        let cmd = format!("touch {}", marker.display());
+        std::fs::write(repo.join(".gitattributes"), "*.dat filter=bad\n").unwrap();
+        std::fs::write(repo.join("a.dat"), "a").unwrap();
+        std::fs::write(repo.join("a.txt"), "a").unwrap();
+        sh_git(&repo, &["add", "a.txt", ".gitattributes"]);
+        sh_git(&repo, &["commit", "-q", "-m", "a"]);
+        let hook = base.join("hook-sh");
+        std::fs::write(&hook, format!("#!/bin/sh\n{cmd}\n")).unwrap();
+        let fsm = base.join("fsmon.sh");
+        std::fs::write(&fsm, format!("#!/bin/sh\n{cmd}\n")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for f in [&hook, &fsm] {
+                std::fs::set_permissions(f, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+        std::fs::create_dir_all(repo.join("evil-hooks")).unwrap();
+        std::fs::copy(&hook, repo.join("evil-hooks/post-checkout")).unwrap();
+        std::fs::copy(&hook, repo.join("evil-hooks/post-commit")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for h in ["post-checkout", "post-commit"] {
+                let f = repo.join("evil-hooks").join(h);
+                std::fs::set_permissions(f, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+        for (k, v) in [
+            ("core.fsmonitor", fsm.to_str().unwrap().to_string()),
+            ("filter.bad.clean", cmd.clone()),
+            ("filter.bad.smudge", cmd.clone()),
+            ("filter.bad.required", "true".into()),
+            ("core.sshCommand", cmd.clone()),
+            ("core.pager", cmd.clone()),
+            ("core.editor", cmd.clone()),
+            ("core.hooksPath", "evil-hooks".into()),
+            ("alias.status", format!("!{cmd}")),
+            ("diff.external", cmd.clone()),
+            ("credential.helper", format!("!{cmd}")),
+        ] {
+            sh_git(&repo, &["config", k, &v]);
+        }
+        (repo, marker)
+    }
+
+    #[tokio::test]
+    async fn repo_config_commands_never_run() {
+        let base =
+            std::env::temp_dir().join(format!("armada-git-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&base).unwrap();
+        let (repo, marker) = booby_trapped_repo(&base);
+        git(&repo, &["status", "--porcelain"]).await.unwrap();
+        git(&repo, &["add", "-A"]).await.unwrap();
+        git(
+            &repo,
+            &[
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "-m",
+                "b",
+            ],
+        )
+        .await
+        .unwrap();
+        git(&repo, &["checkout", "-q", "-b", "other"])
+            .await
+            .unwrap();
+        git(&repo, &["diff", "--no-ext-diff", "--no-textconv", "HEAD~1"])
+            .await
+            .unwrap();
+        assert!(!marker.exists(), "a repo-configured command ran");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn global_filters_still_apply() {
+        let base =
+            std::env::temp_dir().join(format!("armada-git-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&base).unwrap();
+        let repo = base.join("r");
+        std::fs::create_dir_all(&repo).unwrap();
+        sh_git(&repo, &["init", "-q", "-b", "main"]);
+        let global = base.join("gitconfig");
+        std::fs::write(&global, "[filter \"up\"]\n\tclean = tr a-z A-Z\n").unwrap();
+        std::fs::write(repo.join(".gitattributes"), "*.txt filter=up\n").unwrap();
+        std::fs::write(repo.join("f.txt"), "hello\n").unwrap();
+        // The repo also tries to replace the global driver.
+        sh_git(&repo, &["config", "filter.up.clean", "echo pwned"]);
+        // Hardening reads the user's config through the environment, as in the app.
+        std::env::set_var("GIT_CONFIG_GLOBAL", &global);
+        git(&repo, &["add", "f.txt"]).await.unwrap();
+        let blob = git(&repo, &["show", ":f.txt"]).await.unwrap();
+        std::env::remove_var("GIT_CONFIG_GLOBAL");
+        assert_eq!(blob, "HELLO", "global filter should still run");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn forced_removal_only_deletes_managed_worktrees() {
+        let base =
+            std::env::temp_dir().join(format!("armada-git-{}", uuid::Uuid::new_v4().simple()));
+        let repo_dir = base.join("repo");
+        std::fs::create_dir_all(&repo_dir).unwrap();
+        sh_git(&repo_dir, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo_dir.join("a.txt"), "a").unwrap();
+        sh_git(&repo_dir, &["add", "."]);
+        sh_git(&repo_dir, &["commit", "-q", "-m", "a"]);
+        let data = base.join("data");
+        std::fs::create_dir_all(data.join("worktrees")).unwrap();
+
+        // A worktree outside the managed folder, reached through a symlink inside it.
+        let outside = base.join("outside-wt");
+        sh_git(
+            &repo_dir,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "o",
+                outside.to_str().unwrap(),
+            ],
+        );
+        sh_git(&repo_dir, &["worktree", "lock", outside.to_str().unwrap()]);
+        let link = data.join("worktrees").join("link");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        let err = remove_worktree(&data, &repo_dir, &link, None, true).await;
+        assert!(
+            err.is_err(),
+            "must refuse to delete outside the managed folder"
+        );
+        assert!(outside.join("a.txt").exists());
+
+        // A locked, managed worktree is deleted by the fallback.
+        let managed = data.join("worktrees").join("m");
+        sh_git(
+            &repo_dir,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "m",
+                managed.to_str().unwrap(),
+            ],
+        );
+        sh_git(&repo_dir, &["worktree", "lock", managed.to_str().unwrap()]);
+        remove_worktree(&data, &repo_dir, &managed, Some("m"), true)
+            .await
+            .unwrap();
+        assert!(!managed.exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 }

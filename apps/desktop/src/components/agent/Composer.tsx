@@ -1,5 +1,5 @@
 import { ArrowUp, BookText, FileText, ListPlus, Play, RotateCcw, Square } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { cancelTurn, resumeAgent } from "@/lib/actions";
 import { api } from "@/lib/api";
@@ -11,11 +11,13 @@ import { useElementWidth } from "@/hooks/useElementWidth";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useAttachments } from "@/hooks/useAttachments";
 import { useUi } from "@/store/ui";
-import { getDraft, setDraft } from "./drafts";
+import { getDraft, onDraftInsert, setDraft } from "./drafts";
 import { AttachButton, DropOverlay } from "../AttachControls";
+import { DictateButton } from "../DictateButton";
 import { AttachmentStrip } from "../AttachmentStrip";
 import { TemplatePicker } from "../TemplatePicker";
 import { Button } from "../ui/button";
+import { useIsDone } from "@/store/completion";
 import { Kbd } from "../ui/kbd";
 import { Tooltip } from "../ui/tooltip";
 import { ConfigOverflowMenu, ConfigSelect } from "./ConfigSelect";
@@ -47,7 +49,7 @@ function slashQuery(text: string): string | null {
   return m ? m[1].toLowerCase() : null;
 }
 
-export function Composer({ agent }: { agent: Agent }) {
+function ComposerImpl({ agent }: { agent: Agent }) {
   const [text, setText] = useState(() => getDraft(agent.id));
   // Latest text for async callbacks (queue Edit resolves after an await).
   const textRef = useRef(text);
@@ -61,7 +63,7 @@ export function Composer({ agent }: { agent: Agent }) {
   const [caret, setCaret] = useState(0);
   // Results tagged with the query they answer, so a fast Enter never picks a stale file.
   const [files, setFiles] = useState<{ query: string; list: string[] }>({ query: "", list: [] });
-  const attach = useAttachments();
+  const attach = useAttachments([], agent.id);
   const [wrapRef, width] = useElementWidth<HTMLDivElement>();
   // Toolbar tiers by available width: labels → icons → extra options in a "+" menu.
   const roomy = width === 0 || width >= 700;
@@ -192,6 +194,26 @@ export function Composer({ agent }: { agent: Agent }) {
     if (slashQuery(v) === null && mentionQuery(v, nextCaret) === null) setSlashDismissed(false);
   };
 
+  // Text sent in from elsewhere (e.g. terminal output from the workspace panel).
+  const updateRef = useRef(update);
+  updateRef.current = update;
+  useEffect(
+    () =>
+      onDraftInsert(agent.id, (insert) => {
+        const cur = textRef.current;
+        const next = cur.trim() ? `${cur.trimEnd()}\n\n${insert}` : insert;
+        updateRef.current(next);
+        requestAnimationFrame(() => {
+          const el = ref.current;
+          if (el) {
+            el.focus();
+            el.setSelectionRange(next.length, next.length);
+          }
+        });
+      }),
+    [agent.id],
+  );
+
   const pickFile = (path: string) => {
     const before = text.slice(0, caret);
     const start = before.lastIndexOf("@");
@@ -263,6 +285,33 @@ export function Composer({ agent }: { agent: Agent }) {
     requestAnimationFrame(() => ref.current?.focus());
   };
 
+  /** Dictated text goes in at the caret; with "send after dictation" it is sent right away. */
+  const insertDictation = (spoken: string, autoSend: boolean) => {
+    const el = ref.current;
+    const cur = textRef.current;
+    const start = el ? Math.min(el.selectionStart ?? cur.length, cur.length) : cur.length;
+    const end = el ? Math.min(el.selectionEnd ?? start, cur.length) : cur.length;
+    const before = cur.slice(0, start);
+    const lead = before && !/\s$/.test(before) ? " " : "";
+    const inserted = `${lead}${spoken}`;
+    const next = `${before}${inserted}${cur.slice(end)}`;
+    update(next, start + inserted.length);
+    if (autoSend) autoSendRef.current = next.trim();
+    requestAnimationFrame(() => {
+      const t = ref.current;
+      if (!t) return;
+      t.focus();
+      t.setSelectionRange(start + inserted.length, start + inserted.length);
+    });
+  };
+  const autoSendRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (autoSendRef.current === null) return;
+    const want = autoSendRef.current;
+    autoSendRef.current = null;
+    if (text.trim() === want) void send();
+  });
+
   const send = async () => {
     if (!canSend) return;
     const value = text.trim();
@@ -326,16 +375,19 @@ export function Composer({ agent }: { agent: Agent }) {
   };
 
   const name = useIdentity(agent.provider, agent.customAgentId).short;
+  const justDone = useIsDone(agent);
   const placeholder = blocked
     ? `Waiting for your approval above. Queue a message to run after this turn…`
     : working
       ? `${name} is working. Queue a follow-up message…`
-      : agent.availableCommands.length > 0
-        ? `Message ${name}…  / for commands, @ for files`
-        : `Message ${name}…  @ to mention files`;
+      : justDone
+        ? `Done. Reply, or start something new…`
+        : agent.availableCommands.length > 0
+          ? `Message ${name}…  / for commands, @ for files`
+          : `Message ${name}…  @ to mention files`;
 
   return (
-    <div ref={wrapRef} className={cn("shrink-0 pb-4 pt-1", tight ? "px-3" : "px-6")}>
+    <div ref={wrapRef} data-dictation-scope className={cn("shrink-0 pb-4 pt-1", tight ? "px-3" : "px-6")}>
       <div className={cn("mx-auto w-full", width >= 1330 ? "max-w-[1000px]" : "max-w-[860px]")}>
         {agent.rateLimited && !resumable && <RateLimitBanner agent={agent} />}
         <QueueStack agent={agent} onEdit={takeBack} />
@@ -417,6 +469,7 @@ export function Composer({ agent }: { agent: Agent }) {
                 ))}
                 {tight && <ConfigOverflowMenu agent={agent} options={agent.configOptions.slice(1)} />}
                 <AttachButton onClick={attach.openPicker} count={attach.attachments.length} iconOnly={!roomy} />
+                <DictateButton onText={insertDictation} iconOnly={!roomy} />
                 <TemplatePicker
                   onInsert={insertTemplate}
                   trigger={
@@ -630,3 +683,5 @@ function ResumeBanner({ agent }: { agent: Agent }) {
     </div>
   );
 }
+
+export const Composer = memo(ComposerImpl);

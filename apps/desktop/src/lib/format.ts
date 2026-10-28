@@ -45,6 +45,11 @@ export function formatCost(usd: number): string {
   return `$${Math.round(usd).toLocaleString()}`;
 }
 
+/** An agent's cost for display: local models are free, everything else is priced per token. */
+export function agentCostText(agent: { provider: string; costUsd: number }): string {
+  return agent.provider === "local" ? "Free" : formatCost(agent.costUsd);
+}
+
 export function formatTokens(n: number): string {
   if (n < 1000) return `${n}`;
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
@@ -57,4 +62,12 @@ export function formatPercent(ratio: number): string {
 
 export function pluralize(n: number, one: string, many = `${one}s`) {
   return `${n} ${n === 1 ? one : many}`;
+}
+
+/** "142 MB", "1.2 GB" (decimal units, like the OS file manager). */
+export function formatBytes(n: number): string {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`;
+  if (n >= 1e6) return `${Math.round(n / 1e6)} MB`;
+  if (n >= 1e3) return `${Math.round(n / 1e3)} KB`;
+  return `${n} B`;
 }

@@ -101,6 +101,9 @@ struct CtxState {
     /// The user asked to cancel the current turn.
     cancel_requested: bool,
     queue: VecDeque<(String, Prompt)>,
+    /// The timeline item of the most recent user message (its checkpoint is taken
+    /// as its turn begins).
+    last_user_item: Option<String>,
     /// The queue doesn't advance until the user acts (after cancel/stop/failure).
     queue_paused: bool,
     /// When the current turn started, and the agent's cost/tokens at that point.
@@ -161,6 +164,7 @@ impl AgentCtx {
                 turn_begun: false,
                 cancel_requested: false,
                 queue: VecDeque::new(),
+                last_user_item: None,
                 queue_paused: false,
                 turn_started_at: 0,
                 turn_cost_start: 0.0,
@@ -814,13 +818,24 @@ impl AgentCtx {
     /// Adds the prompt to the timeline (when it actually starts running).
     fn record_prompt_locked(&self, st: &mut CtxState, prompt: &Prompt) {
         self.end_stream_locked(st);
-        self.push_locked(
+        let id = self.push_locked(
             st,
             ItemBody::UserMessage {
                 text: prompt.text.clone(),
                 attachments: prompt.attachments.clone(),
             },
         );
+        st.last_user_item = Some(id);
+    }
+
+    /// Snapshots the agent's folder just before the turn's prompt is forwarded to
+    /// the agent (so the files are saved before the agent can change them). Never
+    /// fails the turn: a problem only means this message has no checkpoint.
+    pub async fn checkpoint_before_turn(&self) {
+        let item = self.st.lock().last_user_item.clone();
+        if let Some(core) = self.core.upgrade() {
+            core.checkpoint_for_turn(&self.agent_id, item).await;
+        }
     }
 
     fn publish_queue(&self) {

@@ -168,7 +168,7 @@ export function QueueStack({
           )}
         </span>
       </div>
-      <ol className="max-h-[220px] divide-y divide-line overflow-y-auto">
+      <ol className="max-h-[min(220px,22vh)] divide-y divide-line overflow-y-auto">
         {shown.map((q, i) => (
           <QueueRow
             key={q.id}

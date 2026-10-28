@@ -123,13 +123,73 @@ export function liveTail(items: TimelineItem[] | undefined): string | null {
   return null;
 }
 
-/** Sub-agent calls that are still running. */
-export function runningSubagents(items: TimelineItem[] | undefined): number {
-  if (!items) return 0;
-  let n = 0;
-  for (const it of items) {
-    if (it.kind === "tool_call" && it.subagent && (it.status === "in_progress" || it.status === "pending")) n++;
+/** One sub-agent of an agent, as shown in the running-sub-agents list. */
+export interface SubagentRun {
+  /** Timeline item id (for scrolling to its card). */
+  itemId: string;
+  toolCallId: string;
+  kind: string | null;
+  description: string;
+  /** When it was launched. */
+  startedAt: number;
+  state: "running" | "done" | "failed";
+  /** Title of its latest child call, if any. */
+  step: string | null;
+  background: boolean;
+}
+
+const unfinished = (s: ToolItem["status"]) => s === "in_progress" || s === "pending";
+
+/**
+ * Sub-agents that are running, plus those that finished during the current turn (newest last).
+ * `busy`: the agent is working. A sub-agent whose call is still open only counts while the agent
+ * is busy (an idle agent's leftover open call is stale). A background sub-agent's call completes
+ * at launch, yet it keeps running: Claude's adapter holds the turn open until they finish, so it
+ * counts as running while the agent is busy and the call is from the current turn.
+ */
+export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean): SubagentRun[] {
+  if (!items) return [];
+  let turnStartIdx = 0;
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (items[i].kind === "user_message") {
+      turnStartIdx = i;
+      break;
+    }
   }
+  const lastChild = new Map<string, ToolItem>();
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (it.kind === "tool_call" && it.parentToolCallId) lastChild.set(it.parentToolCallId, it);
+  }
+  const runs: SubagentRun[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (it.kind !== "tool_call" || !it.subagent || it.subagent.control) continue;
+    const bg = !!it.subagent.background;
+    const open = unfinished(it.status) || (bg && it.status === "completed" && i > turnStartIdx);
+    const running = open && busy;
+    if (!running && i <= turnStartIdx) continue;
+    if (!running && unfinished(it.status)) continue; // stale: open call of an idle agent
+    const child = lastChild.get(it.toolCallId);
+    const description = it.subagent.description?.trim() || it.title;
+    runs.push({
+      itemId: it.id,
+      toolCallId: it.toolCallId,
+      kind: it.subagent.kind?.trim() || null,
+      description,
+      startedAt: it.ts,
+      state: running ? "running" : it.status === "failed" ? "failed" : "done",
+      step: child ? child.title : null,
+      background: bg,
+    });
+  }
+  return runs;
+}
+
+/** Number of running sub-agents in `runs`. */
+export function runningCount(runs: readonly SubagentRun[]): number {
+  let n = 0;
+  for (const r of runs) if (r.state === "running") n++;
   return n;
 }
 

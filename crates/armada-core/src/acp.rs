@@ -301,6 +301,7 @@ impl AcpDriver {
                 if !me.ctx.is_current(me.generation) || !me.ctx.begin_turn(prompt.token) {
                     break;
                 }
+                me.ctx.checkpoint_before_turn().await;
                 me.peer.mark_turn();
                 let mark = me.peer.stderr_mark();
                 let preamble = me.ctx.take_preamble();
@@ -529,6 +530,12 @@ impl AcpDriver {
                     u["cost"]["amount"].as_f64()
                 };
                 ctx.usage(u["used"].as_i64(), u["size"].as_i64(), cost);
+                // Claude Code's rate-limit snapshot rides along in `_meta`.
+                if !ctx.replaying() {
+                    if let Some(usage) = parse_claude_rate_limit(&u["_meta"]["_claude/rateLimit"]) {
+                        ctx.account_usage(usage);
+                    }
+                }
             }
             "session_info_update" => {
                 if let Some(t) = u["title"].as_str() {
@@ -854,6 +861,10 @@ fn apply_tool_fields(b: &mut ItemBody, u: &Value) {
         if let Some(p) = input["prompt"].as_str() {
             sa.prompt = Some(p.to_string());
         }
+        // The adapter completes a background launch at once; the sub-agent runs on.
+        if input["run_in_background"].as_bool() == Some(true) {
+            sa.background = true;
+        }
         *tool_kind = ToolKind::Think;
     }
     if let Some(t) = u["title"].as_str() {
@@ -976,4 +987,167 @@ fn parse_config_option(o: &Value) -> Option<ConfigOption> {
         current_value: o["currentValue"].as_str().unwrap_or("").to_string(),
         options: choices,
     })
+}
+
+/// Converts Claude Code's `rate_limit_info` (forwarded by the ACP adapter in a
+/// `usage_update`'s `_meta["_claude/rateLimit"]`) into an account usage snapshot.
+/// Utilization is a 0-1 fraction and `resetsAt` is unix seconds.
+fn parse_claude_rate_limit(info: &Value) -> Option<AccountUsage> {
+    fn window(w: &Value, mins: i64) -> Option<UsageWindow> {
+        let util = w["utilization"].as_f64()?;
+        Some(UsageWindow {
+            used_percent: (util * 100.0).clamp(0.0, 100.0),
+            window_mins: Some(mins),
+            resets_at: w["resetsAt"].as_i64().map(
+                |t| {
+                    if t < 1_000_000_000_000 {
+                        t * 1000
+                    } else {
+                        t
+                    }
+                },
+            ),
+        })
+    }
+    if !info.is_object() {
+        return None;
+    }
+    let windows = &info["unifiedWindows"];
+    let mut primary = window(&windows["five_hour"], 300);
+    let mut secondary = window(&windows["seven_day"], 10080);
+    if primary.is_none() && secondary.is_none() {
+        // Older CLIs: only the window that triggered the event.
+        match info["rateLimitType"].as_str() {
+            Some("five_hour") => primary = window(info, 300),
+            Some("seven_day") => secondary = window(info, 10080),
+            _ => {}
+        }
+    }
+    if primary.is_none() && secondary.is_none() {
+        return None;
+    }
+    Some(AccountUsage {
+        primary,
+        secondary,
+        plan: None,
+        updated_at: now_ms(),
+    })
+}
+
+#[cfg(test)]
+mod rate_limit_tests {
+    use super::*;
+
+    const CAPTURED: &str = r#"{"status":"allowed","resetsAt":1793218200,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.01,"resetsAt":1793218200,"status":"allowed"},"seven_day":{"utilization":0.22,"resetsAt":1793746800,"status":"allowed"}}}"#;
+
+    #[test]
+    fn parses_unified_windows() {
+        let v: Value = serde_json::from_str(CAPTURED).unwrap();
+        let u = parse_claude_rate_limit(&v).unwrap();
+        let p = u.primary.unwrap();
+        assert!((p.used_percent - 1.0).abs() < 1e-6);
+        assert_eq!(p.window_mins, Some(300));
+        assert_eq!(p.resets_at, Some(1793218200000));
+        let s = u.secondary.unwrap();
+        assert!((s.used_percent - 22.0).abs() < 1e-6);
+        assert_eq!(s.window_mins, Some(10080));
+        assert_eq!(s.resets_at, Some(1793746800000));
+        assert!(u.plan.is_none());
+    }
+
+    #[test]
+    fn falls_back_to_top_level_window() {
+        let v = json!({"rateLimitType":"seven_day","utilization":0.5,"resetsAt":1793746800});
+        let u = parse_claude_rate_limit(&v).unwrap();
+        assert!(u.primary.is_none());
+        assert!((u.secondary.unwrap().used_percent - 50.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ignores_missing_or_unusable() {
+        assert!(parse_claude_rate_limit(&Value::Null).is_none());
+        assert!(
+            parse_claude_rate_limit(&json!({"status":"allowed","rateLimitType":"five_hour"}))
+                .is_none()
+        );
+    }
+}
+
+#[cfg(test)]
+mod subagent_tests {
+    use super::*;
+
+    fn blank_tool() -> ItemBody {
+        ItemBody::ToolCall {
+            tool_call_id: "toolu_1".into(),
+            title: String::new(),
+            tool_kind: ToolKind::Other,
+            status: ToolStatus::Pending,
+            locations: Vec::new(),
+            diffs: Vec::new(),
+            output: String::new(),
+            command: None,
+            images: Vec::new(),
+            subagent: None,
+            parent_tool_call_id: None,
+        }
+    }
+
+    fn sub(b: &ItemBody) -> Option<&SubAgent> {
+        match b {
+            ItemBody::ToolCall { subagent, .. } => subagent.as_ref(),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn background_launch_is_flagged_and_stays_flagged_after_completion() {
+        let mut b = blank_tool();
+        apply_tool_fields(
+            &mut b,
+            &json!({
+                "sessionUpdate": "tool_call", "toolCallId": "toolu_1", "title": "Agent",
+                "status": "in_progress", "kind": "think",
+                "rawInput": {"description": "Scan repo", "subagent_type": "Explore",
+                              "prompt": "look around", "run_in_background": true},
+                "_meta": {"claudeCode": {"toolName": "Agent"}}
+            }),
+        );
+        let s = sub(&b).unwrap();
+        assert!(s.background);
+        assert_eq!(s.kind.as_deref(), Some("Explore"));
+        // The completion carries no rawInput (as the adapter sends it): flag survives.
+        apply_tool_fields(
+            &mut b,
+            &json!({
+                "sessionUpdate": "tool_call_update", "toolCallId": "toolu_1", "status": "completed",
+                "content": [{"type": "content", "content": {"type": "text",
+                    "text": "Async agent launched successfully."}}],
+                "_meta": {"claudeCode": {"toolName": "Agent"}}
+            }),
+        );
+        let s = sub(&b).unwrap();
+        assert!(s.background);
+        assert!(matches!(
+            &b,
+            ItemBody::ToolCall {
+                status: ToolStatus::Completed,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn foreground_launch_is_not_background() {
+        let mut b = blank_tool();
+        apply_tool_fields(
+            &mut b,
+            &json!({
+                "sessionUpdate": "tool_call", "toolCallId": "toolu_1", "status": "in_progress",
+                "rawInput": {"description": "x", "subagent_type": "general-purpose", "prompt": "p"},
+                "_meta": {"claudeCode": {"toolName": "Task"}}
+            }),
+        );
+        assert!(!sub(&b).unwrap().background);
+    }
 }

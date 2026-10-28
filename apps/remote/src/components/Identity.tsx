@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
  * Claude, a hex "O" for Codex, an angular "G" for Grok); never vendor logos.
  * Custom agents get the first letter of their name.
  */
-export function ProviderMark({ provider, size }: { provider: "claude" | "codex" | "grok"; size: number }) {
+export function ProviderMark({ provider, size }: { provider: "claude" | "codex" | "grok" | "local"; size: number }) {
   const common = {
     width: size,
     height: size,
@@ -33,6 +33,15 @@ export function ProviderMark({ provider, size }: { provider: "claude" | "codex" 
       <svg {...common}>
         <path d="M12 3.2 19.6 7.6v8.8L12 20.8 4.4 16.4V7.6Z" />
         <circle cx="12" cy="12" r="3" />
+      </svg>
+    );
+  }
+  if (provider === "local") {
+    return (
+      <svg {...common}>
+        <rect x="6.5" y="6.5" width="11" height="11" rx="2" />
+        <rect x="9.5" y="9.5" width="5" height="5" rx="0.8" />
+        <path d="M9.5 3.5v3M14.5 3.5v3M9.5 17.5v3M14.5 17.5v3M3.5 9.5h3M3.5 14.5h3M17.5 9.5h3M17.5 14.5h3" />
       </svg>
     );
   }
