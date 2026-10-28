@@ -139,6 +139,8 @@ mod tests {
         let port = l.local_addr().unwrap().port();
         assert!(port_is_listening(port));
         drop(l);
-        assert!(!port_is_listening(port));
+        // Not the freed port: tests running in parallel may bind it again at once.
+        // Port 1 is outside the ephemeral range and nothing listens there.
+        assert!(!port_is_listening(1));
     }
 }
