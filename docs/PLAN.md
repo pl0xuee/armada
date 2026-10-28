@@ -2,6 +2,21 @@
 
 > **Command your fleet.** One sleek, gunmetal command deck for running Claude, ChatGPT (Codex) and Grok agents side by side, across as many accounts as you own, on Windows, macOS and Linux.
 
+> **Status (v0.1.2): this is the original design document.** What shipped differs in places:
+> - **One process, no daemon.** Agents run inside the app's own core (`crates/armada-core`). The tray keeps the app (and the agents) alive when the window closes, and agents resume after restarts and crashes. There is no separate `armadad` or local socket.
+> - **Crates.** `armada-core` (supervisor, ACP and Codex clients, storage, accounts, installer) plus the Tauri shell (`apps/desktop/src-tauri`). Storage is `rusqlite`.
+> - **UI stack.** React, zustand, Radix, cmdk, motion, xterm, react-markdown and @tanstack/react-virtual; npm, not pnpm. Sounds live in `apps/desktop/src-tauri/sounds`.
+> - **Shipped beyond the plan:**
+>   - the phone companion (`apps/remote`, remote control for every provider);
+>   - the "Needs you" triage view;
+>   - per-agent Auto/Ask mode;
+>   - queued messages;
+>   - sub-agent cards and turn summaries;
+>   - MCP paste and test;
+>   - file and hunk revert.
+> - **Answered open questions:** permissions default to Auto (Ask per agent or in Settings); failover is off, ask or auto; phone push goes through ntfy.
+> - **Not yet built:** custom themes, auto-compact controls beyond the agent's own `/compact`, push targets other than ntfy, the plugin API, team mode, package-manager distribution (winget/Homebrew/AUR/Flatpak), and Playwright end-to-end tests.
+
 ---
 
 ## 1. Vision

@@ -22,7 +22,8 @@
         "center": true,
         "decorations": false,
         "resizable": true,
-        "backgroundColor": "#0B0D10"
+        "backgroundColor": "#0B0D10",
+        "dragDropEnabled": false
       }
     ],
     "security": {
@@ -52,7 +53,7 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Command center for Claude, Codex and Grok agents",
-    "longDescription": "Armada runs Claude Code, OpenAI Codex and xAI Grok Build agents side by side across multiple accounts, alerts you with sounds and notifications when an agent needs attention, and resumes every agent after the app closes.",
+    "longDescription": "Armada runs Claude Code, OpenAI Codex, xAI Grok Build and any ACP agent (Gemini CLI, Goose, OpenCode) side by side across multiple accounts, alerts you with sounds and notifications when an agent needs attention, and resumes every agent after the app closes.",
     "publisher": "Armada contributors",
     "copyright": "Copyright (c) Armada contributors. MIT License.",
     "license": "MIT",
@@ -62,13 +63,17 @@
         "depends": [
           "libwebkit2gtk-4.1-0",
           "libgtk-3-0",
-          "libayatana-appindicator3-1"
+          "libayatana-appindicator3-1",
+          "libasound2t64 | libasound2",
+          "libdbus-1-3"
         ]
       },
       "rpm": {
         "depends": [
           "webkit2gtk4.1",
-          "libappindicator-gtk3"
+          "libappindicator-gtk3",
+          "alsa-lib",
+          "dbus-libs"
         ]
       }
     },

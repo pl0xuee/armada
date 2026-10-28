@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { api } from "@/lib/api";
+import { PROVIDERS } from "@/lib/providers";
 import type { Account } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 import { useApp } from "@/store/app";
@@ -13,6 +14,16 @@ import { ColorSwatches } from "./ColorSwatches";
 export function EditAccountPopover({ account, children }: { account: Account; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(account.name);
+  // Not blocking, just a heads-up: two "Personal" Claude accounts are hard to tell apart.
+  const duplicate = useApp((s) =>
+    s.accounts.some(
+      (a) =>
+        a.id !== account.id &&
+        a.provider === account.provider &&
+        a.name.trim().toLowerCase() === name.trim().toLowerCase() &&
+        name.trim() !== "",
+    ),
+  );
   const [color, setColor] = useState(account.color);
   const [saving, setSaving] = useState(false);
 
@@ -54,7 +65,14 @@ export function EditAccountPopover({ account, children }: { account: Account; ch
             onChange={(e) => setName(e.target.value)}
             autoFocus
             maxLength={40}
+            aria-describedby={duplicate ? `acc-name-dup-${account.id}` : undefined}
           />
+          {duplicate && (
+            <p id={`acc-name-dup-${account.id}`} className="mt-1.5 text-[11.5px] text-warn">
+              Another {PROVIDERS[account.provider].short} account is already called “{name.trim()}”. A distinct name
+              makes them easier to tell apart.
+            </p>
+          )}
           <Label className="mt-4">Color</Label>
           <ColorSwatches value={color} onChange={setColor} className="grid w-fit grid-cols-5" />
           <div className="mt-4 flex justify-end gap-2">

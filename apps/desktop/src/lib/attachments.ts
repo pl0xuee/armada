@@ -2,6 +2,9 @@ import type { Attachment } from "./types";
 
 export const MAX_ATTACHMENTS = 8;
 export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+/** Formats every provider accepts; SVG/TIFF/HEIC etc. are rejected with a clear message. */
+export const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+export const ACCEPTED_IMAGE_LABEL = "PNG, JPEG, GIF or WebP";
 
 export function attachmentSrc(a: Attachment): string {
   return `data:${a.mimeType};base64,${a.data}`;
@@ -35,12 +38,20 @@ export async function filesToAttachments(
       problems.push(`${file.name || "File"} isn't an image`);
       continue;
     }
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      const fmt = file.type
+        .replace("image/", "")
+        .replace(/\+xml$/, "")
+        .toUpperCase();
+      problems.push(`${file.name || "Image"} is ${fmt}: use ${ACCEPTED_IMAGE_LABEL}`);
+      continue;
+    }
     if (file.size > MAX_ATTACHMENT_BYTES) {
       problems.push(`${file.name || "Image"} is larger than 5 MB`);
       continue;
     }
     if (room <= 0) {
-      problems.push(`Only ${MAX_ATTACHMENTS} images per message`);
+      problems.push(`Only ${MAX_ATTACHMENTS} images per message; the rest weren't attached`);
       break;
     }
     try {
@@ -53,6 +64,13 @@ export async function filesToAttachments(
     }
   }
   return { attachments, problems };
+}
+
+/** True when a paste also carries text (e.g. a copied web snippet with an image). */
+export function hasText(dt: DataTransfer | null): boolean {
+  if (!dt) return false;
+  const types = Array.from(dt.types ?? []);
+  return types.includes("text/plain") || types.includes("text/html");
 }
 
 /** Image files from a paste or drop event. */

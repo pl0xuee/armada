@@ -65,6 +65,8 @@
 @layer base {
   html {
     background: var(--bg-0);
+    /* The virtualized timeline corrects its own scroll position. */
+    overflow-anchor: none;
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
@@ -125,27 +127,38 @@
 
   /* Translucent chrome (header / composer). */
   .chrome {
-    background: color-mix(in srgb, var(--bg-0) 92%, transparent);
-    -webkit-backdrop-filter: saturate(160%) blur(18px);
-    backdrop-filter: saturate(160%) blur(18px);
+    /* Opaque instead of a backdrop-filter blur: re-blurring every scrolled frame is
+       one of the most expensive things a mid-range phone GPU can be asked to do. */
+    background: var(--bg-0);
   }
 
   /* Haptic-feeling press feedback. */
+  /* Only transform/opacity animate (compositor-only); colours change instantly. */
   .press {
     transition:
       transform 160ms var(--ease-out),
-      opacity 160ms var(--ease-out),
-      background-color 160ms var(--ease-out),
-      border-color 160ms var(--ease-out);
+      opacity 160ms var(--ease-out);
   }
   .press:active:not(:disabled) {
     transform: scale(0.97);
   }
-  .press-row {
-    transition: background-color 120ms var(--ease-out);
-  }
   .press-row:active {
     background-color: color-mix(in srgb, var(--bg-3) 70%, transparent);
+  }
+
+  /* Expands a small control's tap area to at least 44×44 (needs a positioned element). */
+  .hit::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+  /* Headings focused for screen readers on navigation don't need a ring. */
+  [tabindex="-1"]:focus {
+    outline: none;
   }
 
   .px-safe {
@@ -154,10 +167,18 @@
   }
 
   .skeleton {
-    background: linear-gradient(90deg, var(--bg-2) 0%, var(--bg-3) 50%, var(--bg-2) 100%);
-    background-size: 200% 100%;
-    animation: shimmer 1.4s ease-in-out infinite;
+    position: relative;
+    overflow: hidden;
+    background: var(--bg-2);
     border-radius: 6px;
+  }
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--bg-3) 85%, transparent), transparent);
+    transform: translateX(-100%);
+    animation: shimmer 1.4s ease-in-out infinite;
   }
 
   .scroll-x {
@@ -233,6 +254,11 @@
     text-decoration: underline;
     text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
     text-underline-offset: 2px;
+  }
+  .md-host {
+    color: var(--text-2);
+    font-size: 0.85em;
+    text-decoration: none;
   }
   .md-badlink {
     color: var(--text-2);
@@ -360,11 +386,8 @@
 }
 
 @keyframes shimmer {
-  0% {
-    background-position: 100% 0;
-  }
-  100% {
-    background-position: -100% 0;
+  to {
+    transform: translateX(100%);
   }
 }
 @keyframes spin {
@@ -408,7 +431,7 @@
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateY(-10px) scale(0.98);
+    transform: translateY(10px) scale(0.98);
   }
 }
 @keyframes sheet-in {
@@ -438,10 +461,15 @@
     transition-duration: 1ms !important;
     scroll-behavior: auto !important;
   }
-  .skeleton {
+  .skeleton::after {
     animation: none;
+    display: none;
   }
   .press:active:not(:disabled) {
     transform: none;
+  }
+  /* A stopped spinner reads as "frozen": pulse its opacity instead of rotating. */
+  .animate-spin-smooth {
+    animation: breathe 1.4s ease-in-out infinite !important;
   }
 }

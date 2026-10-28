@@ -16,8 +16,10 @@ import type {
   ArmadaEvent,
   AttentionReason,
   CreateAccountRequest,
+  CommitSummary,
   CreateAgentRequest,
   CustomAgent,
+  McpServer,
   Provider,
   ProviderInfo,
   RemoteStatus,
@@ -25,24 +27,43 @@ import type {
   SearchHit,
   Settings,
   ShareLink,
+  ShipResult,
   TimelineItem,
   UpdateInfo,
 } from "./types";
 
 export const EVENT_CHANNEL = "armada://event";
 
+export interface ListItemsOptions {
+  beforeSeq?: number;
+  limit?: number;
+}
+
+/**
+ * The browser mock ships only in dev, or in builds with VITE_ARMADA_MOCK=1 (for UI review);
+ * otherwise this is statically false and the mock chunk is dropped from the bundle.
+ */
+const MOCK_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ARMADA_MOCK === "1";
+
 export const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 const tauriApi = {
   // state
   getState: () => invoke<AppState>("get_state"),
-  listItems: (agentId: string) => invoke<TimelineItem[]>("list_items", { agentId }),
+  /**
+   * Timeline items, oldest first. With `limit`, returns the newest `limit` items (tail-first);
+   * with `beforeSeq`, only items with seq < beforeSeq (page up).
+   */
+  listItems: (agentId: string, opts?: ListItemsOptions) =>
+    invoke<TimelineItem[]>("list_items", { agentId, beforeSeq: opts?.beforeSeq ?? null, limit: opts?.limit ?? null }),
   search: (query: string) => invoke<SearchHit[]>("search", { query }),
 
   // agents
   createAgent: (req: CreateAgentRequest) => invoke<Agent>("create_agent", { req }),
   sendPrompt: (agentId: string, text: string, attachments?: Attachment[]) =>
     invoke<void>("send_prompt", { agentId, text, attachments: attachments ?? [] }),
+  /** Loads an image file an agent referenced (relative to its cwd; images ≤10 MB in the agent's folders or temp dir). */
+  readImage: (agentId: string, path: string) => invoke<Attachment>("read_image", { agentId, path }),
   /** Fuzzy file search in the agent's cwd: top 50 relative paths. */
   listFiles: (agentId: string, query: string) => invoke<string[]>("list_files", { agentId, query }),
   cancelTurn: (agentId: string) => invoke<void>("cancel_turn", { agentId }),
@@ -50,10 +71,17 @@ const tauriApi = {
     invoke<void>("respond_permission", { agentId, requestId, optionId }),
   resumeAgent: (agentId: string, autoContinue: boolean) => invoke<void>("resume_agent", { agentId, autoContinue }),
   stopAgent: (agentId: string) => invoke<void>("stop_agent", { agentId }),
-  deleteAgent: (agentId: string, removeWorktree: boolean) => invoke<void>("delete_agent", { agentId, removeWorktree }),
+  /**
+   * With removeWorktree and no force, fails with "Unsaved work: …" when the worktree has
+   * uncommitted changes or unmerged commits; retry with force to discard them.
+   */
+  deleteAgent: (agentId: string, removeWorktree: boolean, force?: boolean) =>
+    invoke<void>("delete_agent", { agentId, removeWorktree, force: force ?? false }),
   renameAgent: (agentId: string, title: string) => invoke<void>("rename_agent", { agentId, title }),
   archiveAgent: (agentId: string, archived: boolean) => invoke<void>("archive_agent", { agentId, archived }),
   markRead: (agentId: string) => invoke<void>("mark_read", { agentId }),
+  /** Triage "Done": records acknowledgedAt and clears unread; new activity brings it back. */
+  acknowledgeAgent: (agentId: string) => invoke<void>("acknowledge_agent", { agentId }),
   setAgentConfig: (agentId: string, optionId: string, value: string) =>
     invoke<void>("set_agent_config", { agentId, optionId, value }),
   /** Hand the agent's work to another provider/account with an instruction. */
@@ -75,24 +103,42 @@ const tauriApi = {
   switchAccount: (agentId: string, accountId: string) => invoke<Agent>("switch_account", { agentId, accountId }),
   /** Shows a native save dialog (Markdown or JSON) and writes the transcript; returns the saved path, or null if cancelled. */
   exportAgent: (agentId: string) => invoke<string | null>("export_agent", { agentId }),
+  /** Removes a queued prompt; returns its text and images (null if it already ran). */
+  removeQueued: (agentId: string, queuedId: string) =>
+    invoke<{ text: string; attachments: Attachment[] } | null>("remove_queued", { agentId, queuedId }),
+  /** Unpauses the queue and runs its head if the agent is idle. */
+  resumeQueue: (agentId: string) => invoke<void>("resume_queue", { agentId }),
+  /** Removes every queued message; returns how many were removed. */
+  clearQueue: (agentId: string) => invoke<number>("clear_queue", { agentId }),
+  /** Interrupts the running turn and runs this queued prompt next. */
+  sendQueuedNow: (agentId: string, queuedId: string) => invoke<void>("send_queued_now", { agentId, queuedId }),
   /** Tell the backend what the user is looking at (for smart-mute). */
   setFocus: (agentId: string | null) => invoke<void>("set_focus", { agentId }),
 
   // review / git
   getDiff: (agentId: string) => invoke<AgentDiff>("get_diff", { agentId }),
-  commitAgent: (agentId: string, message: string) => invoke<string>("commit_agent", { agentId, message }),
+  commitAgent: (agentId: string, message: string) => invoke<CommitSummary>("commit_agent", { agentId, message }),
   mergeAgent: (agentId: string) => invoke<string>("merge_agent", { agentId }),
+  /**
+   * Reverse-applies a slice of the agent's diff patch: a file's whole section, or its header
+   * (from `diff --git` to the first `@@`) plus one hunk. All or nothing.
+   */
+  revertPatch: (agentId: string, patch: string) => invoke<void>("revert_patch", { agentId, patch }),
+  /** Commits anything uncommitted (message defaults to the title), then merges into the base branch. */
+  shipAgent: (agentId: string, message: string) => invoke<ShipResult>("ship_agent", { agentId, message }),
   createPr: (agentId: string, title: string, body: string) => invoke<string>("create_pr", { agentId, title, body }),
   discardWorktree: (agentId: string) => invoke<void>("discard_worktree", { agentId }),
 
   // accounts
   createAccount: (req: CreateAccountRequest) => invoke<Account>("create_account", { req }),
+  /** Replaces an API-key account's key (running agents keep the old key until they restart). */
+  updateAccountKey: (accountId: string, apiKey: string) => invoke<Account>("update_account_key", { accountId, apiKey }),
   updateAccount: (accountId: string, name: string, color: string) =>
     invoke<Account>("update_account", { accountId, name, color }),
   deleteAccount: (accountId: string) => invoke<void>("delete_account", { accountId }),
   checkAccount: (accountId: string) => invoke<Account>("check_account", { accountId }),
   /** Starts the provider's own login flow in a PTY; returns a terminal id. */
-  loginAccount: (accountId: string) => invoke<string>("login_account", { accountId }),
+  loginAccount: (accountId: string) => invoke<{ terminalId: string; reused: boolean }>("login_account", { accountId }),
 
   // providers
   detectProviders: () => invoke<ProviderInfo[]>("detect_providers"),
@@ -110,7 +156,8 @@ const tauriApi = {
   // settings & attention
   updateSettings: (settings: Settings) => invoke<Settings>("update_settings", { settings }),
   previewSound: (reason: AttentionReason) => invoke<void>("preview_sound", { reason }),
-  testNotification: () => invoke<void>("test_notification"),
+  /** Shows a test notification; also sends a phone push to `ntfyUrl` (or the saved one) when set. */
+  testNotification: (ntfyUrl?: string | null) => invoke<void>("test_notification", { ntfyUrl: ntfyUrl ?? null }),
   openPath: (path: string) => invoke<void>("open_path", { path }),
 
   // schedules
@@ -123,6 +170,12 @@ const tauriApi = {
   // custom agents
   /** Spawns the agent and runs the ACP handshake; resolves to e.g. "Gemini CLI 0.52.0 (ACP v1)". */
   testCustomAgent: (agent: CustomAgent) => invoke<string>("test_custom_agent", { agent }),
+  /** Starts the MCP server and lists its tools; resolves to e.g. "filesystem 1.2.0 · 12 tools". */
+  testMcpServer: (server: McpServer) => invoke<string>("test_mcp_server", { server }),
+  /** Git repositories under the home folder, newest first. */
+  discoverProjects: () => invoke<string[]>("discover_projects"),
+  /** True when the folder is inside a git work tree with at least one commit (~ is expanded). */
+  isGitRepo: (path: string) => invoke<boolean>("is_git_repo", { path }),
 
   // remote control / share links
   remoteStatus: () => invoke<RemoteStatus>("remote_status"),
@@ -141,7 +194,10 @@ export type ArmadaApi = typeof tauriApi;
 type AnyAsyncFn = (...args: unknown[]) => Promise<unknown>;
 
 let mockModule: Promise<typeof import("./mock")> | null = null;
-const loadMock = () => (mockModule ??= import("./mock"));
+const loadMock = (): Promise<typeof import("./mock")> =>
+  MOCK_ENABLED
+    ? (mockModule ??= import("./mock"))
+    : Promise.reject(new Error("Armada's core isn't available here. Open the Armada desktop app."));
 
 /** Same surface as `tauriApi`, each call forwarded to the lazily loaded mock backend. */
 function createMockProxy(): ArmadaApi {
@@ -155,6 +211,11 @@ function createMockProxy(): ArmadaApi {
 export const api: ArmadaApi = isTauri() ? tauriApi : createMockProxy();
 
 export function onArmadaEvent(cb: (e: ArmadaEvent) => void): Promise<UnlistenFn> {
-  if (!isTauri()) return loadMock().then((m) => m.subscribeMock(cb));
-  return listen<ArmadaEvent>(EVENT_CHANNEL, (e) => cb(e.payload));
+  // The core batches events: a payload is an array per dispatcher cycle (a single object is accepted too).
+  const deliver = (payload: ArmadaEvent | ArmadaEvent[]) => {
+    if (Array.isArray(payload)) for (const e of payload) cb(e);
+    else cb(payload);
+  };
+  if (!isTauri()) return loadMock().then((m) => m.subscribeMock(deliver));
+  return listen<ArmadaEvent | ArmadaEvent[]>(EVENT_CHANNEL, (e) => deliver(e.payload));
 }

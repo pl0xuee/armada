@@ -1,4 +1,4 @@
-import { Globe, Pencil, Plug, Plus, SquareTerminal, Trash2 } from "lucide-react";
+import { ClipboardPaste, Globe, Pencil, Plug, Plus, SquareTerminal, Trash2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/EmptyState";
@@ -16,6 +16,8 @@ import { useApp } from "@/store/app";
 import { cleanKeyValues, KeyValueEditor, validateKeyValues, type KeyValueRow } from "./KeyValueEditor";
 import { SectionHeader } from "./SettingRow";
 import { FieldError } from "./TemplatesSection";
+import { McpPasteDialog } from "./McpPasteDialog";
+import { McpTestButton, McpTestOutcome } from "./McpTestResult";
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
@@ -36,6 +38,7 @@ export function McpSection({ servers }: { servers: McpServer[] }) {
   const [editing, setEditing] = useState<McpServer | "new" | null>(null);
   const [deleting, setDeleting] = useState<McpServer | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [pasting, setPasting] = useState(false);
   const enabled = servers.filter((s) => s.enabled).length;
 
   const toggle = async (server: McpServer, on: boolean) => {
@@ -66,9 +69,14 @@ export function McpSection({ servers }: { servers: McpServer[] }) {
         title="Tools (MCP)"
         description="Servers here are available to every agent, on every provider. Changes apply to agents started (or resumed) afterwards."
         right={
-          <Button variant="secondary" onClick={() => setEditing("new")} className="shrink-0">
-            <Plus /> Add server
-          </Button>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button variant="ghost" onClick={() => setPasting(true)}>
+              <ClipboardPaste /> Paste config
+            </Button>
+            <Button variant="secondary" onClick={() => setEditing("new")}>
+              <Plus /> Add server
+            </Button>
+          </div>
         }
       />
 
@@ -79,9 +87,14 @@ export function McpSection({ servers }: { servers: McpServer[] }) {
             title="No MCP servers"
             description="Connect databases, issue trackers and internal tools once, and every agent can use them, whichever provider it runs on."
             action={
-              <Button variant="primary" onClick={() => setEditing("new")}>
-                <Plus /> Add a server
-              </Button>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button variant="primary" onClick={() => setEditing("new")}>
+                  <Plus /> Add a server
+                </Button>
+                <Button variant="secondary" onClick={() => setPasting(true)}>
+                  <ClipboardPaste /> Paste config
+                </Button>
+              </div>
             }
           />
         </div>
@@ -108,6 +121,8 @@ export function McpSection({ servers }: { servers: McpServer[] }) {
           </ul>
         </>
       )}
+
+      <McpPasteDialog open={pasting} onOpenChange={setPasting} existing={servers} />
 
       <McpDialog
         key={editing === null ? "closed" : editing === "new" ? "new" : editing.id}
@@ -147,82 +162,82 @@ function ServerRow({
   const secrets = stdio ? server.env.length : server.headers.length;
   const shownArgs = server.args.slice(0, 4);
   return (
-    <li className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-raised/40">
-      <span
-        className={cn(
-          "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line-strong bg-raised transition-colors",
-          server.enabled ? "text-accent" : "text-steel",
-        )}
-      >
-        <Icon className="h-4 w-4" />
-      </span>
-      <button
-        type="button"
-        onClick={onEdit}
-        className="min-w-0 flex-1 rounded-md text-left"
-        aria-label={`Edit ${server.name}`}
-      >
-        <span className="flex items-center gap-2">
-          <span className={cn("truncate text-[13px] font-medium", server.enabled ? "text-fg" : "text-muted")}>
-            {server.name}
-          </span>
-          <Badge tone={stdio ? "neutral" : "accent"}>{stdio ? "stdio" : "HTTP"}</Badge>
-        </span>
-        <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted">
-          {stdio ? (
-            <>
-              <span className="shrink-0 font-mono text-fg/85">{server.command}</span>
-              {shownArgs.map((a, i) => (
-                <span
-                  key={i}
-                  className="min-w-0 max-w-[180px] truncate rounded border border-line bg-base/50 px-1 font-mono text-[10.5px] text-muted"
-                >
-                  {a}
-                </span>
-              ))}
-              {server.args.length > shownArgs.length && (
-                <span className="shrink-0 text-[10.5px] text-steel">+{server.args.length - shownArgs.length}</span>
-              )}
-            </>
-          ) : (
-            <span className="truncate font-mono">{server.url}</span>
+    <li className="group px-4 py-3 transition-colors hover:bg-raised/40">
+      <div className="flex items-center gap-3">
+        <span
+          className={cn(
+            "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line-strong bg-raised transition-colors",
+            server.enabled ? "text-accent" : "text-steel",
           )}
-          {secrets > 0 && (
-            <span className="shrink-0 text-steel">
-              · {secrets} {stdio ? (secrets === 1 ? "env var" : "env vars") : secrets === 1 ? "header" : "headers"}
+        >
+          <Icon className="h-4 w-4" />
+        </span>
+        <button
+          type="button"
+          onClick={onEdit}
+          className="min-w-0 flex-1 rounded-md text-left"
+          aria-label={`Edit ${server.name}`}
+        >
+          <span className="flex items-center gap-2">
+            <span className={cn("truncate text-[13px] font-medium", server.enabled ? "text-fg" : "text-muted")}>
+              {server.name}
             </span>
+            <Badge tone={stdio ? "neutral" : "accent"}>{stdio ? "stdio" : "HTTP"}</Badge>
+          </span>
+          <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted">
+            {stdio ? (
+              <>
+                <span className="shrink-0 font-mono text-fg/85">{server.command}</span>
+                {shownArgs.map((a, i) => (
+                  <span
+                    key={i}
+                    className="min-w-0 max-w-[180px] truncate rounded border border-line bg-base/50 px-1 font-mono text-[10.5px] text-muted"
+                  >
+                    {a}
+                  </span>
+                ))}
+                {server.args.length > shownArgs.length && (
+                  <span className="shrink-0 text-[10.5px] text-steel">+{server.args.length - shownArgs.length}</span>
+                )}
+              </>
+            ) : (
+              <span className="truncate font-mono">{server.url}</span>
+            )}
+            {secrets > 0 && (
+              <span className="shrink-0 text-steel">
+                · {secrets} {stdio ? (secrets === 1 ? "env var" : "env vars") : secrets === 1 ? "header" : "headers"}
+              </span>
+            )}
+          </span>
+        </button>
+        <McpTestButton testKey={server.id} server={server} className="shrink-0 max-sm:px-2" />
+        <div className="flex shrink-0 items-center gap-0.5 opacity-70 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+          <Tooltip content="Edit">
+            <Button size="icon-sm" variant="ghost" aria-label={`Edit ${server.name}`} onClick={onEdit}>
+              <Pencil className="!h-3.5 !w-3.5" />
+            </Button>
+          </Tooltip>
+          <Tooltip content="Remove">
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Remove ${server.name}`}
+              onClick={onDelete}
+              className="hover:text-err"
+            >
+              <Trash2 className="!h-3.5 !w-3.5" />
+            </Button>
+          </Tooltip>
+        </div>
+        <span className="flex w-[34px] shrink-0 justify-end">
+          {busy ? (
+            <Spinner className="h-3.5 w-3.5" />
+          ) : (
+            <Switch checked={server.enabled} onCheckedChange={onToggle} aria-label={`${server.name} enabled`} />
           )}
         </span>
-      </button>
-      <div className="flex shrink-0 items-center gap-0.5 opacity-70 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-        <Tooltip content="Edit">
-          <Button size="icon-sm" variant="ghost" aria-label={`Edit ${server.name}`} onClick={onEdit}>
-            <Pencil className="!h-3.5 !w-3.5" />
-          </Button>
-        </Tooltip>
-        <Tooltip content="Remove">
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label={`Remove ${server.name}`}
-            onClick={onDelete}
-            className="hover:text-err"
-          >
-            <Trash2 className="!h-3.5 !w-3.5" />
-          </Button>
-        </Tooltip>
       </div>
-      <span className="flex w-[34px] shrink-0 justify-end">
-        {busy ? (
-          <Spinner className="h-3.5 w-3.5" />
-        ) : (
-          <Switch
-            checked={server.enabled}
-            onCheckedChange={onToggle}
-            aria-label={`${server.enabled ? "Disable" : "Enable"} ${server.name}`}
-          />
-        )}
-      </span>
+      <McpTestOutcome testKey={server.id} server={server} className="ml-11 mt-2" />
     </li>
   );
 }
@@ -300,21 +315,32 @@ function McpDialog({
     .filter(Boolean);
   const commandHasSpaces = stdio && /\s/.test(command.trim()) && argList.length === 0;
 
+  const [draftId] = useState(() => initial?.id ?? uuid());
+  const draft: McpServer = {
+    id: draftId,
+    name: name.trim(),
+    enabled: initial?.enabled ?? true,
+    transport,
+    command: stdio ? command.trim() : "",
+    args: stdio ? argList : [],
+    env: stdio ? cleanKeyValues(env) : [],
+    url: stdio ? "" : url.trim(),
+    headers: stdio ? [] : cleanKeyValues(headers),
+  };
+  const testable = stdio ? !errors.command && !kvInvalid : !errors.url && !kvInvalid;
+
   const submit = async () => {
     setAttempted(true);
-    if (!valid || saving) return;
+    if (!valid) {
+      // The button stays enabled so a click explains itself: reveal errors and focus the first one.
+      requestAnimationFrame(() =>
+        document.querySelector<HTMLElement>('[role="dialog"] [aria-invalid="true"]')?.focus(),
+      );
+      return;
+    }
+    if (saving) return;
     setSaving(true);
-    const server: McpServer = {
-      id: initial?.id ?? uuid(),
-      name: name.trim(),
-      enabled: initial?.enabled ?? true,
-      transport,
-      command: stdio ? command.trim() : "",
-      args: stdio ? argList : [],
-      env: stdio ? cleanKeyValues(env) : [],
-      url: stdio ? "" : url.trim(),
-      headers: stdio ? [] : cleanKeyValues(headers),
-    };
+    const server = draft;
     const list = initial ? servers.map((s) => (s.id === initial.id ? server : s)) : [...servers, server];
     const ok = await saveServers(list, initial ? `Couldn't save ${server.name}` : `Couldn't add ${server.name}`);
     setSaving(false);
@@ -476,12 +502,22 @@ function McpDialog({
                 </div>
               </>
             )}
+            <div className="rounded-xl border border-line bg-card/60 p-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] font-medium">Connection test</p>
+                  <p className="text-[12px] text-steel">Starts the server, lists its tools, then stops it.</p>
+                </div>
+                <McpTestButton testKey={draftId} server={draft} label="Test connection" disabled={!testable} />
+              </div>
+              <McpTestOutcome testKey={draftId} server={draft} className="mt-2.5" />
+            </div>
           </DialogBody>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary" disabled={!valid || saving}>
+            <Button type="submit" variant="primary" disabled={saving}>
               {saving && <Spinner className="h-3.5 w-3.5 text-current" />}
               {initial ? "Save changes" : "Add server"}
             </Button>

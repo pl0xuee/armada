@@ -1,4 +1,4 @@
-import { Minus, Search, Square, Users, X } from "lucide-react";
+import { Minus, RotateCw, Search, Square, Unplug, Users, X } from "lucide-react";
 import { PROVIDERS } from "@/lib/providers";
 import type { Account } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -8,8 +8,12 @@ import { modKey } from "@/lib/utils";
 import { windowAction } from "@/lib/window";
 import { AccountAvatar } from "./AccountAvatar";
 import { AppMark } from "./AppMark";
+import { Button } from "./ui/button";
 import { Kbd } from "./ui/kbd";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { COMPACT_TITLEBAR_QUERY } from "@/lib/layout";
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Tooltip } from "./ui/tooltip";
 import { UsageMeters } from "./UsageMeter";
 import { UpdatePill } from "./UpdatePill";
 
@@ -18,6 +22,7 @@ const VIEW_LABEL: Record<View, string> = {
   mission: "Mission Control",
   inbox: "Inbox",
   compare: "Compare",
+  triage: "Needs you",
   schedules: "Schedules",
   usage: "Usage",
   accounts: "Accounts",
@@ -30,54 +35,94 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
   const view = useUi((s) => s.view);
   const setPaletteOpen = useUi((s) => s.setPaletteOpen);
   const mac = platform === "macos";
+  const compact = useMediaQuery(COMPACT_TITLEBAR_QUERY);
+  const connectionLost = useApp((s) => s.connectionLost);
 
   return (
-    <header
-      data-tauri-drag-region
-      className="texture relative z-30 flex h-10 shrink-0 items-center border-b border-line bg-panel edge"
-      style={{ paddingLeft: mac ? 78 : 12 }}
+    <>
+      <header
+        data-tauri-drag-region
+        className="texture relative z-30 flex h-10 shrink-0 items-center border-b border-line bg-panel edge"
+        style={{ paddingLeft: mac ? 78 : 12 }}
+      >
+        <div
+          data-tauri-drag-region
+          className={cn("flex min-w-0 shrink items-center gap-2", compact ? "w-auto" : "w-[200px]")}
+        >
+          <AppMark size={18} />
+          <span data-tauri-drag-region className="text-[13px] font-semibold tracking-[-0.01em] text-fg">
+            Armada
+          </span>
+          {!minimal && (
+            <>
+              <span data-tauri-drag-region className="text-line-strong max-[599px]:hidden">
+                /
+              </span>
+              <span data-tauri-drag-region className="truncate text-[12.5px] text-muted max-[599px]:hidden">
+                {VIEW_LABEL[view]}
+              </span>
+            </>
+          )}
+        </div>
+
+        <div data-tauri-drag-region className="flex min-w-0 flex-1 justify-center px-4">
+          {!minimal && compact ? (
+            <Tooltip content="Search and commands" shortcut={[modKey, "K"]} side="bottom">
+              <button
+                type="button"
+                onClick={() => setPaletteOpen(true)}
+                aria-label="Open command palette"
+                className="flex h-7 w-7 items-center justify-center rounded-lg border border-line bg-base/60 text-steel transition-colors hover:border-line-strong hover:text-fg"
+              >
+                <Search className="h-3.5 w-3.5" />
+              </button>
+            </Tooltip>
+          ) : (
+            !minimal && (
+              <button
+                type="button"
+                onClick={() => setPaletteOpen(true)}
+                className="group flex h-[26px] w-full min-w-0 max-w-[380px] items-center gap-2 rounded-lg border border-line bg-base/60 px-2.5 text-[12.5px] text-steel transition-colors hover:border-line-strong hover:bg-base hover:text-muted"
+                aria-label="Open command palette"
+              >
+                <Search className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">Search agents, actions, history…</span>
+                <span className="ml-auto flex shrink-0 gap-0.5">
+                  <Kbd>{modKey}</Kbd>
+                  <Kbd>K</Kbd>
+                </span>
+              </button>
+            )
+          )}
+        </div>
+
+        <div data-tauri-drag-region className="flex h-full shrink-0 items-center gap-3">
+          {!minimal && <UpdatePill />}
+          {!minimal && accounts.length > 0 && <AccountSwitcher accounts={accounts} stacked={compact} />}
+          {!mac && <WindowControls />}
+        </div>
+      </header>
+      {connectionLost !== null && <ConnectionLostBanner error={connectionLost} />}
+    </>
+  );
+}
+
+/** Persistent: without the event stream every view silently goes stale. */
+function ConnectionLostBanner({ error }: { error: string }) {
+  return (
+    <div
+      role="alert"
+      className="relative z-20 flex shrink-0 items-center gap-2.5 border-b border-err/30 bg-err/[0.08] px-3 py-1.5 text-[12.5px]"
     >
-      <div data-tauri-drag-region className="flex w-[200px] min-w-0 shrink items-center gap-2">
-        <AppMark size={18} />
-        <span data-tauri-drag-region className="text-[13px] font-semibold tracking-[-0.01em] text-fg">
-          Armada
-        </span>
-        {!minimal && (
-          <>
-            <span data-tauri-drag-region className="text-line-strong">
-              /
-            </span>
-            <span data-tauri-drag-region className="truncate text-[12.5px] text-muted">
-              {VIEW_LABEL[view]}
-            </span>
-          </>
-        )}
-      </div>
-
-      <div data-tauri-drag-region className="flex min-w-0 flex-1 justify-center px-4">
-        {!minimal && (
-          <button
-            type="button"
-            onClick={() => setPaletteOpen(true)}
-            className="group flex h-[26px] w-full min-w-0 max-w-[380px] items-center gap-2 rounded-lg border border-line bg-base/60 px-2.5 text-[12.5px] text-steel transition-colors hover:border-line-strong hover:bg-base hover:text-muted"
-            aria-label="Open command palette"
-          >
-            <Search className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">Search agents, actions, history…</span>
-            <span className="ml-auto flex shrink-0 gap-0.5">
-              <Kbd>{modKey}</Kbd>
-              <Kbd>K</Kbd>
-            </span>
-          </button>
-        )}
-      </div>
-
-      <div data-tauri-drag-region className="flex h-full shrink-0 items-center gap-3">
-        {!minimal && <UpdatePill />}
-        {!minimal && accounts.length > 0 && <AccountSwitcher accounts={accounts} />}
-        {!mac && <WindowControls />}
-      </div>
-    </header>
+      <Unplug className="h-3.5 w-3.5 shrink-0 text-err" />
+      <span className="font-medium text-err">Lost connection to Armada core</span>
+      <span className="min-w-0 flex-1 truncate text-muted" title={error}>
+        Live updates are paused. {error}
+      </span>
+      <Button size="xs" variant="secondary" onClick={() => window.location.reload()}>
+        <RotateCw className="!h-3 !w-3" /> Reload
+      </Button>
+    </div>
   );
 }
 
@@ -104,7 +149,7 @@ function WindowControls() {
   );
 }
 
-function AccountSwitcher({ accounts }: { accounts: Account[] }) {
+function AccountSwitcher({ accounts, stacked }: { accounts: Account[]; stacked: boolean }) {
   const setView = useUi((s) => s.setView);
   const signedIn = accounts.filter((a) => a.status?.loggedIn).length;
   return (
@@ -115,12 +160,17 @@ function AccountSwitcher({ accounts }: { accounts: Account[] }) {
           className="flex items-center rounded-full pl-1 transition-transform active:scale-[0.97]"
           aria-label={`Accounts: ${signedIn} of ${accounts.length} signed in`}
         >
-          {accounts.slice(0, 5).map((a, i) => (
+          {(stacked ? accounts.slice(0, 1) : accounts.slice(0, 5)).map((a, i) => (
             <span key={a.id} className="-ml-1 first:ml-0" style={{ zIndex: 10 - i }}>
               <AccountAvatar account={a} size={22} showProvider={false} compact />
             </span>
           ))}
-          {accounts.length > 5 && (
+          {stacked && accounts.length > 1 && (
+            <span className="relative z-20 -ml-1 flex h-[22px] min-w-[22px] items-center justify-center rounded-full border border-line-strong bg-raised px-1.5 text-[10px] font-medium text-muted tabular ring-2 ring-panel">
+              +{accounts.length - 1}
+            </span>
+          )}
+          {!stacked && accounts.length > 5 && (
             <span className="-ml-1 flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-raised px-1 text-[10px] text-muted ring-2 ring-panel">
               +{accounts.length - 5}
             </span>
@@ -145,6 +195,7 @@ function AccountSwitcher({ accounts }: { accounts: Account[] }) {
                   </div>
                   <div className={cn("truncate text-[11px]", a.status?.loggedIn ? "text-steel" : "text-warn")}>
                     {a.status?.loggedIn ? (a.status.label ?? "Signed in") : "Not signed in"}
+                    {a.authKind === "api_key" && a.status?.loggedIn && " · billed per token"}
                   </div>
                 </div>
                 <span

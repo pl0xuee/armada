@@ -2,17 +2,19 @@ import { CalendarClock, Plus, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/EmptyState";
-import { PageHeader } from "@/components/PageHeader";
+import { HeaderAction, PageHeader } from "@/components/PageHeader";
 import { blankSchedule, ScheduleDialog } from "@/components/schedules/ScheduleDialog";
 import { ScheduleRow } from "@/components/schedules/ScheduleRow";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
+import { onScheduleEvent } from "@/lib/scheduleEvents";
 import { nextRun, sortSchedules, untilLabel } from "@/lib/schedules";
 import type { Schedule } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
-import { useNow } from "@/hooks/useNow";
+import { useFreshNow } from "@/components/schedules/useFreshNow";
+import { useShallow } from "zustand/react/shallow";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 
@@ -25,9 +27,24 @@ export function SchedulesView() {
   const [running, setRunning] = useState<Record<string, boolean>>({});
   const [toggling, setToggling] = useState<Record<string, boolean>>({});
   const accounts = useApp((s) => s.accounts);
-  const agents = useApp((s) => s.agents);
+  // Only the agents schedules link to, compared shallowly (status changes still update the row).
+  const lastIds = useMemo(() => (schedules ?? []).map((s) => s.lastAgentId), [schedules]);
+  const lastAgents = useApp(useShallow((s) => lastIds.map((id) => (id ? s.agents[id] : undefined))));
   const openAgent = useUi((s) => s.openAgent);
-  const now = useNow();
+  const now = useFreshNow();
+  const prefill = useUi((s) => s.schedulePrefill);
+
+  // "Schedule this" from an agent: open the editor prefilled, once.
+  useEffect(() => {
+    if (!prefill) return;
+    const base = blankSchedule();
+    const provider = prefill.provider ?? base.provider;
+    const accountId =
+      prefill.accountId ??
+      (provider === base.provider ? base.accountId : (accounts.find((a) => a.provider === provider)?.id ?? ""));
+    setEditing({ ...base, ...prefill, provider, accountId, id: "", updatedAt: Date.now() });
+    useUi.getState().clearSchedulePrefill();
+  }, [prefill, accounts]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -52,6 +69,16 @@ export function SchedulesView() {
       return next;
     });
   }, []);
+
+  // Live updates (saves, runs starting, the run's agent being recorded, deletions).
+  useEffect(
+    () =>
+      onScheduleEvent((e) => {
+        if (e.type === "updated") upsert(e.schedule);
+        else setSchedules((list) => list?.filter((x) => x.id !== e.scheduleId) ?? null);
+      }),
+    [upsert],
+  );
 
   const sorted = useMemo(() => (schedules ? sortSchedules(schedules, new Date(now)) : []), [schedules, now]);
   const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
@@ -79,11 +106,6 @@ export function SchedulesView() {
         description: agent.title,
         action: { label: "Open", onClick: () => openAgent(agent.id) },
       });
-      // Pick up whatever the backend recorded about the run.
-      api
-        .listSchedules()
-        .then(setSchedules)
-        .catch(() => {});
     } catch (e) {
       toast.error(`Couldn't run “${s.name}”`, { description: errorMessage(e) });
     } finally {
@@ -117,20 +139,23 @@ export function SchedulesView() {
       : "Start agents automatically on a timetable.";
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="@container flex h-full flex-col">
       <PageHeader
         icon={<CalendarClock />}
         title="Schedules"
         subtitle={subtitle}
         right={
-          <Button variant="primary" onClick={() => setEditing(blankSchedule())}>
-            <Plus /> New schedule
-          </Button>
+          <HeaderAction
+            variant="primary"
+            icon={<Plus />}
+            label="New schedule"
+            onClick={() => setEditing(blankSchedule())}
+          />
         }
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1040px] px-6 pb-16 pt-6">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-[1040px] flex-1 flex-col px-4 pb-10 pt-4 @2xl:px-6 @2xl:pb-16 @2xl:pt-6">
           {loadError ? (
             <div
               role="alert"
@@ -158,7 +183,7 @@ export function SchedulesView() {
             </ul>
           ) : sorted.length === 0 ? (
             <EmptyState
-              className="py-20"
+              className="my-auto py-12"
               icon={<CalendarClock />}
               title="No schedules yet"
               description="Have an agent audit dependencies every night, triage issues each morning, or draft a weekly changelog. It starts on its own and pings you when it's done."
@@ -175,7 +200,7 @@ export function SchedulesView() {
                   key={s.id}
                   schedule={s}
                   account={accountMap.get(s.accountId)}
-                  lastAgent={s.lastAgentId ? agents[s.lastAgentId] : undefined}
+                  lastAgent={s.lastAgentId ? lastAgents[lastIds.indexOf(s.lastAgentId)] : undefined}
                   now={now}
                   running={running[s.id] ?? false}
                   toggling={toggling[s.id] ?? false}

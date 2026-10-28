@@ -3,7 +3,7 @@ import { respondToPermission } from "@/lib/controller";
 import { cn } from "@/lib/cn";
 import { relativeTime } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
-import { isAllow, primaryAllow, primaryReject, RESOLVED_LABEL } from "@/lib/meta";
+import { confirmOption, isAllow, primaryAllow, primaryReject, RESOLVED_LABEL } from "@/lib/meta";
 import { useStore } from "@/lib/store";
 import type { PermissionItem, PermissionOption } from "@/lib/types";
 import { Icon, Spinner } from "../Icon";
@@ -76,7 +76,9 @@ export function PermissionButtons({
   showRest?: boolean;
 }) {
   const { allow, reject, rest } = orderOptions(item);
-  const respond = (o: PermissionOption) => void respondToPermission(agentId, item.requestId, o.id);
+  const respond = async (o: PermissionOption) => {
+    if (await confirmOption(o)) void respondToPermission(agentId, item.requestId, o.id);
+  };
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-2 gap-2">

@@ -4,8 +4,9 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { relativeTimeLong } from "@/lib/format";
 import type { Agent, RemoteStatus, ShareLink } from "@/lib/types";
-import { errorMessage } from "@/lib/utils";
+import { cn, errorMessage } from "@/lib/utils";
 import { useApp } from "@/store/app";
+import { pollRemoteStatus } from "./settings/remoteStatus";
 import { useUi } from "@/store/ui";
 import { CopyButton } from "./CopyButton";
 import { Button } from "./ui/button";
@@ -34,6 +35,8 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   const [status, setStatus] = useState<RemoteStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | "enable" | "create" | string>(null);
+  /** Consent step: where the shared view may be opened from (defaults to this computer only). */
+  const [scope, setScope] = useState<"local" | "lan">("local");
   const autoCreated = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -51,13 +54,16 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
 
   const links = status?.shares.filter((s) => s.agentId === agent.id) ?? [];
 
+  const [createError, setCreateError] = useState<string | null>(null);
+
   const create = useCallback(async () => {
     setBusy("create");
+    setCreateError(null);
     try {
       await api.createShareLink(agent.id);
       await refresh();
     } catch (e) {
-      toast.error("Couldn't create a share link", { description: errorMessage(e) });
+      setCreateError(errorMessage(e));
     } finally {
       setBusy(null);
     }
@@ -75,8 +81,12 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
     if (!settings) return;
     setBusy("enable");
     try {
-      await useApp.getState().setSettings({ ...settings, remote: { ...settings.remote, enabled: true, lan: true } });
-      await refresh();
+      await useApp
+        .getState()
+        .setSettings({ ...settings, remote: { ...settings.remote, enabled: true, lan: scope === "lan" } });
+      // The server starts asynchronously: wait for it so we don't flash an error or a stale "off".
+      await pollRemoteStatus((st) => setStatus(st));
+      setLoadError(null);
     } catch (e) {
       toast.error("Couldn't turn on remote access", { description: errorMessage(e) });
     } finally {
@@ -110,17 +120,32 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
             <Skeleton className="h-10 w-full rounded-lg" />
           </div>
         ) : !status.enabled ? (
-          <div className="rounded-xl border border-line-strong bg-card/70 p-4">
+          <fieldset className="rounded-xl border border-line-strong bg-card/70 p-4">
+            <legend className="sr-only">Turn on remote access</legend>
             <div className="flex items-start gap-3">
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-accent/30 bg-accent/10 text-accent">
                 <Radio className="h-4 w-4" />
               </span>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-medium">Remote access is off</p>
                 <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted">
-                  Share links are served by Armada's built-in remote server. Turn it on for devices on your network to
-                  open the link.
+                  Share links are served by Armada's built-in remote server. Choose who can reach it:
                 </p>
+                <div role="radiogroup" aria-label="Who can open the link" className="mt-3 space-y-2">
+                  <ScopeOption
+                    checked={scope === "local"}
+                    onSelect={() => setScope("local")}
+                    title="This computer only"
+                    hint="Open the link in a browser on this machine. Nothing is exposed to the network."
+                  />
+                  <ScopeOption
+                    checked={scope === "lan"}
+                    onSelect={() => setScope("lan")}
+                    title="Allow devices on my network"
+                    hint="Phones and computers on this network can open share links, and anyone with the pairing link gets full control. Traffic isn't encrypted: only on networks you trust, or over a VPN such as Tailscale."
+                    warn
+                  />
+                </div>
                 <Button
                   size="sm"
                   variant="primary"
@@ -129,11 +154,11 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
                   onClick={() => void enable()}
                 >
                   {busy === "enable" ? <Spinner className="h-3.5 w-3.5 text-current" /> : <Radio />}
-                  Turn on remote access (LAN)
+                  {scope === "lan" ? "Turn on for my network" : "Turn on for this computer"}
                 </Button>
               </div>
             </div>
-          </div>
+          </fieldset>
         ) : !status.running ? (
           <div className="flex items-start gap-2.5 rounded-xl border border-err/30 bg-err/[0.06] p-3.5 text-[12.5px]">
             <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-err" />
@@ -155,11 +180,33 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
           </div>
         ) : (
           <div className="space-y-2">
-            {links.length === 0 && (
-              <div className="flex items-center gap-2 text-[12.5px] text-muted">
-                <Spinner className="h-3.5 w-3.5" /> Creating link…
-              </div>
-            )}
+            {links.length === 0 &&
+              (busy === "create" ? (
+                <div className="flex items-center gap-2 text-[12.5px] text-muted" role="status">
+                  <Spinner className="h-3.5 w-3.5" /> Creating link…
+                </div>
+              ) : createError ? (
+                <div
+                  className="flex items-start gap-2.5 rounded-xl border border-err/30 bg-err/[0.06] p-3 text-[12.5px]"
+                  role="alert"
+                >
+                  <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-err" />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-err">Couldn't create a share link</p>
+                    <p className="mt-0.5 break-words text-muted">{createError}</p>
+                  </div>
+                  <Button size="xs" variant="secondary" className="shrink-0" onClick={() => void create()}>
+                    Retry
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed border-line-strong px-3.5 py-3">
+                  <span className="text-[12.5px] text-muted">No active link for this agent.</span>
+                  <Button size="sm" variant="primary" disabled={busy !== null} onClick={() => void create()}>
+                    <Link2 /> Create link
+                  </Button>
+                </div>
+              ))}
             {links.map((l) => (
               <div key={l.token} className="rounded-xl border border-line-strong bg-card/70 p-3">
                 <div className="flex items-center gap-2">
@@ -178,6 +225,11 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
                 </div>
               </div>
             ))}
+            {links.length > 0 && createError && (
+              <p className="text-[12px] text-err" role="alert">
+                Couldn't create another link: {createError}
+              </p>
+            )}
             {links.length > 0 && (
               <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => void create()}>
                 {busy === "create" ? <Spinner className="h-3.5 w-3.5" /> : <Link2 />}
@@ -198,5 +250,47 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         </Button>
       </DialogFooter>
     </>
+  );
+}
+
+function ScopeOption({
+  checked,
+  onSelect,
+  title,
+  hint,
+  warn,
+}: {
+  checked: boolean;
+  onSelect: () => void;
+  title: string;
+  hint: string;
+  warn?: boolean;
+}) {
+  return (
+    <label
+      className={cn(
+        "flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 transition-colors",
+        checked
+          ? warn
+            ? "border-warn/45 bg-warn/[0.06]"
+            : "border-accent/45 bg-accent/[0.06]"
+          : "border-line hover:border-line-strong",
+      )}
+    >
+      <input type="radio" name="share-scope" checked={checked} onChange={onSelect} className="peer sr-only" />
+      <span
+        aria-hidden
+        className={cn(
+          "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border peer-focus-visible:ring-2 peer-focus-visible:ring-accent/60",
+          checked ? (warn ? "border-warn" : "border-accent") : "border-line-strong",
+        )}
+      >
+        {checked && <span className={cn("h-2 w-2 rounded-full", warn ? "bg-warn" : "bg-accent")} />}
+      </span>
+      <span className="min-w-0">
+        <span className="block text-[12.5px] font-medium text-fg">{title}</span>
+        <span className="block text-[11.5px] leading-snug text-muted">{hint}</span>
+      </span>
+    </label>
   );
 }

@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { Agent, AttentionReason, RemoteAccount, RemoteCustomAgent, Session, TimelineItem } from "./types";
+import type { Agent, Attachment, AttentionReason, PermissionItem, PermissionMode, PromptTemplate, RemoteAccount, RemoteCustomAgent, Session, TimelineItem } from "./types";
 
 export type Phase =
   /** Checking the stored token. */
@@ -13,9 +13,11 @@ export type Phase =
 
 export type UnpairedReason = null | "revoked" | "invalid_link";
 
-export type BlockedReason = "unreachable" | "rate_limited" | "error";
+/** "unavailable" = the server answered 503 (remote access off): retried automatically. */
+export type BlockedReason = "unreachable" | "unavailable" | "misdirected" | "rate_limited" | "error";
 
-export type Connection = "connecting" | "live" | "reconnecting" | "offline";
+/** "limited" = the event stream was refused (e.g. too many connections): we poll instead. */
+export type Connection = "connecting" | "live" | "reconnecting" | "offline" | "limited";
 
 export interface Timeline {
   status: "loading" | "ready" | "error";
@@ -23,6 +25,10 @@ export interface Timeline {
   error: string | null;
   /** Possibly out of date (missed events); refetched next time it's opened. */
   stale: boolean;
+  /** Older items exist on the server (only the tail is loaded). */
+  hasMore?: boolean;
+  /** Loading an older page. */
+  loadingOlder?: boolean;
 }
 
 /** A prompt the user sent that the server hasn't echoed back yet. */
@@ -31,6 +37,13 @@ export interface PendingPrompt {
   text: string;
   ts: number;
   failed: boolean;
+  /** The server accepted it; waiting for it to show up in the timeline or the queue. */
+  sent: boolean;
+  attachments: Attachment[];
+  /** Idempotency-Key: a retry reuses it, so the server never runs the prompt twice. */
+  key: string;
+  /** Upload progress 0..1 while photos are being sent, else null. */
+  progress: number | null;
   /** Last timeline seq when sent; the server's echo must be newer. */
   afterSeq: number;
 }
@@ -46,6 +59,16 @@ export interface Toast {
   reason: AttentionReason | null;
   /** ms; 0 = sticky until dismissed. */
   duration: number;
+  /** Optional button, e.g. Undo. */
+  action?: { label: string; run: () => void };
+}
+
+export interface ConfirmRequest {
+  title: string;
+  body?: string;
+  confirmLabel: string;
+  destructive?: boolean;
+  resolve: (ok: boolean) => void;
 }
 
 export interface State {
@@ -54,15 +77,28 @@ export interface State {
   blockedReason: BlockedReason | null;
   blockedMessage: string | null;
   session: Session | null;
+  /** A read-only share link is shown on top of this device's own pairing (tab-only). */
+  sharedView: boolean;
 
   stateStatus: "idle" | "loading" | "ready" | "error";
   stateError: string | null;
   agents: Record<string, Agent>;
   accounts: Record<string, RemoteAccount>;
   customAgents: Record<string, RemoteCustomAgent>;
+  /** For starting agents (owner only): recent folders, templates, worktree default. */
+  projects: string[];
+  templates: PromptTemplate[];
+  defaultWorktree: boolean;
+  /** null = the server doesn't support choosing it. */
+  defaultPermissionMode: PermissionMode | null;
   timelines: Record<string, Timeline>;
 
   connection: Connection;
+  /** Server's explanation when the stream is refused (shown in the banner). */
+  connectionNote: string | null;
+  /** Pending approvals across agents (GET /api/permissions), by requestId. */
+  permissions: Record<string, PermissionItem>;
+  permissionsStatus: "idle" | "loading" | "ready" | "error";
   /** When the connection last left the `live` state (for debouncing the banner). */
   disconnectedAt: number | null;
 
@@ -72,6 +108,8 @@ export interface State {
   /** In-flight actions keyed `cancel:<id>` / `resume:<id>`. */
   busy: Record<string, true>;
   toasts: Toast[];
+  /** The confirmation dialog being shown, if any. */
+  confirm: ConfirmRequest | null;
 }
 
 export const initialState: State = {
@@ -80,18 +118,27 @@ export const initialState: State = {
   blockedReason: null,
   blockedMessage: null,
   session: null,
+  sharedView: false,
   stateStatus: "idle",
   stateError: null,
   agents: {},
   accounts: {},
   customAgents: {},
+  projects: [],
+  templates: [],
+  defaultWorktree: false,
+  defaultPermissionMode: null,
   timelines: {},
   connection: "connecting",
+  connectionNote: null,
+  permissions: {},
+  permissionsStatus: "idle",
   disconnectedAt: null,
   resolving: {},
   pendingPrompts: {},
   busy: {},
   toasts: [],
+  confirm: null,
 };
 
 type Listener = () => void;
@@ -123,48 +170,4 @@ export function useStore<T>(selector: (s: State) => T): T {
     () => selector(state),
     () => selector(state),
   );
-}
-
-// ---------------------------------------------------------------------------
-// Pure helpers for timeline updates.
-
-/** Insert or replace an item, keeping the list ordered by `seq`. */
-export function upsertItem(items: TimelineItem[], item: TimelineItem): TimelineItem[] {
-  const idx = items.findIndex((i) => i.id === item.id);
-  if (idx >= 0) {
-    if (items[idx] === item) return items;
-    const next = items.slice();
-    next[idx] = item;
-    return next;
-  }
-  const next = items.slice();
-  let at = next.length;
-  while (at > 0 && next[at - 1].seq > item.seq) at--;
-  next.splice(at, 0, item);
-  return next;
-}
-
-export function applyDelta(
-  items: TimelineItem[],
-  itemId: string,
-  field: "text" | "output",
-  delta: string,
-): TimelineItem[] {
-  const idx = items.findIndex((i) => i.id === itemId);
-  if (idx < 0) return items;
-  const it = items[idx];
-  let updated: TimelineItem | null = null;
-  if (field === "output" && it.kind === "tool_call") {
-    updated = { ...it, output: it.output + delta };
-  } else if (field === "text" && (it.kind === "agent_message" || it.kind === "thought" || it.kind === "user_message")) {
-    updated = { ...it, text: it.text + delta };
-  }
-  if (!updated) return items;
-  const next = items.slice();
-  next[idx] = updated;
-  return next;
-}
-
-export function sortItems(items: TimelineItem[]): TimelineItem[] {
-  return items.slice().sort((a, b) => a.seq - b.seq);
 }

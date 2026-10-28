@@ -3,7 +3,8 @@ import { cn } from "@/lib/cn";
 import { Icon } from "./Icon";
 
 const LOCK_PX = 10;
-const COMMIT_RATIO = 0.38;
+/** A deliberate drag: most of the card width (a flick or a scroll never answers). */
+const COMMIT_RATIO = 0.7;
 const FLY_MS = 180;
 
 function prefersReducedMotion() {

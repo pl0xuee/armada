@@ -2,6 +2,7 @@ import * as A from "@radix-ui/react-alert-dialog";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
+import { useReturnFocus } from "./returnFocus";
 
 export function ConfirmDialog({
   open,
@@ -30,9 +31,9 @@ export function ConfirmDialog({
     <A.Root open={open} onOpenChange={onOpenChange}>
       <A.Portal>
         <A.Overlay className="anim-fade fixed inset-0 z-[60] bg-[var(--scrim)] backdrop-blur-[3px]" />
-        <A.Content
+        <ConfirmContent
           className={cn(
-            "anim-dialog fixed left-1/2 top-1/2 z-[60] w-[min(420px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-line-strong bg-card p-5 shadow-[0_24px_80px_-12px_rgba(0,0,0,0.6)] edge-strong focus:outline-none",
+            "anim-dialog fixed left-1/2 top-1/2 z-[60] max-h-[calc(100dvh-16px)] w-[min(420px,calc(100vw-16px))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-line-strong bg-card p-5 shadow-[0_24px_80px_-12px_rgba(0,0,0,0.6)] edge-strong focus:outline-none",
           )}
         >
           <A.Title className="text-[15px] font-semibold tracking-tight">{title}</A.Title>
@@ -40,7 +41,7 @@ export function ConfirmDialog({
             <A.Description className="mt-1.5 text-[13px] leading-relaxed text-muted">{description}</A.Description>
           )}
           {children && <div className="mt-4">{children}</div>}
-          <div className="mt-5 flex justify-end gap-2">
+          <div className="mt-5 flex flex-wrap justify-end gap-2">
             <A.Cancel asChild>
               <Button variant="ghost">{cancelLabel}</Button>
             </A.Cancel>
@@ -55,8 +56,18 @@ export function ConfirmDialog({
               {confirmLabel}
             </Button>
           </div>
-        </A.Content>
+        </ConfirmContent>
       </A.Portal>
     </A.Root>
+  );
+}
+
+/** A.Content that returns focus to wherever it was when the dialog opened. */
+function ConfirmContent({ className, children }: { className?: string; children: ReactNode }) {
+  const focus = useReturnFocus();
+  return (
+    <A.Content className={className} onOpenAutoFocus={focus.onOpenAutoFocus} onCloseAutoFocus={focus.onCloseAutoFocus}>
+      {children}
+    </A.Content>
   );
 }

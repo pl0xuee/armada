@@ -6,6 +6,7 @@
 //! installs, or if the updater manifest is missing) we ask the GitHub Releases API
 //! for the latest version and point the user at the release page.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
@@ -23,10 +24,27 @@ const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 #[derive(Default)]
 pub struct UpdateState {
     notified: Mutex<Option<String>>,
+    /// An install is in progress (download through restart).
+    installing: AtomicBool,
+}
+
+/// Clears `UpdateState::installing` when an install attempt ends early.
+struct InstallGuard<'a>(&'a AtomicBool);
+
+impl Drop for InstallGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
 }
 
 fn releases_page() -> String {
     format!("https://github.com/{REPO}/releases/latest")
+}
+
+/// RFC 3339 (what the UI's `Date` parses), from a Unix timestamp.
+fn rfc3339(secs: i64, nanos: u32) -> Option<String> {
+    chrono::DateTime::from_timestamp(secs, nanos)
+        .map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
 }
 
 /// Whether this install can update itself in place.
@@ -74,6 +92,7 @@ struct GithubRelease {
 fn github_latest() -> anyhow::Result<GithubRelease> {
     let agent = ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
+            .tls_config(armada_core::toolchain::platform_tls())
             .timeout_global(Some(Duration::from_secs(20)))
             .build(),
     );
@@ -122,7 +141,7 @@ pub async fn check(app: &AppHandle) -> anyhow::Result<Option<UpdateInfo>> {
                         .or_else(|| gh.and_then(|g| g.notes.clone())),
                     date: update
                         .date
-                        .map(|d| d.to_string())
+                        .and_then(|d| rfc3339(d.unix_timestamp(), d.nanosecond()))
                         .or_else(|| gh.and_then(|g| g.date.clone())),
                     url: gh.map(|g| g.url.clone()).unwrap_or_else(releases_page),
                     can_install: true,
@@ -153,7 +172,11 @@ pub async fn check(app: &AppHandle) -> anyhow::Result<Option<UpdateInfo>> {
 /// The download happens while everything is still running (a failed download leaves
 /// the app untouched). Shutdown must come *before* `install`: on Windows the updater
 /// launches the NSIS installer and exits the process from inside `install`, so nothing
-/// after it would run there.
+/// after it would run there. From shutdown on, quitting is held off so the app can't
+/// exit halfway through replacing itself.
+const CHECK_TIMEOUT: Duration = Duration::from_secs(60);
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+
 pub async fn install(app: &AppHandle) -> anyhow::Result<()> {
     if !can_self_update() {
         anyhow::bail!(
@@ -161,38 +184,74 @@ pub async fn install(app: &AppHandle) -> anyhow::Result<()> {
             releases_page()
         );
     }
-    let update = app
-        .updater()?
-        .check()
-        .await?
+    let state = app.state::<UpdateState>();
+    if state
+        .installing
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        anyhow::bail!("The update is already being installed");
+    }
+    let _guard = InstallGuard(&state.installing);
+
+    let update = tokio::time::timeout(CHECK_TIMEOUT, app.updater()?.check())
+        .await
+        .map_err(|_| anyhow!("Checking for the update timed out. Try again."))??
         .ok_or_else(|| anyhow!("Armada is already up to date"))?;
     info!(version = %update.version, "downloading update");
     let progress_core = app.state::<Core>().inner().clone();
     let mut downloaded: u64 = 0;
-    let bytes = update
-        .download(
+    // A stalled download must not leave "already being installed" forever.
+    let bytes = tokio::time::timeout(
+        DOWNLOAD_TIMEOUT,
+        update.download(
             move |chunk, total| {
                 downloaded += chunk as u64;
                 progress_core.emit(ArmadaEvent::UpdateProgress { downloaded, total });
             },
             || info!("update downloaded"),
-        )
-        .await
-        .context("downloading the update")?;
+        ),
+    )
+    .await
+    .map_err(|_| anyhow!("The download took too long. Check your connection and try again."))?
+    .context("downloading the update")?;
 
+    if !crate::begin_update() {
+        anyhow::bail!("Armada is quitting; the update will be offered again next time");
+    }
     // Record busy agents as interrupted (so they resume after the restart), end PTYs
     // and stop the remote server before the binary is replaced.
-    crate::shutdown_services(app).await;
+    if tokio::time::timeout(crate::SHUTDOWN_DEADLINE, crate::shutdown_services(app))
+        .await
+        .is_err()
+    {
+        warn!("shutdown before the update took too long; installing anyway");
+    }
 
     info!(version = %update.version, "installing update");
+    let version = update.version.clone();
     let installed = tauri::async_runtime::spawn_blocking(move || update.install(bytes))
         .await
         .map_err(|e| anyhow!("{e}"))
         .and_then(|r| r.context("installing the update"));
     if let Err(e) = installed {
-        // The core is already shut down, so the app can't carry on as is: restart the
-        // current version (agents resume from the interrupted state).
+        // Agents are already shut down, so the app can't carry on as is. Say what
+        // happened, then start the current version again (agents resume from the
+        // interrupted state).
         error!("update failed, restarting the current version: {e:#}");
+        let app = app.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+            app.dialog()
+                .message(format!(
+                    "Armada {version} couldn't be installed:\n\n{e:#}\n\nArmada will restart on the current version. You can download the update from {}",
+                    releases_page()
+                ))
+                .title("Update failed")
+                .kind(MessageDialogKind::Error)
+                .blocking_show();
+        })
+        .await;
     }
     app.restart();
 }
@@ -231,6 +290,14 @@ pub fn spawn_background_checks(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::is_newer;
+
+    #[test]
+    fn dates_are_rfc3339() {
+        assert_eq!(
+            super::rfc3339(1_700_000_000, 0).as_deref(),
+            Some("2023-11-14T22:13:20Z")
+        );
+    }
 
     #[test]
     fn version_ordering() {

@@ -1,6 +1,14 @@
-import { useCallback, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
+import { useCallback, useRef, useState, type ClipboardEvent, type DragEvent, type SetStateAction } from "react";
 import { toast } from "sonner";
-import { filesToAttachments, hasFiles, imageFilesFrom, MAX_ATTACHMENTS } from "@/lib/attachments";
+import {
+  ACCEPTED_IMAGE_LABEL,
+  ACCEPTED_IMAGE_TYPES,
+  filesToAttachments,
+  hasFiles,
+  hasText,
+  imageFilesFrom,
+  MAX_ATTACHMENTS,
+} from "@/lib/attachments";
 import type { Attachment } from "@/lib/types";
 
 /**
@@ -8,35 +16,61 @@ import type { Attachment } from "@/lib/types";
  * with the 8 images / 5 MB / images-only limits enforced and reported via toast.
  */
 export function useAttachments(initial: Attachment[] = []) {
-  const [attachments, setAttachments] = useState<Attachment[]>(initial);
+  const [attachments, setRaw] = useState<Attachment[]>(initial);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const depth = useRef(0);
-  const countRef = useRef(attachments.length);
-  countRef.current = attachments.length;
+  // Updated synchronously on every change (not from render), so two quick adds can't
+  // both see the same free room and silently overflow.
+  const liveCount = useRef(initial.length);
 
-  const add = useCallback(async (files: File[]) => {
-    if (files.length === 0) return;
-    const { attachments: added, problems } = await filesToAttachments(files, countRef.current);
-    if (added.length) setAttachments((cur) => [...cur, ...added].slice(0, MAX_ATTACHMENTS));
-    if (problems.length) {
-      toast.warning(problems.length === 1 ? problems[0] : `${problems.length} files weren't attached`, {
-        description: problems.length > 1 ? problems.join(" · ") : "Images only, up to 5 MB each, 8 per message.",
-      });
-    }
+  const setAttachments = useCallback((next: SetStateAction<Attachment[]>) => {
+    setRaw((cur) => {
+      const v = typeof next === "function" ? next(cur) : next;
+      liveCount.current = v.length;
+      return v;
+    });
   }, []);
 
-  const remove = useCallback((i: number) => setAttachments((cur) => cur.filter((_, j) => j !== i)), []);
-  const clear = useCallback(() => setAttachments([]), []);
+  const add = useCallback(
+    async (files: File[]) => {
+      if (files.length === 0) return;
+      const { attachments: read, problems } = await filesToAttachments(files, liveCount.current);
+      // Re-check after the async read: another add may have used the room meanwhile.
+      const room = Math.max(0, MAX_ATTACHMENTS - liveCount.current);
+      const accepted = read.slice(0, room);
+      const dropped = read.length - accepted.length;
+      if (dropped > 0) problems.push(`Only ${MAX_ATTACHMENTS} images per message; ${dropped} not attached`);
+      if (accepted.length) {
+        liveCount.current += accepted.length;
+        setAttachments((cur) => [...cur, ...accepted]);
+      }
+      if (problems.length) {
+        toast.warning(problems.length === 1 ? problems[0] : `${problems.length} files weren't attached`, {
+          description:
+            problems.length > 1
+              ? problems.join(" · ")
+              : // Format problems already name the accepted formats.
+                problems[0].includes(ACCEPTED_IMAGE_LABEL)
+                ? `Up to 5 MB each, ${MAX_ATTACHMENTS} per message.`
+                : `${ACCEPTED_IMAGE_LABEL}, up to 5 MB each, ${MAX_ATTACHMENTS} per message.`,
+        });
+      }
+    },
+    [setAttachments],
+  );
+
+  const remove = useCallback((i: number) => setAttachments((cur) => cur.filter((_, j) => j !== i)), [setAttachments]);
+  const clear = useCallback(() => setAttachments([]), [setAttachments]);
   const openPicker = useCallback(() => inputRef.current?.click(), []);
 
   const onPaste = useCallback(
     (e: ClipboardEvent) => {
       const files = imageFilesFrom(e.clipboardData).filter((f) => f.type.startsWith("image/"));
-      if (files.length) {
-        e.preventDefault();
-        void add(files);
-      }
+      if (files.length === 0) return;
+      // Image + text (e.g. a copied web snippet): keep the text paste, attach the image too.
+      if (!hasText(e.clipboardData)) e.preventDefault();
+      void add(files);
     },
     [add],
   );
@@ -49,7 +83,9 @@ export function useAttachments(initial: Attachment[] = []) {
       setDragging(true);
     },
     onDragOver: (e: DragEvent) => {
-      if (hasFiles(e.dataTransfer)) e.preventDefault();
+      if (!hasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
     },
     onDragLeave: (e: DragEvent) => {
       if (!hasFiles(e.dataTransfer)) return;
@@ -69,7 +105,7 @@ export function useAttachments(initial: Attachment[] = []) {
   const inputProps = {
     ref: inputRef,
     type: "file" as const,
-    accept: "image/*",
+    accept: ACCEPTED_IMAGE_TYPES.join(","),
     multiple: true,
     hidden: true,
     tabIndex: -1,

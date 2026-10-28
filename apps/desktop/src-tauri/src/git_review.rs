@@ -1,10 +1,13 @@
 //! Diff review, commit, merge and PR creation for an agent's working copy.
 //! Shells out to `git` / `gh` so it behaves exactly like the user's own tools.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, bail, Context};
 use armada_core::Agent;
@@ -34,76 +37,323 @@ pub struct AgentDiff {
     pub files: Vec<ChangedFile>,
     pub patch: String,
     pub ahead: i64,
+    /// Files with uncommitted changes in the agent's checkout (what "Commit" would take).
+    ///
+    /// Counted with the same filter-free git as the diff (viewing must not run
+    /// repository-configured programs), so in repositories with clean/smudge filters
+    /// (LFS) a file whose timestamps changed but whose content didn't can be counted
+    /// until a real git command refreshes the index. Committing is unaffected.
+    pub uncommitted: i64,
+    /// `patch` was cut short (at a file boundary) because it exceeded
+    /// [`MAX_PATCH_BYTES`]; `files` still lists every changed file.
+    pub truncated: bool,
+}
+
+/// What a commit took.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitSummary {
+    /// Abbreviated hash of the new commit.
+    pub hash: String,
+    /// Repository-relative paths in the commit.
+    pub files: Vec<String>,
+    /// Changed files (tracked or untracked, not ignored) still uncommitted afterwards.
+    pub left_uncommitted: i64,
+    /// Files the agent touched that were skipped because they're inside a submodule
+    /// or a nested repository (commit those in that repository).
+    pub skipped: Vec<String>,
+    /// One line for the UI, e.g. "Committed 3 files (abc1234); 5 other changed files
+    /// were left uncommitted".
+    pub message: String,
+}
+
+/// The commit had nothing to take. Callers that commit "if needed" (ship) match on
+/// it with `err.is::<NothingToCommit>()`.
+#[derive(Debug)]
+pub struct NothingToCommit(pub String);
+
+impl std::fmt::Display for NothingToCommit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for NothingToCommit {}
+
+/// Extra knobs for running a program.
+#[derive(Default)]
+struct Opts<'a> {
+    envs: Vec<(&'a str, &'a OsStr)>,
+    /// Written to the program's stdin (otherwise stdin is closed).
+    stdin: Option<Vec<u8>>,
+    /// Kill the program if it hasn't finished by then (default [`GIT_TIMEOUT`]).
+    timeout: Option<Duration>,
+    /// Read at most this much of stdout, then kill the program (see [`Captured`]).
+    max_stdout: Option<usize>,
+}
+
+const PUSH_TIMEOUT: Duration = Duration::from_secs(180);
+const GH_TIMEOUT: Duration = Duration::from_secs(120);
+/// Read-only git (viewing a diff, reverting a hunk).
+const READ_TIMEOUT: Duration = Duration::from_secs(60);
+/// Everything else, notably commit and merge, whose hooks can hang.
+const GIT_TIMEOUT: Duration = Duration::from_secs(120);
+/// Largest patch handed to the UI; larger ones are cut at a file boundary.
+pub const MAX_PATCH_BYTES: usize = 8 * 1024 * 1024;
+/// Temporary indexes older than this were left behind by a crash and are removed.
+const STALE_TEMP_INDEX: Duration = Duration::from_secs(60 * 60);
+
+/// One git operation (commit, ship, merge, revert) at a time per agent: a double
+/// click, or the desktop and the phone at once, must not interleave `git add`s.
+pub fn try_lock_agent(agent_id: &str) -> anyhow::Result<tokio::sync::OwnedMutexGuard<()>> {
+    type Locks = parking_lot::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>;
+    static LOCKS: OnceLock<Locks> = OnceLock::new();
+    let lock = {
+        let mut locks = LOCKS.get_or_init(Default::default).lock();
+        // Forget idle agents' locks (only the map holds them, nobody holds the guard).
+        locks.retain(|_, l| Arc::strong_count(l) > 1);
+        locks.entry(agent_id.to_string()).or_default().clone()
+    };
+    lock.try_lock_owned().map_err(|_| {
+        anyhow!("Armada is already committing, merging or reverting this agent's work; wait for it to finish")
+    })
+}
+
+/// The subcommand in `args`, skipping global flags ("-c key=value", "--literal-pathspecs").
+fn subcommand_of<'a>(args: &[&'a str]) -> &'a str {
+    let mut rest = args.iter().copied();
+    while let Some(arg) = rest.next() {
+        if arg == "-c" {
+            rest.next();
+        } else if !arg.starts_with("--") {
+            return arg;
+        }
+    }
+    ""
 }
 
 async fn run(program: &str, cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
-    run_env(program, cwd, args, &[]).await
+    run_opts(program, cwd, args, Opts::default()).await
 }
 
-async fn run_env(
+async fn run_opts(
     program: &str,
     cwd: &Path,
     args: &[&str],
-    envs: &[(&str, &OsStr)],
+    opts: Opts<'_>,
 ) -> anyhow::Result<String> {
-    let out = output(program, cwd, args, envs).await?;
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        let msg = if stderr.is_empty() { stdout } else { stderr };
-        // Skip global flags ("-c key=value", "--literal-pathspecs") to name the subcommand.
-        let mut rest = args.iter().copied();
-        let mut subcommand = "";
-        while let Some(arg) = rest.next() {
-            if arg == "-c" {
-                rest.next();
-            } else if !arg.starts_with("--") {
-                subcommand = arg;
-                break;
-            }
-        }
-        bail!(
-            "{program} {subcommand} failed: {}",
-            if msg.is_empty() {
-                format!("exit status {}", out.status)
-            } else {
-                msg
-            }
-        );
-    }
+    let out = output(program, cwd, args, opts).await?;
+    check(program, args, &out)?;
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Turns a failed exit into an error carrying the program's own message.
+fn check(program: &str, args: &[&str], out: &std::process::Output) -> anyhow::Result<()> {
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let msg = match (stderr.is_empty(), stdout.is_empty()) {
+        (true, true) => format!("exit status {}", out.status),
+        (false, true) => stderr,
+        (true, false) => stdout,
+        // Hooks often print their reason on stdout.
+        (false, false) => format!("{stderr}\n{stdout}"),
+    };
+    bail!("{program} {} failed: {msg}", subcommand_of(args));
 }
 
 async fn output(
     program: &str,
     cwd: &Path,
     args: &[&str],
-    envs: &[(&str, &OsStr)],
+    opts: Opts<'_>,
 ) -> anyhow::Result<std::process::Output> {
+    Ok(output_capped(program, cwd, args, opts).await?.output)
+}
+
+struct Captured {
+    output: std::process::Output,
+    /// stdout passed `Opts::max_stdout`: it holds the first `max_stdout + 1` bytes and
+    /// the program was killed (so its exit status is meaningless).
+    overflowed: bool,
+}
+
+/// Most stderr kept (a program spewing errors mustn't exhaust memory).
+const MAX_STDERR: usize = 1024 * 1024;
+
+async fn output_capped(
+    program: &str,
+    cwd: &Path,
+    args: &[&str],
+    opts: Opts<'_>,
+) -> anyhow::Result<Captured> {
+    use tokio::io::AsyncReadExt;
+
     let exe = which::which(program).map_err(|_| match program {
         "gh" => anyhow!("The GitHub CLI (gh) is not installed. Get it from https://cli.github.com"),
         _ => anyhow!("{program} is not installed or not on PATH"),
     })?;
     let mut cmd = tokio::process::Command::new(exe);
+    // Running as an AppImage: don't hand git/gh our bundled libraries.
+    armada_core::childenv::sanitize_child_env(&mut cmd);
+    if program == "git" {
+        // Windows: paths past MAX_PATH (deep node_modules) instead of "Filename too long".
+        // Unknown elsewhere, where git ignores it.
+        cmd.args(["-c", "core.longpaths=true"]);
+    }
     cmd.args(args)
         .current_dir(cwd)
-        .stdin(Stdio::null())
+        .stdin(if opts.stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GH_PROMPT_DISABLED", "1")
         .env("NO_COLOR", "1")
-        .envs(envs.iter().copied());
+        .envs(opts.envs.iter().copied());
     #[cfg(windows)]
     {
         // CREATE_NO_WINDOW: don't flash console windows from a GUI app.
         cmd.creation_flags(0x0800_0000);
     }
-    cmd.output()
+    let mut child = cmd.spawn().with_context(|| format!("running {program}"))?;
+    if let (Some(data), Some(mut stdin)) = (opts.stdin, child.stdin.take()) {
+        // Concurrently with reading the output, so a chatty program can't deadlock us.
+        tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            let _ = stdin.write_all(&data).await;
+        });
+    }
+    let (Some(mut stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
+        bail!("running {program}: no output pipes");
+    };
+    let max_stdout = opts.max_stdout;
+    let collect = async {
+        let read_stdout = async {
+            let mut buf = Vec::new();
+            let overflowed = match max_stdout {
+                Some(cap) => {
+                    (&mut stdout)
+                        .take(cap as u64 + 1)
+                        .read_to_end(&mut buf)
+                        .await?;
+                    buf.len() > cap
+                }
+                None => {
+                    stdout.read_to_end(&mut buf).await?;
+                    false
+                }
+            };
+            if overflowed {
+                // Stop it now: it would otherwise block writing the rest (and stderr
+                // would never reach EOF).
+                let _ = child.start_kill();
+            }
+            Ok::<_, std::io::Error>((buf, overflowed))
+        };
+        let read_stderr = async {
+            // Drained to the end (a full pipe would stall the program), kept up to a cap.
+            let mut stderr = stderr;
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 8192];
+            loop {
+                let n = stderr.read(&mut chunk).await?;
+                if n == 0 {
+                    break;
+                }
+                let room = MAX_STDERR.saturating_sub(buf.len());
+                buf.extend_from_slice(&chunk[..n.min(room)]);
+            }
+            Ok::<_, std::io::Error>(buf)
+        };
+        let ((stdout, overflowed), stderr) = tokio::try_join!(read_stdout, read_stderr)?;
+        let status = child.wait().await?;
+        Ok::<_, std::io::Error>(Captured {
+            output: std::process::Output {
+                status,
+                stdout,
+                stderr,
+            },
+            overflowed,
+        })
+    };
+    let limit = opts.timeout.unwrap_or(GIT_TIMEOUT);
+    // On timeout, dropping the future drops the child, which kills it (kill_on_drop).
+    tokio::time::timeout(limit, collect)
         .await
+        .map_err(|_| {
+            anyhow!(
+                "{program} {} timed out after {} s",
+                subcommand_of(args),
+                limit.as_secs()
+            )
+        })?
         .with_context(|| format!("running {program}"))
 }
 
 async fn git(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
     run("git", cwd, args).await
+}
+
+/// Runs git with `paths` as NUL-separated pathspecs on stdin (`--pathspec-from-file`),
+/// so long lists never hit command-line length limits (32 KiB on Windows).
+async fn git_with_pathspecs(cwd: &Path, args: &[&str], paths: &[String]) -> anyhow::Result<String> {
+    let mut all = args.to_vec();
+    all.extend(["--pathspec-from-file=-", "--pathspec-file-nul"]);
+    git_stdin(cwd, &all, nul_joined(paths)).await
+}
+
+async fn git_stdin(cwd: &Path, args: &[&str], stdin: Vec<u8>) -> anyhow::Result<String> {
+    run_opts(
+        "git",
+        cwd,
+        args,
+        Opts {
+            stdin: Some(stdin),
+            ..Opts::default()
+        },
+    )
+    .await
+}
+
+/// For commands without `--pathspec-from-file` (ls-files): runs `args -- <chunk>` for
+/// chunks of `paths` small enough for any command line, concatenating the output.
+async fn git_chunked(cwd: &Path, args: &[&str], paths: &[String]) -> anyhow::Result<String> {
+    const MAX_CHARS: usize = 8 * 1024;
+    let mut out = String::new();
+    let mut chunk: Vec<&str> = Vec::new();
+    let mut len = 0;
+    for (i, path) in paths.iter().enumerate() {
+        chunk.push(path);
+        len += path.len() + 3;
+        if len >= MAX_CHARS || i + 1 == paths.len() {
+            let mut all = args.to_vec();
+            all.push("--");
+            all.append(&mut chunk);
+            out.push_str(&git(cwd, &all).await?);
+            len = 0;
+        }
+    }
+    Ok(out)
+}
+
+fn nul_joined(paths: &[String]) -> Vec<u8> {
+    let mut data = Vec::new();
+    for p in paths {
+        data.extend_from_slice(p.as_bytes());
+        data.push(0);
+    }
+    data
+}
+
+fn nul_split(out: &str) -> impl Iterator<Item = &str> {
+    out.split('\0').filter(|p| !p.is_empty())
 }
 
 fn agent_cwd(agent: &Agent) -> anyhow::Result<&Path> {
@@ -114,11 +364,23 @@ fn agent_cwd(agent: &Agent) -> anyhow::Result<&Path> {
     Ok(cwd)
 }
 
-/// Git for viewing a diff on the user's behalf. An agent can write `.git/config` and
-/// `.gitattributes`, so merely looking at its changes must not run anything those
-/// configure: fsmonitor hooks and clean/smudge/process filters are switched off here,
-/// and every diff also passes `--no-ext-diff --no-textconv`. Optional locks are
-/// disabled so git never rewrites the user's index behind their back.
+/// Git for viewing a diff on the user's behalf.
+///
+/// Safety: an agent can write `.git/config` and `.gitattributes`, so merely looking at
+/// its changes must not run anything those configure. fsmonitor hooks and
+/// clean/smudge/process filters are switched off here, and every diff also passes
+/// `--no-ext-diff --no-textconv`. Optional locks are disabled so git never rewrites
+/// the user's index behind their back.
+///
+/// Nested repositories and submodules: checking whether one is dirty runs git inside
+/// it with *its* config (its own filters, fsmonitor…), which the overrides here don't
+/// reach. `git add -N` even turns an untracked embedded repository into a gitlink. So
+/// submodule dirtiness is never examined (`--ignore-submodules=dirty` on every diff and
+/// status, `diff.ignoreSubmodules=dirty` as the default); only their commits are.
+///
+/// Determinism: the UI parses the output, so settings that change its shape
+/// (`diff.noprefix`, `diff.mnemonicPrefix`, `diff.relative`, colors, path quoting,
+/// rename detection) are pinned regardless of the user's config.
 struct ReadOnlyGit<'a> {
     cwd: &'a Path,
     flags: Vec<String>,
@@ -126,12 +388,46 @@ struct ReadOnlyGit<'a> {
 }
 
 impl<'a> ReadOnlyGit<'a> {
-    const BASE_FLAGS: [&'static str; 4] = [
+    const BASE_FLAGS: [&'static str; 22] = [
         "-c",
         "core.fsmonitor=false",
+        // Never look inside nested repositories (see above).
+        "-c",
+        "diff.ignoreSubmodules=dirty",
+        "-c",
+        "status.submoduleSummary=false",
+        // `add -N` of an embedded repository otherwise prints a page of advice.
+        "-c",
+        "advice.addEmbeddedRepo=false",
         // Keep writes to a temporary index self-contained (no sharedindex.* in .git).
         "-c",
         "core.splitIndex=false",
+        // Non-ASCII names verbatim in the patch, as they are in `-z` output.
+        "-c",
+        "core.quotePath=false",
+        "-c",
+        "color.ui=false",
+        "-c",
+        "diff.noprefix=false",
+        "-c",
+        "diff.mnemonicPrefix=false",
+        "-c",
+        "diff.relative=false",
+        "-c",
+        "diff.renames=true",
+    ];
+
+    /// Options for every `git diff`: no external programs, fixed output shape.
+    const DIFF_FLAGS: [&'static str; 9] = [
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-color",
+        "--no-relative",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        "--submodule=short",
+        "--ignore-submodules=dirty",
+        "-M",
     ];
 
     async fn new(cwd: &'a Path) -> anyhow::Result<Self> {
@@ -152,7 +448,10 @@ impl<'a> ReadOnlyGit<'a> {
                 "--get-regexp",
                 r"^filter\.",
             ],
-            &[],
+            Opts {
+                timeout: Some(READ_TIMEOUT),
+                ..Opts::default()
+            },
         )
         .await?;
         if !out.status.success() && out.status.code() != Some(1) {
@@ -180,6 +479,22 @@ impl<'a> ReadOnlyGit<'a> {
     }
 
     async fn run(&self, args: &[&str]) -> anyhow::Result<String> {
+        self.run_input(args, None).await
+    }
+
+    async fn run_input(&self, args: &[&str], stdin: Option<Vec<u8>>) -> anyhow::Result<String> {
+        let out = self.output(args, stdin, None).await?;
+        check("git", args, &out.output)?;
+        Ok(String::from_utf8_lossy(&out.output.stdout).into_owned())
+    }
+
+    /// Runs git with the safety flags; the exit status is the caller's to check.
+    async fn output(
+        &self,
+        args: &[&str],
+        stdin: Option<Vec<u8>>,
+        max_stdout: Option<usize>,
+    ) -> anyhow::Result<Captured> {
         let all: Vec<&str> = self
             .flags
             .iter()
@@ -190,8 +505,79 @@ impl<'a> ReadOnlyGit<'a> {
         if let Some(index) = &self.index {
             envs.push(("GIT_INDEX_FILE", index.as_os_str()));
         }
-        run_env("git", self.cwd, &all, &envs).await
+        output_capped(
+            "git",
+            self.cwd,
+            &all,
+            Opts {
+                envs,
+                stdin,
+                timeout: Some(READ_TIMEOUT),
+                max_stdout,
+            },
+        )
+        .await
     }
+
+    /// `git diff <DIFF_FLAGS> <args>`.
+    async fn diff(&self, args: &[&str]) -> anyhow::Result<String> {
+        let mut all = vec!["diff"];
+        all.extend(Self::DIFF_FLAGS);
+        all.extend(args);
+        self.run(&all).await
+    }
+
+    /// The patch (`git diff <DIFF_FLAGS> <args>`), cut at a file boundary if it's
+    /// over `cap` bytes. Returns (patch, truncated).
+    async fn patch(&self, args: &[&str], cap: usize) -> anyhow::Result<(String, bool)> {
+        let mut all = vec!["diff"];
+        all.extend(Self::DIFF_FLAGS);
+        all.extend(args);
+        let out = self.output(&all, None, Some(cap)).await?;
+        if !out.overflowed {
+            check("git", &all, &out.output)?;
+            return Ok((
+                String::from_utf8_lossy(&out.output.stdout).into_owned(),
+                false,
+            ));
+        }
+        let kept = truncate_patch(&out.output.stdout, cap);
+        Ok((String::from_utf8_lossy(kept).into_owned(), true))
+    }
+
+    /// Whether HEAD points at a commit (false in a repository with no commits yet).
+    async fn has_head(&self) -> anyhow::Result<bool> {
+        let args = ["rev-parse", "--verify", "-q", "HEAD^{commit}"];
+        let out = self.output(&args, None, None).await?.output;
+        match out.status.code() {
+            Some(0) => Ok(true),
+            Some(1) => Ok(false),
+            _ => check("git", &args, &out).map(|()| false),
+        }
+    }
+
+    /// The empty tree's id in this repository's hash (SHA-1 or SHA-256).
+    async fn empty_tree(&self) -> anyhow::Result<String> {
+        Ok(self
+            .run_input(
+                &["hash-object", "-t", "tree", "--no-filters", "--stdin"],
+                Some(Vec::new()),
+            )
+            .await?
+            .trim()
+            .to_string())
+    }
+}
+
+/// The longest prefix of `patch` of at most `cap` bytes that ends at a file boundary
+/// (just before a `diff --git` line). Empty if the first file alone is too big.
+fn truncate_patch(patch: &[u8], cap: usize) -> &[u8] {
+    const MARK: &[u8] = b"\ndiff --git ";
+    // The last file boundary whose newline still fits; keep that newline.
+    (0..cap.min(patch.len()))
+        .rev()
+        .find(|&at| patch[at..].starts_with(MARK))
+        .map_or(&[], |at| &patch[..at + 1])
 }
 
 /// Driver names from `git config --null --get-regexp '^filter\.'` ("key\nvalue\0"…).
@@ -218,9 +604,11 @@ struct TempIndex(PathBuf);
 
 impl TempIndex {
     async fn copy_of(git: &ReadOnlyGit<'_>) -> anyhow::Result<Self> {
-        let real = git.run(&["rev-parse", "--git-path", "index"]).await?;
-        // Relative to the working directory unless GIT_DIR lives elsewhere.
-        let real = git.cwd.join(real.trim_end_matches(['\r', '\n']));
+        let real = git
+            .run(&["rev-parse", "--path-format=absolute", "--git-path", "index"])
+            .await?;
+        // Absolute already; the join only matters for very old git versions.
+        let real = plain_path(&git.cwd.join(real.trim_end_matches(['\r', '\n'])));
         let name = format!("armada-index-{}", uuid::Uuid::new_v4());
         // Next to the real index (same permissions as the repository) when possible.
         let mut candidates = Vec::new();
@@ -228,6 +616,9 @@ impl TempIndex {
             candidates.push(dir.join(&name));
         }
         candidates.push(std::env::temp_dir().join(&name));
+        for dir in candidates.iter().filter_map(|c| c.parent()) {
+            sweep_stale_temp_indexes(dir);
+        }
         let mut last_err = None;
         for tmp in candidates {
             match tokio::fs::copy(&real, &tmp).await {
@@ -252,6 +643,33 @@ impl TempIndex {
     }
 }
 
+/// Removes `armada-index-*` files (and their `.lock`s) in `dir` older than
+/// [`STALE_TEMP_INDEX`]: left behind when Armada was killed mid-diff.
+fn sweep_stale_temp_indexes(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let now = SystemTime::now();
+    for entry in entries.flatten() {
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("armada-index-")
+        {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| now.duration_since(t).ok())
+            .is_some_and(|age| age > STALE_TEMP_INDEX);
+        if stale && entry.file_type().is_ok_and(|t| t.is_file()) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 impl Drop for TempIndex {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
@@ -259,6 +677,36 @@ impl Drop for TempIndex {
         lock.push(".lock");
         let _ = std::fs::remove_file(lock);
     }
+}
+
+/// Largest patch accepted for reverting (a whole-file revert of a big file).
+const MAX_REVERT_PATCH: usize = 16 * 1024 * 1024;
+
+/// Undoes part of the agent's changes: `patch` is a slice of the agent's diff (one
+/// file's section, or a file header plus one hunk), reverse-applied to the working
+/// tree. All or nothing: if any part no longer applies, nothing changes.
+pub async fn revert_patch(agent: &Agent, patch: &str) -> anyhow::Result<()> {
+    let cwd = agent_cwd(agent)?;
+    if patch.len() > MAX_REVERT_PATCH {
+        bail!("That change is too large to revert here");
+    }
+    if !patch.starts_with("diff --git ") {
+        bail!("Not a git patch");
+    }
+    let mut patch = patch.to_string();
+    if !patch.ends_with('\n') {
+        patch.push('\n');
+    }
+    // Same hardening as viewing a diff: the agent controls .git/config and
+    // .gitattributes, so no filters/fsmonitor run while touching its files.
+    let git = ReadOnlyGit::new(cwd).await?;
+    git.run_input(
+        &["apply", "-R", "--whitespace=nowarn", "-"],
+        Some(patch.into_bytes()),
+    )
+    .await
+    .map_err(|e| e.context("The change couldn't be reverted (the file has changed since)"))?;
+    Ok(())
 }
 
 pub async fn get_diff(agent: &Agent) -> anyhow::Result<AgentDiff> {
@@ -274,47 +722,25 @@ async fn diff_worktree(cwd: &Path, base: Option<&str>) -> anyhow::Result<AgentDi
         .await
         .map_err(|_| anyhow!("{} is not a git repository", cwd.display()))?;
 
+    let has_head = git.has_head().await?;
+    // No commits yet: everything is new relative to the empty tree.
+    let base = match base {
+        Some(base) => base.to_string(),
+        None if has_head => "HEAD".to_string(),
+        None => git.empty_tree().await?,
+    };
+
     let index = TempIndex::copy_of(&git).await?;
     git.index = Some(index.0.clone());
     // Intent-to-add (in the private index) so brand-new files show up in `git diff <base>`.
     git.run(&["add", "-A", "-N"]).await?;
 
-    let base = base.unwrap_or("HEAD");
-    let name_status = git
-        .run(&[
-            "diff",
-            "--no-ext-diff",
-            "--no-textconv",
-            base,
-            "--name-status",
-            "-z",
-            "-M",
-        ])
-        .await?;
-    let numstat = git
-        .run(&[
-            "diff",
-            "--no-ext-diff",
-            "--no-textconv",
-            base,
-            "--numstat",
-            "-z",
-            "-M",
-        ])
-        .await?;
-    let patch = git
-        .run(&[
-            "diff",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--no-color",
-            base,
-            "-M",
-        ])
-        .await?;
+    let name_status = git.diff(&["--name-status", "-z", &base]).await?;
+    let numstat = git.diff(&["--numstat", "-z", &base]).await?;
+    let (patch, truncated) = git.patch(&[&base], MAX_PATCH_BYTES).await?;
     drop(index);
     git.index = None;
-    let ahead = if base == "HEAD" {
+    let ahead = if base == "HEAD" || !has_head {
         0
     } else {
         git.run(&["rev-list", "--count", &format!("{base}..HEAD")])
@@ -323,6 +749,19 @@ async fn diff_worktree(cwd: &Path, base: Option<&str>) -> anyhow::Result<AgentDi
             .parse()
             .unwrap_or(0)
     };
+
+    // Filter-free like the diff: see `AgentDiff::uncommitted`.
+    let uncommitted = git
+        .run(&[
+            "status",
+            "--porcelain",
+            "-z",
+            "--untracked-files=normal",
+            "--ignore-submodules=dirty",
+        ])
+        .await
+        .map(|s| count_porcelain(&s))
+        .unwrap_or(0);
 
     let counts = parse_numstat(&numstat);
     let files = parse_name_status(&name_status)
@@ -341,7 +780,45 @@ async fn diff_worktree(cwd: &Path, base: Option<&str>) -> anyhow::Result<AgentDi
         files,
         patch,
         ahead,
+        uncommitted,
+        truncated,
     })
+}
+
+/// Entries in `git status --porcelain -z` output. A rename or copy, in the index (X)
+/// or only in the working tree (Y, e.g. after `git add -N`), carries an extra path.
+fn count_porcelain(out: &str) -> i64 {
+    let mut tokens = out.split('\0').filter(|t| !t.is_empty());
+    let mut n = 0;
+    while let Some(entry) = tokens.next() {
+        n += 1;
+        if entry.chars().take(2).any(|c| c == 'R' || c == 'C') {
+            tokens.next();
+        }
+    }
+    n
+}
+
+/// Changed files left in `cwd`'s checkout (after a commit). Plain git: committing
+/// has already run the repository's filters and hooks.
+async fn count_changes(cwd: &Path) -> i64 {
+    git(
+        cwd,
+        &[
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "status.submoduleSummary=false",
+            "status",
+            "--porcelain",
+            "-z",
+            "--untracked-files=normal",
+            "--ignore-submodules=dirty",
+        ],
+    )
+    .await
+    .map(|s| count_porcelain(&s))
+    .unwrap_or(0)
 }
 
 /// `git diff --name-status -z` → (path, status). Renames/copies carry two paths.
@@ -407,8 +884,15 @@ fn parse_numstat(out: &str) -> HashMap<String, (i64, i64)> {
 /// Commits the agent's work. An agent in its own worktree owns everything there, so all
 /// changes are committed. An agent working directly in the user's checkout only gets
 /// the files it edited (`touched`, from `Core::touched_files`) committed: the user's
-/// own unrelated changes, staged or not, are left alone.
-pub async fn commit(agent: &Agent, message: &str, touched: &[String]) -> anyhow::Result<String> {
+/// own unrelated changes, staged or not, are left alone (and counted in
+/// [`CommitSummary::left_uncommitted`], so the UI can say so).
+///
+/// Fails with [`NothingToCommit`] when there's nothing to take.
+pub async fn commit(
+    agent: &Agent,
+    message: &str,
+    touched: &[String],
+) -> anyhow::Result<CommitSummary> {
     let cwd = agent_cwd(agent)?;
     let message = message.trim();
     if message.is_empty() {
@@ -421,117 +905,297 @@ pub async fn commit(agent: &Agent, message: &str, touched: &[String]) -> anyhow:
     }
 }
 
-async fn commit_all(cwd: &Path, message: &str) -> anyhow::Result<String> {
+async fn commit_all(cwd: &Path, message: &str) -> anyhow::Result<CommitSummary> {
     git(cwd, &["add", "-A"]).await?;
-    let staged = git(cwd, &["diff", "--cached", "--name-only"]).await?;
-    if staged.trim().is_empty() {
-        bail!("Nothing to commit");
+    let files: Vec<String> = nul_split(
+        &git(
+            cwd,
+            &["diff", "--cached", "--no-renames", "--name-only", "-z"],
+        )
+        .await?,
+    )
+    .map(str::to_string)
+    .collect();
+    if files.is_empty() {
+        return Err(NothingToCommit("Nothing to commit".into()).into());
     }
     git(cwd, &["commit", "-m", message]).await?;
-    short_head(cwd).await
+    let hash = short_head(cwd).await?;
+    let left = count_changes(cwd).await;
+    Ok(summary(hash, files, left, Vec::new()))
 }
 
-async fn commit_paths(cwd: &Path, message: &str, touched: &[String]) -> anyhow::Result<String> {
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+fn summary(hash: String, files: Vec<String>, left: i64, skipped: Vec<String>) -> CommitSummary {
+    let mut message = format!(
+        "Committed {} ({hash})",
+        plural(files.len(), "file", "files")
+    );
+    if left > 0 {
+        message.push_str(&format!(
+            "; {} left uncommitted",
+            if left == 1 {
+                "1 other changed file was".to_string()
+            } else {
+                format!("{left} other changed files were")
+            }
+        ));
+    }
+    if !skipped.is_empty() {
+        message.push_str(&format!(
+            "; skipped {} inside a submodule or nested repository",
+            plural(skipped.len(), "file", "files")
+        ));
+    }
+    CommitSummary {
+        hash,
+        files,
+        left_uncommitted: left,
+        skipped,
+        message,
+    }
+}
+
+/// Index/path comparisons: git on Windows (core.ignorecase) matches paths in any case,
+/// so the agent's record of a path may differ in case from the index's.
+fn path_key(path: &str) -> Cow<'_, str> {
+    if cfg!(windows) {
+        Cow::Owned(path.to_lowercase())
+    } else {
+        Cow::Borrowed(path)
+    }
+}
+
+/// Whether `rel` (repository-relative, '/'-separated) lies inside a nested repository
+/// or checked-out submodule below `top`: git refuses to stage such paths in the outer
+/// repository.
+fn inside_nested_repo(top: &Path, rel: &str) -> bool {
+    let mut dir = top.to_path_buf();
+    let parts: Vec<&str> = rel.split('/').collect();
+    for part in &parts[..parts.len().saturating_sub(1)] {
+        dir.push(part);
+        if dir.join(".git").symlink_metadata().is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
+async fn commit_paths(
+    cwd: &Path,
+    message: &str,
+    touched: &[String],
+) -> anyhow::Result<CommitSummary> {
     const NOTHING: &str =
         "Nothing to commit: Armada hasn't seen this agent change any files in this \
                            repository. (Agents without their own worktree only commit the files \
                            they edited; commit anything else yourself.)";
+    let nothing = || anyhow::Error::new(NothingToCommit(NOTHING.into()));
     let top = PathBuf::from(
         git(cwd, &["rev-parse", "--show-toplevel"])
             .await?
             .trim_end_matches(['\r', '\n']),
     );
-    let paths = repo_relative_paths(cwd, &top, touched);
+    let (mut skipped, paths): (Vec<String>, Vec<String>) = repo_relative_paths(cwd, &top, touched)
+        .into_iter()
+        .partition(|p| inside_nested_repo(&top, p));
     if paths.is_empty() {
-        bail!(NOTHING);
-    }
-    let path_args = |prefix: &[&'static str]| -> Vec<String> {
-        prefix
-            .iter()
-            .map(|s| s.to_string())
-            .chain(paths.iter().cloned())
-            .collect()
-    };
-    let run_paths = |args: Vec<String>| {
-        let top = top.clone();
-        async move {
-            let args: Vec<&str> = args.iter().map(String::as_str).collect();
-            git(&top, &args).await
+        if !skipped.is_empty() {
+            return Err(NothingToCommit(
+                "Nothing to commit here: the files this agent changed are inside a submodule \
+                 or nested repository. Commit them in that repository."
+                    .into(),
+            )
+            .into());
         }
-    };
+        return Err(nothing());
+    }
 
-    // Paths git can stage: present on disk, or tracked (a deletion to record).
-    let in_index: HashSet<String> =
-        run_paths(path_args(&["--literal-pathspecs", "ls-files", "-z", "--"]))
-            .await?
-            .split('\0')
-            .filter(|p| !p.is_empty())
-            .map(str::to_string)
-            .collect();
+    // The user's index entries for these paths, to put back if the commit fails.
+    let before = index_entries(&top, &paths).await?;
+    if let Some(conflicted) = before.values().find(|e| e.stage != 0) {
+        bail!(
+            "{} has merge conflicts. Resolve them before committing.",
+            conflicted.path
+        );
+    }
+    // A touched path that is itself a submodule (gitlink): not the agent's file.
+    let (gitlinks, paths): (Vec<String>, Vec<String>) = paths.into_iter().partition(|p| {
+        before
+            .get(path_key(p).as_ref())
+            .is_some_and(|e| e.mode == "160000")
+    });
+    skipped.extend(gitlinks);
     // Ignored, untracked files (build output, .env…) are never committed.
-    let ignored: HashSet<String> = run_paths(path_args(&[
-        "--literal-pathspecs",
-        "ls-files",
-        "-z",
-        "--others",
-        "--ignored",
-        "--exclude-standard",
-        "--",
-    ]))
-    .await?
-    .split('\0')
-    .filter(|p| !p.is_empty())
-    .map(str::to_string)
-    .collect();
+    let ignored = ignored_paths(&top, &paths).await?;
+    // Only files: a directory path would sweep in everything under it, including the
+    // user's own untracked files. Tracked paths gone from disk are deletions to record.
     let stageable: Vec<String> = paths
         .iter()
         .filter(|p| {
-            in_index.contains(*p)
-                || (!ignored.contains(*p) && top.join(p).symlink_metadata().is_ok())
+            before.contains_key(path_key(p).as_ref())
+                || (!ignored.contains(*p)
+                    && top.join(p).symlink_metadata().is_ok_and(|m| !m.is_dir()))
         })
         .cloned()
         .collect();
-    if !stageable.is_empty() {
-        let mut args = vec![
-            "--literal-pathspecs".to_string(),
-            "add".into(),
-            "-A".into(),
-            "--".into(),
-        ];
-        args.extend(stageable.iter().cloned());
-        run_paths(args).await?;
+    if stageable.is_empty() {
+        return Err(nothing());
     }
+    git_with_pathspecs(&top, &["--literal-pathspecs", "add", "-A"], &stageable).await?;
 
-    // What is now staged among those paths (includes deletions already staged earlier).
-    let staged: Vec<String> = run_paths(path_args(&[
-        "--literal-pathspecs",
-        "diff",
-        "--cached",
-        "--no-ext-diff",
-        "--name-only",
-        "-z",
-        "--",
-    ]))
-    .await?
-    .split('\0')
-    .filter(|p| !p.is_empty())
+    // What is now staged among those paths (includes deletions staged earlier).
+    // `--no-renames` so both sides of a move are listed.
+    let wanted: HashSet<Cow<str>> = paths.iter().map(|p| path_key(p)).collect();
+    let staged: Vec<String> = nul_split(
+        &git(
+            &top,
+            &[
+                "diff",
+                "--cached",
+                "--no-renames",
+                "--no-ext-diff",
+                "--name-only",
+                "-z",
+            ],
+        )
+        .await?,
+    )
+    .filter(|p| wanted.contains(&path_key(p)))
     .map(str::to_string)
     .collect();
     if staged.is_empty() {
-        bail!(NOTHING);
+        return Err(nothing());
     }
+
     // `--only`: commit exactly these paths, leaving anything else the user staged staged.
-    let mut args = vec![
-        "--literal-pathspecs".to_string(),
-        "commit".into(),
-        "--only".into(),
-        "-m".into(),
-        message.to_string(),
-        "--".into(),
-    ];
-    args.extend(staged);
-    run_paths(args).await?;
-    short_head(cwd).await
+    let committed = git_with_pathspecs(
+        &top,
+        &["--literal-pathspecs", "commit", "--only", "-m", message],
+        &staged,
+    )
+    .await;
+    if let Err(e) = committed {
+        // Hook rejected it, no identity, signing failed…: leave the user's index as
+        // it was before we staged anything.
+        return Err(match restore_index(&top, &stageable, &before).await {
+            Ok(()) => e.context("The commit failed; nothing was staged or committed"),
+            Err(restore) => e.context(format!(
+                "The commit failed, and restoring the staging area also failed ({restore:#}); \
+                 check `git status`"
+            )),
+        });
+    }
+    let hash = short_head(cwd).await?;
+    let left = count_changes(&top).await;
+    Ok(summary(hash, staged, left, skipped))
+}
+
+/// One index entry (`git ls-files -s`).
+struct IndexEntry {
+    /// The path as the index spells it.
+    path: String,
+    mode: String,
+    oid: String,
+    stage: u8,
+}
+
+/// Index entries for exactly `paths` (entries under a directory path aren't included),
+/// keyed by [`path_key`].
+async fn index_entries(
+    top: &Path,
+    paths: &[String],
+) -> anyhow::Result<HashMap<String, IndexEntry>> {
+    let wanted: HashSet<Cow<str>> = paths.iter().map(|p| path_key(p)).collect();
+    let out = git_chunked(top, &["--literal-pathspecs", "ls-files", "-s", "-z"], paths).await?;
+    let mut entries = HashMap::new();
+    for record in nul_split(&out) {
+        // "<mode> <oid> <stage>\t<path>"
+        let Some((meta, path)) = record.split_once('\t') else {
+            continue;
+        };
+        let key = path_key(path);
+        if !wanted.contains(&key) {
+            continue;
+        }
+        let mut meta = meta.split(' ');
+        let (Some(mode), Some(oid), Some(stage)) = (meta.next(), meta.next(), meta.next()) else {
+            continue;
+        };
+        let stage: u8 = stage.parse().unwrap_or(0);
+        // A conflict has several stages; keep the one that's reported as a conflict.
+        if entries
+            .get(key.as_ref())
+            .is_some_and(|e: &IndexEntry| e.stage != 0)
+        {
+            continue;
+        }
+        entries.insert(
+            key.into_owned(),
+            IndexEntry {
+                path: path.to_string(),
+                mode: mode.to_string(),
+                oid: oid.to_string(),
+                stage,
+            },
+        );
+    }
+    Ok(entries)
+}
+
+/// Which of `paths` are ignored and untracked.
+async fn ignored_paths(top: &Path, paths: &[String]) -> anyhow::Result<HashSet<String>> {
+    let out = output(
+        "git",
+        top,
+        &["check-ignore", "-z", "--stdin"],
+        Opts {
+            stdin: Some(nul_joined(paths)),
+            ..Opts::default()
+        },
+    )
+    .await?;
+    // Exit status 1 = none of the paths is ignored.
+    if out.status.code() != Some(1) {
+        check("git", &["check-ignore"], &out)?;
+    }
+    Ok(nul_split(&String::from_utf8_lossy(&out.stdout))
+        .map(str::to_string)
+        .collect())
+}
+
+/// Puts the index entries of `paths` back to `before` (removing ones that weren't there).
+async fn restore_index(
+    top: &Path,
+    paths: &[String],
+    before: &HashMap<String, IndexEntry>,
+) -> anyhow::Result<()> {
+    let mut entries = Vec::new();
+    let mut removed = Vec::new();
+    for path in paths {
+        match before.get(path_key(path).as_ref()) {
+            Some(e) => {
+                entries.extend_from_slice(format!("{} {} 0\t{}", e.mode, e.oid, e.path).as_bytes());
+                entries.push(0);
+            }
+            None => removed.push(path.clone()),
+        }
+    }
+    if !removed.is_empty() {
+        git_stdin(
+            top,
+            &["update-index", "-z", "--force-remove", "--stdin"],
+            nul_joined(&removed),
+        )
+        .await?;
+    }
+    if !entries.is_empty() {
+        git_stdin(top, &["update-index", "-z", "--index-info"], entries).await?;
+    }
+    Ok(())
 }
 
 async fn short_head(cwd: &Path) -> anyhow::Result<String> {
@@ -578,6 +1242,19 @@ fn repo_relative_paths(cwd: &Path, top: &Path, touched: &[String]) -> Vec<String
     out
 }
 
+/// Removes Windows' `\\?\` verbatim prefix (from `canonicalize`), which git and
+/// most tools can't use: `\\?\C:\x` → `C:\x`, `\\?\UNC\srv\x` → `\\srv\x`.
+fn plain_path(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
+}
+
 /// Canonicalizes the longest existing ancestor of `path` (resolving symlinks such as
 /// macOS's /var → /private/var) and re-appends the rest; `..` in the missing part is
 /// resolved lexically.
@@ -608,7 +1285,10 @@ fn lenient_canonicalize(path: &Path) -> PathBuf {
     }
 }
 
-pub async fn merge(agent: &Agent) -> anyhow::Result<String> {
+/// The checks `merge` makes on the project before touching anything, so "Commit &
+/// merge" can refuse up front instead of committing and then failing to merge.
+/// Returns (branch, base, project).
+pub async fn merge_preflight(agent: &Agent) -> anyhow::Result<(&str, &str, &Path)> {
     let (Some(branch), Some(base)) = (agent.branch.as_deref(), agent.base_branch.as_deref()) else {
         bail!("Only agents running in their own worktree branch can be merged");
     };
@@ -622,24 +1302,129 @@ pub async fn merge(agent: &Agent) -> anyhow::Result<String> {
             agent.project_path
         );
     }
-    let agent_dirty = git(agent_cwd(agent)?, &["status", "--porcelain"]).await?;
-    if !agent_dirty.trim().is_empty() {
-        bail!("The agent has uncommitted changes. Commit them before merging.");
+    // `symbolic-ref` (not `rev-parse --abbrev-ref HEAD`) also works before the first
+    // commit, and tells a detached HEAD apart.
+    let head = output(
+        "git",
+        project,
+        &["symbolic-ref", "-q", "--short", "HEAD"],
+        Opts::default(),
+    )
+    .await?;
+    let current = match head.status.code() {
+        Some(0) => String::from_utf8_lossy(&head.stdout).trim().to_string(),
+        Some(1) => bail!(
+            "{} has a detached HEAD (no branch checked out); check out `{base}` there to merge.",
+            agent.project_path
+        ),
+        _ => {
+            check("git", &["symbolic-ref"], &head)?;
+            String::new()
+        }
+    };
+    let born = output(
+        "git",
+        project,
+        &["rev-parse", "--verify", "-q", "HEAD^{commit}"],
+        Opts::default(),
+    )
+    .await?;
+    if !born.status.success() {
+        bail!(
+            "{} has no commits yet. Make a first commit on `{current}` before merging into it.",
+            agent.project_path
+        );
     }
-    let dirty = git(project, &["status", "--porcelain", "--untracked-files=no"]).await?;
+    if current != base {
+        if let Some(elsewhere) = worktree_with_branch(project, base).await {
+            bail!(
+                "`{base}` is checked out in another worktree ({}), not in {}. Merge `{branch}` \
+                 there, or check `{base}` out in {}.",
+                elsewhere.display(),
+                agent.project_path,
+                agent.project_path
+            );
+        }
+        bail!(
+            "{} has `{current}` checked out; switch it to `{base}` to merge.",
+            agent.project_path
+        );
+    }
+    let dirty = git(
+        project,
+        &[
+            "status",
+            "--porcelain",
+            "--untracked-files=no",
+            "--ignore-submodules=dirty",
+        ],
+    )
+    .await?;
     if !dirty.trim().is_empty() {
         bail!(
             "{} has uncommitted changes. Commit or stash them before merging.",
             agent.project_path
         );
     }
-    let current = git(project, &["rev-parse", "--abbrev-ref", "HEAD"]).await?;
-    let current = current.trim();
-    if current != base {
-        bail!(
-            "{} has `{current}` checked out; switch it to `{base}` to merge.",
-            agent.project_path
-        );
+    Ok((branch, base, project))
+}
+
+/// The worktree (other than `project` itself) that has `branch` checked out.
+async fn worktree_with_branch(project: &Path, branch: &str) -> Option<PathBuf> {
+    let list = git(project, &["worktree", "list", "--porcelain", "-z"])
+        .await
+        .ok()?;
+    let wanted = format!("branch refs/heads/{branch}");
+    let here = lenient_canonicalize(project);
+    let mut path: Option<&str> = None;
+    for field in list.split('\0') {
+        if let Some(p) = field.strip_prefix("worktree ") {
+            path = Some(p);
+        } else if field == wanted {
+            let p = PathBuf::from(path?);
+            return (lenient_canonicalize(&p) != here).then_some(p);
+        }
+    }
+    None
+}
+
+/// Merges the agent's branch into its base branch in the project checkout.
+///
+/// Hooks: the merge runs the project's own hooks (pre-merge-commit, commit-msg,
+/// post-merge), exactly like `git merge` in a terminal. A worktree agent shares the
+/// repository's hooks directory (`.git/hooks`), so it could plant a hook that runs
+/// here. Disabling hooks for this merge (`-c core.hooksPath=<empty dir>`) was
+/// considered and rejected: it would silently skip the user's legitimate hooks (commit
+/// message checks, post-merge installs), and it wouldn't close the hole anyway, since a
+/// planted hook (or `.git/config`) also runs on the user's own next `git commit`.
+/// Isolating the agent from `.git` is the sandbox's job, not the merge's.
+pub async fn merge(agent: &Agent) -> anyhow::Result<String> {
+    let (branch, base, project) = merge_preflight(agent).await?;
+    let agent_dirty = git(
+        agent_cwd(agent)?,
+        &["status", "--porcelain", "--ignore-submodules=dirty"],
+    )
+    .await?;
+    if !agent_dirty.trim().is_empty() {
+        bail!("The agent has uncommitted changes. Commit them before merging.");
+    }
+    // `git merge` exits 0 with "Already up to date." when there is nothing to merge;
+    // don't report the previous commit's stats as this merge's.
+    let merged = output(
+        "git",
+        project,
+        &["merge-base", "--is-ancestor", branch, "HEAD"],
+        Opts::default(),
+    )
+    .await?;
+    match merged.status.code() {
+        Some(0) => {
+            return Ok(format!(
+                "Nothing to merge: {base} already contains {branch}"
+            ))
+        }
+        Some(1) => {}
+        _ => check("git", &["merge-base"], &merged)?,
     }
     let message = format!("Merge Armada agent: {}", agent.title);
     if let Err(e) = git(project, &["merge", "--no-ff", branch, "-m", &message]).await {
@@ -657,37 +1442,123 @@ pub async fn merge(agent: &Agent) -> anyhow::Result<String> {
     })
 }
 
+/// Pushes the agent's branch and opens a pull request into its base branch. Returns
+/// the new PR's URL, or "A pull request already exists: <url>" if the branch has one
+/// (the push has then updated it).
 pub async fn create_pr(agent: &Agent, title: &str, body: &str) -> anyhow::Result<String> {
     let (Some(branch), Some(base)) = (agent.branch.as_deref(), agent.base_branch.as_deref()) else {
         bail!("Pull requests need an agent running on its own branch (enable worktree)");
     };
+    if !agent.worktree {
+        bail!("Pull requests need an agent running on its own branch (enable worktree)");
+    }
     let cwd = agent_cwd(agent)?;
     let title = if title.trim().is_empty() {
         agent.title.as_str()
     } else {
         title.trim()
     };
+    let dirty = git(cwd, &["status", "--porcelain", "--ignore-submodules=dirty"]).await?;
+    if !dirty.trim().is_empty() {
+        bail!("The agent has uncommitted changes. Commit them before opening a pull request, so they're part of it.");
+    }
+    let ahead: i64 = git(
+        cwd,
+        &["rev-list", "--count", &format!("{base}..{branch}"), "--"],
+    )
+    .await
+    .map_err(|e| e.context(format!("comparing {branch} with {base}")))?
+    .trim()
+    .parse()
+    .unwrap_or(0);
+    if ahead == 0 {
+        bail!("{branch} has no commits that aren't already in {base}, so there's nothing to open a pull request for.");
+    }
     // Fail fast with a friendly message before pushing anything.
     which::which("gh").map_err(|_| {
         anyhow!("The GitHub CLI (gh) is not installed. Get it from https://cli.github.com")
     })?;
-    git(cwd, &["push", "-u", "origin", branch]).await?;
-    let out = run(
-        "gh",
+    let remote = push_remote(cwd, branch).await?;
+    run_opts(
+        "git",
         cwd,
-        &[
-            "pr", "create", "--title", title, "--body", body, "--head", branch, "--base", base,
-        ],
+        &["push", "-u", &remote, branch],
+        Opts {
+            timeout: Some(PUSH_TIMEOUT),
+            ..Opts::default()
+        },
     )
     .await?;
-    let url = out
-        .lines()
+    let gh = |args: Vec<&str>| {
+        let args: Vec<String> = args.into_iter().map(str::to_string).collect();
+        async move {
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            run_opts(
+                "gh",
+                cwd,
+                &args,
+                Opts {
+                    timeout: Some(GH_TIMEOUT),
+                    ..Opts::default()
+                },
+            )
+            .await
+        }
+    };
+    let existing = gh(vec![
+        "pr", "list", "--head", branch, "--base", base, "--state", "open", "--json", "url", "--jq",
+        ".[0].url",
+    ])
+    .await
+    .ok()
+    .and_then(|out| last_url(&out));
+    if let Some(url) = existing {
+        return Ok(format!("A pull request already exists: {url}"));
+    }
+    let created = gh(vec![
+        "pr", "create", "--title", title, "--body", body, "--head", branch, "--base", base,
+    ])
+    .await;
+    match created {
+        Ok(out) => Ok(last_url(&out).unwrap_or_else(|| out.trim().to_string())),
+        // Raced with someone else creating it (or `pr list` couldn't see it).
+        Err(e) if format!("{e:#}").contains("already exists") => {
+            match last_url(&format!("{e:#}")) {
+                Some(url) => Ok(format!("A pull request already exists: {url}")),
+                None => Err(e),
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// The last http(s) URL that ends a line of `out`.
+fn last_url(out: &str) -> Option<String> {
+    out.lines()
         .rev()
-        .map(str::trim)
-        .find(|l| l.starts_with("http"))
-        .unwrap_or_else(|| out.trim())
+        .filter_map(|l| l.split_whitespace().last())
+        .find(|w| w.starts_with("https://") || w.starts_with("http://"))
+        .map(str::to_string)
+}
+
+/// The remote `branch` tracks, else `origin`.
+async fn push_remote(cwd: &Path, branch: &str) -> anyhow::Result<String> {
+    let key = format!("branch.{branch}.remote");
+    let configured = output("git", cwd, &["config", "--get", &key], Opts::default()).await?;
+    let configured = String::from_utf8_lossy(&configured.stdout)
+        .trim()
         .to_string();
-    Ok(url)
+    // "." means a local upstream, which can't host a pull request.
+    if !configured.is_empty() && configured != "." {
+        return Ok(configured);
+    }
+    let remotes = git(cwd, &["remote"]).await?;
+    if remotes.lines().any(|r| r.trim() == "origin") {
+        return Ok("origin".into());
+    }
+    bail!(
+        "This repository has no `origin` remote to push {branch} to. Add one (`git remote add origin <url>`) or set the branch's upstream, then try again."
+    )
 }
 
 #[cfg(test)]
@@ -704,9 +1575,12 @@ mod tests {
             let dir = std::env::temp_dir().join(format!("armada-git-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(dir.join("hooks-none")).unwrap();
             let repo = Repo {
-                dir: dir.canonicalize().unwrap(),
+                // Without Windows' \\?\ prefix, which git can't handle.
+                dir: plain_path(&dir.canonicalize().unwrap()),
             };
             repo.git(&["init", "-q"]);
+            // Byte-exact checkouts whatever the machine's git config says.
+            repo.git(&["config", "core.autocrlf", "false"]);
             repo.git(&["config", "user.name", "Armada Test"]);
             repo.git(&["config", "user.email", "test@armada.invalid"]);
             repo.git(&["config", "commit.gpgsign", "false"]);
@@ -761,6 +1635,22 @@ mod tests {
         }
     }
 
+    #[test]
+    fn verbatim_prefixes_are_removed() {
+        assert_eq!(
+            plain_path(Path::new(r"\\?\C:\repo\.git\index")),
+            PathBuf::from(r"C:\repo\.git\index")
+        );
+        assert_eq!(
+            plain_path(Path::new(r"\\?\UNC\srv\share\x")),
+            PathBuf::from(r"\\srv\share\x")
+        );
+        assert_eq!(
+            plain_path(Path::new("/home/me/repo")),
+            PathBuf::from("/home/me/repo")
+        );
+    }
+
     #[tokio::test]
     async fn diff_never_touches_the_real_index() {
         let repo = Repo::new();
@@ -800,10 +1690,134 @@ mod tests {
         let repo = Repo::new();
         repo.write("a.txt", "one\n");
         assert!(repo.index_bytes().is_none());
-        // No commit yet, so diffing against HEAD fails; it must still not create an index.
-        let _ = diff_worktree(&repo.dir, None).await;
+        // No commit yet: everything is new (diffed against the empty tree), and still
+        // no index is created.
+        let diff = diff_worktree(&repo.dir, None).await.unwrap();
+        let mut paths: Vec<_> = diff.files.iter().map(|f| f.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(paths, vec![".gitignore", "a.txt"]);
+        assert!(diff.files.iter().all(|f| f.status == ChangeStatus::Added));
+        assert!(diff.patch.contains("+one"), "{}", diff.patch);
+        assert_eq!(diff.ahead, 0);
+        assert_eq!(diff.uncommitted, 2);
         assert!(repo.index_bytes().is_none());
         assert!(repo.leftover_temp_indexes().is_empty());
+    }
+
+    /// Reported: `git add -N` turns an untracked embedded repository into a gitlink,
+    /// and checking a gitlink for local changes runs git inside it with its own
+    /// config, out of reach of our overrides. Its filters must not run.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn diff_never_runs_a_nested_repositorys_filters() {
+        let repo = Repo::new();
+        repo.write("a.txt", "one\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+
+        let inner = repo.dir.join("vendor/inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        let in_inner = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&inner)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        in_inner(&["init", "-q"]);
+        in_inner(&["config", "user.name", "Armada Test"]);
+        in_inner(&["config", "user.email", "test@armada.invalid"]);
+        in_inner(&["config", "core.hooksPath", "/dev/null"]);
+        std::fs::write(inner.join("f.txt"), "hi\n").unwrap();
+        std::fs::write(inner.join(".gitattributes"), "f.txt filter=evil\n").unwrap();
+        in_inner(&["add", "-A"]);
+        in_inner(&["commit", "-q", "-m", "inner"]);
+        let marker = std::env::temp_dir().join(format!("armada-nested-{}", uuid::Uuid::new_v4()));
+        in_inner(&[
+            "config",
+            "filter.evil.clean",
+            &format!("touch '{}'; cat", marker.display()),
+        ]);
+        // Stat-dirty, content unchanged: git must re-read (and filter) it to tell.
+        let old = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+        std::fs::File::options()
+            .write(true)
+            .open(inner.join("f.txt"))
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+
+        let diff = diff_worktree(&repo.dir, None).await.unwrap();
+        let ran = marker.exists();
+        let _ = std::fs::remove_file(&marker);
+        assert!(!ran, "the nested repository's clean filter ran");
+        assert!(
+            diff.files.iter().any(|f| f.path == "vendor/inner"),
+            "{:?}",
+            diff.files
+        );
+        assert!(repo.leftover_temp_indexes().is_empty());
+    }
+
+    #[tokio::test]
+    async fn huge_patches_are_cut_at_a_file_boundary() {
+        let repo = Repo::new();
+        repo.write("a.txt", "a\n");
+        repo.write("b.txt", "b\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+        repo.write("a.txt", &"a line\n".repeat(50));
+        repo.write("b.txt", &"b line\n".repeat(5000));
+        let git = ReadOnlyGit::new(&repo.dir).await.unwrap();
+        let (full, truncated) = git.patch(&["HEAD"], MAX_PATCH_BYTES).await.unwrap();
+        assert!(!truncated);
+        let (cut, truncated) = git.patch(&["HEAD"], 4096).await.unwrap();
+        assert!(truncated);
+        assert!(cut.starts_with("diff --git a/a.txt b/a.txt\n"), "{cut}");
+        assert!(!cut.contains("b.txt"), "{cut}");
+        assert!(full.starts_with(&cut));
+        assert!(cut.ends_with('\n'));
+    }
+
+    #[test]
+    fn patch_truncation() {
+        let patch = b"diff --git a/x b/x\n+1\ndiff --git a/y b/y\n+22222\n";
+        assert_eq!(
+            truncate_patch(patch, patch.len()),
+            b"diff --git a/x b/x\n+1\n"
+        );
+        assert_eq!(truncate_patch(patch, 23), b"diff --git a/x b/x\n+1\n");
+        assert_eq!(truncate_patch(patch, 22), b"diff --git a/x b/x\n+1\n");
+        assert_eq!(truncate_patch(patch, 21), b"");
+        assert_eq!(truncate_patch(patch, 5), b"");
+    }
+
+    #[tokio::test]
+    async fn stale_temp_indexes_are_swept() {
+        let repo = Repo::new();
+        repo.write("a.txt", "one\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+        let git_dir = repo.dir.join(".git");
+        let stale = git_dir.join("armada-index-stale");
+        let fresh = git_dir.join("armada-index-fresh");
+        std::fs::write(&stale, "x").unwrap();
+        std::fs::write(&fresh, "x").unwrap();
+        let old = SystemTime::now() - STALE_TEMP_INDEX - Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(&stale)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        diff_worktree(&repo.dir, None).await.unwrap();
+        assert!(!stale.exists());
+        assert!(fresh.exists(), "a concurrent diff's index must survive");
     }
 
     /// Repo-local config an agent could write must not execute when the diff is viewed.
@@ -890,6 +1904,96 @@ mod tests {
         assert!(status.contains("!! debug.log"), "{status}");
     }
 
+    /// The UI is told what was committed and what was left behind.
+    #[tokio::test]
+    async fn commit_reports_files_and_what_was_left() {
+        let repo = Repo::new();
+        repo.write("agent.txt", "a\n");
+        repo.write("user.txt", "u\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+        repo.write("agent.txt", "a2\n");
+        repo.write("user.txt", "u2\n");
+        repo.write("scratch.txt", "mine\n");
+        // A nested repository the agent also wrote into.
+        let inner = repo.dir.join("libs/inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        assert!(std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&inner)
+            .status()
+            .unwrap()
+            .success());
+        repo.write("libs/inner/x.txt", "x\n");
+
+        let summary = commit_paths(
+            &repo.dir,
+            "agent work",
+            &["agent.txt".into(), "libs/inner/x.txt".into()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(summary.files, vec!["agent.txt"]);
+        assert_eq!(summary.skipped, vec!["libs/inner/x.txt"]);
+        // user.txt, scratch.txt and the nested repository.
+        assert_eq!(summary.left_uncommitted, 3);
+        assert_eq!(
+            summary.message,
+            format!(
+                "Committed 1 file ({}); 3 other changed files were left uncommitted; \
+                 skipped 1 file inside a submodule or nested repository",
+                summary.hash
+            )
+        );
+        assert_eq!(
+            repo.lines(&["show", "--name-only", "--format=", "HEAD"]),
+            vec!["agent.txt"]
+        );
+
+        // Only nested-repository files: nothing to commit, and it says why.
+        let err = commit_paths(&repo.dir, "msg", &["libs/inner/x.txt".into()])
+            .await
+            .unwrap_err();
+        assert!(err.is::<NothingToCommit>());
+        assert!(err.to_string().contains("nested repository"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn commit_all_with_nothing_is_a_typed_error() {
+        let repo = Repo::new();
+        repo.write("a.txt", "a\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+        let err = commit_all(&repo.dir, "msg").await.unwrap_err();
+        assert!(err.is::<NothingToCommit>(), "{err:#}");
+        repo.write("b.txt", "b\n");
+        let summary = commit_all(&repo.dir, "msg").await.unwrap();
+        assert_eq!(summary.files, vec!["b.txt"]);
+        assert_eq!(summary.left_uncommitted, 0);
+        assert_eq!(
+            summary.message,
+            format!("Committed 1 file ({})", summary.hash)
+        );
+    }
+
+    #[test]
+    fn agent_git_operations_dont_overlap() {
+        let id = format!("agent-{}", uuid::Uuid::new_v4());
+        let guard = try_lock_agent(&id).unwrap();
+        assert!(try_lock_agent(&id).is_err());
+        assert!(try_lock_agent("another-agent").is_ok());
+        drop(guard);
+        assert!(try_lock_agent(&id).is_ok());
+    }
+
+    #[test]
+    fn counts_porcelain_entries() {
+        // Index rename, worktree-only rename (intent-to-add), plain entries.
+        let out = "R  new.txt\0old.txt\0 R moved.txt\0orig.txt\0 M a.txt\0?? b.txt\0";
+        assert_eq!(count_porcelain(out), 4);
+        assert_eq!(count_porcelain(""), 0);
+    }
+
     #[tokio::test]
     async fn commit_without_worktree_needs_touched_files() {
         let repo = Repo::new();
@@ -906,6 +2010,354 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().starts_with("Nothing to commit"), "{err}");
         assert_eq!(repo.lines(&["rev-list", "--count", "HEAD"]), vec!["1"]);
+    }
+
+    /// The UI parses `diff --git a/… b/…`; user config must not change the shape.
+    #[tokio::test]
+    async fn diff_output_ignores_user_diff_config() {
+        let repo = Repo::new();
+        repo.write("café.txt", "one\n");
+        repo.write("sub/x.txt", "x\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+        for (key, value) in [
+            ("diff.mnemonicPrefix", "true"),
+            ("diff.noprefix", "true"),
+            ("diff.relative", "true"),
+            ("diff.renames", "false"),
+            ("core.quotePath", "true"),
+            ("color.ui", "always"),
+            ("color.diff", "always"),
+        ] {
+            repo.git(&["config", key, value]);
+        }
+        repo.write("café.txt", "one\ntwo\n");
+        repo.write("sub/x.txt", "x\ny\n");
+
+        // From a subfolder, where diff.relative would hide the root file.
+        let diff = diff_worktree(&repo.dir.join("sub"), None).await.unwrap();
+        let mut paths: Vec<_> = diff.files.iter().map(|f| f.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(paths, vec!["café.txt", "sub/x.txt"]);
+        assert!(
+            diff.files.iter().all(|f| f.additions == 1),
+            "{:?}",
+            diff.files
+        );
+        assert!(
+            diff.patch.contains("diff --git a/café.txt b/café.txt\n"),
+            "{}",
+            diff.patch
+        );
+        assert!(diff.patch.contains("--- a/café.txt\n+++ b/café.txt\n"));
+        assert!(diff.patch.contains("diff --git a/sub/x.txt b/sub/x.txt\n"));
+        assert!(!diff.patch.contains('\x1b'), "no color codes");
+    }
+
+    /// A rejected commit (hook, identity, signing) leaves the user's index as it was.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_commit_restores_the_index() {
+        use std::os::unix::fs::PermissionsExt;
+        let repo = Repo::new();
+        repo.write("agent.txt", "a\n");
+        repo.write("user.txt", "u\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+        repo.write(
+            "hooks-none/pre-commit",
+            "#!/bin/sh\necho 'tests are red' >&2\nexit 1\n",
+        );
+        std::fs::set_permissions(
+            repo.dir.join("hooks-none/pre-commit"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+
+        repo.write("user.txt", "u2\n");
+        repo.git(&["add", "user.txt"]);
+        repo.write("agent.txt", "a2\n");
+        repo.write("new.txt", "n\n");
+        let before = repo.index_bytes().unwrap();
+
+        let err = commit_paths(
+            &repo.dir,
+            "agent work",
+            &["agent.txt".into(), "new.txt".into()],
+        )
+        .await
+        .unwrap_err();
+        assert!(format!("{err:#}").contains("tests are red"), "{err:#}");
+        assert_eq!(repo.lines(&["rev-list", "--count", "HEAD"]), vec!["1"]);
+        assert_eq!(
+            repo.lines(&["diff", "--cached", "--name-only"]),
+            vec!["user.txt"]
+        );
+        let status = repo.git(&["status", "--porcelain"]);
+        assert!(status.contains("?? new.txt"), "{status}");
+        assert!(status.contains(" M agent.txt"), "{status}");
+        // Same entries (only stat data may differ).
+        let after = repo.git(&["ls-files", "-s"]);
+        std::fs::write(repo.dir.join(".git/index"), &before).unwrap();
+        assert_eq!(after, repo.git(&["ls-files", "-s"]));
+    }
+
+    #[tokio::test]
+    async fn commit_skips_directories() {
+        let repo = Repo::new();
+        repo.write("src/lib.rs", "a\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+        repo.write("src/lib.rs", "b\n");
+        repo.write("src/users-own.rs", "mine\n");
+
+        let err = commit_paths(&repo.dir, "msg", &["src".into()])
+            .await
+            .unwrap_err();
+        assert!(err.to_string().starts_with("Nothing to commit"), "{err}");
+
+        commit_paths(&repo.dir, "msg", &["src".into(), "src/lib.rs".into()])
+            .await
+            .unwrap();
+        assert_eq!(
+            repo.lines(&["show", "--name-only", "--format=", "HEAD"]),
+            vec!["src/lib.rs"]
+        );
+        assert!(repo
+            .git(&["status", "--porcelain"])
+            .contains("?? src/users-own.rs"));
+    }
+
+    /// Thousands of paths go through stdin, not the command line (Windows: 32 KiB).
+    #[tokio::test]
+    async fn commit_many_paths() {
+        let repo = Repo::new();
+        repo.write("seed.txt", "s\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+        let names: Vec<String> = (0..1500)
+            .map(|i| format!("generated/a-fairly-long-file-name-number-{i:05}.txt"))
+            .collect();
+        for name in &names {
+            repo.write(name, "x\n");
+        }
+        commit_paths(&repo.dir, "many", &names).await.unwrap();
+        assert_eq!(
+            repo.lines(&["show", "--name-only", "--format=", "HEAD"])
+                .len(),
+            names.len()
+        );
+    }
+
+    fn worktree_agent(repo: &Repo, wt: &Path, branch: &str, base: &str) -> Agent {
+        serde_json::from_value(serde_json::json!({
+            "id": "a1",
+            "title": "Agent",
+            "provider": "grok",
+            "accountId": "acc",
+            "projectPath": repo.dir.display().to_string(),
+            "cwd": wt.display().to_string(),
+            "worktree": true,
+            "branch": branch,
+            "baseBranch": base,
+            "status": "idle",
+            "running": false,
+            "createdAt": 0,
+            "updatedAt": 0,
+            "lastActivityAt": 0,
+            "costUsd": 0.0,
+            "tokensUsed": 0,
+            "unread": false,
+            "archived": false,
+            "pendingPermissions": 0
+        }))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn revert_file_and_hunk() {
+        let repo = Repo::new();
+        let lines: String = (1..=30).map(|i| format!("line {i}\n")).collect();
+        repo.write("a.txt", &lines);
+        repo.write("b.txt", "keep\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+        let agent = worktree_agent(&repo, &repo.dir, "main", "main");
+        repo.write(
+            "a.txt",
+            &lines
+                .replace("line 2\n", "TWO\n")
+                .replace("line 29\n", "TWENTY-NINE\n"),
+        );
+        repo.write("b.txt", "changed\n");
+        repo.write("new.txt", "fresh\n");
+        let diff = get_diff(&agent).await.unwrap();
+        assert_eq!(diff.uncommitted, 3);
+
+        // Split the patch into per-file sections, like the UI does.
+        let sections: Vec<String> = diff
+            .patch
+            .split("diff --git ")
+            .filter(|s| !s.is_empty())
+            .map(|s| format!("diff --git {s}"))
+            .collect();
+        let section = |name: &str| {
+            sections
+                .iter()
+                .find(|s| s.starts_with(&format!("diff --git a/{name} ")))
+                .unwrap()
+                .clone()
+        };
+
+        // Whole files: a modified one and a brand-new one.
+        revert_patch(&agent, &section("b.txt")).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(repo.dir.join("b.txt")).unwrap(),
+            "keep\n"
+        );
+        revert_patch(&agent, &section("new.txt")).await.unwrap();
+        assert!(!repo.dir.join("new.txt").exists());
+
+        // One hunk of a.txt: header plus the second hunk only.
+        let a = section("a.txt");
+        let first_hunk = a.find("\n@@").unwrap() + 1;
+        let second_hunk = a[first_hunk + 2..].find("\n@@").unwrap() + first_hunk + 3;
+        let hunk = format!("{}{}", &a[..first_hunk], &a[second_hunk..]);
+        revert_patch(&agent, &hunk).await.unwrap();
+        let now = std::fs::read_to_string(repo.dir.join("a.txt")).unwrap();
+        assert!(now.contains("TWO\n") && now.contains("line 29\n"), "{now}");
+
+        // A stale patch changes nothing and says why.
+        let err = revert_patch(&agent, &section("b.txt")).await.unwrap_err();
+        assert!(
+            format!("{err:#}").contains("couldn't be reverted"),
+            "{err:#}"
+        );
+        assert!(revert_patch(&agent, "rm -rf /").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn merge_with_nothing_new_says_so() {
+        let repo = Repo::new();
+        repo.write("a.txt", "a\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+        let base = repo
+            .git(&["rev-parse", "--abbrev-ref", "HEAD"])
+            .trim()
+            .to_string();
+        let wt = repo.dir.join("hooks-none").join("wt");
+        repo.git(&[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "agent-x",
+            wt.to_str().unwrap(),
+        ]);
+        let agent = worktree_agent(&repo, &wt, "agent-x", &base);
+
+        let msg = merge(&agent).await.unwrap();
+        assert!(msg.starts_with("Nothing to merge"), "{msg}");
+        assert_eq!(repo.lines(&["rev-list", "--count", "HEAD"]), vec!["1"]);
+
+        std::fs::write(wt.join("b.txt"), "b\n").unwrap();
+        commit_all(&wt, "agent commit").await.unwrap();
+        let msg = merge(&agent).await.unwrap();
+        assert!(msg.starts_with("Merged agent-x"), "{msg}");
+        assert!(msg.contains("1 file changed"), "{msg}");
+    }
+
+    fn worktree_setup() -> (Repo, PathBuf, String) {
+        let repo = Repo::new();
+        repo.write("a.txt", "a\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+        let base = repo
+            .git(&["rev-parse", "--abbrev-ref", "HEAD"])
+            .trim()
+            .to_string();
+        let wt = repo.dir.join("hooks-none").join("wt");
+        repo.git(&[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "agent-x",
+            wt.to_str().unwrap(),
+        ]);
+        (repo, wt, base)
+    }
+
+    #[tokio::test]
+    async fn merge_explains_why_it_cant() {
+        let (repo, wt, base) = worktree_setup();
+        let agent = worktree_agent(&repo, &wt, "agent-x", &base);
+        std::fs::write(wt.join("b.txt"), "b\n").unwrap();
+        commit_all(&wt, "agent commit").await.unwrap();
+
+        // Detached HEAD in the project.
+        repo.git(&["checkout", "-q", "--detach"]);
+        let err = merge(&agent).await.unwrap_err();
+        assert!(err.to_string().contains("detached HEAD"), "{err}");
+
+        // The base branch checked out in another worktree.
+        let other = repo.dir.join("hooks-none").join("other");
+        repo.git(&["worktree", "add", "-q", other.to_str().unwrap(), &base]);
+        repo.git(&["checkout", "-q", "-b", "elsewhere"]);
+        let err = merge(&agent).await.unwrap_err();
+        assert!(
+            err.to_string().contains("checked out in another worktree"),
+            "{err}"
+        );
+        assert!(err.to_string().contains("hooks-none/other"), "{err}");
+        assert_eq!(repo.lines(&["rev-list", "--count", &base]), vec!["1"]);
+    }
+
+    #[tokio::test]
+    async fn merge_into_an_unborn_branch_says_so() {
+        let repo = Repo::new();
+        let agent = worktree_agent(&repo, &repo.dir, "agent-x", "main");
+        repo.git(&["checkout", "-q", "-b", "main"]);
+        let err = merge(&agent).await.unwrap_err();
+        assert!(err.to_string().contains("no commits yet"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn pull_requests_need_commits() {
+        let (repo, wt, base) = worktree_setup();
+        let agent = worktree_agent(&repo, &wt, "agent-x", &base);
+        let err = create_pr(&agent, "t", "b").await.unwrap_err();
+        assert!(err.to_string().contains("no commits"), "{err}");
+        let mut not_worktree = agent.clone();
+        not_worktree.worktree = false;
+        let err = create_pr(&not_worktree, "t", "b").await.unwrap_err();
+        assert!(err.to_string().contains("enable worktree"), "{err}");
+    }
+
+    #[test]
+    fn finds_pr_urls() {
+        assert_eq!(
+            last_url("https://github.com/o/r/pull/7\n").as_deref(),
+            Some("https://github.com/o/r/pull/7")
+        );
+        assert_eq!(
+            last_url("gh pr create failed: a pull request for branch \"x\" into branch \"main\" already exists:\nhttps://github.com/o/r/pull/9").as_deref(),
+            Some("https://github.com/o/r/pull/9")
+        );
+        assert_eq!(last_url("\n"), None);
+    }
+
+    #[tokio::test]
+    async fn pull_requests_push_to_the_tracked_remote() {
+        let repo = Repo::new();
+        let err = push_remote(&repo.dir, "feature").await.unwrap_err();
+        assert!(err.to_string().contains("no `origin` remote"), "{err}");
+        repo.git(&["remote", "add", "origin", "https://example.invalid/o.git"]);
+        assert_eq!(push_remote(&repo.dir, "feature").await.unwrap(), "origin");
+        repo.git(&["remote", "add", "fork", "https://example.invalid/f.git"]);
+        repo.git(&["config", "branch.feature.remote", "fork"]);
+        assert_eq!(push_remote(&repo.dir, "feature").await.unwrap(), "fork");
     }
 
     #[test]

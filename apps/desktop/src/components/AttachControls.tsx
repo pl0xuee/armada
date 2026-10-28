@@ -7,9 +7,11 @@ export function AttachButton({
   onClick,
   count,
   className,
+  iconOnly,
 }: {
   onClick: () => void;
   count: number;
+  iconOnly?: boolean;
   className?: string;
 }) {
   const full = count >= MAX_ATTACHMENTS;
@@ -26,7 +28,7 @@ export function AttachButton({
         )}
       >
         <ImagePlus className="h-3.5 w-3.5" />
-        {count > 0 ? <span className="tabular">{count}</span> : <span>Image</span>}
+        {count > 0 ? <span className="tabular">{count}</span> : !iconOnly && <span>Image</span>}
       </button>
     </Tooltip>
   );

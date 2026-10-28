@@ -16,7 +16,9 @@ parking_lot.workspace = true
 which.workspace = true
 rusqlite = { version = "0.37", features = ["bundled"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
-ureq = "3"
+# platform-verifier: trust the OS certificate store (corporate TLS-inspecting proxies);
+# win-system-proxy: honor the Windows proxy setting (HTTP(S)_PROXY env vars are read anyway).
+ureq = { version = "3", features = ["platform-verifier", "win-system-proxy"] }
 flate2 = "1"
 tar = "0.4"
 sha2 = "0.11"
@@ -26,3 +28,6 @@ base64 = "0.22"
 
 [target."cfg(unix)".dependencies]
 libc = "0.2"
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }

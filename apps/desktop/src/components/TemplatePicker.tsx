@@ -28,6 +28,8 @@ export function TemplatePicker({
   align?: "start" | "end";
 }) {
   const [open, setOpen] = useState(false);
+  // After inserting (or navigating away), the caller moves focus; don't yank it back to the trigger.
+  const keepFocus = useRef(false);
   const templates = useApp((s) => s.settings?.templates ?? []);
 
   return (
@@ -46,15 +48,25 @@ export function TemplatePicker({
           )}
         </PopoverTrigger>
       </Tooltip>
-      <PopoverContent side={side} align={align} className="w-[360px] p-0">
+      <PopoverContent
+        side={side}
+        align={align}
+        className="w-[360px] p-0"
+        onCloseAutoFocus={(e) => {
+          if (keepFocus.current) e.preventDefault();
+          keepFocus.current = false;
+        }}
+      >
         {open && (
           <PickerBody
             templates={templates}
             onDone={(text) => {
+              keepFocus.current = true;
               setOpen(false);
               onInsert(text);
             }}
             onManage={() => {
+              keepFocus.current = true;
               setOpen(false);
               useUi.getState().openSettings("templates");
             }}

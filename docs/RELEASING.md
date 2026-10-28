@@ -7,15 +7,16 @@ Installed copies of Armada check GitHub Releases for updates (15 seconds after l
 
 ## Cutting a release
 
-1. Bump the version in **both** places (they must match the tag):
-   - `Cargo.toml` → `[workspace.package] version`
-   - `apps/desktop/package.json` → `version`
+1. Bump the version everywhere (they must match the tag; the Release workflow refuses to build otherwise):
+   - `Cargo.toml` → `[workspace.package] version` (then `cargo check` to update `Cargo.lock`)
+   - `apps/desktop/package.json` and `apps/remote/package.json` → `version` (then `npm install` in each to update the lock files)
+   - `tauri.conf.json` has no version on purpose: Tauri takes it from `Cargo.toml`.
 2. Commit, then tag and push:
    ```bash
    git tag v0.2.0
    git push origin v0.2.0
    ```
-3. The **Release** workflow builds macOS (universal), Windows and Linux installers, signs the update bundles and uploads everything plus `latest.json` to a **draft** release.
+3. The **Release** workflow first checks that the tag matches the version and runs the tests, then builds macOS (universal), Windows and Linux installers, signs the update bundles and uploads everything plus `latest.json` to a **draft** release.
 4. Review the draft on GitHub and press **Publish**. Only published releases are visible to the updater, so this is the moment the update rolls out.
 
 ## Signing key
@@ -40,3 +41,14 @@ gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD < ~/.tauri/armada-updater.passw
 ## Optional: OS code signing
 
 `release.yml` has commented placeholders for Apple notarization and Windows Authenticode. Without them, macOS Gatekeeper and Windows SmartScreen show a warning on first install. Updates still verify through the updater key above.
+
+## Building locally
+
+The phone companion is embedded into the desktop binary, and release builds refuse to compile without it:
+
+```bash
+(cd apps/remote && npm ci && npm run build)
+cd apps/desktop && npm ci && npm run tauri build
+```
+
+(`beforeBuildCommand` rebuilds it too; set `ARMADA_ALLOW_MISSING_REMOTE=1` only for throwaway builds.)

@@ -7,7 +7,7 @@ export interface TerminalSink {
 }
 
 const sinks = new Map<string, TerminalSink>();
-const pending = new Map<string, { data: string[]; exit?: number | null }>();
+const pending = new Map<string, { data: string[]; size?: number; exit?: number | null }>();
 
 export function attachTerminal(id: string, sink: TerminalSink): () => void {
   sinks.set(id, sink);
@@ -33,10 +33,19 @@ function buffer(id: string) {
   return b;
 }
 
+/** Cap on output buffered for a terminal nobody has opened yet (oldest chunks are dropped). */
+const MAX_PENDING_CHARS = 2_000_000;
+
 export function routeTerminalOutput(id: string, data: string) {
   const s = sinks.get(id);
-  if (s) s.write(data);
-  else buffer(id).data.push(data);
+  if (s) {
+    s.write(data);
+    return;
+  }
+  const b = buffer(id);
+  b.data.push(data);
+  b.size = (b.size ?? 0) + data.length;
+  while (b.size > MAX_PENDING_CHARS && b.data.length > 1) b.size -= b.data.shift()?.length ?? 0;
 }
 
 export function routeTerminalExit(id: string, code: number | null) {
