@@ -23,6 +23,7 @@ export const SubagentCard = memo(function SubagentCard({
   childrenOf,
   agentId,
   agentLive,
+  bgRunning = false,
   depth = 0,
 }: {
   item: ToolItem;
@@ -30,12 +31,14 @@ export const SubagentCard = memo(function SubagentCard({
   childrenOf: Map<string, ToolItem[]>;
   agentId: string;
   agentLive: boolean;
+  /** Background sub-agent that already returned its launch result but is still running. */
+  bgRunning?: boolean;
   depth?: number;
 }) {
   const childCalls = childrenOf.get(item.toolCallId) ?? NO_CHILDREN;
   const info = item.subagent ?? {};
   const unfinished = item.status === "in_progress" || item.status === "pending";
-  const running = unfinished && agentLive;
+  const running = (unfinished && agentLive) || bgRunning;
   const stalled = unfinished && !agentLive;
   const failed = item.status === "failed";
   const [showPrompt, setShowPrompt] = useState(false);
@@ -72,6 +75,7 @@ export const SubagentCard = memo(function SubagentCard({
               {kind}
             </span>
             <span className="text-[11.5px] text-steel tabular">{pluralize(childCalls.length, "tool call")}</span>
+            {bgRunning && <span className="text-[11.5px] text-accent">Running in background</span>}
             {running && childrenRunning > 0 && (
               <span className="text-[11.5px] text-accent tabular">{childrenRunning} running</span>
             )}
@@ -160,7 +164,7 @@ export const SubagentCard = memo(function SubagentCard({
         </div>
       )}
 
-      {!unfinished && item.output.trim() && (
+      {!unfinished && !bgRunning && item.output.trim() && (
         <div className="border-t border-line bg-base/30 px-3 py-2.5">
           <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-steel">Result</div>
           <Markdown text={item.output} className="!text-[12.5px]" />

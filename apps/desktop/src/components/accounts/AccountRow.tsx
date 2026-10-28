@@ -267,6 +267,7 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
                   </Button>
                 </Tooltip>
               )}
+              {account.isSystem && <span aria-hidden className="h-7 w-7 shrink-0" />}
             </>
           )}
         </div>

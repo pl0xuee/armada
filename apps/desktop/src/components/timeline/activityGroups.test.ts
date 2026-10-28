@@ -51,6 +51,11 @@ describe("groupActivity", () => {
     expect(g.groups.get(1)).toEqual([1, 2, 3]);
     expect(g.rows).toEqual([0, 1, 4]);
   });
+  it("keeps the latest interim message visible while later tool calls stream in", () => {
+    const g = run([user(), tool(), tool(), msg(), tool(), tool()]);
+    expect(g.rows).toEqual([0, 1, 3, 4]);
+    expect(g.groups.get(4)).toEqual([4, 5]);
+  });
   it("a pending permission breaks the run", () => {
     const g = run([user(), tool(), tool(), perm(null), tool(), tool()]);
     expect(g.rows).toEqual([0, 1, 3, 4]);

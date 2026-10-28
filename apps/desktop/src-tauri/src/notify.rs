@@ -57,30 +57,39 @@ pub fn close_for_request(request_id: &str) {
     let _ = request_id;
 }
 
-/// Most characters of a permission request's command shown in its notification.
-/// Servers wrap long bodies (some cut them); this keeps a whole command readable
-/// before Approve, without sending megabytes over D-Bus.
+/// Longest command (characters) a notification can carry Approve/Deny for. Notification
+/// daemons clip bodies well before this, so anything longer is reviewed in the app.
 #[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
-const MAX_COMMAND_CHARS: usize = 1500;
+const MAX_ACTIONABLE_CHARS: usize = 300;
+/// Most lines of a command a notification can carry Approve/Deny for (servers show few lines).
+#[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
+const MAX_ACTIONABLE_LINES: usize = 6;
 
-/// The notification body for a permission request: the request's title plus the
-/// full command it would run, so Approve is never pressed on a truncated command.
+/// The notification body for a permission request and whether it may offer Approve/Deny.
+/// A short command is shown whole, so Approve is never pressed on a clipped command; a long
+/// (or already truncated) one gets only "Open in Armada" and a note.
 #[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
-fn request_body(title: &str, command: Option<&str>) -> String {
-    let Some(command) = command.map(str::trim).filter(|c| !c.is_empty()) else {
-        return title.to_string();
+fn request_body(title: &str, command: Option<&str>) -> (String, bool) {
+    let command = command.map(str::trim).filter(|c| !c.is_empty());
+    let too_long = |s: &str| {
+        s.chars().count() > MAX_ACTIONABLE_CHARS || s.lines().count() > MAX_ACTIONABLE_LINES
     };
-    let shown: String = if command.chars().count() > MAX_COMMAND_CHARS {
-        let mut cut: String = command.chars().take(MAX_COMMAND_CHARS - 1).collect();
-        cut.push('…');
-        cut
-    } else {
-        command.to_string()
+    let truncated_title = command.is_none() && title.ends_with('\u{2026}');
+    if truncated_title || command.is_some_and(too_long) || too_long(title) {
+        let head: String = title.chars().take(80).collect();
+        let head = head.lines().next().unwrap_or("");
+        return (
+            format!("{head}\nLong command \u{2014} review it in Armada"),
+            false,
+        );
+    }
+    let Some(command) = command else {
+        return (title.to_string(), true);
     };
     if title.contains(command) {
-        title.to_string()
+        (title.to_string(), true)
     } else {
-        format!("{title}\n$ {shown}")
+        (format!("{title}\n$ {command}"), true)
     }
 }
 
@@ -435,22 +444,23 @@ mod xdg {
         };
         let is_request =
             toast.reason == Some(AttentionReason::Permission) && toast.request_id.is_some();
+        // Approve must never be pressed on a cut-off command: show all of it, or (when it is
+        // too long for a notification) offer only "Open" and review it in the app.
+        let (body, actionable) = match (&toast.agent_id, &toast.request_id) {
+            (Some(agent_id), Some(request_id)) if is_request => request_body(
+                &toast.body,
+                request_command(&app, agent_id, request_id).as_deref(),
+            ),
+            _ => (toast.body.clone(), true),
+        };
         let mut actions: Vec<&str> = Vec::new();
         if toast.agent_id.is_some() {
-            if is_request {
+            if is_request && actionable {
                 actions.extend(["approve", "Approve", "deny", "Deny"]);
             }
             // "default" = clicking the notification body on most servers.
             actions.extend(["default", "Open Armada", "open", "Open"]);
         }
-        // Approve must never be pressed on a cut-off command: show all of it.
-        let body = match (&toast.agent_id, &toast.request_id) {
-            (Some(agent_id), Some(request_id)) if is_request => request_body(
-                &toast.body,
-                request_command(&app, agent_id, request_id).as_deref(),
-            ),
-            _ => toast.body.clone(),
-        };
         let icon = icon
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default();
@@ -484,7 +494,7 @@ mod xdg {
                 Target {
                     app,
                     agent_id,
-                    request_id: toast.request_id.filter(|_| is_request),
+                    request_id: toast.request_id.filter(|_| is_request && actionable),
                 },
             );
             // Clicks that beat the registration.
@@ -622,20 +632,42 @@ mod tests {
     fn request_notifications_show_the_whole_command() {
         let cmd = "rm -rf ./build && git push --force origin main";
         assert_eq!(
-            request_body("Run rm -rf ./build && git pu…", Some(cmd)),
-            format!("Run rm -rf ./build && git pu…\n$ {cmd}")
+            request_body("Run rm -rf ./build && git pu\u{2026}", Some(cmd)),
+            (
+                format!("Run rm -rf ./build && git pu\u{2026}\n$ {cmd}"),
+                true
+            )
         );
         // Already fully in the title: not repeated.
         assert_eq!(
             request_body(&format!("Run `{cmd}`"), Some(cmd)),
-            format!("Run `{cmd}`")
+            (format!("Run `{cmd}`"), true)
         );
-        assert_eq!(request_body("Edit a.txt", None), "Edit a.txt");
-        assert_eq!(request_body("Edit a.txt", Some("  ")), "Edit a.txt");
-        let huge = "x".repeat(MAX_COMMAND_CHARS * 2);
-        let body = request_body("Run", Some(&huge));
-        assert_eq!(body.chars().count(), "Run\n$ ".len() + MAX_COMMAND_CHARS);
-        assert!(body.ends_with('…'));
+        assert_eq!(
+            request_body("Edit a.txt", None),
+            ("Edit a.txt".into(), true)
+        );
+        assert_eq!(
+            request_body("Edit a.txt", Some("  ")),
+            ("Edit a.txt".into(), true)
+        );
+    }
+
+    #[test]
+    fn long_commands_get_no_approve_or_deny() {
+        let huge = "x".repeat(MAX_ACTIONABLE_CHARS + 1);
+        let (body, actionable) = request_body("Run", Some(&huge));
+        assert!(!actionable);
+        assert!(body.contains("Long command"));
+        assert!(!body.contains(&huge));
+        // Many short lines hide the tail just as well.
+        let tall = "a\n".repeat(MAX_ACTIONABLE_LINES + 1);
+        assert!(!request_body("Run", Some(&tall)).1);
+        // A title that was truncated by the agent layer, with no command to show.
+        assert!(!request_body("Run rm -rf ./build && git pu\u{2026}", None).1);
+        // Exactly at the limit is still fine.
+        let ok = "x".repeat(MAX_ACTIONABLE_CHARS);
+        assert!(request_body("Run", Some(&ok)).1);
     }
 
     #[test]

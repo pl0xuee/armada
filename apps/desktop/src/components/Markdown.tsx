@@ -2,14 +2,15 @@ import { createContext, memo, useContext, useDeferredValue, useMemo, useRef, typ
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ImageOff } from "lucide-react";
-import { isExternalUrl, openExternal } from "@/lib/external";
+import { toast } from "sonner";
+import { isExternalUrl, linkMismatchHost, openExternal } from "@/lib/external";
 import { cn } from "@/lib/utils";
 import { localImagePath } from "@/lib/images";
 import { CopyButton } from "./CopyButton";
 import { LocalImage } from "./LocalImage";
 import { CodeText } from "./CodeText";
 import { langFromFence } from "@/lib/highlight";
-import { commandText, isShellLang, looksLikeCommand } from "@/lib/shellRun";
+import { commandText, findHiddenChars, isShellLang, looksLikeCommand, revealHidden } from "@/lib/shellRun";
 import { useApp } from "@/store/app";
 import { RunButton } from "./RunButton";
 
@@ -21,11 +22,14 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
   const lines = code.replace(/\n$/, "").split("\n");
   const runAgent = useContext(RunContext);
   const platform = useApp((s) => s.platform);
-  const command = useMemo(() => {
-    if (!runAgent) return "";
-    if (!(lang ? isShellLang(lang, platform) : looksLikeCommand(code))) return "";
-    return commandText(code, lang);
-  }, [runAgent, lang, code, platform]);
+  const shellish = useMemo(
+    () => Boolean(runAgent) && (lang ? isShellLang(lang, platform) : looksLikeCommand(code)),
+    [runAgent, lang, code, platform],
+  );
+  // Invisible or control characters would make the shown command differ from what runs.
+  const hidden = useMemo(() => shellish && findHiddenChars(code).length > 0, [shellish, code]);
+  const command = useMemo(() => (shellish && !hidden ? commandText(code, lang) : ""), [shellish, hidden, code, lang]);
+  const shown = hidden ? revealHidden(code) : code;
   const runFn = useRef<() => void>(() => {});
   return (
     <div className="group/code my-3 overflow-hidden rounded-xl border border-line bg-code edge">
@@ -41,9 +45,14 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
               }}
             />
           )}
-          <CopyButton text={code} className="opacity-70 group-hover/code:opacity-100" />
+          <CopyButton text={shown} className="opacity-70 group-hover/code:opacity-100" />
         </div>
       </div>
+      {hidden && (
+        <div role="alert" className="border-b border-line bg-err/10 px-3.5 py-1.5 text-[12px] text-err">
+          This command contains hidden characters and can't be run from here.
+        </div>
+      )}
       <pre
         {...(command
           ? {
@@ -74,7 +83,7 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
               </span>
             ))
           ) : (
-            <CodeText code={code.replace(/\n$/, "")} lang={langFromFence(lang)} />
+            <CodeText code={shown.replace(/\n$/, "")} lang={langFromFence(lang)} />
           )}
         </code>
       </pre>
@@ -129,7 +138,13 @@ const components: Components = {
       title={href}
       onClick={(e) => {
         e.preventDefault();
-        if (href) void openExternal(href);
+        if (!href) return;
+        const host = linkMismatchHost(textOf(children), href);
+        if (!host) return void openExternal(href);
+        toast(`This link goes to ${host}`, {
+          description: "The link text shows a different address.",
+          action: { label: "Open", onClick: () => void openExternal(href) },
+        });
       }}
     >
       {children}

@@ -9,7 +9,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import type { Agent } from "@/lib/types";
 import { cn, errorMessage, isMac } from "@/lib/utils";
-import { bufferTail, fenced, themeFromCss, XTERM_FONT } from "@/lib/xterm-theme";
+import { bufferTail, fenced, themeFromCss, XTERM_FONT, XTERM_LINK_HANDLER } from "@/lib/xterm-theme";
 import { useUi } from "@/store/ui";
 import {
   agentWs,
@@ -57,16 +57,23 @@ export function TerminalTab({ agent }: { agent: Agent }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-line px-1.5">
-        <div role="tablist" aria-label="Terminals" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
-          {ws.terms.map((t) => (
-            <TermChip
-              key={t.id}
-              term={t}
-              selected={t.id === active?.id}
-              onSelect={() => setActive(agent.id, t.id)}
-              onClose={() => closeTerminal(agent.id, t.id)}
-            />
-          ))}
+        <div className="flex min-w-0 flex-1 items-center gap-0.5">
+          <div
+            role="tablist"
+            aria-label="Terminals"
+            onKeyDown={onTabListKeyDown}
+            className="flex min-w-0 items-center gap-0.5 overflow-x-auto"
+          >
+            {ws.terms.map((t) => (
+              <TermChip
+                key={t.id}
+                term={t}
+                selected={t.id === active?.id}
+                onSelect={() => setActive(agent.id, t.id)}
+                onClose={() => closeTerminal(agent.id, t.id)}
+              />
+            ))}
+          </div>
           <Tooltip content="New terminal">
             <Button
               size="icon-sm"
@@ -96,6 +103,24 @@ export function TerminalTab({ agent }: { agent: Agent }) {
   );
 }
 
+/** Arrow keys / Home / End move between tabs (selection follows focus). */
+function onTabListKeyDown(e: React.KeyboardEvent<HTMLElement>) {
+  const keys = ["ArrowRight", "ArrowLeft", "Home", "End"];
+  if (!keys.includes(e.key)) return;
+  const tabs = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]'));
+  const cur = tabs.findIndex((t) => t === document.activeElement);
+  if (cur < 0) return;
+  const next =
+    e.key === "Home"
+      ? 0
+      : e.key === "End"
+        ? tabs.length - 1
+        : (cur + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+  e.preventDefault();
+  tabs[next].focus();
+  tabs[next].click();
+}
+
 function TermChip({
   term,
   selected,
@@ -119,8 +144,9 @@ function TermChip({
         type="button"
         role="tab"
         aria-selected={selected}
+        tabIndex={selected ? 0 : -1}
         onClick={onSelect}
-        className="flex max-w-[160px] items-center gap-1.5 truncate pl-2 pr-1 outline-none focus-visible:underline"
+        className="flex max-w-[160px] items-center gap-1.5 truncate rounded-md pl-2 pr-1 outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
       >
         <span
           aria-hidden
@@ -152,6 +178,7 @@ function XtermView({ term: session }: { term: WsTerm }) {
     if (!host) return;
     const id = session.id;
     const term = new Terminal({
+      linkHandler: XTERM_LINK_HANDLER,
       fontFamily: XTERM_FONT,
       fontSize: 12.5,
       lineHeight: 1.3,

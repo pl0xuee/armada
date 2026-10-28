@@ -10,6 +10,26 @@ export function isExternalUrl(href: string | null | undefined): href is string {
   return !!href && EXTERNAL.test(href.trim());
 }
 
+const HOSTLIKE = /^(?:https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z]{2,})(?::\d+)?(?:[/?#]\S*)?$/i;
+
+/**
+ * When a link's visible text looks like a URL or hostname but points at a different host,
+ * returns the real host (for a "this link goes to ..." check); otherwise null.
+ */
+export function linkMismatchHost(text: string, href: string | null | undefined): string | null {
+  const m = HOSTLIKE.exec(text.trim());
+  if (!m || !href) return null;
+  let target: string;
+  try {
+    target = new URL(href.trim()).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  if (!target) return null;
+  const strip = (h: string) => h.replace(/^www\./, "");
+  return strip(m[1].toLowerCase()) === strip(target) ? null : target;
+}
+
 export async function openExternal(href: string): Promise<void> {
   if (!isExternalUrl(href)) return;
   try {

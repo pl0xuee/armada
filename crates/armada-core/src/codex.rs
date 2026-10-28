@@ -178,7 +178,16 @@ impl CodexDriver {
             match peer
                 .request_timeout(
                     "thread/resume",
-                    json!({ "threadId": prev, "cwd": cwd, "excludeTurns": true, "config": codex_config(opts.mcp_servers) }),
+                    // Same sandbox and approval policy as a fresh thread: a resumed
+                    // thread must not fall back to a looser value from config.toml.
+                    json!({
+                        "threadId": prev,
+                        "cwd": cwd,
+                        "excludeTurns": true,
+                        "approvalPolicy": opts.approval_policy,
+                        "sandbox": "workspace-write",
+                        "config": codex_config(opts.mcp_servers)
+                    }),
                     Some(Duration::from_secs(120)),
                 )
                 .await
@@ -1296,11 +1305,13 @@ fn codex_config(servers: &[McpServer]) -> Value {
         };
         map.insert(key, entry);
     }
-    if map.is_empty() {
-        Value::Null
-    } else {
-        json!({ "mcp_servers": map })
+    // Network access follows the user's own Codex config (agents can't write it from the
+    // workspace-write sandbox), so it isn't overridden here.
+    let mut config = json!({});
+    if !map.is_empty() {
+        config["mcp_servers"] = Value::Object(map);
     }
+    config
 }
 
 /// Codex reads attachments when the turn starts; anything older than a day is done.

@@ -15,6 +15,7 @@ export type SettingsSection =
   | "agents"
   | "remote"
   | "voice"
+  | "assistant"
   | "about";
 
 export interface TerminalSession {
@@ -67,6 +68,9 @@ interface UiStore {
   /** Workspace panel (terminals, scripts) under the conversation; remembered across restarts. */
   workspaceOpen: boolean;
   workspaceHeight: number;
+  /** Tallest the workspace panel can be right now (0 = the window is too small for it). Not persisted. */
+  workspaceRoom: number;
+  setWorkspaceRoom: (px: number) => void;
   /** Bumps to ask the composer to focus itself. */
   composerFocusTick: number;
   /** A timeline item to scroll into view once its agent's timeline is showing (see `revealItem`). */
@@ -188,6 +192,8 @@ export const useUi = create<UiStore>((set) => ({
   revealTarget: null,
   workspaceOpen: readWorkspace().open,
   workspaceHeight: readWorkspace().height,
+  workspaceRoom: 1000,
+  setWorkspaceRoom: (workspaceRoom) => set((s) => (s.workspaceRoom === workspaceRoom ? s : { workspaceRoom })),
 
   setView: (view) => set({ view }),
   openAgent: (id) => set({ view: "agents", selectedAgentId: id }),

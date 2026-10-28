@@ -89,6 +89,14 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
   const run = async (kind: "commit" | "ship", message: string) => {
     setBusy(kind);
     try {
+      const secrets = await api.secretLookingFiles(agent.id).catch(() => [] as string[]);
+      if (secrets.length > 0) {
+        toast.error("These files look like secrets", {
+          description: `${secrets.slice(0, 4).join(", ")}${secrets.length > 4 ? ", ..." : ""}. Open the review to commit them or leave them out.`,
+          duration: 10000,
+        });
+        return false;
+      }
       if (kind === "commit") {
         toastCommit(await api.commitAgent(agent.id, message));
       } else {

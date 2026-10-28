@@ -78,6 +78,10 @@ describe("local model helpers", () => {
     expect(isLoopbackUrl("http://[::1]:8080")).toBe(true);
     expect(isLoopbackUrl("http://192.168.1.5:8000")).toBe(false);
     expect(isLoopbackUrl("https://localhost.evil.com")).toBe(false);
+    expect(isLoopbackUrl("http://127.evil.com")).toBe(false);
+    expect(isLoopbackUrl("http://0.0.0.0:11434")).toBe(false);
+    expect(isLoopbackUrl("http://127.1.2.3")).toBe(true);
+    expect(isLoopbackUrl("http://localhost@evil.com")).toBe(false);
     expect(isLoopbackUrl("nonsense")).toBe(false);
   });
 

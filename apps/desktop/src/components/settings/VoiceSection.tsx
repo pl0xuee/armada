@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils";
 import { Check, Download, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -130,7 +131,7 @@ export function VoiceSection({ settings }: { settings: Settings }) {
           <Select
             id="voice-language"
             aria-label="Dictation language"
-            className="h-8 w-[200px]"
+            className={cn("h-8 w-[200px]", !multilingual && "cursor-not-allowed opacity-50")}
             value={multilingual ? voice.language : "auto"}
             onValueChange={(v) => void update({ language: v })}
             options={languageOptions}
@@ -179,7 +180,7 @@ export function VoiceSection({ settings }: { settings: Settings }) {
                   )}
                 </span>
               }
-              description={`${m.description} · ${formatBytes(m.sizeBytes)}${m.multilingual ? " · many languages" : ""}`}
+              description={`${m.description} · ${formatBytes(m.sizeBytes)}${m.multilingual && !/language/i.test(m.description) ? " · many languages" : ""}`}
             >
               {downloading ? (
                 <>

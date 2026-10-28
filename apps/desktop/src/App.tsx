@@ -5,6 +5,7 @@ import { AgentDialogs } from "@/components/AgentDialogs";
 import { Announcer } from "@/components/shell/Announcer";
 import { VoiceSetupDialog } from "@/components/DictateButton";
 import { ShortcutHelp } from "@/components/shell/ShortcutHelp";
+import { VoiceAssistantPanel } from "@/components/voice/VoiceAssistantPanel";
 import { AppMark } from "@/components/AppMark";
 import { Rail } from "@/components/Rail";
 import { TitleBar } from "@/components/TitleBar";
@@ -157,6 +158,7 @@ export function App() {
                 </WhenOpened>
                 <AgentDialogs />
                 <ShortcutHelp />
+                <VoiceAssistantPanel />
                 <VoiceSetupDialog />
                 <Announcer />
                 <WhenOpened open={(s) => s.reviewAgentId !== null}>

@@ -9,6 +9,15 @@ docs/RELEASING.md).
 
 ### New
 
+- **Talk to Armada with the voice assistant.** Press Ctrl/Cmd+Shift+A (or the new title bar button) and
+  speak: ask what your agents are doing, start an agent in one of your projects, message or stop one,
+  or jump to Mission Control, the inbox or an agent's diff. A small panel shows live captions, what it
+  did (with an Open link for each action), the elapsed time and an estimated cost, and you can mute or
+  end it any time. It can never approve or deny permissions, delete or archive agents, commit, push or
+  change settings. It's off by default and needs an OpenAI API key account (add one in Accounts, then
+  choose it in Settings > Voice assistant). Your voice and the agent information it reads are sent to
+  OpenAI's Realtime API and billed to that account per minute; sessions end on their own after a
+  maximum length or silence you choose.
 - **Run models on your own computer.** A new "Local" provider runs agents on Ollama, LM Studio, or any
   OpenAI-compatible server (llama.cpp, vLLM, a GPU box on your network) instead of a cloud account. Add
   a server in Accounts and Armada detects Ollama and LM Studio for you, shows what's running and which
@@ -63,8 +72,58 @@ docs/RELEASING.md).
 
 ### Fixed
 
+- UI polish: the pull request chip reads "2 failing" instead of a bare count, the Run button's shortcut hint matches your platform, and the Mission Control list and account rows line up their status glyphs and action icons.
+
+- **Safer git and pull-request prompts.** Armada's own git commands (commit, merge, push, delete) no longer
+  run programs or hooks that a project's `.git/config` configures, such as filters, pagers, editors, SSH
+  commands or a repository-local hooks folder (such as husky's; run those hooks from your terminal), and refuse to push when the project's config rewrites push
+  addresses; your own global git settings (like Git LFS) keep working. Deleting an agent's worktree can no
+  longer remove folders outside Armada's own worktrees folder. "Fix CI" and "Address comments" now label
+  CI logs and review comments as text written by other people, show who wrote each one, leave out comments
+  from people outside the project unless you choose to include them, and the preview says to review it
+  before sending. Restored conversation history is quoted as history, not instructions. Committing from the
+  review sheet asks first when new files look like secrets (`.env`, `*.pem`, `id_rsa`, ...) and can leave
+  them out. New schedules start in Ask mode in their own worktree, and choosing Auto explains the risk.
+  Codex agents that reattach to an earlier thread keep the same sandbox and approval settings, with
+  network access in the sandbox off.
+- **Safer phone pairing and share links.** The pairing QR code no longer contains a permanent key: it holds a
+  one-time code that works once and expires after 5 minutes, and each phone gets its own key. Settings, Remote
+  lists your paired devices (name and last seen) with a Revoke button for each, plus "Unpair all". Phones that
+  were already paired keep working as one "Previously paired phone" until you revoke it. Keys and share links are
+  stored only as hashes. Share links now expire (1 hour, 24 hours or 7 days; 24 hours by default) and stop when
+  the agent is archived or deleted. People with a share link see the conversation with secrets hidden and a short
+  outline of the tools the agent ran, but no command output, file contents, diffs, approval requests or local
+  paths. Remote access over the network now refuses public addresses (use Tailscale), limits connections per
+  device, rejects requests from other websites, and says plainly that traffic on the local network is not
+  encrypted. The phone app only follows pasted pairing links to private addresses without asking, and no longer
+  re-displays its own credentials.
+- **Safer Run button and links.**
+  - Code blocks containing hidden or control characters (the kind that can make a command look different
+    from what runs) show a warning with those characters made visible, and can't be run or pasted.
+  - Run now asks first for anything except plain common commands (`ls`, `git status`, `npm test`,
+    `cargo build`, ...); pipes, redirects, `$(...)`, `sudo`/`doas` and the like always show the full
+    command for confirmation.
+  - Long permission requests no longer offer Approve/Deny in a desktop notification (the text may be
+    clipped); open them in Armada to review the whole command.
+  - Links in terminal output only open http(s) and mail links in your browser, and a message link whose
+    text names one site but goes to another asks before opening.
+  - Local model servers: addresses with a username or password, and link-local or cloud-metadata
+    addresses, are refused, downloads are limited to your own machine or network, and `127.evil.com` is
+    no longer treated as this computer.
+- **Agent CLIs install pinned, verified versions.** Armada now installs exact, tested versions of Claude Code, Codex and Grok (not "latest"), downloads a pinned Node.js whose checksum is built into the app, and only runs the install scripts those CLIs need.
 - **Pasting images on Linux.** Screenshots and image files copied in a file manager now paste
   into the message box on Wayland (Hyprland, sway, GNOME, KDE), where they were silently dropped.
+- **Privacy hardening.**
+  - Phone pushes now say only which agent needs you and why. Showing the agent's own message text is opt-in
+    (Settings → Phone push → Push detail), and secrets are scrubbed from it.
+  - Secrets in MCP server and custom agent settings (environment values and headers) are kept in your OS
+    keychain instead of Armada's database; existing ones move over automatically.
+  - Checkpoints no longer snapshot untracked credential files (`.env`, `*.pem`, `*.key`, `id_rsa*`,
+    `.npmrc` and similar), and restoring a checkpoint never touches them.
+  - Agent output is no longer written to Armada's log files by default, log files are private to you, and
+    each day's log is capped at 20 MB.
+  - Pasting an image path as text only attaches files inside the agent's project, and linked or
+    non-image files are refused.
 
 ## v0.1.2 — 2026-10-28
 

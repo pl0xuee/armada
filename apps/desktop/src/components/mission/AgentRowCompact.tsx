@@ -76,7 +76,9 @@ export const AgentRowCompact = memo(function AgentRowCompact({
         <span aria-hidden className="absolute inset-y-0 left-0 w-[2px] bg-accent shadow-[0_0_8px_var(--accent)]" />
       )}
       <div className="flex items-center gap-2">
-        <StatusDot status={agent.status} size={7} done={done} />
+        <span className="flex w-3 shrink-0 justify-center">
+          <StatusDot status={agent.status} size={7} done={done} />
+        </span>
         <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="sm" />
       </div>
 

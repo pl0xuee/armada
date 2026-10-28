@@ -724,6 +724,13 @@ impl Db {
             Ok(v) => from_value_lenient::<Settings>(&v),
             Err(e) => (Settings::default(), vec![format!("(not JSON: {e})")]),
         };
+        // Secrets live in the OS keychain; bring plaintext left by older versions (or a
+        // keychain outage) into it now.
+        if crate::secrets::resolve(&mut settings, crate::secrets::vault()) {
+            if let Err(e) = self.put_settings(&settings) {
+                tracing::warn!("couldn't move secrets to the keychain: {e:#}");
+            }
+        }
         dropped.extend(settings.sanitize().into_iter().map(str::to_string));
         if !dropped.is_empty() {
             // Keep the user's data recoverable, once per distinct content (not on
@@ -748,6 +755,7 @@ impl Db {
     }
 
     pub fn put_settings(&self, settings: &Settings) -> anyhow::Result<()> {
+        let settings = &crate::secrets::externalize(settings, crate::secrets::vault());
         self.conn.lock().execute(
             "INSERT INTO settings (id, data) VALUES (1, ?1)
              ON CONFLICT(id) DO UPDATE SET data = excluded.data",

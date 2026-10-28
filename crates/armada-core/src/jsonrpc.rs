@@ -269,6 +269,7 @@ impl Peer {
                         Ok(msg) => route(msg, &closer.pending, &tx),
                         Err(_) => {
                             let shown: String = line.chars().take(400).collect();
+                            let shown = crate::redact::redact_secrets(&shown);
                             tracing::debug!(target: "armada::rpc", "[{label}] non-JSON stdout: {shown}")
                         }
                     }
@@ -284,7 +285,10 @@ impl Peer {
             let tail = stderr_tail.clone();
             tokio::spawn(async move {
                 let _ = read_lines(stderr, MAX_STDERR_LINE, |line| {
-                    tracing::debug!(target: "armada::agent_stderr", "[{label}] {line}");
+                    if tracing::enabled!(target: "armada::agent_stderr", tracing::Level::DEBUG) {
+                        let shown = crate::redact::redact_secrets(&line);
+                        tracing::debug!(target: "armada::agent_stderr", "[{label}] {shown}");
+                    }
                     let mut t = tail.lock();
                     t.count += 1;
                     let n = t.count;

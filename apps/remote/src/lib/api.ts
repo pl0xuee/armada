@@ -1,4 +1,11 @@
-import type { Agent, Attachment, CreateAgentRequest, Session, StateSnapshot, TimelineItem } from "./types";
+import type {
+  Agent,
+  Attachment,
+  CreateAgentRequest,
+  Session,
+  StateSnapshot,
+  TimelineItem,
+} from "./types";
 
 export type HttpMethod = "GET" | "POST" | "DELETE";
 
@@ -26,8 +33,12 @@ export class ApiError extends Error {
   }
 }
 
-export function describeStatus(status: number, serverMessage: string | null): string {
-  if (serverMessage && /shutting down/i.test(serverMessage)) return "Armada is shutting down on your computer. Try again once it's running.";
+export function describeStatus(
+  status: number,
+  serverMessage: string | null,
+): string {
+  if (serverMessage && /shutting down/i.test(serverMessage))
+    return "Armada is shutting down on your computer. Try again once it's running.";
   switch (status) {
     case 0:
       return "Can't reach Armada. Check that your computer is awake and reachable.";
@@ -40,7 +51,10 @@ export function describeStatus(status: number, serverMessage: string | null): st
     case 408:
       return serverMessage ?? "Armada took too long to respond.";
     case 413:
-      return serverMessage ?? "That request is too large. Try fewer or smaller photos.";
+      return (
+        serverMessage ??
+        "That request is too large. Try fewer or smaller photos."
+      );
     case 421:
       // The server only answers on the addresses it advertises (DNS-rebinding guard).
       return "Open the link from the QR code or the LAN address shown in Armada.";
@@ -49,7 +63,10 @@ export function describeStatus(status: number, serverMessage: string | null): st
     case 503:
       return serverMessage ?? "Armada isn't accepting connections right now.";
     default:
-      if (status >= 500) return serverMessage ? `Armada hit an error: ${serverMessage}` : "Armada hit an error. Try again.";
+      if (status >= 500)
+        return serverMessage
+          ? `Armada hit an error: ${serverMessage}`
+          : "Armada hit an error. Try again.";
       return serverMessage ?? `Request failed (${status}).`;
   }
 }
@@ -81,8 +98,10 @@ export function newIdempotencyKey(): string {
  */
 export function retryDelay(e: unknown, attempt: number): number | null {
   if (!(e instanceof ApiError)) return null;
-  if (e.status === 409 && /still being processed/i.test(e.serverMessage ?? "")) return attempt < 30 ? 2_000 : null;
-  if (e.status === 0 || (e.status === 408 && e.serverMessage === null)) return attempt < 2 ? 1_500 * (attempt + 1) : null;
+  if (e.status === 409 && /still being processed/i.test(e.serverMessage ?? ""))
+    return attempt < 30 ? 2_000 : null;
+  if (e.status === 0 || (e.status === 408 && e.serverMessage === null))
+    return attempt < 2 ? 1_500 * (attempt + 1) : null;
   return null;
 }
 
@@ -109,7 +128,12 @@ export interface RequestOptions {
  */
 export interface Backend {
   readonly kind: "http" | "mock";
-  request(method: HttpMethod, path: string, body?: unknown, opts?: RequestOptions): Promise<unknown>;
+  request(
+    method: HttpMethod,
+    path: string,
+    body?: unknown,
+    opts?: RequestOptions,
+  ): Promise<unknown>;
   /** Resolves when the server ends the stream; rejects on failure (ApiError for HTTP statuses). */
   stream(handlers: StreamHandlers): Promise<void>;
 }
@@ -125,7 +149,10 @@ export async function requestIdempotent(
 ): Promise<unknown> {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await b.request(method, path, body, { idempotencyKey: key, onProgress });
+      return await b.request(method, path, body, {
+        idempotencyKey: key,
+        onProgress,
+      });
     } catch (e) {
       const wait = retryDelay(e, attempt);
       if (wait === null) throw e;
@@ -134,7 +161,8 @@ export async function requestIdempotent(
   }
 }
 
-const agentPath = (id: string, rest = "") => `/api/agents/${encodeURIComponent(id)}${rest}`;
+const agentPath = (id: string, rest = "") =>
+  `/api/agents/${encodeURIComponent(id)}${rest}`;
 
 export interface DiffFile {
   path: string;
@@ -172,49 +200,117 @@ export interface ShipResult {
 
 export const api = {
   session: (b: Backend) => b.request("GET", "/api/session") as Promise<Session>,
-  state: (b: Backend) => b.request("GET", "/api/state") as Promise<StateSnapshot>,
+  state: (b: Backend) =>
+    b.request("GET", "/api/state") as Promise<StateSnapshot>,
   /** The last `limit` items with seq < `beforeSeq` (oldest first). */
   items: (b: Backend, agentId: string, limit?: number, beforeSeq?: number) => {
     const q = new URLSearchParams();
     if (limit) q.set("limit", String(limit));
     if (beforeSeq !== undefined) q.set("beforeSeq", String(beforeSeq));
     const qs = q.toString();
-    return b.request("GET", agentPath(agentId, `/items${qs ? `?${qs}` : ""}`)) as Promise<TimelineItem[]>;
+    return b.request(
+      "GET",
+      agentPath(agentId, `/items${qs ? `?${qs}` : ""}`),
+    ) as Promise<TimelineItem[]>;
   },
   /** Every pending approval across visible agents (cheaper than timelines for the inbox). */
-  permissions: (b: Backend) => b.request("GET", "/api/permissions") as Promise<TimelineItem[]>,
-  createAgent: (b: Backend, req: CreateAgentRequest, key: string, onProgress?: (f: number) => void) =>
-    requestIdempotent(b, "POST", "/api/agents", req, key, onProgress) as Promise<Agent>,
-  prompt: (b: Backend, agentId: string, text: string, attachments: Attachment[], key: string, onProgress?: (f: number) => void) =>
-    requestIdempotent(b, "POST", agentPath(agentId, "/prompt"), attachments.length ? { text, attachments } : { text }, key, onProgress) as Promise<void>,
-  permission: (b: Backend, agentId: string, requestId: string, optionId: string) =>
-    b.request("POST", agentPath(agentId, "/permission"), { requestId, optionId }) as Promise<void>,
-  cancel: (b: Backend, agentId: string) => b.request("POST", agentPath(agentId, "/cancel")) as Promise<void>,
-  resume: (b: Backend, agentId: string) => b.request("POST", agentPath(agentId, "/resume")) as Promise<void>,
-  stop: (b: Backend, agentId: string) => b.request("POST", agentPath(agentId, "/stop")) as Promise<void>,
+  permissions: (b: Backend) =>
+    b.request("GET", "/api/permissions") as Promise<TimelineItem[]>,
+  createAgent: (
+    b: Backend,
+    req: CreateAgentRequest,
+    key: string,
+    onProgress?: (f: number) => void,
+  ) =>
+    requestIdempotent(
+      b,
+      "POST",
+      "/api/agents",
+      req,
+      key,
+      onProgress,
+    ) as Promise<Agent>,
+  prompt: (
+    b: Backend,
+    agentId: string,
+    text: string,
+    attachments: Attachment[],
+    key: string,
+    onProgress?: (f: number) => void,
+  ) =>
+    requestIdempotent(
+      b,
+      "POST",
+      agentPath(agentId, "/prompt"),
+      attachments.length ? { text, attachments } : { text },
+      key,
+      onProgress,
+    ) as Promise<void>,
+  permission: (
+    b: Backend,
+    agentId: string,
+    requestId: string,
+    optionId: string,
+  ) =>
+    b.request("POST", agentPath(agentId, "/permission"), {
+      requestId,
+      optionId,
+    }) as Promise<void>,
+  cancel: (b: Backend, agentId: string) =>
+    b.request("POST", agentPath(agentId, "/cancel")) as Promise<void>,
+  resume: (b: Backend, agentId: string) =>
+    b.request("POST", agentPath(agentId, "/resume")) as Promise<void>,
+  stop: (b: Backend, agentId: string) =>
+    b.request("POST", agentPath(agentId, "/stop")) as Promise<void>,
   config: (b: Backend, agentId: string, optionId: string, value: string) =>
-    b.request("POST", agentPath(agentId, "/config"), { optionId, value }) as Promise<void>,
+    b.request("POST", agentPath(agentId, "/config"), {
+      optionId,
+      value,
+    }) as Promise<void>,
   switchAccount: (b: Backend, agentId: string, accountId: string) =>
-    b.request("POST", agentPath(agentId, "/account"), { accountId }) as Promise<Agent>,
+    b.request("POST", agentPath(agentId, "/account"), {
+      accountId,
+    }) as Promise<Agent>,
   archive: (b: Backend, agentId: string, archived: boolean) =>
-    b.request("POST", agentPath(agentId, "/archive"), { archived }) as Promise<void>,
-  markRead: (b: Backend, agentId: string) => b.request("POST", agentPath(agentId, "/read")) as Promise<void>,
+    b.request("POST", agentPath(agentId, "/archive"), {
+      archived,
+    }) as Promise<void>,
+  markRead: (b: Backend, agentId: string) =>
+    b.request("POST", agentPath(agentId, "/read")) as Promise<void>,
   removeQueued: (b: Backend, agentId: string, qid: string) =>
-    b.request("DELETE", agentPath(agentId, `/queue/${encodeURIComponent(qid)}`)) as Promise<
+    b.request(
+      "DELETE",
+      agentPath(agentId, `/queue/${encodeURIComponent(qid)}`),
+    ) as Promise<
       { text: string | null; attachments?: Attachment[] } | undefined
     >,
   /** Unpause the queue (runs its head if the agent is idle). */
-  resumeQueue: (b: Backend, agentId: string) => b.request("POST", agentPath(agentId, "/queue/resume")) as Promise<void>,
-  clearQueue: (b: Backend, agentId: string) => b.request("DELETE", agentPath(agentId, "/queue")) as Promise<{ removed?: number } | undefined>,
+  resumeQueue: (b: Backend, agentId: string) =>
+    b.request("POST", agentPath(agentId, "/queue/resume")) as Promise<void>,
+  clearQueue: (b: Backend, agentId: string) =>
+    b.request("DELETE", agentPath(agentId, "/queue")) as Promise<
+      { removed?: number } | undefined
+    >,
   sendQueuedNow: (b: Backend, agentId: string, qid: string) =>
-    b.request("POST", agentPath(agentId, `/queue/${encodeURIComponent(qid)}/send`)) as Promise<void>,
-  diff: (b: Backend, agentId: string) => b.request("GET", agentPath(agentId, "/diff")) as Promise<AgentDiffSummary>,
+    b.request(
+      "POST",
+      agentPath(agentId, `/queue/${encodeURIComponent(qid)}/send`),
+    ) as Promise<void>,
+  diff: (b: Backend, agentId: string) =>
+    b.request("GET", agentPath(agentId, "/diff")) as Promise<AgentDiffSummary>,
   commit: (b: Backend, agentId: string, message: string) =>
-    b.request("POST", agentPath(agentId, "/commit"), { message }) as Promise<{ result?: CommitSummary | string } | undefined>,
+    b.request("POST", agentPath(agentId, "/commit"), { message }) as Promise<
+      { result?: CommitSummary | string } | undefined
+    >,
   ship: (b: Backend, agentId: string, message: string) =>
-    b.request("POST", agentPath(agentId, "/ship"), { message }) as Promise<ShipResult | undefined>,
+    b.request("POST", agentPath(agentId, "/ship"), { message }) as Promise<
+      ShipResult | undefined
+    >,
   image: (b: Backend, agentId: string, path: string) =>
-    b.request("GET", agentPath(agentId, `/image?path=${encodeURIComponent(path)}`)) as Promise<Attachment>,
+    b.request(
+      "GET",
+      agentPath(agentId, `/image?path=${encodeURIComponent(path)}`),
+    ) as Promise<Attachment>,
 };
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -226,7 +322,12 @@ const STREAM_HEADERS_TIMEOUT_MS = 12_000;
 function parseErrorBody(text: string): string | null {
   try {
     const body: unknown = JSON.parse(text);
-    if (body && typeof body === "object" && typeof (body as { error?: unknown }).error === "string") return (body as { error: string }).error;
+    if (
+      body &&
+      typeof body === "object" &&
+      typeof (body as { error?: unknown }).error === "string"
+    )
+      return (body as { error: string }).error;
   } catch {
     // Non-JSON error body (proxy, captive portal, ...)
   }
@@ -238,8 +339,58 @@ function parseOk(status: number, text: string): unknown {
   try {
     return JSON.parse(text) as unknown;
   } catch {
-    throw new ApiError(502, null, "Armada sent a response this app couldn't read.");
+    throw new ApiError(
+      502,
+      null,
+      "Armada sent a response this app couldn't read.",
+    );
   }
+}
+
+/**
+ * Trade a one-time pairing code for this device's own token. Unauthenticated (the code is the
+ * credential), so it bypasses the bearer-token backend.
+ */
+export async function pairDevice(
+  code: string,
+  deviceName: string,
+): Promise<{ token: string; scope: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  let res: Response;
+  try {
+    res = await fetch("/api/pair", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ code, deviceName }),
+      cache: "no-store",
+      credentials: "omit",
+      signal: controller.signal,
+    });
+  } catch {
+    throw controller.signal.aborted
+      ? new ApiError(408, null)
+      : new ApiError(0, null);
+  } finally {
+    clearTimeout(timer);
+  }
+  const text = await res.text().catch(() => "");
+  if (!res.ok) throw new ApiError(res.status, parseErrorBody(text));
+  const out = parseOk(res.status, text) as {
+    token?: unknown;
+    scope?: unknown;
+  } | null;
+  if (!out || typeof out.token !== "string" || typeof out.scope !== "string") {
+    throw new ApiError(
+      502,
+      null,
+      "Armada sent a response this app couldn't read.",
+    );
+  }
+  return { token: out.token, scope: out.scope };
 }
 
 /** Real server: bearer-token auth, JSON in/out, SSE over a streaming fetch. */
@@ -251,22 +402,47 @@ export class HttpBackend implements Backend {
     this.token = token;
   }
 
-  async request(method: HttpMethod, path: string, body?: unknown, opts: RequestOptions = {}): Promise<unknown> {
+  async request(
+    method: HttpMethod,
+    path: string,
+    body?: unknown,
+    opts: RequestOptions = {},
+  ): Promise<unknown> {
     const encoded = body === undefined ? undefined : JSON.stringify(body);
-    const headers: Record<string, string> = { Authorization: `Bearer ${this.token}`, Accept: "application/json" };
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.token}`,
+      Accept: "application/json",
+    };
     if (encoded !== undefined) headers["Content-Type"] = "application/json";
     if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
     const large = encoded !== undefined && encoded.length > 256 * 1024;
     // Photo uploads over a phone's Wi-Fi can take a while; XHR reports progress.
-    if (large || opts.onProgress) return this.xhr(method, path, headers, encoded, large ? UPLOAD_TIMEOUT_MS : REQUEST_TIMEOUT_MS, opts.onProgress);
+    if (large || opts.onProgress)
+      return this.xhr(
+        method,
+        path,
+        headers,
+        encoded,
+        large ? UPLOAD_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+        opts.onProgress,
+      );
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     let res: Response;
     try {
-      res = await fetch(path, { method, headers, body: encoded, cache: "no-store", credentials: "omit", signal: controller.signal });
+      res = await fetch(path, {
+        method,
+        headers,
+        body: encoded,
+        cache: "no-store",
+        credentials: "omit",
+        signal: controller.signal,
+      });
     } catch {
-      throw controller.signal.aborted ? new ApiError(408, null) : new ApiError(0, null);
+      throw controller.signal.aborted
+        ? new ApiError(408, null)
+        : new ApiError(0, null);
     } finally {
       clearTimeout(timer);
     }
@@ -290,7 +466,8 @@ export class HttpBackend implements Backend {
       x.timeout = timeout;
       if (onProgress) {
         x.upload.onprogress = (e) => {
-          if (e.lengthComputable && e.total > 0) onProgress(Math.min(1, e.loaded / e.total));
+          if (e.lengthComputable && e.total > 0)
+            onProgress(Math.min(1, e.loaded / e.total));
         };
       }
       x.onload = () => {
@@ -303,7 +480,14 @@ export class HttpBackend implements Backend {
         } else reject(new ApiError(x.status, parseErrorBody(x.responseText)));
       };
       x.onerror = () => reject(new ApiError(0, null));
-      x.ontimeout = () => reject(new ApiError(408, null, "The upload took too long. Try again on a stronger connection."));
+      x.ontimeout = () =>
+        reject(
+          new ApiError(
+            408,
+            null,
+            "The upload took too long. Try again on a stronger connection.",
+          ),
+        );
       x.send(body ?? null);
     });
   }
@@ -314,7 +498,12 @@ export class HttpBackend implements Backend {
    * of retried forever), and we see heartbeat comments, which lets the caller
    * run a stall watchdog.
    */
-  async stream({ signal, onOpen, onMessage, onActivity }: StreamHandlers): Promise<void> {
+  async stream({
+    signal,
+    onOpen,
+    onMessage,
+    onActivity,
+  }: StreamHandlers): Promise<void> {
     // Our own controller so a server that accepts the connection but never
     // sends headers can't hang the reconnect loop.
     const controller = new AbortController();
@@ -329,7 +518,10 @@ export class HttpBackend implements Backend {
       let res: Response;
       try {
         res = await fetch("/api/events", {
-          headers: { Accept: "text/event-stream", Authorization: `Bearer ${this.token}` },
+          headers: {
+            Accept: "text/event-stream",
+            Authorization: `Bearer ${this.token}`,
+          },
           cache: "no-store",
           credentials: "omit",
           signal: controller.signal,
@@ -340,8 +532,13 @@ export class HttpBackend implements Backend {
       } finally {
         clearTimeout(timer);
       }
-      if (!res.ok) throw new ApiError(res.status, parseErrorBody(await res.text().catch(() => "")));
-      if (!res.body) throw new ApiError(0, null, "This browser can't stream live updates.");
+      if (!res.ok)
+        throw new ApiError(
+          res.status,
+          parseErrorBody(await res.text().catch(() => "")),
+        );
+      if (!res.body)
+        throw new ApiError(0, null, "This browser can't stream live updates.");
       onOpen();
 
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();

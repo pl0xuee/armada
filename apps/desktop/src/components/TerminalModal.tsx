@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/misc";
 import { api } from "@/lib/api";
 import { attachTerminal } from "@/lib/terminal-bus";
-import { themeFromCss, XTERM_FONT } from "@/lib/xterm-theme";
+import { themeFromCss, XTERM_FONT, XTERM_LINK_HANDLER } from "@/lib/xterm-theme";
 import { errorMessage, isMac } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
 import { useApp } from "@/store/app";
@@ -73,6 +73,7 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
   useEffect(() => {
     if (!host) return;
     const term = new Terminal({
+      linkHandler: XTERM_LINK_HANDLER,
       fontFamily: XTERM_FONT,
       fontSize: 12.5,
       lineHeight: 1.35,

@@ -20,6 +20,39 @@ pub const MIN_NODE_MAJOR: u32 = 20;
 
 const NODE_DIST: &str = "https://nodejs.org/dist";
 
+/// Node.js release Armada downloads. Pinned (never "latest") together with the
+/// SHA-256 of each archive, so a compromised mirror or CDN can't swap the runtime.
+/// To bump: pick a new LTS from https://nodejs.org/dist/index.json, copy the six
+/// matching lines from https://nodejs.org/dist/<version>/SHASUMS256.txt below, and
+/// cross-check at least one by downloading the archive and running `sha256sum`.
+const NODE_VERSION: &str = "v24.22.1";
+const NODE_SHA256: &[(&str, &str)] = &[
+    (
+        "node-v24.22.1-darwin-arm64.tar.gz",
+        "89c682593d76cd44233fa53b1563264e7de9cbb189cad169135c5b4fadfbc0a7",
+    ),
+    (
+        "node-v24.22.1-darwin-x64.tar.gz",
+        "d132557e7ee2b85af08b0c8c34338e65c6430f2238d01f727728ef42dc83b035",
+    ),
+    (
+        "node-v24.22.1-linux-arm64.tar.gz",
+        "33c37be234ba8bee041961047b19160f4d7d0f164e8e246f78bdd10feff148b3",
+    ),
+    (
+        "node-v24.22.1-linux-x64.tar.gz",
+        "eb6728e77c576a35162c122c45ccadf224d89ff00abc8dae46cc2897c6002d7c",
+    ),
+    (
+        "node-v24.22.1-win-arm64.zip",
+        "a0c807319fede24c4a0d8f84564c82a619bd313b16b10c007c383c2609e99171",
+    ),
+    (
+        "node-v24.22.1-win-x64.zip",
+        "d2046d28c2c3dcd211ac5145c0bf30e2047ef9dfb306693c8c6e2eccd8b95fa5",
+    ),
+];
+
 pub type Log = Arc<dyn Fn(&str) + Send + Sync>;
 
 pub fn runtime_dir(data_dir: &Path) -> PathBuf {
@@ -207,18 +240,6 @@ fn http() -> ureq::Agent {
     )
 }
 
-fn get_text(agent: &ureq::Agent, url: &str) -> anyhow::Result<String> {
-    let mut resp = agent
-        .get(url)
-        .call()
-        .with_context(|| format!("GET {url}"))?;
-    resp.body_mut()
-        .with_config()
-        .limit(16 * 1024 * 1024)
-        .read_to_string()
-        .with_context(|| format!("reading {url}"))
-}
-
 /// 8 hex characters for short unique names.
 /// Lowercase hex encoding (digest 0.11 output no longer implements `LowerHex`).
 pub(crate) fn hex_lower(bytes: &[u8]) -> String {
@@ -318,26 +339,15 @@ fn download_node(data_dir: &Path, log: &Log) -> anyhow::Result<()> {
     let (os, arch, ext) = node_platform()?;
     let agent = http();
 
-    log("▸ Looking up the current Node.js LTS release…");
-    let index: serde_json::Value =
-        serde_json::from_str(&get_text(&agent, &format!("{NODE_DIST}/index.json"))?)?;
-    let version = index
-        .as_array()
-        .and_then(|a| a.iter().find(|r| r["lts"].is_string()))
-        .and_then(|r| r["version"].as_str())
-        .ok_or_else(|| anyhow!("couldn't find an LTS release in the Node.js index"))?
-        .to_string();
+    let version = NODE_VERSION;
     let name = format!("node-{version}-{os}-{arch}");
     let file = format!("{name}.{ext}");
-
-    let sums = get_text(&agent, &format!("{NODE_DIST}/{version}/SHASUMS256.txt"))?;
-    let expected = sums
-        .lines()
-        .find_map(|l| {
-            let (hash, f) = l.split_once("  ")?;
-            (f.trim() == file).then(|| hash.trim().to_lowercase())
-        })
-        .ok_or_else(|| anyhow!("{file} isn't listed in SHASUMS256.txt"))?;
+    // Pinned in this binary, not read from the server that serves the archive.
+    let expected = NODE_SHA256
+        .iter()
+        .find_map(|(f, h)| (*f == file).then_some(*h))
+        .ok_or_else(|| anyhow!("no pinned checksum for {file}"))?
+        .to_string();
 
     let runtime = runtime_dir(data_dir);
     // Unique per run so an abandoned download can't trample a newer one. Short, so
@@ -412,7 +422,11 @@ fn packages_for(provider: Provider, data_dir: &Path) -> Vec<String> {
     match provider {
         Provider::Claude => {
             if providers::find_cli(Provider::Claude).is_none() {
-                pkgs.push("@anthropic-ai/claude-code@latest".into());
+                pkgs.push(format!(
+                    "{}@{}",
+                    providers::CLAUDE_CODE_PKG,
+                    providers::CLAUDE_CODE_VERSION
+                ));
             }
             // Missing, or not the pinned version: (re)install the pinned one.
             if !providers::claude_adapter_current(data_dir) {
@@ -425,12 +439,20 @@ fn packages_for(provider: Provider, data_dir: &Path) -> Vec<String> {
         }
         Provider::Codex => {
             if providers::find_cli(Provider::Codex).is_none() {
-                pkgs.push("@openai/codex@latest".into());
+                pkgs.push(format!(
+                    "{}@{}",
+                    providers::CODEX_PKG,
+                    providers::CODEX_VERSION
+                ));
             }
         }
         Provider::Grok => {
             if providers::find_cli(Provider::Grok).is_none() {
-                pkgs.push("@xai-official/grok@latest".into());
+                pkgs.push(format!(
+                    "{}@{}",
+                    providers::GROK_PKG,
+                    providers::GROK_VERSION
+                ));
             }
         }
         Provider::Custom => {}
@@ -444,10 +466,23 @@ pub fn needs_install(provider: Provider, data_dir: &Path) -> bool {
     !packages_for(provider, data_dir).is_empty()
 }
 
-/// Newer npm blocks dependency install scripts unless they're allow-listed in the
-/// project's package.json. Claude Code and Grok fetch their native binaries in
-/// postinstall, so allow exactly the packages Armada installs (nothing else).
-fn allow_install_scripts(prefix: &Path, pkgs: &[String]) -> anyhow::Result<()> {
+/// Packages whose own install script is needed and trusted: Claude Code and Grok
+/// copy their native binary out of the platform optionalDependency in `postinstall`.
+/// Everything else (Codex and the Claude adapter ship plain files or script-less
+/// platform packages; Grok's only dependency, @iarna/toml, has no install script)
+/// is installed with scripts disabled, and transitive scripts never run.
+const SCRIPTED_PKGS: &[&str] = &[providers::CLAUDE_CODE_PKG, providers::GROK_PKG];
+
+fn pkg_name(spec: &str) -> &str {
+    match spec.rfind('@') {
+        Some(i) if i > 0 => &spec[..i],
+        _ => spec,
+    }
+}
+
+/// Newer npm blocks dependency install scripts unless allow-listed in the project's
+/// package.json; allow exactly the trusted packages being rebuilt (nothing else).
+fn allow_install_scripts(prefix: &Path, names: &[&str]) -> anyhow::Result<()> {
     let path = prefix.join("package.json");
     let mut manifest: serde_json::Value = std::fs::read(&path)
         .ok()
@@ -456,15 +491,9 @@ fn allow_install_scripts(prefix: &Path, pkgs: &[String]) -> anyhow::Result<()> {
         .unwrap_or_else(|| serde_json::json!({}));
     manifest["name"] = "armada-tools".into();
     manifest["private"] = true.into();
-    if !manifest["allowScripts"].is_object() {
-        manifest["allowScripts"] = serde_json::json!({});
-    }
-    for pkg in pkgs {
-        let name = match pkg.rfind('@') {
-            Some(i) if i > 0 => &pkg[..i],
-            _ => pkg.as_str(),
-        };
-        manifest["allowScripts"][name] = true.into();
+    manifest["allowScripts"] = serde_json::json!({});
+    for name in names {
+        manifest["allowScripts"][*name] = true.into();
     }
     std::fs::write(&path, serde_json::to_vec_pretty(&manifest)?)?;
     Ok(())
@@ -473,20 +502,52 @@ fn allow_install_scripts(prefix: &Path, pkgs: &[String]) -> anyhow::Result<()> {
 async fn npm_install(npm: &Npm, data_dir: &Path, pkgs: &[String], log: &Log) -> anyhow::Result<()> {
     let prefix = tools_dir(data_dir);
     std::fs::create_dir_all(&prefix)?;
-    allow_install_scripts(&prefix, pkgs)?;
-    let mut cmd = tokio::process::Command::new(&npm.program);
-    cmd.args(&npm.args)
+    // Empty user config: a ~/.npmrc can't redirect the registry or inject auth/scripts.
+    // Proxy settings still come from the HTTPS_PROXY/HTTP_PROXY environment.
+    let userconfig = prefix.join(".armada-npmrc");
+    std::fs::write(&userconfig, b"")?;
+    let scripted: Vec<&str> = pkgs
+        .iter()
+        .map(|p| pkg_name(p))
+        .filter(|n| SCRIPTED_PKGS.contains(n))
+        .collect();
+    allow_install_scripts(&prefix, &scripted)?;
+
+    let common = |cmd: &mut tokio::process::Command| {
+        cmd.arg(format!("--userconfig={}", userconfig.display()))
+            .arg("--registry=https://registry.npmjs.org/")
+            .args([
+                "--no-fund",
+                "--no-audit",
+                "--update-notifier=false",
+                "--loglevel=warn",
+            ]);
+    };
+    let mut install = tokio::process::Command::new(&npm.program);
+    install
+        .args(&npm.args)
         .args(["install", "--prefix"])
-        .arg(&prefix)
-        .args([
-            "--no-fund",
-            "--no-audit",
-            "--update-notifier=false",
-            "--loglevel=warn",
-            "--foreground-scripts",
-        ])
-        .args(pkgs)
-        .stdin(Stdio::null())
+        .arg(&prefix);
+    common(&mut install);
+    install.arg("--ignore-scripts").args(pkgs);
+    run_npm(install, log).await?;
+
+    // Run only the trusted packages' own install scripts, never transitive ones.
+    if !scripted.is_empty() {
+        let mut rebuild = tokio::process::Command::new(&npm.program);
+        rebuild
+            .args(&npm.args)
+            .args(["rebuild", "--prefix"])
+            .arg(&prefix);
+        common(&mut rebuild);
+        rebuild.arg("--foreground-scripts").args(&scripted);
+        run_npm(rebuild, log).await?;
+    }
+    Ok(())
+}
+
+async fn run_npm(mut cmd: tokio::process::Command, log: &Log) -> anyhow::Result<()> {
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);

@@ -7,6 +7,7 @@ import {
   DICTATION_KEYS,
   dictationAvailable,
   registerDictationTarget,
+  type DictationPhase,
   toggleDictation,
   useDictation,
 } from "@/lib/dictation";
@@ -40,14 +41,34 @@ export function DictateButton({
   const id = useId();
   const onTextRef = useRef(onText);
   onTextRef.current = onText;
-  useEffect(() => registerDictationTarget({ id, insert: (t, a) => onTextRef.current(t, a) }), [id]);
+  const anchor = useRef<HTMLSpanElement>(null);
+  useEffect(
+    () => registerDictationTarget({ id, insert: (t, a) => onTextRef.current(t, a), el: () => anchor.current }),
+    [id],
+  );
 
-  const { phase, owner, level, elapsedMs, maxMs } = useDictation();
-  if (!dictationAvailable()) return null;
-  const mine = owner === id;
+  const phase = useDictation((s) => s.phase);
+  const mine = useDictation((s) => s.owner === id);
   const active = mine && phase !== "idle";
+  // Only the recording button needs the 20 Hz level/clock; idle buttons skip those re-renders.
+  if (!dictationAvailable()) return null;
+  return (
+    <span ref={anchor} className="contents">
+      {active ? (
+        <ActiveDictate id={id} phase={phase} className={className} />
+      ) : (
+        <IdleDictate id={id} phase={phase} iconOnly={iconOnly} className={className} />
+      )}
+    </span>
+  );
+}
 
-  if (active && phase === "transcribing") {
+function ActiveDictate({ id, phase, className }: { id: string; phase: DictationPhase; className?: string }) {
+  const level = useDictation((s) => s.level);
+  const elapsedMs = useDictation((s) => s.elapsedMs);
+  const maxMs = useDictation((s) => s.maxMs);
+
+  if (phase === "transcribing") {
     return (
       <span
         className={cn("inline-flex h-6 items-center gap-1.5 px-1.5 text-[11.5px] text-muted", className)}
@@ -59,7 +80,7 @@ export function DictateButton({
     );
   }
 
-  if (active) {
+  {
     const nearLimit = elapsedMs > maxMs - 30_000;
     return (
       <Tooltip content="Stop and transcribe (Enter). Esc cancels." shortcut={DICTATION_KEYS}>
@@ -89,7 +110,19 @@ export function DictateButton({
       </Tooltip>
     );
   }
+}
 
+function IdleDictate({
+  id,
+  phase,
+  iconOnly,
+  className,
+}: {
+  id: string;
+  phase: DictationPhase;
+  iconOnly?: boolean;
+  className?: string;
+}) {
   return (
     <>
       <Tooltip content="Dictate (speech to text, on this device)" shortcut={DICTATION_KEYS}>

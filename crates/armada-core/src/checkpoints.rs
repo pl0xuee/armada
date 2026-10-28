@@ -90,6 +90,16 @@ pub struct RestoreResult {
     pub files_changed: usize,
 }
 
+/// A folder younger than this since its last edit can't be vouched for by stat data.
+const RECENT_EDIT: Duration = Duration::from_secs(3);
+/// Budget for a per-message snapshot; the agent waits on it, so a huge folder
+/// gets no checkpoint rather than a stalled prompt.
+const TURN_BUDGET: Duration = Duration::from_secs(5);
+
+/// The last snapshot of each folder: (change fingerprint, tree).
+type SnapshotCache = parking_lot::Mutex<HashMap<PathBuf, (Vec<u8>, String)>>;
+static SNAPSHOTS: std::sync::LazyLock<SnapshotCache> = std::sync::LazyLock::new(Default::default);
+
 /// One checkpoint operation at a time per agent.
 async fn lock_agent(agent_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
     type Locks = parking_lot::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>;
@@ -280,18 +290,24 @@ impl<'a> Git<'a> {
         Ok(tmp)
     }
 
+    /// Untracked, non-ignored files (NUL-separated).
+    async fn untracked(&self) -> anyhow::Result<Vec<u8>> {
+        self.run(
+            &["ls-files", "--others", "--exclude-standard", "-z"],
+            None,
+            &[],
+        )
+        .await
+    }
+
     /// Refuses folders whose untracked, non-ignored files would bloat the repository's
     /// object store on every snapshot (a stray video, an un-ignored build folder...).
-    async fn check_untracked_size(&self) -> anyhow::Result<()> {
-        let out = self
-            .run(
-                &["ls-files", "--others", "--exclude-standard", "-z"],
-                None,
-                &[],
-            )
-            .await?;
+    fn check_untracked_size(&self, untracked: &[u8]) -> anyhow::Result<()> {
         let (mut count, mut total) = (0usize, 0u64);
-        for raw in out.split(|b| *b == 0).filter(|p| !p.is_empty()) {
+        for raw in untracked
+            .split(|b| *b == 0)
+            .filter(|p| !p.is_empty() && !is_secret_path(p))
+        {
             count += 1;
             if count > MAX_UNTRACKED_FILES {
                 bail!("more than {MAX_UNTRACKED_FILES} untracked files (add them to .gitignore)");
@@ -316,16 +332,98 @@ impl<'a> Git<'a> {
         Ok(())
     }
 
-    /// The tree of the folder's current contents (tracked + untracked, not ignored).
-    async fn snapshot_tree(&self) -> anyhow::Result<String> {
-        self.check_untracked_size()
+    /// A fingerprint of everything that differs from the index: `git status` plus the
+    /// size and mtime of each such file (status alone can't see a file that is edited
+    /// again after it already showed as modified). None when it can't vouch for the
+    /// state: unmerged paths, or a file touched in the last few seconds (a same-size
+    /// edit inside one timestamp tick would look identical).
+    async fn fingerprint(&self) -> Option<Vec<u8>> {
+        let out = self
+            .run(
+                &[
+                    "status",
+                    "--porcelain=v2",
+                    "-z",
+                    "--untracked-files=all",
+                    "--no-renames",
+                    "--ignore-submodules=none",
+                ],
+                None,
+                &[],
+            )
             .await
+            .ok()?;
+        let now = std::time::SystemTime::now();
+        let mut fp = out.clone();
+        for rec in out.split(|b| *b == 0).filter(|r| !r.is_empty()) {
+            let path = match rec[0] {
+                b'u' => return None,
+                b'1' => rec.splitn(9, |b| *b == b' ').nth(8)?,
+                b'?' => rec.get(2..)?,
+                _ => continue,
+            };
+            let meta = std::fs::symlink_metadata(self.cwd.join(rel_path(path)?));
+            match meta {
+                Ok(m) => {
+                    let mtime = m.modified().ok()?;
+                    if now.duration_since(mtime).map_or(true, |d| d < RECENT_EDIT) {
+                        return None;
+                    }
+                    let since = mtime.duration_since(std::time::UNIX_EPOCH).ok()?;
+                    fp.extend_from_slice(format!("\0{}:{}", m.len(), since.as_nanos()).as_bytes());
+                }
+                // Deleted paths are already in the status output.
+                Err(_) => fp.extend_from_slice(b"\0-"),
+            }
+        }
+        Some(fp)
+    }
+
+    /// The tree of the folder's current contents (tracked + untracked, not ignored).
+    /// `prev` is the previous checkpoint's tree: when the folder provably hasn't
+    /// changed since it was taken, that tree is reused without re-adding every file.
+    async fn snapshot_tree(&self, prev: Option<&str>) -> anyhow::Result<String> {
+        // One directory walk for the untracked list (shared by the size check and
+        // the secret exclusions) alongside the change fingerprint.
+        let (untracked, fp) = tokio::join!(self.untracked(), self.fingerprint());
+        let untracked = untracked?;
+        let cached = SNAPSHOTS.lock().get(self.cwd).cloned();
+        if let (Some(fp), Some((old_fp, old_tree)), Some(prev)) = (&fp, &cached, prev) {
+            if old_fp == fp && old_tree == prev {
+                return Ok(old_tree.clone());
+            }
+        }
+        self.check_untracked_size(&untracked)
             .context("Checkpoint skipped")?;
         let index = self.temp_index(true).await?;
         let env: [(&str, &OsStr); 1] = [("GIT_INDEX_FILE", index.0.as_os_str())];
-        self.run(&["add", "-A"], None, &env).await?;
+        // Untracked files that look like credentials never enter a snapshot (tracked
+        // ones are already in the repository's history, so they stay).
+        let mut args: Vec<String> = vec!["add".into(), "-A".into(), "--".into(), ".".into()];
+        for raw in untracked
+            .split(|b| *b == 0)
+            .filter(|p| !p.is_empty() && is_secret_path(p))
+        {
+            if let Ok(p) = std::str::from_utf8(raw) {
+                args.push(format!(":(exclude,literal){p}"));
+            }
+        }
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        self.run(&args, None, &env).await?;
         let tree = self.run(&["write-tree"], None, &env).await?;
-        Ok(String::from_utf8_lossy(&tree).trim().to_string())
+        let tree = String::from_utf8_lossy(&tree).trim().to_string();
+        // The fingerprint was taken before the files were read, so a change made in
+        // between only ever costs a needless re-snapshot next time.
+        let mut cache = SNAPSHOTS.lock();
+        match fp {
+            Some(fp) => {
+                cache.insert(self.cwd.to_path_buf(), (fp, tree.clone()));
+            }
+            None => {
+                cache.remove(self.cwd);
+            }
+        }
+        Ok(tree)
     }
 
     async fn commit_tree(&self, tree: &str, parent: Option<&str>) -> anyhow::Result<String> {
@@ -344,6 +442,28 @@ impl<'a> Git<'a> {
         let out = self.run(&args, None, &envs).await?;
         Ok(String::from_utf8_lossy(&out).trim().to_string())
     }
+}
+
+/// Does this repository-relative path name a file that usually holds credentials?
+/// Sample/template env files are not secrets.
+fn is_secret_path(raw: &[u8]) -> bool {
+    let name = raw.rsplit(|b| *b == b'/').next().unwrap_or(raw);
+    let name = String::from_utf8_lossy(name).to_lowercase();
+    if name == ".env" {
+        return true;
+    }
+    if let Some(rest) = name.strip_prefix(".env.") {
+        return !matches!(
+            rest,
+            "example" | "sample" | "template" | "dist" | "defaults"
+        );
+    }
+    const EXACT: [&str; 4] = [".npmrc", ".pypirc", ".netrc", ".git-credentials"];
+    const PREFIX: [&str; 4] = ["id_rsa", "id_ed25519", "id_ecdsa", "credentials"];
+    const SUFFIX: [&str; 5] = [".pem", ".key", ".p12", ".pfx", ".keystore"];
+    EXACT.contains(&name.as_str())
+        || PREFIX.iter().any(|p| name.starts_with(p))
+        || SUFFIX.iter().any(|s| name.ends_with(s))
 }
 
 fn stderr_of(out: &std::process::Output) -> String {
@@ -416,10 +536,17 @@ pub(crate) async fn take_for_turn(
     if !git.available().await {
         return Ok(None);
     }
-    let _guard = lock_agent(&agent.id).await;
-    take_locked(db, &git, agent, "turn", item_id)
-        .await
-        .map(Some)
+    let work = async {
+        let _guard = lock_agent(&agent.id).await;
+        take_locked(db, &git, agent, "turn", item_id).await
+    };
+    match tokio::time::timeout(TURN_BUDGET, work).await {
+        Ok(r) => r.map(Some),
+        Err(_) => bail!(
+            "Checkpoint skipped: snapshot took over {}s",
+            TURN_BUDGET.as_secs()
+        ),
+    }
 }
 
 async fn take_locked(
@@ -429,9 +556,9 @@ async fn take_locked(
     kind: &str,
     item_id: Option<String>,
 ) -> anyhow::Result<Checkpoint> {
-    let tree = git.snapshot_tree().await?;
     let existing = db.checkpoints(&agent.id)?;
     let prev = existing.last();
+    let tree = git.snapshot_tree(prev.map(|p| p.tree.as_str())).await?;
     let commit = match prev {
         // Nothing changed since the last checkpoint: share its commit.
         Some(p) if p.tree == tree => p.commit.clone(),
@@ -491,6 +618,7 @@ pub(crate) async fn forget_agent(agent: &Agent) {
     let Ok(git) = Git::new(cwd).await else {
         return;
     };
+    SNAPSHOTS.lock().remove(cwd);
     let _guard = lock_agent(&agent.id).await;
     let prefix = ref_prefix(&agent.id);
     let Ok(refs) = git
@@ -576,7 +704,7 @@ pub(crate) async fn preview(
     }
     let target = find(db, agent, checkpoint_id)?;
     let _guard = lock_agent(&agent.id).await;
-    let current = git.snapshot_tree().await?;
+    let current = git.snapshot_tree(None).await?;
     let list = changes(&git, &current, &target.tree).await?;
     let numstat = git
         .run(
@@ -865,6 +993,74 @@ mod tests {
         assert!(!r.dir.join("b.txt").exists());
     }
 
+    fn backdate(r: &Repo, path: &str, secs: u64) {
+        let f = std::fs::OpenOptions::new()
+            .write(true)
+            .open(r.dir.join(path))
+            .unwrap();
+        f.set_modified(std::time::SystemTime::now() - Duration::from_secs(secs))
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn quiet_folder_reuses_the_tree_but_edits_are_seen() {
+        let r = Repo::new();
+        r.write("a.txt", "mod1\n");
+        r.write("n.txt", "new1\n");
+        backdate(&r, "a.txt", 60);
+        backdate(&r, "n.txt", 60);
+        let take = |id: &'static str| take_for_turn(&r.db, &r.agent, Some(id.into()));
+        let a = take("i1").await.unwrap().unwrap();
+        let b = take("i2").await.unwrap().unwrap();
+        assert_eq!(a.tree, b.tree);
+        assert_eq!(SNAPSHOTS.lock().get(r.dir.as_path()).unwrap().1, a.tree);
+        // Same size, older timestamp: the stat data still differs.
+        r.write("a.txt", "mod2\n");
+        backdate(&r, "a.txt", 50);
+        let c = take("i3").await.unwrap().unwrap();
+        assert_ne!(b.tree, c.tree);
+        // A just-edited file is never vouched for.
+        r.write("n.txt", "new2\n");
+        let d = take("i4").await.unwrap().unwrap();
+        assert_ne!(c.tree, d.tree);
+        r.write("n.txt", "new3\n");
+        let e = take("i5").await.unwrap().unwrap();
+        assert_ne!(d.tree, e.tree);
+        std::fs::remove_file(r.dir.join("n.txt")).unwrap();
+        let f = take("i6").await.unwrap().unwrap();
+        assert_ne!(e.tree, f.tree);
+    }
+
+    /// Timing on a generated 20k-file repository: `cargo test -p armada-core
+    /// checkpoint_timing -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn checkpoint_timing() {
+        let r = Repo::new();
+        for i in 0..20_000 {
+            r.write(
+                &format!("src/d{}/f{i}.txt", i % 200),
+                &format!("file {i}\n"),
+            );
+        }
+        r.git(&["add", "-A"]);
+        r.git(&["commit", "-q", "-m", "many"]);
+        r.write("src/d0/f0.txt", "edited\n");
+        backdate(&r, "src/d0/f0.txt", 60);
+        let take = || take_for_turn(&r.db, &r.agent, None);
+        let t = std::time::Instant::now();
+        take().await.unwrap();
+        println!("first snapshot (full add): {:?}", t.elapsed());
+        let t = std::time::Instant::now();
+        take().await.unwrap();
+        println!("unchanged (fast path): {:?}", t.elapsed());
+        r.write("src/d0/f0.txt", "edited2\n");
+        backdate(&r, "src/d0/f0.txt", 50);
+        let t = std::time::Instant::now();
+        take().await.unwrap();
+        println!("one file changed (full add): {:?}", t.elapsed());
+    }
+
     #[tokio::test]
     async fn unchanged_folder_reuses_the_commit_and_refs_exist() {
         let r = Repo::new();
@@ -962,6 +1158,75 @@ mod tests {
             .await
             .unwrap()
             .is_some());
+    }
+
+    #[test]
+    fn secret_names() {
+        for n in [
+            ".env",
+            "a/.env",
+            ".env.local",
+            ".env.production",
+            "k.pem",
+            "x/server.key",
+            "a.p12",
+            "a.pfx",
+            "id_rsa",
+            "id_rsa.pub",
+            "id_ed25519",
+            "id_ecdsa",
+            ".npmrc",
+            ".pypirc",
+            ".netrc",
+            "credentials",
+            "credentials.json",
+            "a.keystore",
+            ".git-credentials",
+        ] {
+            assert!(is_secret_path(n.as_bytes()), "{n}");
+        }
+        for n in [
+            ".env.example",
+            ".env.sample",
+            ".env.template",
+            "a.txt",
+            "env",
+            "keys.rs",
+        ] {
+            assert!(!is_secret_path(n.as_bytes()), "{n}");
+        }
+    }
+
+    #[tokio::test]
+    async fn untracked_secrets_stay_out_of_snapshots_and_restores() {
+        let r = Repo::new();
+        r.write(".env", "TOKEN=abc\n");
+        r.write("sub/id_rsa", "PRIVATE\n");
+        r.write(".env.example", "TOKEN=\n");
+        let c = take_for_turn(&r.db, &r.agent, None).await.unwrap().unwrap();
+        let files = r.git(&["ls-tree", "-r", "--name-only", &c.tree]);
+        assert!(!files.contains(".env\n"), "{files}");
+        assert!(!files.contains("id_rsa"), "{files}");
+        assert!(files.contains(".env.example"), "{files}");
+        // Restoring neither deletes nor rewrites them.
+        r.write("a.txt", "changed\n");
+        r.write(".env", "TOKEN=newer\n");
+        restore(&r.db, &r.agent, &c.id).await.unwrap();
+        assert_eq!(r.read("a.txt").as_deref(), Some("one\n"));
+        assert_eq!(r.read(".env").as_deref(), Some("TOKEN=newer\n"));
+        assert_eq!(r.read("sub/id_rsa").as_deref(), Some("PRIVATE\n"));
+    }
+
+    #[tokio::test]
+    async fn tracked_env_files_are_still_snapshotted() {
+        let r = Repo::new();
+        r.write(".env", "A=1\n");
+        r.git(&["add", "-f", ".env"]);
+        r.git(&["commit", "-q", "-m", "env"]);
+        r.write(".env", "A=2\n");
+        let c = take_for_turn(&r.db, &r.agent, None).await.unwrap().unwrap();
+        let blob = r.git(&["rev-parse", &format!("{}:.env", c.tree)]);
+        assert_eq!(r.git(&["cat-file", "-p", blob.trim()]), "A=2\n");
     }
 
     #[test]

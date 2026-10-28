@@ -4,6 +4,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "Armada",
         "width": 1440,
         "height": 900,

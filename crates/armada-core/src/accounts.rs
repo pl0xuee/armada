@@ -10,7 +10,7 @@ use tokio::io::AsyncWriteExt;
 use crate::model::{now_ms, Account, AccountStatus, AuthKind, Provider};
 use crate::providers;
 
-const KEYRING_SERVICE: &str = "dev.armada.app";
+pub(crate) const KEYRING_SERVICE: &str = "dev.armada.app";
 
 pub fn profile_dir(data_dir: &Path, account_id: &str) -> PathBuf {
     data_dir.join("profiles").join(account_id)

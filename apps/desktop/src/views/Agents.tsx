@@ -1,4 +1,14 @@
-import { Columns3, LayoutGrid, ListTodo, PanelLeftOpen, Play, RotateCcw, SlidersHorizontal } from "lucide-react";
+import {
+  Columns3,
+  LayoutGrid,
+  ListTodo,
+  PanelLeftOpen,
+  Play,
+  RotateCcw,
+  SlidersHorizontal,
+  SquareTerminal,
+  X,
+} from "lucide-react";
 import * as D from "@radix-ui/react-dialog";
 import { AnimatePresence } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -20,6 +30,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { resumeAgent } from "@/lib/actions";
 import { triageQueue } from "@/lib/agents";
 import { api } from "@/lib/api";
+import type { Agent } from "@/lib/types";
 import { basename, modKey } from "@/lib/utils";
 import { useAgentListLayout } from "@/hooks/useAgentListLayout";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -90,11 +101,47 @@ function AgentDrawer({ open, onClose }: { open: boolean; onClose: () => void }) 
   );
 }
 
+/** Owns the items subscription so streamed frames re-render only the timeline, not the whole pane. */
+function TimelinePane({ agent }: { agent: Agent }) {
+  const items = useApp((s) => s.items[agent.id]);
+  const loading = useApp((s) => s.itemsLoading[agent.id] ?? false);
+  const loadError = useApp((s) => s.itemsError[agent.id]);
+  return (
+    <Timeline
+      agent={agent}
+      items={items}
+      loading={loading}
+      footer={
+        loadError && !items ? (
+          <div className="mx-auto mt-10 max-w-sm rounded-xl border border-err/30 bg-err/[0.06] p-4 text-center">
+            <p className="text-[13px] font-medium text-err">Couldn't load this conversation</p>
+            <p className="selectable mt-1 break-words font-mono text-[11.5px] text-muted">{loadError}</p>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="mt-3"
+              onClick={() => void useApp.getState().ensureItems(agent.id, true)}
+            >
+              Try again
+            </Button>
+          </div>
+        ) : items && items.length === 0 && !loading ? (
+          <div className="py-16 text-center text-[12.5px] text-steel">
+            {agent.status === "starting" ? "Starting session…" : "No messages yet. Say hello below."}
+          </div>
+        ) : null
+      }
+    />
+  );
+}
+
+function InspectorPane({ agent, className }: { agent: Agent; className?: string }) {
+  const items = useApp((s) => s.items[agent.id]);
+  return <Inspector agent={agent} items={items} className={className} />;
+}
+
 function AgentPane({ agentId }: { agentId: string }) {
   const agent = useApp((s) => s.agents[agentId]);
-  const items = useApp((s) => s.items[agentId]);
-  const loading = useApp((s) => s.itemsLoading[agentId] ?? false);
-  const loadError = useApp((s) => s.itemsError[agentId]);
   const inspectorPref = useUi((s) => s.inspectorOpen);
   const overlay = useUi((s) => s.inspectorOverlay);
   const wide = useMediaQuery(INSPECTOR_DOCK_QUERY);
@@ -102,17 +149,30 @@ function AgentPane({ agentId }: { agentId: string }) {
   const windowFocused = useUi((s) => s.windowFocused);
   const workspaceOpen = useUi((s) => s.workspaceOpen);
   // The panel only takes what the conversation and composer can spare (tiling WMs go down to 600px tall).
+  // Measures the header and composer (incl. queue) so the conversation always keeps its minimum.
   const sectionRef = useRef<HTMLElement>(null);
-  const [sectionH, setSectionH] = useState(0);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+  const [workspaceMax, setWorkspaceMax] = useState(0);
+  const setWorkspaceRoom = useUi((s) => s.setWorkspaceRoom);
   useEffect(() => {
-    const el = sectionRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setSectionH(el.clientHeight));
-    ro.observe(el);
-    setSectionH(el.clientHeight);
+    const section = sectionRef.current;
+    if (!section) return;
+    const measure = () =>
+      setWorkspaceMax(
+        workspaceMaxHeight(
+          section.clientHeight,
+          (headerRef.current?.offsetHeight ?? 0) + (composerRef.current?.offsetHeight ?? 0),
+        ),
+      );
+    const ro = new ResizeObserver(measure);
+    for (const el of [section, headerRef.current, composerRef.current]) if (el) ro.observe(el);
+    measure();
     return () => ro.disconnect();
   }, []);
-  const workspaceMax = workspaceMaxHeight(sectionH);
+  useEffect(() => {
+    setWorkspaceRoom(workspaceMax);
+  }, [workspaceMax, setWorkspaceRoom]);
 
   useEffect(() => {
     void useApp.getState().ensureItems(agentId);
@@ -129,41 +189,38 @@ function AgentPane({ agentId }: { agentId: string }) {
   return (
     <div className="relative flex min-w-0 flex-1">
       <section ref={sectionRef} aria-label={agent.title} className="flex min-w-0 flex-1 flex-col bg-base">
-        <AgentHeader agent={agent} />
-        <Timeline
-          agent={agent}
-          items={items}
-          loading={loading}
-          footer={
-            loadError && !items ? (
-              <div className="mx-auto mt-10 max-w-sm rounded-xl border border-err/30 bg-err/[0.06] p-4 text-center">
-                <p className="text-[13px] font-medium text-err">Couldn't load this conversation</p>
-                <p className="selectable mt-1 break-words font-mono text-[11.5px] text-muted">{loadError}</p>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="mt-3"
-                  onClick={() => void useApp.getState().ensureItems(agentId, true)}
-                >
-                  Try again
-                </Button>
-              </div>
-            ) : items && items.length === 0 && !loading ? (
-              <div className="py-16 text-center text-[12.5px] text-steel">
-                {agent.status === "starting" ? "Starting session…" : "No messages yet. Say hello below."}
-              </div>
-            ) : null
-          }
-        />
+        <div ref={headerRef} className="shrink-0">
+          <AgentHeader agent={agent} />
+        </div>
+        <TimelinePane agent={agent} />
         {workspaceOpen && workspaceMax > 0 && <WorkspacePanel agent={agent} maxHeight={workspaceMax} />}
-        <Composer agent={agent} />
+        {workspaceOpen && workspaceMax === 0 && (
+          <div
+            role="status"
+            className="flex h-8 shrink-0 items-center gap-2 border-t border-line bg-base px-3 text-[12px] text-muted"
+          >
+            <SquareTerminal className="h-3.5 w-3.5 shrink-0 text-steel" />
+            <span className="min-w-0 truncate">Workspace panel: not enough room. Enlarge the window.</span>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              className="ml-auto"
+              aria-label="Hide workspace panel"
+              onClick={() => useUi.getState().setWorkspaceOpen(false)}
+            >
+              <X />
+            </Button>
+          </div>
+        )}
+        <div ref={composerRef} className="shrink-0">
+          <Composer agent={agent} />
+        </div>
       </section>
       <AnimatePresence initial={false}>
         {inspectorOpen && (
-          <Inspector
+          <InspectorPane
             key="inspector"
             agent={agent}
-            items={items}
             className={
               wide ? undefined : "absolute inset-y-0 right-0 z-20 shadow-[-24px_0_60px_-20px_rgba(0,0,0,0.6)] glass"
             }

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type { Agent, TimelineItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
+import { isBusy } from "@/lib/agents";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { Spinner } from "../ui/misc";
@@ -562,7 +563,23 @@ function renderItem(
       return <ThoughtBlock item={it} live={liveTail} agentId={agent.id} />;
     case "tool_call":
       if (it.subagent) {
-        return <SubagentCard item={it} childrenOf={ctx.childrenOf} agentId={agent.id} agentLive={agentLive} />;
+        // Same rule as subagentRuns: a background sub-agent's call completes at launch but it keeps
+        // running while the agent is busy and the call belongs to the current turn.
+        const bgRunning =
+          !!it.subagent.background &&
+          it.status === "completed" &&
+          isBusy(agent) &&
+          !!ctx.lastPrompt &&
+          it.ts >= ctx.lastPrompt.ts;
+        return (
+          <SubagentCard
+            item={it}
+            childrenOf={ctx.childrenOf}
+            agentId={agent.id}
+            agentLive={agentLive}
+            bgRunning={bgRunning}
+          />
+        );
       }
       return <ToolCallCard item={it} agentId={agent.id} agentLive={agentLive} />;
     case "permission":

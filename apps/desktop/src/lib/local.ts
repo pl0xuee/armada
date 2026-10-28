@@ -68,13 +68,10 @@ export function serverStatusText(running: boolean, models: number): string {
 export function isLoopbackUrl(url: string): boolean {
   try {
     const host = new URL(url.trim()).hostname.toLowerCase().replace(/^\[|\]$/g, "");
-    return (
-      host === "localhost" ||
-      host.endsWith(".localhost") ||
-      host === "::1" ||
-      host === "0.0.0.0" ||
-      host.startsWith("127.")
-    );
+    // Only a real IPv4 loopback literal (127.0.0.0/8), ::1, or localhost / *.localhost.
+    const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+    if (v4) return v4[1] === "127" && v4.slice(1).every((o) => Number(o) <= 255);
+    return host === "localhost" || host.endsWith(".localhost") || host === "::1";
   } catch {
     return false;
   }

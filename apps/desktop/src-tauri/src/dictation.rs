@@ -225,7 +225,7 @@ fn device_name(d: &cpal::Device) -> Option<String> {
     d.description().ok().map(|x| x.name().to_string())
 }
 
-fn pick_device(name: Option<&str>) -> Result<cpal::Device, String> {
+pub(crate) fn pick_device(name: Option<&str>) -> Result<cpal::Device, String> {
     let host = cpal::default_host();
     if let Some(name) = name {
         if let Ok(mut devices) = host.input_devices() {
@@ -240,7 +240,7 @@ fn pick_device(name: Option<&str>) -> Result<cpal::Device, String> {
     })
 }
 
-fn mic_error(what: &str, e: impl std::fmt::Display) -> String {
+pub(crate) fn mic_error(what: &str, e: impl std::fmt::Display) -> String {
     let hint = if cfg!(target_os = "macos") {
         " Check System Settings > Privacy & Security > Microphone."
     } else if cfg!(windows) {
@@ -596,6 +596,7 @@ pub async fn voice_stop(
         Some(voice_settings.language.clone())
     };
     let model_id = spec.id.to_string();
+    let data_dir = shell.data_dir.clone();
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         let audio =
@@ -612,6 +613,7 @@ pub async fn voice_stop(
                 }
                 _ => {
                     *slot = None;
+                    voice::verify_once(&data_dir, spec).map_err(|e| format!("{e:#}"))?;
                     let ctx = Arc::new(
                         WhisperContext::new_with_params(&path, WhisperContextParameters::default())
                             .map_err(|e| format!("Couldn't load the speech model: {e}"))?,

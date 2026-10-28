@@ -325,12 +325,15 @@ function Palette({ onClose }: { onClose: () => void }) {
                   <span className="w-24 truncate text-right text-[11.5px] text-steel max-[480px]:hidden">
                     {basename(a.projectPath)}
                   </span>
-                  {i < 9 && !a.archived && (
-                    <span className="hidden gap-0.5 group-data-[selected=true]:flex">
-                      <Kbd>{modKey}</Kbd>
-                      <Kbd>{i + 1}</Kbd>
-                    </span>
-                  )}
+                  {/* Always reserve the badge's width so rows don't shift when one is selected. */}
+                  <span className="invisible flex w-[52px] shrink-0 justify-end gap-0.5 group-data-[selected=true]:visible max-[480px]:hidden">
+                    {i < 9 && !a.archived && (
+                      <>
+                        <Kbd>{modKey}</Kbd>
+                        <Kbd>{i + 1}</Kbd>
+                      </>
+                    )}
+                  </span>
                 </Command.Item>
               ))}
             </Command.Group>

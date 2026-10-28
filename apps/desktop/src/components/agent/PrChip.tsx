@@ -74,7 +74,7 @@ function CheckRow({ check }: { check: PrCheck }) {
   );
 }
 
-type Draft = { kind: "ci" | "review"; text: string } | null;
+type Draft = { kind: "ci" | "review"; text: string; omitted: number } | null;
 
 /** The pull request + CI chip in the agent header. Renders nothing without a PR. */
 export function PrChip({ agent }: { agent: Agent }) {
@@ -89,12 +89,12 @@ export function PrChip({ agent }: { agent: Agent }) {
 
   const prepare = async (kind: "ci" | "review") => {
     setLoading(kind);
-    const text = await attempt(
+    const prompt = await attempt(
       kind === "ci" ? "Couldn't prepare the CI prompt" : "Couldn't load review comments",
       () => (kind === "ci" ? api.prFixCiPrompt(agent.id) : api.prReviewPrompt(agent.id)),
     );
     setLoading(null);
-    if (text) setDraft({ kind, text });
+    if (prompt) setDraft({ kind, text: prompt.text, omitted: prompt.omitted });
   };
 
   return (
@@ -112,7 +112,9 @@ export function PrChip({ agent }: { agent: Agent }) {
             {open && pr.summary.overall !== "none" && (
               <span className="inline-flex items-center gap-1">
                 <CiIcon pr={pr} />
-                {pr.summary.failing > 0 && <span className="tabular font-medium text-err">{pr.summary.failing}</span>}
+                {pr.summary.failing > 0 && (
+                  <span className="tabular font-medium text-err">{pr.summary.failing} failing</span>
+                )}
               </span>
             )}
             {open && review && (
@@ -215,7 +217,17 @@ function SendPromptBody({
   onClose: () => void;
 }): ReactNode {
   const [text, setText] = useState(draft.text);
+  const [omitted, setOmitted] = useState(draft.omitted);
   const [sending, setSending] = useState(false);
+  const [loadingOutside, setLoadingOutside] = useState(false);
+  const includeOutside = async () => {
+    setLoadingOutside(true);
+    const prompt = await attempt("Couldn't load review comments", () => api.prReviewPrompt(agent.id, true));
+    setLoadingOutside(false);
+    if (!prompt) return;
+    setText(prompt.text);
+    setOmitted(0);
+  };
   const busy = agent.status === "working" || agent.status === "starting" || agent.status === "needs_permission";
   const title = draft.kind === "ci" ? `Fix CI on #${pr.number}` : `Address review comments on #${pr.number}`;
   const send = async () => {
@@ -239,6 +251,21 @@ function SendPromptBody({
       className="w-[min(720px,calc(100vw-32px))]"
     >
       <DialogBody>
+        <p className="mb-2 text-[12px] text-muted">
+          This message includes text written by other people. Review it before sending.
+        </p>
+        {omitted > 0 && (
+          <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-warn/30 bg-warn/[0.07] px-3 py-2 text-[12px]">
+            <span>
+              {omitted} {omitted === 1 ? "comment" : "comments"} from people outside the project{" "}
+              {omitted === 1 ? "was" : "were"} left out.
+            </span>
+            <Button size="xs" variant="ghost" disabled={loadingOutside} onClick={() => void includeOutside()}>
+              {loadingOutside && <Spinner className="h-3 w-3" />}
+              Include {omitted === 1 ? "it" : "them"}
+            </Button>
+          </div>
+        )}
         <Textarea
           value={text}
           onChange={(e) => setText(e.target.value)}

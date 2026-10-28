@@ -43,10 +43,12 @@ jobs:
         id: notes
         run: |
           python3 scripts/release_notes.py "${GITHUB_REF_NAME}" > release-notes.md
+          # Random delimiter: the notes can't terminate the output block early.
+          delim="EOF_$(openssl rand -hex 16)"
           {
-            echo "body<<ARMADA_RELEASE_NOTES_EOF"
+            echo "body<<${delim}"
             cat release-notes.md
-            echo "ARMADA_RELEASE_NOTES_EOF"
+            echo "${delim}"
           } >> "$GITHUB_OUTPUT"
           cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -80,7 +82,7 @@ jobs:
           npx tsc --noEmit
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
   release:
     name: ${{ matrix.name }}
@@ -97,15 +99,15 @@ jobs:
           - name: macOS (universal)
             platform: macos-latest
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
-            args: --target universal-apple-darwin
+            args: --target universal-apple-darwin -- --locked
           - name: Linux
             platform: ubuntu-22.04
             rust-targets: ""
-            args: ""
+            args: "-- --locked"
           - name: Windows
             platform: windows-latest
             rust-targets: ""
-            args: ""
+            args: "-- --locked"
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

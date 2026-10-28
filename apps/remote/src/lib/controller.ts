@@ -16,16 +16,44 @@
  * `/api/session` before it is stored, and a rejected link falls back to the
  * device's existing pairing instead of wiping it.
  */
-import { ApiError, api, errorMessage, HttpBackend, newIdempotencyKey, type Backend } from "./api";
-import { adoptValidatedToken, clearPairing, hasTokenParam, setShared, storedToken, takeLinkToken } from "./auth";
+import {
+  ApiError,
+  api,
+  errorMessage,
+  HttpBackend,
+  newIdempotencyKey,
+  pairDevice,
+  type Backend,
+} from "./api";
+import {
+  adoptValidatedToken,
+  clearPairing,
+  hasTokenParam,
+  setShared,
+  storedToken,
+  takeLinkToken,
+} from "./auth";
 import { getRoute, navigate, notifyRouteChange } from "./router";
-import { getState, initialState, setState, type Connection, type PendingPrompt, type Timeline, type Toast } from "./store";
+import {
+  getState,
+  initialState,
+  setState,
+  type Connection,
+  type PendingPrompt,
+  type Timeline,
+  type Toast,
+} from "./store";
 import { coalesceDeltas, reconcilePending } from "./composerLogic";
 import { purgeAllDrafts, purgeDraft } from "./drafts";
 import { commitMessage, shipOutcome, throttledProgress } from "./outcomes";
 import { loadLocalImage } from "./localImages";
 import { applyConfigValue } from "./config";
-import { applyDelta, mergeSnapshot, upsertItem, type BufferedEvent } from "./timeline";
+import {
+  applyDelta,
+  mergeSnapshot,
+  upsertItem,
+  type BufferedEvent,
+} from "./timeline";
 import type {
   Agent,
   Attachment,
@@ -76,21 +104,32 @@ export async function boot() {
     if (dev) {
       devOverrides = dev;
       if (dev.forceUnpaired) {
-        setState({ phase: "unpaired", unpairedReason: dev.forceUnpaired === "revoked" ? "revoked" : null });
+        setState({
+          phase: "unpaired",
+          unpairedReason: dev.forceUnpaired === "revoked" ? "revoked" : null,
+        });
         return;
       }
-      await connect({ token: link.candidate ?? "dev-mock-token", source: "stored" });
+      await connect({
+        token: link.candidate ?? "dev-mock-token",
+        source: "stored",
+      });
       return;
     }
   }
 
-  if (link.candidate) return connect({ token: link.candidate, source: "candidate" });
+  if (link.pairCode) return pairWithCode(link.pairCode);
+  if (link.candidate)
+    return connect({ token: link.candidate, source: "candidate" });
   const stored = storedToken();
   if (stored) {
     if (link.malformed) invalidLinkToast();
     return connect(stored);
   }
-  setState({ phase: "unpaired", unpairedReason: link.malformed ? "invalid_link" : null });
+  setState({
+    phase: "unpaired",
+    unpairedReason: link.malformed ? "invalid_link" : null,
+  });
 }
 
 /** A pairing link opened in a tab that already runs the app only changes the hash. */
@@ -98,7 +137,9 @@ function onHashChange() {
   if (!hasTokenParam(location.hash)) return;
   const link = takeLinkToken();
   notifyRouteChange();
-  if (link.candidate) void connect({ token: link.candidate, source: "candidate" });
+  if (link.pairCode) void pairWithCode(link.pairCode);
+  else if (link.candidate)
+    void connect({ token: link.candidate, source: "candidate" });
   else if (getState().phase === "ready") invalidLinkToast();
   else setState({ phase: "unpaired", unpairedReason: "invalid_link" });
 }
@@ -112,6 +153,61 @@ function invalidLinkToast() {
     reason: null,
     duration: 7_000,
   });
+}
+
+/** What this device is called in Armada's list of paired devices. */
+function deviceName(): string {
+  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
+  if (/iPad/.test(ua)) return "iPad";
+  if (/iPhone|iPod/.test(ua)) return "iPhone";
+  if (/Android/.test(ua)) return "Android phone";
+  return "Browser";
+}
+
+/**
+ * Pair with the one-time code from a pairing link/QR: trade it for this device's own token,
+ * then connect with that token like any other (it is only stored once the session accepts it).
+ */
+export async function pairWithCode(code: string) {
+  const gen = ++generation;
+  connection?.stop();
+  connection = null;
+  setState({ phase: "boot", blockedReason: null, blockedMessage: null });
+  try {
+    const { token } = await pairDevice(code, deviceName());
+    if (gen !== generation) return;
+    await connect({ token, source: "candidate" });
+  } catch (e) {
+    if (gen !== generation) return;
+    if (e instanceof ApiError && e.isRateLimited) {
+      setState({
+        phase: "blocked",
+        blockedReason: "rate_limited",
+        blockedMessage: e.message,
+      });
+    } else if (
+      e instanceof ApiError &&
+      (e.isUnauthorized || e.status === 403 || e.status === 409)
+    ) {
+      const fallback = storedToken();
+      if (fallback) {
+        invalidLinkToast();
+        void connect(fallback);
+      } else setState({ phase: "unpaired", unpairedReason: "invalid_link" });
+    } else {
+      const unreachable =
+        e instanceof ApiError && (e.isNetwork || e.status === 408);
+      setState({
+        phase: "blocked",
+        blockedReason: unreachable
+          ? "unreachable"
+          : e instanceof ApiError && e.status === 503
+            ? "unavailable"
+            : "error",
+        blockedMessage: errorMessage(e),
+      });
+    }
+  }
 }
 
 /** Pair using a token entered on the pairing screen. */
@@ -132,16 +228,24 @@ async function connect(ref: TokenRef, quiet = false) {
   connection?.stop();
   connection = null;
   const b = devOverrides.backend ?? new HttpBackend(ref.token);
-  if (!quiet) setState({ phase: "boot", blockedReason: null, blockedMessage: null });
+  if (!quiet)
+    setState({ phase: "boot", blockedReason: null, blockedMessage: null });
 
   try {
     const session = await api.session(b);
     if (gen !== generation) return;
     if (!session || (session.scope !== "owner" && session.scope !== "viewer")) {
-      throw new ApiError(502, null, "Armada sent a response this app couldn't read.");
+      throw new ApiError(
+        502,
+        null,
+        "Armada sent a response this app couldn't read.",
+      );
     }
     // Only now is the token known to be good.
-    const source: TokenSource = ref.source === "candidate" ? adoptValidatedToken(ref.token, session.scope) : ref.source;
+    const source: TokenSource =
+      ref.source === "candidate"
+        ? adoptValidatedToken(ref.token, session.scope)
+        : ref.source;
     if (current && current.token !== ref.token) resetData(); // different identity: drop its data
     current = { token: ref.token, source };
     attempting = null;
@@ -162,9 +266,14 @@ async function connect(ref: TokenRef, quiet = false) {
     if (e instanceof ApiError && e.isUnauthorized) {
       tokenRejected(ref);
     } else if (e instanceof ApiError && e.isRateLimited) {
-      setState({ phase: "blocked", blockedReason: "rate_limited", blockedMessage: e.message });
+      setState({
+        phase: "blocked",
+        blockedReason: "rate_limited",
+        blockedMessage: e.message,
+      });
     } else {
-      const unreachable = e instanceof ApiError && (e.isNetwork || e.status === 408);
+      const unreachable =
+        e instanceof ApiError && (e.isNetwork || e.status === 408);
       setState({
         phase: "blocked",
         blockedReason: unreachable
@@ -201,7 +310,10 @@ function tokenRejected(ref: TokenRef) {
   if (fallback && fallback.token !== ref.token) {
     pushToast({
       tone: "warn",
-      title: ref.source === "candidate" ? "That pairing link didn't work" : "This shared link has expired",
+      title:
+        ref.source === "candidate"
+          ? "That pairing link didn't work"
+          : "This shared link has expired",
       body: "Reconnected with this device's existing pairing.",
       agentId: null,
       reason: null,
@@ -211,7 +323,10 @@ function tokenRejected(ref: TokenRef) {
     return;
   }
   resetData();
-  setState({ phase: "unpaired", unpairedReason: ref.source === "candidate" ? "invalid_link" : "revoked" });
+  setState({
+    phase: "unpaired",
+    unpairedReason: ref.source === "candidate" ? "invalid_link" : "revoked",
+  });
   navigate({ name: "fleet" }, { replace: true });
 }
 
@@ -288,7 +403,8 @@ function backoff(attempt: number): number {
 
 function setConnection(next: Connection, note?: string | null) {
   const s = getState();
-  const connectionNote = next === "live" ? null : note === undefined ? s.connectionNote : note;
+  const connectionNote =
+    next === "live" ? null : note === undefined ? s.connectionNote : note;
   if (s.connection === next && s.connectionNote === connectionNote) return;
   setState({
     connection: next,
@@ -329,13 +445,19 @@ function openConnection(b: Backend, gen: number): ConnectionHandle {
   // Without live events the view would go stale: poll state, approvals and the
   // open agent (only if it changed) until the stream is back.
   const poller = setInterval(() => {
-    if (!alive() || !navigator.onLine || document.visibilityState !== "visible") return;
+    if (!alive() || !navigator.onLine || document.visibilityState !== "visible")
+      return;
     const c = getState().connection;
     if (c === "limited" || c === "reconnecting") void resync();
   }, POLL_MS);
 
   const watchdog = setInterval(() => {
-    if (controller && everOpened && getState().connection === "live" && Date.now() - lastActivity > WATCHDOG_MS) {
+    if (
+      controller &&
+      everOpened &&
+      getState().connection === "live" &&
+      Date.now() - lastActivity > WATCHDOG_MS
+    ) {
       controller.abort(); // stalled: the loop reconnects and resyncs
     }
   }, 5_000);
@@ -404,7 +526,8 @@ function openConnection(b: Backend, gen: number): ConnectionHandle {
         controller = null;
       }
       if (!alive()) return;
-      if (getState().connection !== "limited") setConnection(navigator.onLine ? "reconnecting" : "offline");
+      if (getState().connection !== "limited")
+        setConnection(navigator.onLine ? "reconnecting" : "offline");
       // A stream that was healthy and then dropped reconnects almost at once;
       // repeated failures back off exponentially.
       await sleep(opened ? 250 + Math.random() * 750 : backoff(attempt++));
@@ -426,7 +549,11 @@ function openConnection(b: Backend, gen: number): ConnectionHandle {
     nudge(reason) {
       if (!alive()) return;
       const quiet = Date.now() - lastActivity;
-      if (controller && getState().connection === "live" && quiet < STALE_AFTER_HIDDEN_MS) {
+      if (
+        controller &&
+        getState().connection === "live" &&
+        quiet < STALE_AFTER_HIDDEN_MS
+      ) {
         // The stream stayed healthy, so nothing was missed (if the server had to
         // drop events it sends `resync`): no refetch needed.
         void reason;
@@ -448,7 +575,8 @@ function openConnection(b: Backend, gen: number): ConnectionHandle {
 let stateInFlight = false;
 let stateAgain = false;
 /** Agent events seen while `/api/state` is in flight, re-applied on top of the snapshot. */
-let stateJournal: { updated: Map<string, Agent>; removed: Set<string> } | null = null;
+let stateJournal: { updated: Map<string, Agent>; removed: Set<string> } | null =
+  null;
 
 const itemsInFlight = new Map<string, boolean>(); // agentId -> refetch again when done
 /** Events for an agent received while its timeline fetch is in flight. */
@@ -477,7 +605,8 @@ export async function resync() {
     // merged by seq); the others when they're opened.
     setState((s) => {
       const timelines: Record<string, Timeline> = {};
-      for (const [id, t] of Object.entries(s.timelines)) timelines[id] = t.status === "ready" ? { ...t, stale: true } : t;
+      for (const [id, t] of Object.entries(s.timelines))
+        timelines[id] = t.status === "ready" ? { ...t, stale: true } : t;
       return { timelines };
     });
     const route = getRoute();
@@ -506,28 +635,43 @@ export async function refreshState() {
   stateInFlight = true;
   stateJournal = { updated: new Map(), removed: new Set() };
   const gen = generation;
-  if (getState().stateStatus !== "ready") setState({ stateStatus: "loading", stateError: null });
+  if (getState().stateStatus !== "ready")
+    setState({ stateStatus: "loading", stateError: null });
   try {
     const snap = (await api.state(b)) as StateSnapshot | null;
     if (gen !== generation) return;
     if (!snap || !Array.isArray(snap.agents) || !Array.isArray(snap.accounts)) {
-      throw new ApiError(502, null, "Armada sent a response this app couldn't read.");
+      throw new ApiError(
+        502,
+        null,
+        "Armada sent a response this app couldn't read.",
+      );
     }
     const agents: Record<string, Agent> = {};
-    for (const a of snap.agents) if (a && typeof a.id === "string") agents[a.id] = a;
+    for (const a of snap.agents)
+      if (a && typeof a.id === "string") agents[a.id] = a;
     for (const [id, a] of stateJournal.updated) {
       const snapA = agents[id];
       if (!snapA || agentRecency(a) >= agentRecency(snapA)) agents[id] = a;
     }
     for (const id of stateJournal.removed) delete agents[id];
 
-    const accounts = Object.fromEntries(snap.accounts.filter((a) => a && a.id).map((a) => [a.id, a]));
-    const customAgents = Object.fromEntries((snap.customAgents ?? []).filter((c) => c && c.id).map((c) => [c.id, c]));
-    const projects = Array.isArray(snap.projects) ? snap.projects.filter((p) => typeof p === "string" && p) : [];
-    const templates = Array.isArray(snap.templates) ? snap.templates.filter((t) => t && t.id && typeof t.text === "string") : [];
+    const accounts = Object.fromEntries(
+      snap.accounts.filter((a) => a && a.id).map((a) => [a.id, a]),
+    );
+    const customAgents = Object.fromEntries(
+      (snap.customAgents ?? []).filter((c) => c && c.id).map((c) => [c.id, c]),
+    );
+    const projects = Array.isArray(snap.projects)
+      ? snap.projects.filter((p) => typeof p === "string" && p)
+      : [];
+    const templates = Array.isArray(snap.templates)
+      ? snap.templates.filter((t) => t && t.id && typeof t.text === "string")
+      : [];
     setState((s) => {
       const timelines = { ...s.timelines };
-      for (const id of Object.keys(timelines)) if (!agents[id]) delete timelines[id];
+      for (const id of Object.keys(timelines))
+        if (!agents[id]) delete timelines[id];
       return {
         agents,
         accounts,
@@ -535,7 +679,11 @@ export async function refreshState() {
         projects,
         templates,
         defaultWorktree: snap.defaultWorktree === true,
-        defaultPermissionMode: snap.defaultPermissionMode === "auto" || snap.defaultPermissionMode === "ask" ? snap.defaultPermissionMode : null,
+        defaultPermissionMode:
+          snap.defaultPermissionMode === "auto" ||
+          snap.defaultPermissionMode === "ask"
+            ? snap.defaultPermissionMode
+            : null,
         timelines,
         stateStatus: "ready",
         stateError: null,
@@ -545,7 +693,8 @@ export async function refreshState() {
   } catch (e) {
     if (gen !== generation) return;
     if (handleAuthError(e)) return;
-    if (getState().stateStatus !== "ready") setState({ stateStatus: "error", stateError: errorMessage(e) });
+    if (getState().stateStatus !== "ready")
+      setState({ stateStatus: "error", stateError: errorMessage(e) });
   } finally {
     stateJournal = null;
     stateInFlight = false;
@@ -569,8 +718,11 @@ function touchLru(agentId: string) {
   const s = getState();
   const route = getRoute();
   const keep = (id: string) =>
-    (route.name === "agent" && route.agentId === id) || (s.agents[id]?.pendingPermissions ?? 0) > 0;
-  const evict = lru.filter((id) => !keep(id)).slice(0, lru.length - TIMELINE_CACHE);
+    (route.name === "agent" && route.agentId === id) ||
+    (s.agents[id]?.pendingPermissions ?? 0) > 0;
+  const evict = lru
+    .filter((id) => !keep(id))
+    .slice(0, lru.length - TIMELINE_CACHE);
   if (!evict.length) return;
   for (const id of evict) lru.splice(lru.indexOf(id), 1);
   setState((st) => {
@@ -603,23 +755,44 @@ export async function loadTimeline(agentId: string) {
   const gen = generation;
   const existing = getState().timelines[agentId];
   if (!existing || existing.status === "error") {
-    setTimeline(agentId, { status: "loading", items: existing?.items ?? [], error: null, stale: false });
+    setTimeline(agentId, {
+      status: "loading",
+      items: existing?.items ?? [],
+      error: null,
+      stale: false,
+    });
   }
   try {
     // The tail only; older pages load when the reader scrolls up.
     const raw = await api.items(b, agentId, PAGE_SIZE);
     if (gen !== generation) return;
-    if (!Array.isArray(raw)) throw new ApiError(502, null, "Armada sent a response this app couldn't read.");
-    const snapshot = raw.filter((i) => i && typeof i.id === "string" && typeof i.kind === "string");
+    if (!Array.isArray(raw))
+      throw new ApiError(
+        502,
+        null,
+        "Armada sent a response this app couldn't read.",
+      );
+    const snapshot = raw.filter(
+      (i) => i && typeof i.id === "string" && typeof i.kind === "string",
+    );
     const merged = mergeSnapshot(snapshot, itemBuffers.get(agentId) ?? []);
     const { gap } = merged;
     // Keep older pages already loaded (the tail refetch doesn't include them).
     const minSeq = snapshot.length ? snapshot[0].seq : Infinity;
     const prev = getState().timelines[agentId];
-    const older = prev && snapshot.length ? prev.items.filter((i) => i.seq < minSeq) : [];
+    const older =
+      prev && snapshot.length ? prev.items.filter((i) => i.seq < minSeq) : [];
     const items = older.length ? [...older, ...merged.items] : merged.items;
-    const hasMore = older.length ? (prev?.hasMore ?? false) : raw.length >= PAGE_SIZE;
-    setTimeline(agentId, { status: "ready", items, error: null, stale: false, hasMore });
+    const hasMore = older.length
+      ? (prev?.hasMore ?? false)
+      : raw.length >= PAGE_SIZE;
+    setTimeline(agentId, {
+      status: "ready",
+      items,
+      error: null,
+      stale: false,
+      hasMore,
+    });
     if (gap) scheduleRefetch(agentId);
     reconcile(agentId, items);
     touchLru(agentId);
@@ -631,8 +804,16 @@ export async function loadTimeline(agentId: string) {
       // Keep showing what we have, marked stale with the reason (retried on the next resync).
       setTimeline(agentId, { ...cur, stale: true, error: errorMessage(e) });
     } else {
-      const message = e instanceof ApiError && e.status === 404 ? "This agent no longer exists." : errorMessage(e);
-      setTimeline(agentId, { status: "error", items: cur?.items ?? [], error: message, stale: false });
+      const message =
+        e instanceof ApiError && e.status === 404
+          ? "This agent no longer exists."
+          : errorMessage(e);
+      setTimeline(agentId, {
+        status: "error",
+        items: cur?.items ?? [],
+        error: message,
+        stale: false,
+      });
     }
   } finally {
     itemBuffers.delete(agentId);
@@ -649,21 +830,41 @@ const PAGE_SIZE = 200;
 export async function loadOlder(agentId: string) {
   const b = backend;
   const t = getState().timelines[agentId];
-  if (!b || !t || t.status !== "ready" || !t.hasMore || t.loadingOlder || !t.items.length) return;
+  if (
+    !b ||
+    !t ||
+    t.status !== "ready" ||
+    !t.hasMore ||
+    t.loadingOlder ||
+    !t.items.length
+  )
+    return;
   const before = t.items[0].seq;
   const gen = generation;
   setTimeline(agentId, { ...t, loadingOlder: true });
   try {
     const raw = await api.items(b, agentId, PAGE_SIZE, before);
     if (gen !== generation) return;
-    if (!Array.isArray(raw)) throw new ApiError(502, null, "Armada sent a response this app couldn't read.");
+    if (!Array.isArray(raw))
+      throw new ApiError(
+        502,
+        null,
+        "Armada sent a response this app couldn't read.",
+      );
     // Older servers ignore paging and send everything: keep only what's older.
-    const page = raw.filter((i) => i && typeof i.id === "string" && i.seq < before).sort((x, y) => x.seq - y.seq);
+    const page = raw
+      .filter((i) => i && typeof i.id === "string" && i.seq < before)
+      .sort((x, y) => x.seq - y.seq);
     const cur = getState().timelines[agentId];
     if (!cur) return;
     const known = new Set(cur.items.map((i) => i.id));
     const items = [...page.filter((i) => !known.has(i.id)), ...cur.items];
-    setTimeline(agentId, { ...cur, items, loadingOlder: false, hasMore: raw.length >= PAGE_SIZE && page.length > 0 });
+    setTimeline(agentId, {
+      ...cur,
+      items,
+      loadingOlder: false,
+      hasMore: raw.length >= PAGE_SIZE && page.length > 0,
+    });
   } catch (e) {
     if (gen !== generation || handleAuthError(e)) return;
     const cur = getState().timelines[agentId];
@@ -684,7 +885,9 @@ const GAP_WINDOW_MS = 10_000;
 function scheduleRefetch(agentId: string) {
   if (refetchTimers.has(agentId)) return;
   const now = Date.now();
-  const recent = (gapRefetches.get(agentId) ?? []).filter((t) => now - t < GAP_WINDOW_MS);
+  const recent = (gapRefetches.get(agentId) ?? []).filter(
+    (t) => now - t < GAP_WINDOW_MS,
+  );
   if (recent.length >= GAP_LIMIT) return;
   recent.push(now);
   gapRefetches.set(agentId, recent);
@@ -714,13 +917,21 @@ export async function loadPermissions() {
   permsInFlight = true;
   permsJournal = new Map();
   const gen = generation;
-  if (getState().permissionsStatus !== "ready") setState({ permissionsStatus: "loading" });
+  if (getState().permissionsStatus !== "ready")
+    setState({ permissionsStatus: "loading" });
   try {
     const raw = await api.permissions(b);
     if (gen !== generation) return;
-    if (!Array.isArray(raw)) throw new ApiError(502, null, "Armada sent a response this app couldn't read.");
+    if (!Array.isArray(raw))
+      throw new ApiError(
+        502,
+        null,
+        "Armada sent a response this app couldn't read.",
+      );
     const permissions: Record<string, PermissionItem> = {};
-    for (const it of raw) if (it && it.kind === "permission" && it.resolution === null) permissions[it.requestId] = it;
+    for (const it of raw)
+      if (it && it.kind === "permission" && it.resolution === null)
+        permissions[it.requestId] = it;
     for (const [id, it] of permsJournal) {
       if (it.resolution === null) permissions[id] = it;
       else delete permissions[id];
@@ -729,7 +940,8 @@ export async function loadPermissions() {
   } catch (e) {
     if (gen !== generation) return;
     if (handleAuthError(e)) return;
-    if (getState().permissionsStatus !== "ready") setState({ permissionsStatus: "error" });
+    if (getState().permissionsStatus !== "ready")
+      setState({ permissionsStatus: "error" });
   } finally {
     permsJournal = null;
     permsInFlight = false;
@@ -753,7 +965,8 @@ function notePermission(item: PermissionItem) {
   permsJournal?.set(item.requestId, item);
   setState((s) => {
     const has = !!s.permissions[item.requestId];
-    if (item.resolution === null) return { permissions: { ...s.permissions, [item.requestId]: item } };
+    if (item.resolution === null)
+      return { permissions: { ...s.permissions, [item.requestId]: item } };
     if (!has) return {};
     const permissions = { ...s.permissions };
     delete permissions[item.requestId];
@@ -777,7 +990,10 @@ function enqueueEvent(raw: string) {
   eventQueue.push(raw);
   if (flushScheduled) return;
   flushScheduled = true;
-  if (typeof requestAnimationFrame === "function" && document.visibilityState === "visible") {
+  if (
+    typeof requestAnimationFrame === "function" &&
+    document.visibilityState === "visible"
+  ) {
     requestAnimationFrame(flushEvents);
   } else {
     setTimeout(flushEvents, HIDDEN_FLUSH_MS);
@@ -792,7 +1008,8 @@ function flushEvents() {
   for (const r of raw) {
     try {
       const ev = JSON.parse(r) as RemoteEvent;
-      if (ev && typeof ev === "object" && typeof ev.type === "string") parsed.push(ev);
+      if (ev && typeof ev === "object" && typeof ev.type === "string")
+        parsed.push(ev);
     } catch {
       // ignore malformed events
     }
@@ -810,7 +1027,10 @@ function handleEvent(ev: RemoteEvent) {
       const prev = getState().agents[agent.id];
       setState((s) => ({ agents: { ...s.agents, [agent.id]: agent } }));
       reconcile(agent.id, []);
-      if (agent.pendingPermissions > 0 && (prev?.pendingPermissions ?? 0) < agent.pendingPermissions) {
+      if (
+        agent.pendingPermissions > 0 &&
+        (prev?.pendingPermissions ?? 0) < agent.pendingPermissions
+      ) {
         if (getState().session?.scope === "owner") schedulePermissions();
       }
       return;
@@ -842,7 +1062,8 @@ function handleEvent(ev: RemoteEvent) {
       const item = ev.item;
       if (!item || typeof item.id !== "string") return;
       itemBuffers.get(item.agentId)?.push({ type: "item_upserted", item });
-      if (item.kind === "permission" && getState().session?.scope === "owner") notePermission(item);
+      if (item.kind === "permission" && getState().session?.scope === "owner")
+        notePermission(item);
       const t = getState().timelines[item.agentId];
       if (t && t.status !== "error") {
         const items = upsertItem(t.items, item);
@@ -858,9 +1079,11 @@ function handleEvent(ev: RemoteEvent) {
       const t = getState().timelines[ev.agentId];
       if (!t || t.status === "error") return;
       const r = applyDelta(t.items, ev);
-      if (r.items !== t.items) setTimeline(ev.agentId, { ...t, items: r.items });
+      if (r.items !== t.items)
+        setTimeline(ev.agentId, { ...t, items: r.items });
       // While a fetch is in flight the buffered copy is reconciled with the snapshot instead.
-      if (r.outcome === "gap" && !buffer && t.status === "ready") scheduleRefetch(ev.agentId);
+      if (r.outcome === "gap" && !buffer && t.status === "ready")
+        scheduleRefetch(ev.agentId);
       return;
     }
     case "attention":
@@ -891,8 +1114,19 @@ function handleEvent(ev: RemoteEvent) {
 /** Map the full desktop Account (account_updated) to the remote's account shape. */
 export function toRemoteAccount(a: unknown): RemoteAccount | null {
   if (!a || typeof a !== "object") return null;
-  const x = a as { id?: unknown; name?: unknown; provider?: unknown; color?: unknown; status?: { label?: unknown; loggedIn?: unknown; error?: unknown } | null };
-  if (typeof x.id !== "string" || typeof x.name !== "string" || typeof x.provider !== "string") return null;
+  const x = a as {
+    id?: unknown;
+    name?: unknown;
+    provider?: unknown;
+    color?: unknown;
+    status?: { label?: unknown; loggedIn?: unknown; error?: unknown } | null;
+  };
+  if (
+    typeof x.id !== "string" ||
+    typeof x.name !== "string" ||
+    typeof x.provider !== "string"
+  )
+    return null;
   const st = x.status ?? null;
   return {
     id: x.id,
@@ -910,17 +1144,26 @@ function reconcile(agentId: string, items: TimelineItem[]) {
   const s = getState();
   let resolving = s.resolving;
   for (const it of items) {
-    if (it.kind === "permission" && it.resolution !== null && resolving[it.requestId]) {
+    if (
+      it.kind === "permission" &&
+      it.resolution !== null &&
+      resolving[it.requestId]
+    ) {
       if (resolving === s.resolving) resolving = { ...resolving };
       delete resolving[it.requestId];
     }
   }
   const before = s.pendingPrompts[agentId];
-  const pending = before?.length ? reconcilePending(before, items, s.agents[agentId]?.queue) : before;
+  const pending = before?.length
+    ? reconcilePending(before, items, s.agents[agentId]?.queue)
+    : before;
   if (resolving !== s.resolving || pending !== s.pendingPrompts[agentId]) {
     setState((st) => ({
       resolving,
-      pendingPrompts: pending === st.pendingPrompts[agentId] ? st.pendingPrompts : { ...st.pendingPrompts, [agentId]: pending },
+      pendingPrompts:
+        pending === st.pendingPrompts[agentId]
+          ? st.pendingPrompts
+          : { ...st.pendingPrompts, [agentId]: pending },
     }));
   }
 }
@@ -935,11 +1178,17 @@ export function pushToast(t: Omit<Toast, "id">): string {
   const id = `t${++toastSeq}`;
   setState((s) => {
     // Collapse repeats for the same agent + reason instead of stacking them.
-    const rest = s.toasts.filter((x) => !(t.agentId && x.agentId === t.agentId && x.reason === t.reason));
+    const rest = s.toasts.filter(
+      (x) => !(t.agentId && x.agentId === t.agentId && x.reason === t.reason),
+    );
     for (const x of s.toasts) if (!rest.includes(x)) clearTimer(x.id);
     return { toasts: [...rest, { ...t, id }].slice(-3) };
   });
-  if (t.duration > 0) toastTimers.set(id, setTimeout(() => dismissToast(id), t.duration));
+  if (t.duration > 0)
+    toastTimers.set(
+      id,
+      setTimeout(() => dismissToast(id), t.duration),
+    );
   return id;
 }
 
@@ -957,17 +1206,29 @@ export function dismissToast(id: string) {
 /** Pause auto-dismiss while the user is touching a toast. */
 export function holdToast(id: string, hold: boolean) {
   if (hold) clearTimer(id);
-  else if (!toastTimers.has(id)) toastTimers.set(id, setTimeout(() => dismissToast(id), 4_000));
+  else if (!toastTimers.has(id))
+    toastTimers.set(
+      id,
+      setTimeout(() => dismissToast(id), 4_000),
+    );
 }
 
 export function toastError(title: string, e: unknown) {
-  pushToast({ tone: "err", title, body: errorMessage(e), agentId: null, reason: null, duration: 6_000 });
+  pushToast({
+    tone: "err",
+    title,
+    body: errorMessage(e),
+    agentId: null,
+    reason: null,
+    duration: 6_000,
+  });
 }
 
 export function vibrate(pattern: number | number[]) {
   try {
     // Browsers ignore (and log) vibration before the user has interacted with the page.
-    if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+    if (navigator.userActivation && !navigator.userActivation.hasBeenActive)
+      return;
     navigator.vibrate?.(pattern);
   } catch {
     // Unsupported (iOS) or blocked: haptics are best-effort.
@@ -978,10 +1239,13 @@ function onAttention(ev: AttentionEvent) {
   if (ev.reason === "permission") vibrate([35, 60, 35]);
   const route = getRoute();
   const watching =
-    route.name === "agent" && route.agentId === ev.agentId && document.visibilityState === "visible";
+    route.name === "agent" &&
+    route.agentId === ev.agentId &&
+    document.visibilityState === "visible";
   if (watching) return; // the timeline already shows it
   pushToast({
-    tone: ev.reason === "permission" ? "warn" : ev.reason === "done" ? "ok" : "err",
+    tone:
+      ev.reason === "permission" ? "warn" : ev.reason === "done" ? "ok" : "err",
     title: ev.title,
     body: ev.body || null,
     agentId: ev.agentId,
@@ -998,7 +1262,11 @@ function requireBackend(): Backend {
   return backend;
 }
 
-export async function respondToPermission(agentId: string, requestId: string, optionId: string): Promise<boolean> {
+export async function respondToPermission(
+  agentId: string,
+  requestId: string,
+  optionId: string,
+): Promise<boolean> {
   const s = getState();
   if (s.resolving[requestId]) return false;
   setState((st) => ({ resolving: { ...st.resolving, [requestId]: optionId } }));
@@ -1009,7 +1277,11 @@ export async function respondToPermission(agentId: string, requestId: string, op
     const t = getState().timelines[agentId];
     if (t) {
       const items = t.items.map((i) =>
-        i.kind === "permission" && i.requestId === requestId && i.resolution === null ? { ...i, resolution: optionId } : i,
+        i.kind === "permission" &&
+        i.requestId === requestId &&
+        i.resolution === null
+          ? { ...i, resolution: optionId }
+          : i,
       );
       setTimeline(agentId, { ...t, items });
     }
@@ -1053,10 +1325,19 @@ export async function respondToPermission(agentId: string, requestId: string, op
 // Undoable answers (swipe-to-approve): sent after a 5 s grace period.
 
 const UNDO_MS = 5_000;
-const deferredAnswers = new Map<string, { agentId: string; optionId: string; timer: ReturnType<typeof setTimeout> }>();
+const deferredAnswers = new Map<
+  string,
+  { agentId: string; optionId: string; timer: ReturnType<typeof setTimeout> }
+>();
 
 /** Answer after UNDO_MS unless undone; the card hides right away. */
-export function respondWithUndo(agentId: string, requestId: string, optionId: string, label: string, detail: string | null) {
+export function respondWithUndo(
+  agentId: string,
+  requestId: string,
+  optionId: string,
+  label: string,
+  detail: string | null,
+) {
   if (getState().resolving[requestId] || deferredAnswers.has(requestId)) return;
   setState((s) => ({ resolving: { ...s.resolving, [requestId]: optionId } }));
   vibrate(12);
@@ -1105,31 +1386,65 @@ if (typeof document !== "undefined") {
 
 let promptSeq = 0;
 
-function patchPending(agentId: string, id: string, patch: Partial<PendingPrompt>) {
+function patchPending(
+  agentId: string,
+  id: string,
+  patch: Partial<PendingPrompt>,
+) {
   setState((s) => ({
     pendingPrompts: {
       ...s.pendingPrompts,
-      [agentId]: (s.pendingPrompts[agentId] ?? []).map((p) => (p.id === id ? { ...p, ...patch } : p)),
+      [agentId]: (s.pendingPrompts[agentId] ?? []).map((p) =>
+        p.id === id ? { ...p, ...patch } : p,
+      ),
     },
   }));
 }
 
-export async function sendPrompt(agentId: string, text: string, attachments: Attachment[] = [], retryOf?: string) {
+export async function sendPrompt(
+  agentId: string,
+  text: string,
+  attachments: Attachment[] = [],
+  retryOf?: string,
+) {
   const body = text.trim();
   if (!body && !attachments.length) return;
   const t = getState().timelines[agentId];
   const afterSeq = t?.items.length ? t.items[t.items.length - 1].seq : -1;
   const id = retryOf ?? `p${++promptSeq}`;
-  const previous = retryOf ? getState().pendingPrompts[agentId]?.find((p) => p.id === retryOf) : undefined;
+  const previous = retryOf
+    ? getState().pendingPrompts[agentId]?.find((p) => p.id === retryOf)
+    : undefined;
   const key = previous?.key ?? newIdempotencyKey();
-  const entry: PendingPrompt = { id, text: body, ts: Date.now(), failed: false, sent: false, afterSeq, attachments, key, progress: attachments.length ? 0 : null };
+  const entry: PendingPrompt = {
+    id,
+    text: body,
+    ts: Date.now(),
+    failed: false,
+    sent: false,
+    afterSeq,
+    attachments,
+    key,
+    progress: attachments.length ? 0 : null,
+  };
   setState((s) => {
     const list = (s.pendingPrompts[agentId] ?? []).filter((p) => p.id !== id);
-    return { pendingPrompts: { ...s.pendingPrompts, [agentId]: [...list, entry] } };
+    return {
+      pendingPrompts: { ...s.pendingPrompts, [agentId]: [...list, entry] },
+    };
   });
   try {
-    const onProgress = attachments.length ? throttledProgress((progress) => patchPending(agentId, id, { progress })) : undefined;
-    await api.prompt(requireBackend(), agentId, body, attachments, key, onProgress);
+    const onProgress = attachments.length
+      ? throttledProgress((progress) => patchPending(agentId, id, { progress }))
+      : undefined;
+    await api.prompt(
+      requireBackend(),
+      agentId,
+      body,
+      attachments,
+      key,
+      onProgress,
+    );
     patchPending(agentId, id, { sent: true, progress: null });
     // It may already be in the queue (agent busy) or the timeline.
     reconcile(agentId, getState().timelines[agentId]?.items ?? []);
@@ -1141,11 +1456,18 @@ export async function sendPrompt(agentId: string, text: string, attachments: Att
 
 export function discardPrompt(agentId: string, id: string) {
   setState((s) => ({
-    pendingPrompts: { ...s.pendingPrompts, [agentId]: (s.pendingPrompts[agentId] ?? []).filter((p) => p.id !== id) },
+    pendingPrompts: {
+      ...s.pendingPrompts,
+      [agentId]: (s.pendingPrompts[agentId] ?? []).filter((p) => p.id !== id),
+    },
   }));
 }
 
-async function busyAction(key: string, title: string, run: () => Promise<void>) {
+async function busyAction(
+  key: string,
+  title: string,
+  run: () => Promise<void>,
+) {
   if (getState().busy[key]) return;
   setState((s) => ({ busy: { ...s.busy, [key]: true } }));
   try {
@@ -1163,18 +1485,24 @@ async function busyAction(key: string, title: string, run: () => Promise<void>) 
 
 export function cancelTurn(agentId: string) {
   vibrate(10);
-  return busyAction(`cancel:${agentId}`, "Couldn't stop the agent", () => api.cancel(requireBackend(), agentId));
+  return busyAction(`cancel:${agentId}`, "Couldn't stop the agent", () =>
+    api.cancel(requireBackend(), agentId),
+  );
 }
 
 export function resumeAgent(agentId: string) {
   vibrate(10);
-  return busyAction(`resume:${agentId}`, "Couldn't resume the agent", () => api.resume(requireBackend(), agentId));
+  return busyAction(`resume:${agentId}`, "Couldn't resume the agent", () =>
+    api.resume(requireBackend(), agentId),
+  );
 }
 
 /** Kill the agent's process (it can be resumed later). */
 export function stopAgent(agentId: string) {
   vibrate(10);
-  return busyAction(`stop:${agentId}`, "Couldn't stop the agent", () => api.stop(requireBackend(), agentId));
+  return busyAction(`stop:${agentId}`, "Couldn't stop the agent", () =>
+    api.stop(requireBackend(), agentId),
+  );
 }
 
 function patchAgent(agentId: string, patch: (a: Agent) => Agent) {
@@ -1185,10 +1513,17 @@ function patchAgent(agentId: string, patch: (a: Agent) => Agent) {
 }
 
 /** Optimistically set a session option (mode / model / effort …); rolls back on failure. */
-export async function setConfigOption(agentId: string, optionId: string, value: string): Promise<boolean> {
+export async function setConfigOption(
+  agentId: string,
+  optionId: string,
+  value: string,
+): Promise<boolean> {
   const before = getState().agents[agentId]?.configOptions;
   if (!before) return false;
-  patchAgent(agentId, (a) => ({ ...a, configOptions: applyConfigValue(a.configOptions ?? [], optionId, value) }));
+  patchAgent(agentId, (a) => ({
+    ...a,
+    configOptions: applyConfigValue(a.configOptions ?? [], optionId, value),
+  }));
   const key = `config:${agentId}:${optionId}`;
   setState((s) => ({ busy: { ...s.busy, [key]: true } }));
   try {
@@ -1207,18 +1542,35 @@ export async function setConfigOption(agentId: string, optionId: string, value: 
   }
 }
 
-export async function switchAccount(agentId: string, accountId: string): Promise<boolean> {
+export async function switchAccount(
+  agentId: string,
+  accountId: string,
+): Promise<boolean> {
   let ok = false;
-  await busyAction(`account:${agentId}`, "Couldn't switch accounts", async () => {
-    const agent = await api.switchAccount(requireBackend(), agentId, accountId);
-    if (agent && typeof agent.id === "string") setState((s) => ({ agents: { ...s.agents, [agent.id]: agent } }));
-    else patchAgent(agentId, (a) => ({ ...a, accountId, rateLimited: false }));
-    ok = true;
-  });
+  await busyAction(
+    `account:${agentId}`,
+    "Couldn't switch accounts",
+    async () => {
+      const agent = await api.switchAccount(
+        requireBackend(),
+        agentId,
+        accountId,
+      );
+      if (agent && typeof agent.id === "string")
+        setState((s) => ({ agents: { ...s.agents, [agent.id]: agent } }));
+      else
+        patchAgent(agentId, (a) => ({ ...a, accountId, rateLimited: false }));
+      ok = true;
+    },
+  );
   return ok;
 }
 
-export async function setArchived(agentId: string, archived: boolean, undoable = true) {
+export async function setArchived(
+  agentId: string,
+  archived: boolean,
+  undoable = true,
+) {
   const prev = getState().agents[agentId]?.archived;
   patchAgent(agentId, (a) => ({ ...a, archived }));
   try {
@@ -1230,11 +1582,21 @@ export async function setArchived(agentId: string, archived: boolean, undoable =
       agentId: null,
       reason: null,
       duration: undoable ? 5_000 : 3_000,
-      action: undoable ? { label: "Undo", run: () => void setArchived(agentId, !archived, false) } : undefined,
+      action: undoable
+        ? {
+            label: "Undo",
+            run: () => void setArchived(agentId, !archived, false),
+          }
+        : undefined,
     });
   } catch (e) {
-    if (prev !== undefined) patchAgent(agentId, (a) => ({ ...a, archived: prev }));
-    if (!handleAuthError(e)) toastError(archived ? "Couldn't archive the agent" : "Couldn't restore the agent", e);
+    if (prev !== undefined)
+      patchAgent(agentId, (a) => ({ ...a, archived: prev }));
+    if (!handleAuthError(e))
+      toastError(
+        archived ? "Couldn't archive the agent" : "Couldn't restore the agent",
+        e,
+      );
   }
 }
 
@@ -1249,17 +1611,32 @@ export function markRead(agentId: string) {
 }
 
 /** Remove a queued message; returns its text and photos (for "Edit"), or null on failure. */
-export async function removeQueued(agentId: string, qid: string): Promise<{ text: string; attachments: Attachment[] } | null> {
+export async function removeQueued(
+  agentId: string,
+  qid: string,
+): Promise<{ text: string; attachments: Attachment[] } | null> {
   const before = getState().agents[agentId]?.queue;
-  patchAgent(agentId, (a) => ({ ...a, queue: (a.queue ?? []).filter((q) => q.id !== qid) }));
+  patchAgent(agentId, (a) => ({
+    ...a,
+    queue: (a.queue ?? []).filter((q) => q.id !== qid),
+  }));
   try {
     const res = await api.removeQueued(requireBackend(), agentId, qid);
     if (!res || typeof res.text !== "string") {
       // `text: null`: it left the queue on its own (it's running now).
-      pushToast({ tone: "info", title: "That message already started", body: null, agentId: null, reason: null, duration: 4_000 });
+      pushToast({
+        tone: "info",
+        title: "That message already started",
+        body: null,
+        agentId: null,
+        reason: null,
+        duration: 4_000,
+      });
       return null;
     }
-    const attachments = Array.isArray(res.attachments) ? res.attachments.filter((a) => a && typeof a.data === "string") : [];
+    const attachments = Array.isArray(res.attachments)
+      ? res.attachments.filter((a) => a && typeof a.data === "string")
+      : [];
     return { text: res.text, attachments };
   } catch (e) {
     if (before) patchAgent(agentId, (a) => ({ ...a, queue: before }));
@@ -1269,29 +1646,44 @@ export async function removeQueued(agentId: string, qid: string): Promise<{ text
 }
 
 export function resumeQueue(agentId: string) {
-  return busyAction(`queue-resume:${agentId}`, "Couldn't resume the queue", async () => {
-    await api.resumeQueue(requireBackend(), agentId);
-    patchAgent(agentId, (a) => ({ ...a, queuePaused: false }));
-  });
+  return busyAction(
+    `queue-resume:${agentId}`,
+    "Couldn't resume the queue",
+    async () => {
+      await api.resumeQueue(requireBackend(), agentId);
+      patchAgent(agentId, (a) => ({ ...a, queuePaused: false }));
+    },
+  );
 }
 
 export function clearQueue(agentId: string) {
   const before = getState().agents[agentId]?.queue;
   patchAgent(agentId, (a) => ({ ...a, queue: [], queuedPrompts: 0 }));
-  return busyAction(`queue-clear:${agentId}`, "Couldn't clear the queue", async () => {
-    try {
-      await api.clearQueue(requireBackend(), agentId);
-    } catch (e) {
-      if (before) patchAgent(agentId, (a) => ({ ...a, queue: before, queuedPrompts: before.length }));
-      throw e;
-    }
-  });
+  return busyAction(
+    `queue-clear:${agentId}`,
+    "Couldn't clear the queue",
+    async () => {
+      try {
+        await api.clearQueue(requireBackend(), agentId);
+      } catch (e) {
+        if (before)
+          patchAgent(agentId, (a) => ({
+            ...a,
+            queue: before,
+            queuedPrompts: before.length,
+          }));
+        throw e;
+      }
+    },
+  );
 }
 
 /** Interrupt the current turn and run this queued message now. */
 export function sendQueuedNow(agentId: string, qid: string) {
   vibrate(10);
-  return busyAction(`queue:${qid}`, "Couldn't send that message", () => api.sendQueuedNow(requireBackend(), agentId, qid));
+  return busyAction(`queue:${qid}`, "Couldn't send that message", () =>
+    api.sendQueuedNow(requireBackend(), agentId, qid),
+  );
 }
 
 /**
@@ -1299,28 +1691,37 @@ export function sendQueuedNow(agentId: string, qid: string) {
  * passes the same `key` when retrying the same request, so a timeout never
  * creates a duplicate agent.
  */
-export async function createAgent(req: CreateAgentRequest, key: string, onProgress?: (f: number) => void): Promise<string> {
-  const agent = await api.createAgent(requireBackend(), req, key, onProgress && throttledProgress(onProgress)).catch((e: unknown) => {
-    handleAuthError(e);
-    throw e;
-  });
-  if (!agent || typeof agent.id !== "string") throw new ApiError(502, null, "Armada sent a response this app couldn't read.");
+export async function createAgent(
+  req: CreateAgentRequest,
+  key: string,
+  onProgress?: (f: number) => void,
+): Promise<string> {
+  const agent = await api
+    .createAgent(
+      requireBackend(),
+      req,
+      key,
+      onProgress && throttledProgress(onProgress),
+    )
+    .catch((e: unknown) => {
+      handleAuthError(e);
+      throw e;
+    });
+  if (!agent || typeof agent.id !== "string")
+    throw new ApiError(
+      502,
+      null,
+      "Armada sent a response this app couldn't read.",
+    );
   setState((s) => ({ agents: { ...s.agents, [agent.id]: agent } }));
   return agent.id;
 }
 
-/**
- * This device's pairing link, for pairing the iOS Home Screen app (which has
- * its own storage). Only for the stored pairing, never a tab-only share link.
- */
-export function currentPairingLink(): string | null {
-  if (!current || current.source !== "stored" || devOverrides.backend) return null;
-  return `${location.origin}/#token=${encodeURIComponent(current.token)}`;
-}
-
 /** A screenshot the agent referenced by local path (owner only; cached). */
 export function fetchLocalImage(agentId: string, path: string) {
-  return loadLocalImage(agentId, path, () => api.image(requireBackend(), agentId, path));
+  return loadLocalImage(agentId, path, () =>
+    api.image(requireBackend(), agentId, path),
+  );
 }
 
 /** What changed in the agent's checkout (owner only). */
@@ -1337,7 +1738,11 @@ export async function loadDiff(agentId: string) {
  * Commit (or commit & merge) the agent's work. Errors mean nothing changed;
  * a ship that committed but couldn't merge reports a warning.
  */
-export async function commitWork(agentId: string, message: string, merge: boolean): Promise<boolean> {
+export async function commitWork(
+  agentId: string,
+  message: string,
+  merge: boolean,
+): Promise<boolean> {
   const key = `commit:${agentId}`;
   if (getState().busy[key]) return false;
   setState((s) => ({ busy: { ...s.busy, [key]: true } }));
@@ -1345,14 +1750,27 @@ export async function commitWork(agentId: string, message: string, merge: boolea
     if (merge) {
       const r = await api.ship(requireBackend(), agentId, message);
       const outcome = shipOutcome(r);
-      pushToast({ ...outcome, agentId: null, reason: null, duration: outcome.tone === "warn" ? 10_000 : 6_000 });
+      pushToast({
+        ...outcome,
+        agentId: null,
+        reason: null,
+        duration: outcome.tone === "warn" ? 10_000 : 6_000,
+      });
     } else {
       const r = await api.commit(requireBackend(), agentId, message);
-      pushToast({ tone: "ok", title: "Committed", body: commitMessage(r?.result), agentId: null, reason: null, duration: 6_000 });
+      pushToast({
+        tone: "ok",
+        title: "Committed",
+        body: commitMessage(r?.result),
+        agentId: null,
+        reason: null,
+        duration: 6_000,
+      });
     }
     return true;
   } catch (e) {
-    if (!handleAuthError(e)) toastError(merge ? "Couldn't commit and merge" : "Couldn't commit", e);
+    if (!handleAuthError(e))
+      toastError(merge ? "Couldn't commit and merge" : "Couldn't commit", e);
     return false;
   } finally {
     setState((s) => {

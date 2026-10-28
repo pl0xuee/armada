@@ -59,16 +59,19 @@ describe("turnEndOf", () => {
     expect(turnEndOf("interrupted", [u, m], m, 5000)).toBeNull();
   });
   it("reports Done with the turn's duration, also for answer-only turns", () => {
-    expect(turnEndOf("idle", [u, m], m, 73_000)).toEqual({ tone: "done", label: "Done", elapsedMs: 72_000 });
+    expect(turnEndOf("idle", [u, m], m)).toEqual({ tone: "done", label: "Done", elapsedMs: 1000 });
   });
   it("leaves the summary card to say it", () => {
     expect(turnEndOf("idle", [u, m, summary], summary, 5000)).toBeNull();
   });
   it("distinguishes errors and user cancels", () => {
     expect(turnEndOf("error", [u, m], m, 5000)?.label).toBe("Stopped with an error");
+    const errNotice = { ...b, kind: "notice", level: "error", text: "boom", ts: 3000 } as unknown as TimelineItem;
+    expect(turnEndOf("error", [u, m, errNotice], errNotice)).toBeNull();
     expect(turnEndOf("idle", [u, m, cancelled], cancelled, 5000)).toMatchObject({ tone: "stopped", label: "Stopped" });
   });
   it("ignores an unknown or negative duration", () => {
-    expect(turnEndOf("idle", [u, m], m, 10)?.elapsedMs).toBeNull();
+    const early = { ...m, ts: 500 } as TimelineItem;
+    expect(turnEndOf("idle", [u, early], early)?.elapsedMs).toBeNull();
   });
 });

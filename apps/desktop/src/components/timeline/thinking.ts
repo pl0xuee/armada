@@ -86,15 +86,20 @@ export function turnEndOf(
   status: AgentStatus,
   items: readonly TimelineItem[],
   lastRow: TimelineItem | undefined,
-  lastActivityAt: number,
+  _lastActivityAt?: number,
 ): TurnEnd | null {
   if (status !== "idle" && status !== "error") return null;
   if (!lastRow || lastRow.kind === "turn_summary") return null;
   const start = items.findLast((i) => i.kind === "user_message");
   if (!start) return null;
+  // An error notice is already the last row: don't say it a second time.
+  if (status === "error" && lastRow.kind === "notice" && lastRow.level === "error") return null;
   if (status === "error") return { tone: "error", label: "Stopped with an error", elapsedMs: null };
   if (turnOutcome(items) === "cancelled") return { tone: "stopped", label: "Stopped", elapsedMs: null };
-  const elapsed = lastActivityAt - start.ts;
+  // The turn's own end (its last item), not lastActivityAt: archive/rename/unread bump that.
+  const end = items[items.length - 1] ?? start;
+  const summary = items.findLast((i, idx) => i.kind === "turn_summary" && items[idx] && i.ts >= start.ts);
+  const elapsed = summary && summary.kind === "turn_summary" ? summary.durationMs : end.ts - start.ts;
   return { tone: "done", label: "Done", elapsedMs: elapsed >= 0 ? elapsed : null };
 }
 

@@ -426,7 +426,13 @@ const AgentRow = memo(function AgentRow({
                     aria-label="Unread"
                   />
                 )}
-                <span className="shrink-0 text-[11px] text-steel">
+                <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-steel">
+                  {hotkey !== null && (
+                    <span aria-hidden className="hidden text-[10px] text-steel/70 group-hover:inline">
+                      {modKey}
+                      {hotkey}
+                    </span>
+                  )}
                   <span className="sr-only">Last active </span>
                   <Tooltip
                     content={`${relativeTimeLong(agent.lastActivityAt, now)} · ${new Date(agent.lastActivityAt).toLocaleString()}`}
@@ -491,12 +497,6 @@ const AgentRow = memo(function AgentRow({
                 </button>
               )}
             </div>
-            {hotkey !== null && (
-              <span className="pointer-events-none absolute bottom-2 right-2.5 hidden text-[10px] text-steel/70 group-hover:block">
-                {modKey}
-                {hotkey}
-              </span>
-            )}
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent onCloseAutoFocus={(e) => renaming && e.preventDefault()}>

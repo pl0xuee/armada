@@ -24,7 +24,7 @@ import {
   SquareTerminal,
   Trash2,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   archiveAgent,
   attempt,
@@ -72,7 +72,7 @@ import { relativeTimeLong } from "@/lib/format";
 
 const EMPTY_CUSTOM: CustomAgent[] = [];
 
-export function AgentHeader({ agent }: { agent: Agent }) {
+function AgentHeaderImpl({ agent }: { agent: Agent }) {
   const account = useApp((s) => s.accounts.find((a) => a.id === agent.accountId));
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const done = useIsDone(agent);
@@ -85,6 +85,7 @@ export function AgentHeader({ agent }: { agent: Agent }) {
   const overlay = useUi((s) => s.inspectorOverlay);
   const inspectorOpen = wide ? inspectorPref : overlay;
   const workspaceOpen = useUi((s) => s.workspaceOpen);
+  const workspaceRoom = useUi((s) => s.workspaceRoom);
   const toggleInspector = () =>
     wide ? useUi.getState().setInspectorOpen(!inspectorPref) : useUi.getState().setInspectorOverlay(!overlay);
   const setReviewAgent = useUi((s) => s.setReviewAgent);
@@ -222,7 +223,18 @@ export function AgentHeader({ agent }: { agent: Agent }) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Tooltip content={workspaceOpen ? "Hide workspace panel" : "Show workspace panel"} shortcut={[modKey, "`"]}>
+          <Tooltip
+            content={
+              workspaceOpen
+                ? workspaceRoom === 0
+                  ? "Hide workspace panel (not enough room to show it)"
+                  : "Hide workspace panel"
+                : workspaceRoom === 0
+                  ? "Show workspace panel (window is small)"
+                  : "Show workspace panel"
+            }
+            shortcut={[modKey, "`"]}
+          >
             <Button
               size="icon-sm"
               variant="ghost"
@@ -287,20 +299,63 @@ export function AgentHeader({ agent }: { agent: Agent }) {
         {agent.provider !== "custom" && agent.provider !== "local" && account && (
           <UsageChip account={account} compact={tier === "compact"} />
         )}
-        <Tooltip content={prettyPath(agent.projectPath)}>
-          <Chip>
-            <FolderOpen className="h-3 w-3 text-steel" />
-            <span className="text-fg/90">{basename(agent.projectPath)}</span>
-          </Chip>
-        </Tooltip>
-        {agent.branch && (
-          <Tooltip content={agent.worktree ? `Worktree: ${prettyPath(agent.cwd)}` : "Branch"}>
-            <Chip>
-              <GitBranch className="h-3 w-3 text-steel" />
-              <span className="max-w-[180px] truncate font-mono text-[11px] text-fg/90">{agent.branch}</span>
-              {agent.baseBranch && <span className="font-mono text-[11px] text-steel">→ {agent.baseBranch}</span>}
-            </Chip>
-          </Tooltip>
+        {tier === "full" ? (
+          <>
+            <Tooltip content={prettyPath(agent.projectPath)}>
+              <Chip>
+                <FolderOpen className="h-3 w-3 text-steel" />
+                <span className="text-fg/90">{basename(agent.projectPath)}</span>
+              </Chip>
+            </Tooltip>
+            {agent.branch && (
+              <Tooltip content={agent.worktree ? `Worktree: ${prettyPath(agent.cwd)}` : "Branch"}>
+                <Chip>
+                  <GitBranch className="h-3 w-3 text-steel" />
+                  <span className="max-w-[180px] truncate font-mono text-[11px] text-fg/90">{agent.branch}</span>
+                  {agent.baseBranch && <span className="font-mono text-[11px] text-steel">→ {agent.baseBranch}</span>}
+                </Chip>
+              </Tooltip>
+            )}
+          </>
+        ) : (
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                aria-label="Project and branch"
+                className="inline-flex h-6 items-center gap-1 rounded-full border border-line bg-card/60 px-2 text-[11.5px] text-muted transition-colors hover:bg-raised/60 hover:text-fg focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25"
+              >
+                <Ellipsis className="h-3.5 w-3.5" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-72 space-y-2 text-[12px]">
+              <div className="flex items-start gap-2">
+                <FolderOpen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-steel" />
+                <div className="min-w-0">
+                  <div className="text-fg">{basename(agent.projectPath)}</div>
+                  <div className="selectable break-all font-mono text-[11px] text-steel">
+                    {prettyPath(agent.projectPath)}
+                  </div>
+                </div>
+              </div>
+              {agent.branch && (
+                <div className="flex items-start gap-2">
+                  <GitBranch className="mt-0.5 h-3.5 w-3.5 shrink-0 text-steel" />
+                  <div className="min-w-0">
+                    <div className="selectable break-all font-mono text-[11.5px] text-fg">
+                      {agent.branch}
+                      {agent.baseBranch && <span className="text-steel"> → {agent.baseBranch}</span>}
+                    </div>
+                    {agent.worktree && (
+                      <div className="selectable break-all font-mono text-[11px] text-steel">
+                        {prettyPath(agent.cwd)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </PopoverContent>
+          </Popover>
         )}
         <PrChip agent={agent} />
       </div>
@@ -619,3 +674,5 @@ function ActionButton({
     </Tooltip>
   );
 }
+
+export const AgentHeader = memo(AgentHeaderImpl);

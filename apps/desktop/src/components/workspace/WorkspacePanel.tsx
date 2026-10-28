@@ -10,12 +10,15 @@ import { useUi, WORKSPACE_DEFAULT_HEIGHT, WORKSPACE_MIN_HEIGHT } from "@/store/u
 import { hasNewServer, previewOf, usePreview, usePreviewDetection } from "@/store/preview";
 import { WORKSPACE_TABS } from "./tabs";
 
-/** Vertical space the conversation and composer keep; the panel never takes it. */
-export const WORKSPACE_RESERVED = 300;
+/** Least height the conversation keeps; the panel never takes it. */
+export const CONVERSATION_MIN = 140;
 
-/** Tallest the panel can be inside a column of `available` px, or 0 when it doesn't fit at all. */
-export function workspaceMaxHeight(available: number): number {
-  const max = available - WORKSPACE_RESERVED;
+/**
+ * Tallest the panel can be inside a column of `available` px, given the measured `chrome`
+ * (header + queue + composer) heights, or 0 when it doesn't fit at all.
+ */
+export function workspaceMaxHeight(available: number, chrome: number): number {
+  const max = available - chrome - CONVERSATION_MIN;
   return max >= WORKSPACE_MIN_HEIGHT ? max : 0;
 }
 
@@ -57,7 +60,7 @@ export function WorkspacePanel({ agent, maxHeight }: { agent: Agent; maxHeight: 
         aria-valuenow={shown}
         tabIndex={0}
         className={cn(
-          "absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize touch-none outline-none transition-colors hover:bg-accent/30 focus-visible:bg-accent/40",
+          "absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize touch-none outline-none transition-colors hover:bg-accent/30 focus-visible:bg-accent/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/70",
           drag !== null && "bg-accent/40",
         )}
         onPointerDown={(e) => {
@@ -82,16 +85,39 @@ export function WorkspacePanel({ agent, maxHeight }: { agent: Agent; maxHeight: 
         }}
       />
       <div className="flex h-8 shrink-0 items-center gap-1 border-b border-line px-1.5">
-        <div role="tablist" aria-label="Workspace tabs" className="flex items-center gap-0.5">
+        <div
+          role="tablist"
+          aria-label="Workspace tabs"
+          className="flex items-center gap-0.5"
+          onKeyDown={(e) => {
+            const keys = ["ArrowRight", "ArrowLeft", "Home", "End"];
+            if (!keys.includes(e.key)) return;
+            const tabs = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]'));
+            const cur = tabs.findIndex((t) => t === document.activeElement);
+            if (cur < 0) return;
+            const next =
+              e.key === "Home"
+                ? 0
+                : e.key === "End"
+                  ? tabs.length - 1
+                  : (cur + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+            e.preventDefault();
+            tabs[next].focus();
+            tabs[next].click();
+          }}
+        >
           {WORKSPACE_TABS.map((t) => (
             <button
               key={t.id}
               type="button"
               role="tab"
+              id={`ws-tab-${t.id}`}
               aria-selected={t.id === tab.id}
+              aria-controls="ws-tabpanel"
+              tabIndex={t.id === tab.id ? 0 : -1}
               onClick={() => setTab(agent.id, t.id)}
               className={cn(
-                "flex h-6 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium transition-colors [&_svg]:h-3.5 [&_svg]:w-3.5",
+                "flex h-6 items-center gap-1.5 rounded-md px-2 outline-none focus-visible:ring-2 focus-visible:ring-accent/60 text-[12px] font-medium transition-colors [&_svg]:h-3.5 [&_svg]:w-3.5",
                 t.id === tab.id ? "bg-raised text-fg" : "text-muted hover:bg-raised/60 hover:text-fg",
               )}
             >
@@ -115,7 +141,12 @@ export function WorkspacePanel({ agent, maxHeight }: { agent: Agent; maxHeight: 
           </Button>
         </Tooltip>
       </div>
-      <div className="@container flex min-h-0 flex-1 flex-col" role="tabpanel">
+      <div
+        className="@container flex min-h-0 flex-1 flex-col"
+        role="tabpanel"
+        id="ws-tabpanel"
+        aria-labelledby={`ws-tab-${tab.id}`}
+      >
         <Suspense
           fallback={
             <div className="flex flex-1 items-center justify-center">
