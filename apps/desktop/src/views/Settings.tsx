@@ -16,9 +16,10 @@ import {
   ExternalLink,
   Download,
   Sparkles,
+  X,
 } from "lucide-react";
-import { motion } from "motion/react";
-import { useEffect, useState, type ComponentType } from "react";
+import { m } from "motion/react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import { toast } from "sonner";
 import { AppMark } from "@/components/AppMark";
 import { GithubGlyph } from "@/components/settings/GithubGlyph";
@@ -34,11 +35,17 @@ import { ThemeCard, THEMES } from "@/components/settings/ThemeCard";
 import { Button } from "@/components/ui/button";
 import { fieldClass, Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
+import { Spinner } from "@/components/ui/misc";
 import { Segmented } from "@/components/ui/segmented";
 import { Select } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { checkForUpdates, installUpdate } from "@/lib/actions";
+import { checkForUpdates } from "@/lib/actions";
+import { useGuardedInstall } from "@/components/settings/useGuardedInstall";
+import { HotkeyRecorder } from "@/components/settings/HotkeyRecorder";
+import { useCommitOnUnmount } from "@/components/settings/useCommitOnUnmount";
+import { FieldError } from "@/components/settings/FieldError";
+import { fieldErrorId, saveSettingsPatch, useFieldError } from "@/components/settings/settingsErrors";
 import { api } from "@/lib/api";
 import { relativeTimeLong } from "@/lib/format";
 import type { AttentionReason, Settings } from "@/lib/types";
@@ -59,12 +66,9 @@ const SECTIONS: { id: SettingsSection; label: string; icon: ComponentType<{ clas
   { id: "about", label: "About", icon: Info },
 ];
 
-async function save(patch: Partial<Settings>) {
-  try {
-    await useApp.getState().patchSettings(patch);
-  } catch (e) {
-    toast.error("Couldn't save settings", { description: errorMessage(e) });
-  }
+/** Save a patch; validation errors land inline on their field, others as a toast. */
+function save(patch: Partial<Settings>): Promise<boolean> {
+  return saveSettingsPatch(patch, (message) => toast.error("Couldn't save settings", { description: message }));
 }
 
 export function SettingsView() {
@@ -81,45 +85,19 @@ export function SettingsView() {
       /* ignore */
     }
   }, [openSettings]);
+  // Each section starts at the top.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [section]);
   if (!settings) return null;
 
   return (
-    <div className="flex h-full">
-      <nav
-        aria-label="Settings sections"
-        className="flex w-[208px] shrink-0 flex-col gap-0.5 border-r border-line bg-panel/50 px-2.5 pt-7"
-      >
-        <h1 className="mb-3 px-2.5 text-[20px] font-semibold tracking-[-0.02em]">Settings</h1>
-        {SECTIONS.map((s) => {
-          const active = s.id === section;
-          const Icon = s.icon;
-          return (
-            <button
-              key={s.id}
-              type="button"
-              aria-current={active ? "page" : undefined}
-              onClick={() => openSettings(s.id)}
-              className={cn(
-                "relative flex h-8 items-center gap-2.5 rounded-lg px-2.5 text-[13px] transition-colors",
-                active ? "text-fg" : "text-muted hover:bg-raised/60 hover:text-fg",
-              )}
-            >
-              {active && (
-                <motion.span
-                  layoutId="settings-nav"
-                  transition={{ type: "spring", stiffness: 520, damping: 40 }}
-                  className="absolute inset-0 rounded-lg border border-line-strong bg-raised edge"
-                />
-              )}
-              <Icon className={cn("relative h-4 w-4", active ? "text-accent" : "text-steel")} />
-              <span className="relative">{s.label}</span>
-            </button>
-          );
-        })}
-      </nav>
+    <div className="flex h-full max-[860px]:flex-col">
+      <SettingsNav section={section} onSelect={openSettings} />
 
-      <div className="min-w-0 flex-1 overflow-y-auto">
-        <div key={section} className="view-enter mx-auto max-w-[720px] px-8 pb-16 pt-8">
+      <div ref={scrollRef} className="@container min-h-0 min-w-0 flex-1 overflow-y-auto">
+        <div key={section} className="view-enter mx-auto max-w-[720px] px-4 pb-16 pt-6 @md:px-6 @2xl:px-8 @2xl:pt-8">
           {section === "appearance" && <Appearance settings={settings} />}
           {section === "sounds" && <Sounds settings={settings} />}
           {section === "notifications" && <Notifications settings={settings} />}
@@ -136,13 +114,81 @@ export function SettingsView() {
   );
 }
 
+/**
+ * Section navigation: a sidebar on wide windows, a horizontally scrolling pill
+ * strip below 860px (tiling window managers routinely give us narrow tiles).
+ */
+function SettingsNav({ section, onSelect }: { section: SettingsSection; onSelect: (s: SettingsSection) => void }) {
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  // Keep the active pill in view on the narrow strip (scroll only the strip itself).
+  useEffect(() => {
+    const strip = stripRef.current;
+    const el = strip?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!strip || !el || strip.scrollWidth <= strip.clientWidth) return;
+    const target = el.offsetLeft - (strip.clientWidth - el.offsetWidth) / 2;
+    strip.scrollTo({ left: Math.max(0, target), behavior: "smooth" });
+  }, [section]);
+
+  return (
+    <nav
+      aria-label="Settings sections"
+      className={cn(
+        "flex w-[208px] shrink-0 flex-col border-r border-line bg-panel/50 px-2.5 pt-7",
+        "max-[860px]:w-full max-[860px]:border-b max-[860px]:border-r-0 max-[860px]:px-0 max-[860px]:pt-4",
+      )}
+    >
+      <h1 className="mb-3 px-2.5 text-[20px] font-semibold tracking-[-0.02em] max-[860px]:mb-2.5 max-[860px]:px-4 max-[860px]:text-[18px]">
+        Settings
+      </h1>
+      <div
+        ref={stripRef}
+        className={cn(
+          "flex flex-col gap-0.5",
+          "max-[860px]:flex-row max-[860px]:gap-1 max-[860px]:overflow-x-auto max-[860px]:px-3 max-[860px]:pb-2.5",
+          "max-[860px]:[scrollbar-width:none] max-[860px]:[&::-webkit-scrollbar]:hidden",
+          "max-[860px]:[mask-image:linear-gradient(to_right,transparent,black_14px,black_calc(100%-14px),transparent)]",
+        )}
+      >
+        {SECTIONS.map((s) => {
+          const active = s.id === section;
+          const Icon = s.icon;
+          return (
+            <button
+              key={s.id}
+              type="button"
+              aria-current={active ? "page" : undefined}
+              onClick={() => onSelect(s.id)}
+              className={cn(
+                "relative flex h-8 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 text-[13px] transition-colors",
+                "max-[860px]:h-8 max-[860px]:gap-2 max-[860px]:rounded-full max-[860px]:px-3",
+                active ? "text-fg" : "text-muted hover:bg-raised/60 hover:text-fg",
+              )}
+            >
+              {active && (
+                <m.span
+                  layoutId="settings-nav"
+                  transition={{ type: "spring", stiffness: 520, damping: 40 }}
+                  className="absolute inset-0 rounded-[inherit] border border-line-strong bg-raised edge"
+                />
+              )}
+              <Icon className={cn("relative h-4 w-4", active ? "text-accent" : "text-steel")} />
+              <span className="relative">{s.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
 // ---------------------------------------------------------------- Appearance
 
 function Appearance({ settings }: { settings: Settings }) {
   return (
     <>
       <SectionHeader title="Appearance" description="Pick the finish for your command deck." />
-      <div role="radiogroup" aria-label="Theme" className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div role="radiogroup" aria-label="Theme" className="grid grid-cols-1 gap-3 @md:grid-cols-3">
         {THEMES.map((t) => (
           <ThemeCard
             key={t.id}
@@ -256,7 +302,9 @@ function Sounds({ settings }: { settings: Settings }) {
                     eventLabel={ev.title}
                     onChange={(path) => {
                       const cur = useApp.getState().settings;
-                      return cur ? save({ sounds: { ...cur.sounds, [ev.custom]: path } }) : Promise.resolve();
+                      return cur
+                        ? save({ sounds: { ...cur.sounds, [ev.custom]: path } }).then(() => {})
+                        : Promise.resolve();
                     }}
                   />
                 </>
@@ -283,15 +331,79 @@ function Sounds({ settings }: { settings: Settings }) {
 function Notifications({ settings }: { settings: Settings }) {
   const n = settings.notifications;
   const q = settings.quietHours;
+  // Time inputs commit on blur, and only complete HH:MM values (no half-typed saves).
+  const [qStart, setQStart] = useState(q.start);
+  const [qEnd, setQEnd] = useState(q.end);
+  // While a rejected value is shown with its backend error, don't overwrite it on rollback.
+  const keepQuiet = useRef(false);
+  const keepNtfy = useRef(false);
+  useEffect(() => {
+    if (!keepQuiet.current) setQStart(q.start);
+  }, [q.start]);
+  useEffect(() => {
+    if (!keepQuiet.current) setQEnd(q.end);
+  }, [q.end]);
+  const [quietError, setQuietError] = useState<string | null>(null);
+  const commitQuiet = (key: "start" | "end", value: string) => {
+    const cur = useApp.getState().settings?.quietHours;
+    if (!cur) return;
+    const snapBack = () => (key === "start" ? setQStart(cur.start) : setQEnd(cur.end));
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
+      // Invalid or cleared: snap back to the saved value.
+      snapBack();
+      return;
+    }
+    const other = key === "start" ? cur.end : cur.start;
+    if (value === other) {
+      setQuietError("Start and end can't be the same time.");
+      snapBack();
+      return;
+    }
+    setQuietError(null);
+    if (cur[key] === value) return;
+    keepQuiet.current = true;
+    void save({ quietHours: { ...cur, [key]: value } }).then((ok) => {
+      setTimeout(() => (keepQuiet.current = !ok), 0);
+    });
+  };
+  // The field keeps what the user typed even when the backend rejects it (so they can fix it).
   const [ntfy, setNtfy] = useState(settings.ntfyUrl ?? "");
-  useEffect(() => setNtfy(settings.ntfyUrl ?? ""), [settings.ntfyUrl]);
+  useEffect(() => {
+    if (!keepNtfy.current) setNtfy(settings.ntfyUrl ?? "");
+  }, [settings.ntfyUrl]);
   const ntfyValid = ntfy.trim() === "" || /^https?:\/\/\S+$/i.test(ntfy.trim());
+  const ntfyError = useFieldError("ntfy");
+  const [push, setPush] = useState<{ state: "idle" | "sending" | "sent" } | { state: "error"; message: string }>({
+    state: "idle",
+  });
+  const sendTestPush = async () => {
+    const url = ntfy.trim();
+    if (!url || !ntfyValid) return;
+    setPush({ state: "sending" });
+    try {
+      await api.testNotification(url);
+      setPush({ state: "sent" });
+    } catch (e) {
+      setPush({ state: "error", message: errorMessage(e) });
+    }
+  };
+  useEffect(() => setPush({ state: "idle" }), [ntfy]);
 
   const commitNtfy = () => {
     const v = ntfy.trim();
     if (!ntfyValid) return;
-    if ((settings.ntfyUrl ?? "") !== v) void save({ ntfyUrl: v || null });
+    if ((settings.ntfyUrl ?? "") === v) return;
+    keepNtfy.current = true;
+    void save({ ntfyUrl: v || null }).then((ok) => {
+      setTimeout(() => (keepNtfy.current = !ok), 0);
+    });
   };
+  // Switching sections/views by shortcut skips the blur: commit pending edits on unmount.
+  useCommitOnUnmount(() => {
+    commitNtfy();
+    if (qStart !== q.start) commitQuiet("start", qStart);
+    if (qEnd !== q.end) commitQuiet("end", qEnd);
+  });
 
   return (
     <>
@@ -357,24 +469,42 @@ function Notifications({ settings }: { settings: Settings }) {
               onCheckedChange={(v) => void save({ quietHours: { ...q, enabled: v } })}
             />
           </SettingRow>
-          <SettingRow title="Schedule" description="Overnight windows (e.g. 22:00 to 08:00) are supported.">
+          <SettingRow
+            title="Schedule"
+            description={
+              quietError ? (
+                <span role="alert" className="text-err">
+                  {quietError}
+                </span>
+              ) : (
+                "Overnight windows (e.g. 22:00 to 08:00) are supported."
+              )
+            }
+          >
             <input
               type="time"
               aria-label="Quiet hours start"
-              value={q.start}
+              value={qStart}
               disabled={!q.enabled}
-              onChange={(e) => e.target.value && void save({ quietHours: { ...q, start: e.target.value } })}
+              onChange={(e) => setQStart(e.target.value)}
+              onBlur={(e) => commitQuiet("start", e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
               className={cn(fieldClass, "h-8 w-[128px] tabular [color-scheme:inherit]")}
             />
             <span className="text-[12px] text-steel">to</span>
             <input
               type="time"
               aria-label="Quiet hours end"
-              value={q.end}
+              value={qEnd}
               disabled={!q.enabled}
-              onChange={(e) => e.target.value && void save({ quietHours: { ...q, end: e.target.value } })}
+              onChange={(e) => setQEnd(e.target.value)}
+              onBlur={(e) => commitQuiet("end", e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
               className={cn(fieldClass, "h-8 w-[128px] tabular [color-scheme:inherit]")}
             />
+            <div className="basis-full">
+              <FieldError field="quietHours" />
+            </div>
           </SettingRow>
         </SettingGroup>
 
@@ -388,20 +518,45 @@ function Notifications({ settings }: { settings: Settings }) {
             htmlFor="ntfy-url"
           >
             <div className="w-full">
-              <Input
-                id="ntfy-url"
-                value={ntfy}
-                placeholder="https://ntfy.sh/armada-7f3k2"
-                onChange={(e) => setNtfy(e.target.value)}
-                onBlur={commitNtfy}
-                onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-                aria-invalid={!ntfyValid}
-                className={cn(
-                  "font-mono text-[12.5px]",
-                  !ntfyValid && "border-err/60 focus:border-err/60 focus:ring-err/15",
-                )}
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  id="ntfy-url"
+                  value={ntfy}
+                  placeholder="https://ntfy.sh/armada-7f3k2"
+                  onChange={(e) => setNtfy(e.target.value)}
+                  onBlur={commitNtfy}
+                  onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+                  aria-invalid={!ntfyValid || !!ntfyError}
+                  aria-describedby={ntfyError ? fieldErrorId("ntfy") : undefined}
+                  className={cn(
+                    "min-w-0 flex-1 basis-[260px] font-mono text-[12.5px]",
+                    (!ntfyValid || ntfyError) && "border-err/60 focus:border-err/60 focus:ring-err/15",
+                  )}
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-9"
+                  disabled={!ntfy.trim() || !ntfyValid || push.state === "sending"}
+                  title={!ntfy.trim() ? "Enter a topic URL first" : "Show a test notification and push it to this URL"}
+                  onClick={() => void sendTestPush()}
+                >
+                  {push.state === "sending" ? <Spinner className="h-3.5 w-3.5" /> : <Send />}
+                  Send test push
+                </Button>
+              </div>
               {!ntfyValid && <p className="mt-1.5 text-[11.5px] text-err">Enter a full http(s) URL.</p>}
+              <FieldError field="ntfy" />
+              {push.state === "sent" && (
+                <p role="status" className="mt-1.5 text-[11.5px] text-ok">
+                  Sent. Check your phone.
+                </p>
+              )}
+              {push.state === "error" && (
+                <p role="alert" className="mt-1.5 break-words text-[11.5px] text-err">
+                  {push.message}
+                </p>
+              )}
             </div>
           </SettingRow>
         </SettingGroup>
@@ -413,6 +568,24 @@ function Notifications({ settings }: { settings: Settings }) {
 // ---------------------------------------------------------------- Behavior
 
 const ESCALATE_OPTIONS = [0, 2, 5, 10, 15, 30];
+
+const PERMISSION_MODES: {
+  value: Settings["defaultPermissionMode"];
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: "auto",
+    label: "Auto",
+    description:
+      "New agents start in their Auto mode: Claude decides when to ask you, Codex works freely inside its sandbox. Change it per agent from the composer.",
+  },
+  {
+    value: "ask",
+    label: "Ask before acting",
+    description: "New agents start in their default mode and ask before edits and commands.",
+  },
+];
 
 const FAILOVER: { value: Settings["failover"]; label: string; description: string }[] = [
   { value: "off", label: "Off", description: "The agent stops with an error. You decide what to do next." },
@@ -430,7 +603,40 @@ const FAILOVER: { value: Settings["failover"]; label: string; description: strin
 
 function Behavior({ settings }: { settings: Settings }) {
   const [hotkey, setHotkey] = useState(settings.globalHotkey);
-  useEffect(() => setHotkey(settings.globalHotkey), [settings.globalHotkey]);
+  const [hotkeyError, setHotkeyError] = useState<string | null>(null);
+  const [hotkeySaving, setHotkeySaving] = useState(false);
+  // After a failed save the store rolls back; keep the user's text (and the error) instead.
+  const holdHotkey = useRef(false);
+  useEffect(() => {
+    if (!holdHotkey.current) setHotkey(settings.globalHotkey);
+  }, [settings.globalHotkey]);
+
+  const commitHotkey = async (raw: string) => {
+    const v = raw.trim();
+    if (v === (useApp.getState().settings?.globalHotkey ?? "")) {
+      holdHotkey.current = false;
+      setHotkeyError(null);
+      setHotkey(v);
+      return;
+    }
+    holdHotkey.current = true;
+    setHotkeySaving(true);
+    try {
+      await useApp.getState().patchSettings({ globalHotkey: v });
+      holdHotkey.current = false;
+      setHotkeyError(null);
+    } catch (e) {
+      // The backend refuses accelerators it can't register (taken, or malformed).
+      setHotkeyError(errorMessage(e));
+      setHotkey(v);
+    } finally {
+      setHotkeySaving(false);
+    }
+  };
+
+  useCommitOnUnmount(() => {
+    if (hotkey.trim() !== (useApp.getState().settings?.globalHotkey ?? "") && !hotkeySaving) void commitHotkey(hotkey);
+  });
 
   const toggle = (key: "closeToTray" | "autoResume" | "defaultWorktree" | "launchAtLogin") => (v: boolean) =>
     void save({ [key]: v } as Partial<Settings>);
@@ -456,26 +662,82 @@ function Behavior({ settings }: { settings: Settings }) {
           </SettingRow>
           <SettingRow
             title="Global hotkey"
-            description="Bring Armada forward from anywhere. Use Tauri accelerator syntax."
+            description="Bring Armada forward from anywhere. Record a shortcut, or type Tauri accelerator syntax; leave empty to disable."
             htmlFor="b-hotkey"
           >
-            <Input
-              id="b-hotkey"
-              value={hotkey}
-              onChange={(e) => setHotkey(e.target.value)}
-              onBlur={() => {
-                const v = hotkey.trim();
-                if (!v) setHotkey(settings.globalHotkey);
-                else if (v !== settings.globalHotkey) void save({ globalHotkey: v });
-              }}
-              onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-              className="h-8 w-[220px] font-mono text-[12px]"
-              spellCheck={false}
-            />
+            <div className="w-[240px] max-w-full">
+              <div className="relative">
+                <Input
+                  id="b-hotkey"
+                  value={hotkey}
+                  placeholder="Disabled"
+                  onChange={(e) => setHotkey(e.target.value)}
+                  onBlur={() => void commitHotkey(hotkey)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+                    if (e.key === "Escape" && hotkeyError === null) setHotkey(settings.globalHotkey);
+                  }}
+                  aria-invalid={hotkeyError !== null}
+                  aria-describedby={hotkeyError ? "b-hotkey-error" : undefined}
+                  className={cn(
+                    "h-8 pr-8 font-mono text-[12px]",
+                    hotkeyError && "border-err/60 focus:border-err/60 focus:ring-err/15",
+                  )}
+                  spellCheck={false}
+                />
+                {hotkeySaving ? (
+                  <Spinner className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
+                ) : (
+                  hotkey && (
+                    <button
+                      type="button"
+                      aria-label="Clear hotkey (disable)"
+                      title="Clear (disable)"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setHotkey("");
+                        void commitHotkey("");
+                      }}
+                      className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-steel transition-colors hover:bg-raised hover:text-fg"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )
+                )}
+              </div>
+              <div className="mt-1.5">
+                <HotkeyRecorder
+                  disabled={hotkeySaving}
+                  onRecord={(acc) => {
+                    setHotkey(acc);
+                    void commitHotkey(acc);
+                  }}
+                />
+              </div>
+              {hotkeyError && (
+                <p id="b-hotkey-error" role="alert" className="mt-1.5 text-[11.5px] leading-snug text-err">
+                  {hotkeyError}
+                </p>
+              )}
+            </div>
           </SettingRow>
         </SettingGroup>
 
         <SettingGroup title="Agents">
+          <SettingRow
+            stack
+            title="Permission mode for new agents"
+            description={PERMISSION_MODES.find((m) => m.value === settings.defaultPermissionMode)?.description}
+          >
+            <Segmented
+              aria-label="Permission mode for new agents"
+              value={settings.defaultPermissionMode}
+              onChange={(v) => void save({ defaultPermissionMode: v })}
+              className="w-full"
+              options={PERMISSION_MODES.map((m) => ({ value: m.value, label: m.label }))}
+            />
+            <FieldError field="permissionMode" />
+          </SettingRow>
           <SettingRow
             title="Auto-resume interrupted agents"
             description="When Armada starts, agents cut off by a crash or reboot pick up where they left off."
@@ -492,7 +754,7 @@ function Behavior({ settings }: { settings: Settings }) {
           </SettingRow>
           <SettingRow title="Re-ping pending approvals" description="If an approval waits this long, ping once more.">
             <Select
-              aria-label="Escalate after"
+              aria-label="Re-ping pending approvals"
               className="h-8 w-[140px]"
               value={String(settings.escalateAfterMins)}
               onValueChange={(v) => void save({ escalateAfterMins: Number(v) })}
@@ -514,6 +776,7 @@ function Behavior({ settings }: { settings: Settings }) {
               className="w-full"
               options={FAILOVER.map((f) => ({ value: f.value, label: f.label }))}
             />
+            <FieldError field="failover" />
           </SettingRow>
         </SettingGroup>
       </div>
@@ -585,6 +848,7 @@ function About() {
   const update = useApp((s) => s.update);
   const progress = useApp((s) => s.updateProgress);
   const [checking, setChecking] = useState(false);
+  const guardedInstall = useGuardedInstall();
 
   const check = async () => {
     setChecking(true);
@@ -596,6 +860,7 @@ function About() {
 
   return (
     <>
+      {guardedInstall.dialog}
       <div className="relative mb-8 overflow-hidden rounded-2xl border border-line bg-card p-6 edge texture">
         <div
           className="pointer-events-none absolute -right-10 -top-16 h-56 w-56 rounded-full bg-accent/10 blur-3xl"
@@ -667,7 +932,7 @@ function About() {
                 </p>
               )}
             </div>
-            <Button size="sm" variant="primary" disabled={progress !== null} onClick={() => void installUpdate()}>
+            <Button size="sm" variant="primary" disabled={progress !== null} onClick={guardedInstall.request}>
               {update.canInstall ? (
                 <>
                   <Download /> Install & restart

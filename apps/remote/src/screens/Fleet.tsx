@@ -5,15 +5,17 @@ import { Sheet } from "@/components/Sheet";
 import { ConnectionPill, TopBar } from "@/components/TopBar";
 import { Button, IconButton } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { retryState, unpair } from "@/lib/controller";
+import { retryState, stopAgent, unpair } from "@/lib/controller";
+import { confirmAction } from "@/lib/confirm";
 import { devParam } from "@/lib/dev";
 import { basename, plainPreview, plural, relativeTime, relativeTimeLong } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
 import { agentIdentity, safeColor, statusMeta } from "@/lib/meta";
 import { navigate } from "@/lib/router";
-import { groupFleet, pendingCount, useInbox } from "@/lib/selectors";
+import { accountOf, filterAgents, groupFleet, useAgentPending, useInbox } from "@/lib/selectors";
 import { useStore } from "@/lib/store";
 import type { Agent } from "@/lib/types";
+import { InstallTip, installTipApplies } from "@/components/InstallTip";
 import { EmptyState, ErrorState } from "./States";
 
 /** Fleet scroll position, restored when coming back from an agent. */
@@ -27,9 +29,12 @@ export function Fleet() {
   const now = useNow();
   const [showArchived, setShowArchived] = useState(false);
   const [settings, setSettings] = useState(devParam("sheet") === "settings");
+  const owner = useStore((s) => s.session?.scope === "owner");
 
   const list = useMemo(() => Object.values(agents), [agents]);
-  const groups = useMemo(() => groupFleet(list), [list]);
+  const [query, setQuery] = useState("");
+  const filtered = useMemo(() => filterAgents(list, query), [list, query]);
+  const groups = useMemo(() => groupFleet(filtered), [filtered]);
   const working = groups.find((g) => g.id === "working")?.agents.length ?? 0;
   const active = list.filter((a) => !a.archived).length;
 
@@ -54,13 +59,32 @@ export function Fleet() {
         icon="sparkle"
         tone="accent"
         title="No agents yet"
-        body="Start an agent in Armada on your computer and it will appear here instantly."
+        body="Start one from here with New agent, or in Armada on your computer."
       />
     );
   } else {
     body = (
       <div className="space-y-6">
-        {inbox.count > 0 && <InboxCallout count={inbox.count} />}
+        {owner && <InstallTip />}
+        {list.length > 5 && (
+          <div className="relative">
+            <Icon name="search" size={17} className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-steel" />
+            <label htmlFor="fleet-search" className="sr-only">
+              Search agents
+            </label>
+            <input
+              id="fleet-search"
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search agents"
+              autoComplete="off"
+              className="block h-11 w-full rounded-xl border border-line bg-panel pr-3 pl-10 text-[16px] text-fg outline-none placeholder:text-steel focus:border-accent/60"
+            />
+          </div>
+        )}
+        {query && !filtered.length && <p className="px-1 text-[14px] text-muted">No agents match "{query}".</p>}
+        {!query && inbox.count > 0 && <InboxCallout count={inbox.count} />}
         {groups.map((g) => {
           if (!g.agents.length) return null;
           const archived = g.id === "archived";
@@ -132,7 +156,17 @@ export function Fleet() {
           </div>
         }
       />
-      <main className="mx-auto w-full max-w-[860px] flex-1 px-safe pt-4 pb-[calc(24px+var(--safe-bottom))]">{body}</main>
+      <main className="mx-auto w-full max-w-[860px] flex-1 px-safe pt-4 pb-[calc(96px+var(--safe-bottom))]">{body}</main>
+      {owner && stateStatus === "ready" && (
+        <button
+          type="button"
+          onClick={() => navigate({ name: "new" })}
+          className="press animate-enter fixed right-[max(16px,var(--safe-right))] bottom-[max(18px,calc(var(--safe-bottom)+10px))] z-30 inline-flex h-14 items-center gap-2 rounded-full bg-accent pr-5 pl-4 text-[15.5px] font-semibold text-accent-fg shadow-[0_14px_34px_-10px_color-mix(in_srgb,var(--accent)_75%,transparent),inset_0_1px_0_rgba(255,255,255,0.35)]"
+        >
+          <Icon name="plus" size={22} strokeWidth={2.4} />
+          New agent
+        </button>
+      )}
       <SettingsSheet open={settings} onClose={() => setSettings(false)} />
     </div>
   );
@@ -163,11 +197,9 @@ function InboxCallout({ count }: { count: number }) {
 }
 
 const AgentRow = memo(function AgentRow({ agent, now }: { agent: Agent; now: number }) {
-  const account = useStore((s) => s.accounts[agent.accountId]);
-  const timeline = useStore((s) => s.timelines[agent.id]);
-  const resolving = useStore((s) => s.resolving);
+  const account = useStore((s) => accountOf(s.accounts, agent));
   const customAgents = useStore((s) => s.customAgents);
-  const pending = pendingCount(agent, timeline, resolving);
+  const pending = useAgentPending(agent);
   const id = agentIdentity(agent, customAgents);
   const preview = agent.lastMessage ? plainPreview(agent.lastMessage) : null;
   const needs = agent.status === "needs_permission" || pending > 0;
@@ -204,10 +236,14 @@ const AgentRow = memo(function AgentRow({ agent, now }: { agent: Agent; now: num
           ) : (
             <span className="max-w-[50%] shrink-0 truncate text-muted">{id.short}</span>
           )}
-          <span className="text-line-strong" aria-hidden>
-            ·
-          </span>
-          <span className="min-w-0 truncate text-steel">{basename(agent.projectPath)}</span>
+          {agent.projectPath && (
+            <>
+              <span className="text-line-strong" aria-hidden>
+                ·
+              </span>
+              <span className="min-w-0 truncate text-steel">{basename(agent.projectPath)}</span>
+            </>
+          )}
         </span>
         {(preview || pending > 0) && (
           <span className="mt-1 flex items-start gap-2">
@@ -254,6 +290,33 @@ function FleetSkeleton() {
   );
 }
 
+function StopAll({ onDone }: { onDone: () => void }) {
+  const agents = useStore((s) => s.agents);
+  const running = useMemo(() => Object.values(agents).filter((a) => a.running && !a.archived && a.status !== "stopped"), [agents]);
+  if (!running.length) return null;
+  return (
+    <Button
+      variant="secondary"
+      size="lg"
+      icon="power"
+      className="mt-4 w-full"
+      onClick={async () => {
+        const ok = await confirmAction({
+          title: `Stop ${plural(running.length, "agent")}?`,
+          body: "This ends every running agent's process. Conversations are kept and can be resumed.",
+          confirmLabel: "Stop all",
+          destructive: true,
+        });
+        if (!ok) return;
+        onDone();
+        await Promise.all(running.map((a) => stopAgent(a.id)));
+      }}
+    >
+      Stop all running agents ({running.length})
+    </Button>
+  );
+}
+
 function SettingsSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const session = useStore((s) => s.session);
   const [confirm, setConfirm] = useState(false);
@@ -277,6 +340,12 @@ function SettingsSheet({ open, onClose }: { open: boolean; onClose: () => void }
         <Row label="Access">{session?.scope === "owner" ? "Full control" : "Read-only"}</Row>
         {session?.version && <Row label="Armada version">{session.version}</Row>}
       </dl>
+      {installTipApplies() && (
+        <div className="mt-4">
+          <InstallTip dismissible={false} />
+        </div>
+      )}
+      {session?.scope === "owner" && <StopAll onDone={onClose} />}
       <p className="mt-4 text-[13px] leading-relaxed text-muted">
         Anyone with this device can approve requests and send prompts. You can revoke access from Settings → Remote on your
         computer.

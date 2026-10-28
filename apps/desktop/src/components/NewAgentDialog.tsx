@@ -1,11 +1,15 @@
-import { Check, ChevronDown, Columns3, FolderOpen, GitBranch, Rocket, TriangleAlert } from "lucide-react";
+import { Check, ChevronDown, Columns3, FolderOpen, GitBranch, Rocket } from "lucide-react";
+import { PermissionModeChip, usePermissionMode } from "./home/PermissionModeChip";
+import { PreflightNotes, usePreflight } from "./home/PreflightNotes";
+import { ProjectPicker } from "./home/ProjectPicker";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { CUSTOM_ACCOUNT_ID, PROVIDER_ORDER, PROVIDERS } from "@/lib/providers";
-import type { Account, Provider } from "@/lib/types";
-import { basename, cn, errorMessage, modKey, prettyPath, uuid } from "@/lib/utils";
+import type { Account, Agent, Provider } from "@/lib/types";
+import { cn, errorMessage, modKey, uuid, isMac } from "@/lib/utils";
 import { pickFolder } from "@/lib/window";
+import { customFromChoice, pickAccount, readLaunchDefaults, rememberLaunch, resolveLaunch } from "@/lib/launchDefaults";
 import { useApp } from "@/store/app";
 import { useUi, type NewAgentPreset } from "@/store/ui";
 import { AccountAvatar } from "./AccountAvatar";
@@ -32,6 +36,7 @@ export function NewAgentDialog() {
         title="New agent"
         description="Launch an agent into a project. It keeps running even if you close the window."
         className="w-[min(640px,calc(100vw-32px))]"
+        sheet
       >
         {open && <NewAgentForm preset={preset} onDone={close} />}
       </DialogContent>
@@ -40,60 +45,113 @@ export function NewAgentDialog() {
 }
 
 function defaultAccount(accounts: Account[], provider: Provider): Account | undefined {
-  const mine = accounts.filter((a) => a.provider === provider);
-  return mine.find((a) => a.status?.loggedIn) ?? mine[0];
+  if (provider === "custom") return undefined;
+  return pickAccount(accounts, provider, readLaunchDefaults().accounts[provider]);
 }
 
 interface LaunchTarget {
+  /** Selection key: account id, or "custom:<id>" for custom agents. */
+  key: string;
   provider: Provider;
   accountId: string;
   customAgentId: string | null;
 }
 
 function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDone: () => void }) {
+  const [mode, setMode] = usePermissionMode();
   const accounts = useApp((s) => s.accounts);
   const settings = useApp((s) => s.settings);
-  const providers = useApp((s) => s.providers);
   const openAgent = useUi((s) => s.openAgent);
   const openCompare = useUi((s) => s.openCompare);
   const setView = useUi((s) => s.setView);
 
   const recent = settings?.recentProjects ?? [];
-  const [project, setProject] = useState(preset?.projectPath ?? recent[0] ?? "");
+  // Start from what was used last time (provider, account, folder, worktree), unless preset.
+  const [initial] = useState(() => resolveLaunch(accounts, settings));
+  const [project, setProject] = useState(preset?.projectPath ?? (initial.folder || recent[0] || ""));
   const [compare, setCompare] = useState(preset?.compare ?? false);
   const customAgents = useMemo(() => (settings?.customAgents ?? []).filter((c) => c.enabled), [settings?.customAgents]);
   /** "claude" | "codex" | "grok" | "custom:<id>" */
-  const [choice, setChoice] = useState<string>(preset?.provider ?? "claude");
+  const [choice, setChoice] = useState<string>(
+    () =>
+      preset?.provider ??
+      (initial.provider === "custom" && !customFromChoice(initial.choice, customAgents) ? "claude" : initial.choice),
+  );
   const custom = choice.startsWith("custom:") ? customAgents.find((c) => `custom:${c.id}` === choice) : undefined;
   const provider: Provider = custom ? "custom" : (choice as Provider);
   const attach = useAttachments();
   const [accountId, setAccountId] = useState<string>(
-    preset?.accountId ?? defaultAccount(accounts, preset?.provider ?? "claude")?.id ?? "",
+    () =>
+      preset?.accountId ??
+      (preset?.provider ? defaultAccount(accounts, preset.provider)?.id : initial.accountId || undefined) ??
+      "",
   );
   const [targets, setTargets] = useState<string[]>(() =>
     PROVIDER_ORDER.map((p) => defaultAccount(accounts, p)?.id).filter((x): x is string => !!x),
   );
-  const [worktree, setWorktree] = useState(settings?.defaultWorktree ?? true);
+  const [worktree, setWorktree] = useState(initial.worktree);
   const [title, setTitle] = useState("");
   const [model, setModel] = useState("");
   const [prompt, setPrompt] = useState(preset?.prompt ?? "");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const submittingRef = useRef(false);
+  /** Compare group for this dialog session, reused when retrying failed targets. */
+  const groupRef = useRef<string | null>(null);
+  /** Agents already launched in this session (partial Compare launches). */
+  const [launched, setLaunched] = useState<Agent[]>([]);
+
+  const targetKeyOf = (a: Agent) => (a.provider === "custom" ? `custom:${a.customAgentId}` : a.accountId);
+  const targetLabel = (t: LaunchTarget) => {
+    if (t.provider === "custom") {
+      return customAgents.find((c) => c.id === t.customAgentId)?.name ?? "Custom agent";
+    }
+    const acc = accounts.find((a) => a.id === t.accountId);
+    return `${PROVIDERS[t.provider].short} · ${acc?.name ?? "account"}`;
+  };
 
   useEffect(() => {
     const t = setTimeout(() => promptRef.current?.focus(), 60);
     return () => clearTimeout(t);
   }, []);
 
+  // Alt+1..4 picks the agent: Claude, Codex, Grok, then the first custom agent.
+  const keyChoices = useMemo<string[]>(
+    () => [...PROVIDER_ORDER, ...(customAgents[0] ? [`custom:${customAgents[0].id}`] : [])],
+    [customAgents],
+  );
+
   const providerAccounts = useMemo(() => accounts.filter((a) => a.provider === provider), [accounts, provider]);
   const account = accounts.find((a) => a.id === accountId);
-  const providerInfo = providers.find((p) => p.provider === provider);
+  const issues = usePreflight({ provider, account: custom ? undefined : account, folder: project, worktree });
 
   const chooseProvider = (key: string) => {
     setChoice(key);
     if (!key.startsWith("custom:")) setAccountId(defaultAccount(accounts, key as Provider)?.id ?? "");
   };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // ⌘/Ctrl+Enter launches from any field (never mid-IME composition).
+      const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+      if (e.key === "Enter" && mod && !e.altKey) {
+        if (e.isComposing || e.keyCode === 229 || e.repeat) return;
+        e.preventDefault();
+        void submit();
+        return;
+      }
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.repeat || compare) return;
+      // e.code: Alt+digit types symbols on macOS.
+      const m = /^Digit([1-4])$/.exec(e.code);
+      const key = m ? keyChoices[Number(m[1]) - 1] : undefined;
+      if (!key) return;
+      e.preventDefault();
+      chooseProvider(key);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   const toggleTarget = (id: string) => setTargets((t) => (t.includes(id) ? t.filter((x) => x !== id) : [...t, id]));
 
@@ -107,25 +165,37 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
     ? [
         ...accounts
           .filter((a) => targets.includes(a.id))
-          .map((a) => ({ provider: a.provider, accountId: a.id, customAgentId: null })),
+          .map((a) => ({ key: a.id, provider: a.provider, accountId: a.id, customAgentId: null })),
         ...customAgents
           .filter((c) => targets.includes(`custom:${c.id}`))
-          .map((c) => ({ provider: "custom" as const, accountId: CUSTOM_ACCOUNT_ID, customAgentId: c.id })),
+          .map((c) => ({
+            key: `custom:${c.id}`,
+            provider: "custom" as const,
+            accountId: CUSTOM_ACCOUNT_ID,
+            customAgentId: c.id,
+          })),
       ]
     : custom
-      ? [{ provider: "custom", accountId: CUSTOM_ACCOUNT_ID, customAgentId: custom.id }]
+      ? [{ key: `custom:${custom.id}`, provider: "custom", accountId: CUSTOM_ACCOUNT_ID, customAgentId: custom.id }]
       : account
-        ? [{ provider: account.provider, accountId: account.id, customAgentId: null }]
+        ? [{ key: account.id, provider: account.provider, accountId: account.id, customAgentId: null }]
         : [];
   const canSubmit =
-    project.trim() !== "" && prompt.trim() !== "" && chosen.length > 0 && (!compare || chosen.length >= 2);
+    project.trim() !== "" &&
+    chosen.length > 0 &&
+    // The prompt is optional (the agent starts and waits), except in Compare mode,
+    // which exists to send one prompt to several agents.
+    // After a partial Compare launch, retrying the failed targets joins the same group.
+    (!compare || ((chosen.length >= 2 || launched.length > 0) && prompt.trim() !== ""));
 
   const submit = async () => {
-    if (!canSubmit || submitting) return;
+    if (!canSubmit || submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
-    const groupId = compare ? uuid() : null;
+    if (compare && !groupRef.current) groupRef.current = uuid();
+    const groupId = compare ? groupRef.current : null;
     try {
-      const created = await Promise.all(
+      const results = await Promise.allSettled(
         chosen.map((t) =>
           api.createAgent({
             provider: t.provider,
@@ -137,28 +207,89 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
             worktree,
             model: !compare && t.provider !== "custom" && model.trim() ? model.trim() : null,
             groupId,
+            permissionMode: mode,
             attachments: attach.attachments,
           }),
         ),
       );
+      const created: Agent[] = [];
+      const failed: { target: LaunchTarget; error: string }[] = [];
+      results.forEach((r, i) => {
+        if (r.status === "fulfilled") created.push(r.value);
+        else failed.push({ target: chosen[i], error: errorMessage(r.reason) });
+      });
       for (const a of created) useApp.getState().upsertAgent(a);
-      onDone();
-      if (groupId) {
-        openCompare(groupId);
-        toast.success(`Launched ${created.length} agents`, { description: "Comparing side by side." });
-      } else if (created[0]) {
-        openAgent(created[0].id);
+      const allLaunched = [...launched, ...created];
+
+      if (failed.length === 0) {
+        if (!compare && chosen[0]) {
+          rememberLaunch({
+            provider: chosen[0].provider,
+            accountId: chosen[0].accountId,
+            customAgentId: chosen[0].customAgentId,
+            folder: project.trim(),
+            worktree,
+          });
+        }
+        onDone();
+        if (groupId && allLaunched.length >= 2) {
+          openCompare(groupId);
+          toast.success(`Launched ${allLaunched.length} agents`, { description: "Comparing side by side." });
+        } else if (allLaunched[0]) {
+          openAgent(allLaunched[0].id);
+        }
+        return;
       }
-    } catch (e) {
-      toast.error("Couldn't launch agent", { description: errorMessage(e) });
+
+      // Partial (or total) failure: keep what launched, leave only the failed targets selected
+      // so a retry can't duplicate the successes.
+      setLaunched(allLaunched);
+      if (compare) {
+        const ok = new Set(created.map((a) => targetKeyOf(a)));
+        setTargets((t) => t.filter((k) => !ok.has(k)));
+      }
+      const lines = (
+        <span className="mt-0.5 flex flex-col gap-0.5">
+          {failed.map((f) => (
+            <span key={f.target.key}>
+              <span className="font-medium text-fg">{targetLabel(f.target)}</span>: {f.error}
+            </span>
+          ))}
+        </span>
+      );
+      if (created.length === 0 && launched.length === 0) {
+        toast.error(failed.length === 1 ? "Couldn't launch agent" : `Couldn't launch ${failed.length} agents`, {
+          description: lines,
+        });
+      } else {
+        toast.warning(`Launched ${allLaunched.length}, ${failed.length} failed`, {
+          description: (
+            <>
+              {lines}
+              <span className="mt-1 block">Launch again to retry only the failed ones.</span>
+            </>
+          ),
+          action:
+            groupId && allLaunched.length > 0
+              ? {
+                  label: "View comparison",
+                  onClick: () => {
+                    onDone();
+                    openCompare(groupId);
+                  },
+                }
+              : undefined,
+        });
+      }
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
 
   return (
     <>
-      <DialogBody className="space-y-4 pt-2">
+      <DialogBody className="space-y-4 pt-2 max-sm:flex max-sm:flex-col">
         {/* Project */}
         <div>
           <Label htmlFor="na-project">Project folder</Label>
@@ -177,33 +308,21 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
               Browse…
             </Button>
           </div>
-          {recent.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {recent.slice(0, 6).map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  title={prettyPath(p)}
-                  onClick={() => setProject(p)}
-                  className={cn(
-                    "inline-flex h-6 items-center gap-1 rounded-full border px-2.5 text-[11.5px] transition-colors",
-                    project === p
-                      ? "border-accent/50 bg-accent/10 text-accent"
-                      : "border-line bg-card text-muted hover:border-line-strong hover:text-fg",
-                  )}
-                >
-                  {project === p && <Check className="h-3 w-3" />}
-                  {basename(p)}
-                </button>
-              ))}
-            </div>
-          )}
+          <ProjectPicker value={project} onChange={setProject} recent={recent} defaultOpen={recent.length === 0} />
         </div>
 
         {/* Provider / account */}
         <div>
           <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-xs font-medium text-muted">{compare ? "Run on" : "Provider"}</span>
+            <span className="flex items-center gap-2 text-xs font-medium text-muted">
+              {compare ? "Run on" : "Provider"}
+              {!compare && (
+                <span className="hidden items-center gap-0.5 font-normal text-steel sm:flex">
+                  <Kbd>Alt</Kbd>
+                  <Kbd>1–{keyChoices.length}</Kbd>
+                </span>
+              )}
+            </span>
             <label className="flex cursor-default items-center gap-2 text-[12px] text-muted">
               <Columns3 className="h-3.5 w-3.5 text-steel" />
               Compare mode
@@ -214,7 +333,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
           {!compare ? (
             <div className="flex flex-wrap items-center gap-2">
               <Segmented
-                aria-label="Agent"
+                aria-label="Provider"
                 value={choice}
                 onChange={chooseProvider}
                 className="max-w-full overflow-x-auto"
@@ -354,27 +473,18 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
             </div>
           )}
 
-          {!compare && !custom && account && account.status && !account.status.loggedIn && (
-            <p className="mt-2 flex items-center gap-1.5 text-[12px] text-warn">
-              <TriangleAlert className="h-3.5 w-3.5" /> {account.name} isn't signed in. The agent may fail to start.
-            </p>
-          )}
-          {!compare && !custom && providerInfo && !providerInfo.installed && (
-            <p className="mt-2 flex items-center gap-1.5 text-[12px] text-warn">
-              <TriangleAlert className="h-3.5 w-3.5" /> {providerInfo.displayName} CLI isn't installed. Install it from
-              Settings → Providers.
-            </p>
-          )}
-          {compare && chosen.length < 2 && (
+          {!compare && <PreflightNotes issues={issues} className="mt-2" />}
+          {compare && chosen.length < 2 && launched.length === 0 && (
             <p className="mt-2 text-[12px] text-steel">Pick at least two agents to compare.</p>
           )}
         </div>
 
         {/* Prompt */}
-        <div>
+        <div className="max-sm:flex max-sm:min-h-[180px] max-sm:flex-1 max-sm:flex-col">
           <div className="mb-1.5 flex items-center justify-between">
             <Label htmlFor="na-prompt" className="mb-0">
               Prompt
+              {!compare && <span className="ml-1.5 font-normal text-steel">optional</span>}
             </Label>
             <div className="flex items-center gap-1">
               <AttachButton onClick={attach.openPicker} count={attach.attachments.length} />
@@ -389,21 +499,19 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
             </div>
           </div>
           <input {...attach.inputProps} />
-          <div {...attach.dropHandlers} className="relative">
+          <div {...attach.dropHandlers} className="relative max-sm:flex max-sm:flex-1 max-sm:flex-col">
             <Textarea
               id="na-prompt"
               onPaste={attach.onPaste}
               ref={promptRef}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  void submit();
-                }
-              }}
-              placeholder="What should the agent do? Be specific about goals and constraints. Paste or drop images to attach them."
-              className="min-h-[112px]"
+              placeholder={
+                compare
+                  ? "What should each agent do? Be specific about goals and constraints."
+                  : "Describe the task, or leave this empty to start the agent and type when you're ready."
+              }
+              className="min-h-[112px] max-sm:flex-1"
             />
             {attach.dragging && <DropOverlay />}
           </div>
@@ -418,6 +526,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
             Isolated worktree
             <span className="text-[11.5px] text-steel">(own branch, no conflicts)</span>
           </label>
+          <PermissionModeChip value={mode} onChange={setMode} />
           <button
             type="button"
             onClick={() => setShowAdvanced((v) => !v)}
@@ -436,7 +545,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                 id="na-title"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="Generated from prompt"
+                placeholder="From the prompt or your first message"
               />
             </div>
             <div>

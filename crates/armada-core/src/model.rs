@@ -205,14 +205,74 @@ pub struct Agent {
     /// For `Provider::Custom`: which `CustomAgent` definition runs this agent.
     #[serde(default)]
     pub custom_agent_id: Option<String>,
+    /// Messages sent while a turn was running; they run, in order, right after it.
+    #[serde(default)]
+    pub queued_prompts: i64,
+    /// The queued messages themselves (oldest first), so the UI can show/edit them.
+    #[serde(default)]
+    pub queue: Vec<QueuedPrompt>,
+    /// The queue is paused (the turn was cancelled/stopped/failed); nothing runs
+    /// until the user sends one of them or a new message.
+    #[serde(default)]
+    pub queue_paused: bool,
+    /// How this agent's sessions start: "auto" or "ask" (None = the settings default).
+    #[serde(default)]
+    pub permission_mode: Option<String>,
+    /// When the user last marked this agent "done" in triage; attention from
+    /// before this time is dismissed.
+    #[serde(default)]
+    pub acknowledged_at: Option<i64>,
+    /// The next session must be briefed with the conversation so far (set when the
+    /// agent moved to another account; survives restarts until the brief is sent).
+    #[serde(default)]
+    pub needs_briefing: bool,
+}
+
+/// Prefix of the error `delete_agent` returns when removing the agent's worktree
+/// would lose uncommitted changes or unmerged commits. The UI can offer to delete
+/// anyway (`force: true`). Full text: "Unsaved work: <details>. Delete anyway to
+/// discard them."
+pub const UNSAVED_WORK_ERROR: &str = "Unsaved work";
+
+/// Non-archived agent tallies (for the tray), computed without cloning agents.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCounts {
+    /// Non-archived agents.
+    pub total: usize,
+    /// Starting or working.
+    pub working: usize,
+    /// Waiting on a permission answer.
+    pub needs_permission: usize,
+    /// Pending approvals (at least one per agent waiting on a permission).
+    pub pending_permissions: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedPrompt {
+    pub id: String,
+    pub text: String,
+    pub attachments: usize,
+}
+
+/// A queued message taken back out of the queue (so the composer can edit it).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemovedPrompt {
+    pub text: String,
+    pub attachments: Vec<Attachment>,
 }
 
 /// A user-defined ACP agent (Gemini CLI, Goose, OpenCode, an in-house agent, …).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomAgent {
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -222,6 +282,17 @@ pub struct CustomAgent {
     pub color: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+}
+
+/// A sub-agent an agent delegated work to (Claude's Agent/Task tool, Codex
+/// collaborator threads).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubAgent {
+    /// e.g. "general-purpose", "Explore", or the Codex tool name.
+    pub kind: Option<String>,
+    pub description: Option<String>,
+    pub prompt: Option<String>,
 }
 
 /// An image attached to a prompt (base64 payload, no data: prefix).
@@ -395,6 +466,16 @@ pub enum ItemBody {
         diffs: Vec<FileDiff>,
         output: String,
         command: Option<String>,
+        /// Images the tool produced or looked at (screenshots, renders, …).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<Attachment>,
+        /// Set when this call launched a sub-agent; its own tool calls name this
+        /// call's `tool_call_id` as their parent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent: Option<SubAgent>,
+        /// The sub-agent call this tool call ran under, if any.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_tool_call_id: Option<String>,
     },
     Permission {
         request_id: String,
@@ -412,6 +493,15 @@ pub enum ItemBody {
         level: NoticeLevel,
         text: String,
     },
+    /// What a finished turn did: the "review" shown when an agent is done.
+    TurnSummary {
+        duration_ms: i64,
+        files: Vec<String>,
+        tool_calls: i64,
+        commands: i64,
+        cost_usd: f64,
+        tokens: i64,
+    },
 }
 
 impl ItemBody {
@@ -424,6 +514,7 @@ impl ItemBody {
             ItemBody::Permission { .. } => "permission",
             ItemBody::Plan { .. } => "plan",
             ItemBody::Notice { .. } => "notice",
+            ItemBody::TurnSummary { .. } => "turn_summary",
         }
     }
 }
@@ -447,7 +538,7 @@ pub enum AttentionReason {
     Error,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeltaField {
     Text,
@@ -504,6 +595,11 @@ pub enum ArmadaEvent {
         item_id: String,
         field: DeltaField,
         delta: String,
+        /// Length of the field before this delta, in UTF-16 code units (JavaScript
+        /// string length). Clients apply a delta only when it matches their copy:
+        /// smaller means already applied, larger means a gap (refetch). Every stream
+        /// also ends with a full `ItemUpserted`, which heals any gap.
+        offset: usize,
     },
     AccountUpdated {
         account: Account,
@@ -535,6 +631,12 @@ pub enum ArmadaEvent {
     },
     UpdateAvailable {
         update: UpdateInfo,
+    },
+    ScheduleUpdated {
+        schedule: Schedule,
+    },
+    ScheduleRemoved {
+        schedule_id: String,
     },
     UpdateProgress {
         downloaded: u64,
@@ -613,6 +715,9 @@ pub struct Settings {
     /// What to do when an account hits a usage/rate limit: "off" | "ask" | "auto".
     pub failover: String,
     pub custom_agents: Vec<CustomAgent>,
+    /// How new agents start: "auto" (the agent's own Auto mode, where it has one)
+    /// or "ask" (the agent's default, which asks before acting).
+    pub default_permission_mode: String,
     pub remote: RemoteSettings,
 }
 
@@ -639,15 +744,20 @@ impl Default for RemoteSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptTemplate {
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub body: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyValue {
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub value: String,
 }
 
@@ -656,6 +766,9 @@ pub struct KeyValue {
 pub enum McpTransport {
     #[default]
     Stdio,
+    /// Streamable HTTP. Unknown transports (e.g. "sse", or one a newer Armada
+    /// added) read as HTTP: every transport other than stdio is URL-based.
+    #[serde(other)]
     Http,
 }
 
@@ -708,6 +821,12 @@ pub struct Schedule {
     /// saving a schedule never fires it retroactively.
     #[serde(default)]
     pub updated_at: i64,
+    /// Why the last run failed to start (None after a successful run or an edit).
+    #[serde(default)]
+    pub last_error: Option<String>,
+    /// "auto" or "ask" for the agents this schedule starts (None = settings default).
+    #[serde(default)]
+    pub permission_mode: Option<String>,
 }
 
 impl Default for SoundSettings {
@@ -755,6 +874,49 @@ fn default_custom_color() -> String {
     "#B39DDB".into()
 }
 
+impl Settings {
+    /// Rejects values the rest of Armada can't act on.
+    pub fn validate(&self) -> Result<(), String> {
+        if !matches!(self.failover.as_str(), "off" | "ask" | "auto") {
+            return Err(format!(
+                "Unknown failover setting \u{201c}{}\u{201d} (use off, ask or auto)",
+                self.failover
+            ));
+        }
+        if !matches!(self.default_permission_mode.as_str(), "auto" | "ask") {
+            return Err(format!(
+                "Unknown permission mode \u{201c}{}\u{201d} (use auto or ask)",
+                self.default_permission_mode
+            ));
+        }
+        if self.remote.port == 0 {
+            return Err("The remote control port must be between 1 and 65535".into());
+        }
+        Ok(())
+    }
+
+    /// Resets values `validate` would reject to their defaults (for settings read
+    /// from storage, so one bad value can't block every later save). Returns the
+    /// names of the fields that were reset.
+    pub fn sanitize(&mut self) -> Vec<&'static str> {
+        let defaults = Settings::default();
+        let mut reset = Vec::new();
+        if !matches!(self.failover.as_str(), "off" | "ask" | "auto") {
+            self.failover = defaults.failover;
+            reset.push("failover");
+        }
+        if !matches!(self.default_permission_mode.as_str(), "auto" | "ask") {
+            self.default_permission_mode = defaults.default_permission_mode;
+            reset.push("defaultPermissionMode");
+        }
+        if self.remote.port == 0 {
+            self.remote.port = defaults.remote.port;
+            reset.push("remote.port");
+        }
+        reset
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Settings {
@@ -792,6 +954,7 @@ impl Default for Settings {
             mcp_servers: Vec::new(),
             failover: "ask".into(),
             custom_agents: Vec::new(),
+            default_permission_mode: "auto".into(),
             remote: RemoteSettings::default(),
         }
     }
@@ -810,6 +973,9 @@ pub struct CreateAgentRequest {
     pub group_id: Option<String>,
     #[serde(default)]
     pub custom_agent_id: Option<String>,
+    /// "auto" or "ask" for this agent; None uses `Settings::default_permission_mode`.
+    #[serde(default)]
+    pub permission_mode: Option<String>,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
 }

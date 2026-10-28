@@ -23,12 +23,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use armada_core::{now_ms, Agent, ArmadaEvent, Core, RemoteSettings};
+use armada_core::{
+    now_ms, Agent, ArmadaEvent, Attachment, Core, CreateAgentRequest, Provider, RemoteSettings,
+};
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use futures_util::stream::Stream;
 use parking_lot::Mutex;
@@ -39,25 +41,60 @@ use tracing::{info, warn};
 
 static REMOTE_HTML: &str = include_str!(concat!(env!("OUT_DIR"), "/remote.html"));
 static ICON_PNG: &[u8] = include_bytes!("../icons/128x128@2x.png");
+static ICON_192: &[u8] = include_bytes!("../icons/pwa-192.png");
+static ICON_512: &[u8] = include_bytes!("../icons/icon.png");
 
 const MAX_FAILURES: u32 = 10;
+/// Open connections at once (each SSE stream holds one).
+const MAX_CONNECTIONS: usize = 64;
+/// A client must send its request headers within this time (also closes idle
+/// keep-alive connections), so slow or silent clients can't hold connections.
+const HEADER_READ_TIMEOUT: Duration = if cfg!(test) {
+    Duration::from_secs(1)
+} else {
+    Duration::from_secs(10)
+};
 const LOCKOUT: Duration = Duration::from_secs(10 * 60);
 const MIN_PORT: u16 = 1024;
 
 /// Agent fields a read-only viewer doesn't need (local paths, ids, branches).
-const VIEWER_HIDDEN_FIELDS: &[&str] = &[
-    "projectPath",
-    "cwd",
-    "accountId",
-    "sessionId",
-    "baseCommit",
-    "branch",
-    "baseBranch",
+/// Request-body cap for prompts with attachments (4 phone photos at core's 5 MB
+/// per-image limit, base64-encoded, plus JSON).
+const MAX_REMOTE_UPLOAD: usize = 28 * 1024 * 1024;
+/// A request body must arrive within this time (stops slow-drip uploads holding
+/// connection slots).
+const BODY_READ_TIMEOUT: Duration = Duration::from_secs(150);
+/// How long a finished request's result is replayed for a retried Idempotency-Key.
+const IDEMPOTENCY_TTL: Duration = Duration::from_secs(10 * 60);
+/// Live event streams per token: owners (several devices/tabs) and share links.
+const MAX_OWNER_STREAMS: usize = 16;
+const MAX_VIEWER_STREAMS: usize = 4;
+/// Event streams end after this long; clients reconnect (and re-check access).
+const STREAM_LIFETIME: Duration = Duration::from_secs(60 * 60);
+/// Images per prompt sent from the phone.
+const MAX_REMOTE_IMAGES: usize = 4;
+
+/// The agent fields a read-only viewer gets (an allowlist, so new fields stay
+/// private by default). No local paths, accounts, queued drafts or settings.
+const VIEWER_FIELDS: &[&str] = &[
+    "id",
+    "title",
+    "provider",
     "customAgentId",
-    "scheduleId",
-    "groupId",
-    "configOptions",
-    "availableCommands",
+    "status",
+    "running",
+    "worktree",
+    "createdAt",
+    "updatedAt",
+    "lastActivityAt",
+    "costUsd",
+    "tokensUsed",
+    "contextUsed",
+    "contextSize",
+    "archived",
+    "lastMessage",
+    "pendingPermissions",
+    "rateLimited",
 ];
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -115,7 +152,7 @@ pub struct Remote {
     core: Core,
     version: String,
     path: PathBuf,
-    events: broadcast::Sender<String>,
+    events: broadcast::Sender<Arc<Published>>,
     tokens: Mutex<Tokens>,
     running: Mutex<Option<Running>>,
     /// Bumped whenever credentials change or the server stops/starts; live event
@@ -124,8 +161,31 @@ pub struct Remote {
     epoch: Mutex<u64>,
     /// Serializes start/stop so concurrent settings saves can't race.
     apply_lock: tokio::sync::Mutex<()>,
+    /// Set at app exit: later `apply` calls (e.g. the startup one) do nothing.
+    shutting_down: std::sync::atomic::AtomicBool,
     error: Mutex<Option<String>>,
+    /// Problem with the stored pairing data, shown until the user re-pairs.
+    tokens_problem: Mutex<Option<String>>,
+    /// Serializes writes of the token file.
+    save_lock: Mutex<()>,
+    /// False while the token file exists but couldn't be read: never overwrite it
+    /// then (until the user explicitly unpairs).
+    persist: std::sync::atomic::AtomicBool,
     failures: Mutex<HashMap<IpAddr, (u32, Instant)>>,
+    /// Open event streams per token.
+    streams: Arc<Mutex<HashMap<String, usize>>>,
+    /// Idempotency-Key → result (None while in flight), so a phone retrying after a
+    /// timeout doesn't start a second agent or send a prompt twice.
+    idempotency: Mutex<HashMap<String, (Instant, Option<IdemResult>)>>,
+}
+
+/// A finished request's status and JSON body.
+type IdemResult = (StatusCode, String);
+
+enum IdemBegin {
+    New,
+    InFlight,
+    Done(StatusCode, String),
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -170,23 +230,14 @@ fn lan_ip() -> Option<IpAddr> {
 /// Removes fields a read-only viewer shouldn't see from a serialized agent.
 fn trim_agent(agent: &mut Value) {
     if let Some(obj) = agent.as_object_mut() {
-        for field in VIEWER_HIDDEN_FIELDS {
-            obj.remove(*field);
-        }
+        obj.retain(|k, _| VIEWER_FIELDS.contains(&k.as_str()));
     }
 }
 
 impl Remote {
     pub fn new(core: Core, version: String, data_dir: PathBuf) -> Arc<Remote> {
         let path = data_dir.join("remote.json");
-        let mut tokens: Tokens = std::fs::read(&path)
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
-        let fresh = tokens.owner.len() < 32;
-        if fresh {
-            tokens.owner = new_token();
-        }
+        let loaded = load_tokens(&path);
         let (events, _) = broadcast::channel(1024);
         let (generation, _) = watch::channel(0);
         let remote = Arc::new(Remote {
@@ -194,26 +245,47 @@ impl Remote {
             version,
             path,
             events,
-            tokens: Mutex::new(tokens),
+            tokens: Mutex::new(loaded.tokens),
             running: Mutex::new(None),
             generation,
             epoch: Mutex::new(0),
             apply_lock: tokio::sync::Mutex::new(()),
+            shutting_down: std::sync::atomic::AtomicBool::new(false),
             error: Mutex::new(None),
+            tokens_problem: Mutex::new(loaded.problem),
+            save_lock: Mutex::new(()),
+            persist: std::sync::atomic::AtomicBool::new(loaded.persist),
             failures: Mutex::new(HashMap::new()),
+            streams: Arc::new(Mutex::new(HashMap::new())),
+            idempotency: Mutex::new(HashMap::new()),
         });
-        // Always rewrite so existing files get owner-only permissions too.
-        remote.save_tokens();
+        if let Some(problem) = remote.tokens_problem.lock().as_deref() {
+            warn!("{problem}");
+        }
+        if loaded.dirty {
+            // New or repaired tokens; also tightens permissions of existing files.
+            remote.save_tokens();
+        }
         remote
     }
 
+    /// Writes the tokens atomically (temp file + rename), one writer at a time; the
+    /// snapshot is taken under the same lock, so the last writer writes the latest.
     fn save_tokens(&self) {
+        let _saving = self.save_lock.lock();
+        if !self.persist.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
         let data = match serde_json::to_vec_pretty(&*self.tokens.lock()) {
             Ok(d) => d,
             Err(e) => return warn!("serializing remote tokens: {e}"),
         };
-        if let Err(e) = write_private(&self.path, &data) {
+        if let Err(e) = write_private_atomic(&self.path, &data) {
             warn!("saving remote tokens: {e}");
+            *self.tokens_problem.lock() = Some(format!(
+                "Couldn't save remote pairing data ({}): {e}",
+                self.path.display()
+            ));
         }
     }
 
@@ -245,16 +317,62 @@ impl Remote {
                 | ArmadaEvent::ItemUpserted { .. }
                 | ArmadaEvent::TextDelta { .. }
                 | ArmadaEvent::Attention { .. }
+                // Owner-only (viewers only get events about their agent).
+                | ArmadaEvent::AccountUpdated { .. }
+                | ArmadaEvent::AccountRemoved { .. }
         );
         if relevant {
             if let Ok(json) = serde_json::to_string(event) {
-                let _ = self.events.send(json);
+                let agent_id = match event {
+                    ArmadaEvent::AgentUpdated { agent } => Some(agent.id.clone()),
+                    ArmadaEvent::AgentRemoved { agent_id }
+                    | ArmadaEvent::TextDelta { agent_id, .. }
+                    | ArmadaEvent::Attention { agent_id, .. } => Some(agent_id.clone()),
+                    ArmadaEvent::ItemUpserted { item } => Some(item.agent_id.clone()),
+                    _ => None,
+                };
+                let kind = match event {
+                    ArmadaEvent::AgentUpdated { .. } => PublishedKind::AgentUpdated,
+                    ArmadaEvent::AgentRemoved { .. } => PublishedKind::AgentRemoved,
+                    _ => PublishedKind::Other,
+                };
+                let _ = self.events.send(Arc::new(Published {
+                    agent_id,
+                    kind,
+                    json,
+                }));
             }
         }
     }
 
     fn core(&self) -> Core {
         self.core.clone()
+    }
+
+    fn idem_begin(&self, key: &str) -> IdemBegin {
+        let mut map = self.idempotency.lock();
+        map.retain(|_, (at, _)| at.elapsed() < IDEMPOTENCY_TTL);
+        match map.get(key) {
+            Some((_, None)) => IdemBegin::InFlight,
+            Some((_, Some((status, body)))) => IdemBegin::Done(*status, body.clone()),
+            None => {
+                map.insert(key.to_string(), (Instant::now(), None));
+                IdemBegin::New
+            }
+        }
+    }
+
+    /// Records the outcome: successes are replayed, failures may be retried.
+    fn idem_finish(&self, key: &str, result: Option<IdemResult>) {
+        let mut map = self.idempotency.lock();
+        match result {
+            Some(done) => {
+                map.insert(key.to_string(), (Instant::now(), Some(done)));
+            }
+            None => {
+                map.remove(key);
+            }
+        }
     }
 
     fn base_url(&self) -> Option<String> {
@@ -270,6 +388,7 @@ impl Remote {
         let tokens = self.tokens.lock();
         let pairing_url = base
             .as_ref()
+            .filter(|_| !tokens.owner.is_empty())
             .map(|b| format!("{b}/#token={}", tokens.owner));
         let qr_svg = pairing_url.as_deref().and_then(|u| {
             qrcode::QrCode::new(u.as_bytes()).ok().map(|code| {
@@ -301,7 +420,11 @@ impl Remote {
             url: base,
             pairing_url,
             qr_svg,
-            error: self.error.lock().clone(),
+            error: self
+                .error
+                .lock()
+                .clone()
+                .or_else(|| self.tokens_problem.lock().clone()),
             shares,
         }
     }
@@ -309,6 +432,10 @@ impl Remote {
     /// Unpairs every device by issuing a new owner token.
     pub fn rotate_owner_token(&self) {
         self.tokens.lock().owner = new_token();
+        // An explicit unpair replaces even an unreadable file.
+        self.persist
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        *self.tokens_problem.lock() = None;
         self.save_tokens();
         self.bump_generation();
     }
@@ -339,9 +466,13 @@ impl Remote {
         self.bump_generation();
     }
 
-    /// Starts, restarts or stops the server to match `settings`.
+    /// Starts, restarts or stops the server to match `settings`. Does nothing once the
+    /// app is shutting down.
     pub async fn apply(self: &Arc<Self>, settings: &RemoteSettings) {
         let _serialized = self.apply_lock.lock().await;
+        if self.is_shutting_down() {
+            return;
+        }
         let unchanged =
             self.running.lock().as_ref().is_some_and(|r| {
                 r.settings.lan == settings.lan && r.settings.port == settings.port
@@ -349,12 +480,19 @@ impl Remote {
         if settings.enabled && unchanged {
             return;
         }
-        self.stop_and_wait().await;
+        let was_running = self.stop_and_wait().await;
         if !settings.enabled {
             *self.error.lock() = None;
             return;
         }
-        match self.start(settings).await {
+        self.start_reporting(settings, was_running).await;
+    }
+
+    /// Starts and records the outcome in `error`.
+    async fn start_reporting(self: &Arc<Self>, settings: &RemoteSettings, was_running: bool) {
+        // Only right after stopping our own server can the port still be in use by
+        // it; otherwise "in use" means another program and retrying won't help.
+        match self.start(settings, was_running).await {
             Ok(addr) => {
                 info!(%addr, "remote server listening");
                 *self.error.lock() = None;
@@ -366,7 +504,54 @@ impl Remote {
         }
     }
 
-    async fn start(self: &Arc<Self>, settings: &RemoteSettings) -> Result<SocketAddr, String> {
+    fn is_shutting_down(&self) -> bool {
+        self.shutting_down.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// At app exit: stops the server and keeps it stopped.
+    pub async fn shutdown(&self) {
+        self.shutting_down
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        // Waits for an in-flight `apply` (e.g. the startup one) to finish first.
+        let _serialized = self.apply_lock.lock().await;
+        self.stop_and_wait().await;
+    }
+
+    /// The LAN address can change (new Wi-Fi, DHCP); when it did, listen on the new
+    /// one so the shown URL/QR code works. Called when the UI reads the status.
+    pub async fn refresh_lan(self: &Arc<Self>) {
+        let settings = match self.running.lock().as_ref() {
+            Some(r) if r.settings.lan && lan_ip() != Some(r.addr.ip()) => r.settings.clone(),
+            _ => return,
+        };
+        let _serialized = self.apply_lock.lock().await;
+        if self.is_shutting_down() {
+            return;
+        }
+        // Re-check under the lock: another apply may have handled it.
+        let still_stale = self
+            .running
+            .lock()
+            .as_ref()
+            .is_some_and(|r| r.settings.lan && lan_ip() != Some(r.addr.ip()));
+        if !still_stale {
+            return;
+        }
+        info!("LAN address changed; restarting the remote server");
+        let was_running = self.stop_and_wait().await;
+        self.start_reporting(&settings, was_running).await;
+    }
+
+    async fn start(
+        self: &Arc<Self>,
+        settings: &RemoteSettings,
+        retry_in_use: bool,
+    ) -> Result<SocketAddr, String> {
+        if self.tokens.lock().owner.is_empty() {
+            return Err(self.tokens_problem.lock().clone().unwrap_or_else(|| {
+                "Remote pairing data is unavailable; unpair devices to reset it.".into()
+            }));
+        }
         if settings.port < MIN_PORT {
             return Err(format!("Choose a port between {MIN_PORT} and 65535"));
         }
@@ -383,7 +568,11 @@ impl Remote {
         let listener = loop {
             match tokio::net::TcpListener::bind(addr).await {
                 Ok(l) => break l,
-                Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && attempt < 10 => {
+                Err(e)
+                    if retry_in_use
+                        && e.kind() == std::io::ErrorKind::AddrInUse
+                        && attempt < 10 =>
+                {
                     attempt += 1;
                     tokio::time::sleep(Duration::from_millis(200)).await;
                 }
@@ -398,18 +587,7 @@ impl Remote {
         };
         let (tx, rx) = oneshot::channel::<()>();
         let router = self.router(epoch);
-        let task = tauri::async_runtime::spawn(async move {
-            let server = axum::serve(
-                listener,
-                router.into_make_service_with_connect_info::<SocketAddr>(),
-            )
-            .with_graceful_shutdown(async {
-                let _ = rx.await;
-            });
-            if let Err(e) = server.await {
-                warn!("remote server stopped: {e}");
-            }
-        });
+        let task = tauri::async_runtime::spawn(serve(listener, router, rx));
         *self.running.lock() = Some(Running {
             addr,
             epoch,
@@ -432,16 +610,19 @@ impl Remote {
         running.task.take()
     }
 
-    async fn stop_and_wait(&self) {
-        if let Some(task) = self.stop() {
-            // Streams end via the generation bump, so this is normally quick.
-            if tokio::time::timeout(Duration::from_secs(3), task)
-                .await
-                .is_err()
-            {
-                warn!("remote server took too long to stop");
-            }
+    /// Stops the server if it runs; returns whether it did.
+    async fn stop_and_wait(&self) -> bool {
+        let Some(task) = self.stop() else {
+            return false;
+        };
+        // Streams end via the generation bump, so this is normally quick.
+        if tokio::time::timeout(Duration::from_secs(3), task)
+            .await
+            .is_err()
+        {
+            warn!("remote server took too long to stop");
         }
+        true
     }
 
     fn current_epoch(&self) -> Option<u64> {
@@ -449,25 +630,52 @@ impl Remote {
     }
 
     fn router(self: &Arc<Self>, epoch: u64) -> Router {
+        let ctx = Ctx {
+            remote: self.clone(),
+            epoch,
+        };
+        let api = Router::new()
+            .route("/api/session", get(session))
+            .route("/api/state", get(state))
+            .route("/api/agents/{id}/items", get(items))
+            .route("/api/agents/{id}/permission", post(permission))
+            .route("/api/agents/{id}/cancel", post(cancel))
+            .route("/api/agents/{id}/resume", post(resume))
+            .route("/api/agents/{id}/stop", post(stop))
+            .route("/api/agents/{id}/config", post(config))
+            .route("/api/agents/{id}/account", post(switch_account))
+            .route("/api/agents/{id}/archive", post(archive))
+            .route("/api/agents/{id}/read", post(mark_read))
+            .route("/api/agents/{id}/queue/{qid}", delete(remove_queued))
+            .route("/api/agents/{id}/queue/{qid}/send", post(send_queued_now))
+            .route("/api/agents/{id}/queue/resume", post(resume_queue))
+            .route("/api/agents/{id}/queue", delete(clear_queue))
+            .route("/api/agents/{id}/diff", get(diff_summary))
+            .route("/api/agents/{id}/commit", post(commit))
+            .route("/api/agents/{id}/ship", post(ship))
+            .route("/api/agents/{id}/image", get(image))
+            .route("/api/permissions", get(permissions))
+            .route("/api/events", get(events))
+            .layer(DefaultBodyLimit::max(256 * 1024))
+            // Prompts may carry photos/screenshots from the phone.
+            .merge(
+                Router::new()
+                    .route("/api/agents", post(create_agent))
+                    .route("/api/agents/{id}/prompt", post(prompt))
+                    .layer(DefaultBodyLimit::max(MAX_REMOTE_UPLOAD)),
+            )
+            // Authenticate before any body is read.
+            .route_layer(axum::middleware::from_fn_with_state(ctx.clone(), guard));
         Router::new()
             .route("/", get(index))
             .route("/index.html", get(index))
             .route("/manifest.webmanifest", get(manifest))
             .route("/icon.png", get(icon))
-            .route("/api/session", get(session))
-            .route("/api/state", get(state))
-            .route("/api/agents/{id}/items", get(items))
-            .route("/api/agents/{id}/prompt", post(prompt))
-            .route("/api/agents/{id}/permission", post(permission))
-            .route("/api/agents/{id}/cancel", post(cancel))
-            .route("/api/agents/{id}/resume", post(resume))
-            .route("/api/events", get(events))
-            .layer(DefaultBodyLimit::max(256 * 1024))
+            .route("/icon-192.png", get(icon_192))
+            .route("/icon-512.png", get(icon_512))
+            .merge(api)
             .layer(axum::middleware::map_response(no_store))
-            .with_state(Ctx {
-                remote: self.clone(),
-                epoch,
-            })
+            .with_state(ctx)
     }
 
     /// Which credentials a token grants, without touching the failure counters.
@@ -492,14 +700,12 @@ impl Remote {
         epoch: u64,
         ip: IpAddr,
         headers: &HeaderMap,
-        query_token: Option<&str>,
     ) -> Result<(Scope, String), ApiError> {
         self.check_origin(epoch, headers)?;
         let token = headers
             .get(header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "))
-            .or(query_token)
             .unwrap_or("")
             .trim()
             .to_string();
@@ -574,25 +780,172 @@ impl Remote {
     }
 }
 
-#[cfg(unix)]
-fn write_private(path: &std::path::Path, data: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-    // `mode` only applies when the file is created; tighten existing files too.
-    f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-    f.write_all(data)
+struct LoadedTokens {
+    tokens: Tokens,
+    /// Needs writing (new or repaired).
+    dirty: bool,
+    /// Safe to write the file.
+    persist: bool,
+    problem: Option<String>,
 }
 
-#[cfg(not(unix))]
-fn write_private(path: &std::path::Path, data: &[u8]) -> std::io::Result<()> {
-    // Per-user app data dirs on Windows/macOS aren't readable by other users.
-    std::fs::write(path, data)
+/// Reads the pairing tokens. Only a missing file means "first run, new owner token":
+/// a damaged file is kept as a backup and reported (re-pairing is unavoidable), and an
+/// unreadable one is left alone, with remote access unavailable until it's fixed or
+/// the user unpairs, rather than silently unpairing every device.
+fn load_tokens(path: &std::path::Path) -> LoadedTokens {
+    let fresh = || Tokens {
+        owner: new_token(),
+        shares: Vec::new(),
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return LoadedTokens {
+                tokens: fresh(),
+                dirty: true,
+                persist: true,
+                problem: None,
+            }
+        }
+        Err(e) => {
+            return LoadedTokens {
+                tokens: Tokens::default(),
+                dirty: false,
+                persist: false,
+                problem: Some(format!(
+                    "Couldn't read remote pairing data ({}): {e}. Remote access stays off until the file is readable again, or unpair devices to reset it.",
+                    path.display()
+                )),
+            }
+        }
+    };
+    match serde_json::from_slice::<Tokens>(&bytes) {
+        Ok(tokens) if tokens.owner.len() >= 32 => LoadedTokens {
+            tokens,
+            // Rewrite anyway so older files get owner-only permissions.
+            dirty: true,
+            persist: true,
+            problem: None,
+        },
+        parsed => {
+            let backup = path.with_extension(format!("json.damaged-{}", now_ms()));
+            let kept = std::fs::copy(path, &backup).is_ok();
+            let mut tokens = fresh();
+            if let Ok(old) = parsed {
+                tokens.shares = old.shares;
+            }
+            LoadedTokens {
+                tokens,
+                dirty: true,
+                persist: true,
+                problem: Some(format!(
+                    "Remote pairing data was damaged and has been reset: pair your devices again.{}",
+                    if kept {
+                        format!(" (The old file was kept as {}.)", backup.display())
+                    } else {
+                        String::new()
+                    }
+                )),
+            }
+        }
+    }
+}
+
+/// Writes `data` to `path` atomically, readable by the owner only: a crash mid-write
+/// leaves the old file intact.
+fn write_private_atomic(path: &std::path::Path, data: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tmp = path.with_file_name(format!(".{name}.{}.tmp", uuid::Uuid::new_v4().simple()));
+    let result = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        // Per-user app data dirs on Windows/macOS aren't readable by other users.
+        let mut f = options.open(&tmp)?;
+        f.write_all(data)?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
+/// Accept loop for the remote server: at most `MAX_CONNECTIONS` at once, request
+/// headers within `HEADER_READ_TIMEOUT`. On shutdown, stops accepting and lets open
+/// connections finish (live streams end via the generation bump).
+async fn serve(
+    listener: tokio::net::TcpListener,
+    router: Router,
+    mut shutdown: oneshot::Receiver<()>,
+) {
+    use tower::ServiceExt;
+
+    let permits = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
+    let (closing_tx, closing_rx) = watch::channel(false);
+    let mut connections = tokio::task::JoinSet::new();
+    loop {
+        let permit = tokio::select! {
+            _ = &mut shutdown => break,
+            permit = permits.clone().acquire_owned() => match permit {
+                Ok(p) => p,
+                Err(_) => break,
+            },
+        };
+        let (stream, peer) = tokio::select! {
+            _ = &mut shutdown => break,
+            accepted = listener.accept() => match accepted {
+                Ok(conn) => conn,
+                Err(e) => {
+                    // e.g. too many open files: back off instead of spinning.
+                    warn!("remote server accept failed: {e}");
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    continue;
+                }
+            },
+        };
+        let router = router.clone();
+        let mut closing = closing_rx.clone();
+        connections.spawn(async move {
+            let _permit = permit;
+            let service = hyper::service::service_fn(
+                move |mut req: axum::extract::Request<hyper::body::Incoming>| {
+                    req.extensions_mut().insert(ConnectInfo(peer));
+                    router.clone().oneshot(req)
+                },
+            );
+            let conn = hyper::server::conn::http1::Builder::new()
+                .timer(hyper_util::rt::TokioTimer::new())
+                .header_read_timeout(HEADER_READ_TIMEOUT)
+                .serve_connection(hyper_util::rt::TokioIo::new(stream), service);
+            tokio::pin!(conn);
+            tokio::select! {
+                _ = conn.as_mut() => {}
+                () = async {
+                    // The returned guard must not live across the await below.
+                    let _ = closing.wait_for(|c| *c).await;
+                } => {
+                    conn.as_mut().graceful_shutdown();
+                    let _ = conn.await;
+                }
+            }
+        });
+        while connections.try_join_next().is_some() {}
+    }
+    drop(listener);
+    let _ = closing_tx.send(true);
+    while connections.join_next().await.is_some() {}
 }
 
 // ---- HTTP plumbing ------------------------------------------------------------------
@@ -621,9 +974,58 @@ impl From<anyhow::Error> for ApiError {
 }
 
 async fn no_store(mut res: Response) -> Response {
-    res.headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    let h = res.headers_mut();
+    if !h.contains_key(header::CACHE_CONTROL) {
+        h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
+    h.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
     res
+}
+
+/// Every API request: check the token (and Host/origin) before reading the body,
+/// then read the body within `BODY_READ_TIMEOUT`.
+async fn guard(
+    State(c): State<Ctx>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let Some(ConnectInfo(peer)) = req.extensions().get::<ConnectInfo<SocketAddr>>().cloned() else {
+        return ApiError(StatusCode::BAD_REQUEST, "No peer address".into()).into_response();
+    };
+    if let Err(e) = c.auth(&peer, req.headers()) {
+        return e.into_response();
+    }
+    let (parts, body) = req.into_parts();
+    let bytes = match tokio::time::timeout(
+        BODY_READ_TIMEOUT,
+        axum::body::to_bytes(body, MAX_REMOTE_UPLOAD),
+    )
+    .await
+    {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(_)) => {
+            return ApiError(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "That request is too large.".into(),
+            )
+            .into_response()
+        }
+        Err(_) => {
+            return ApiError(
+                StatusCode::REQUEST_TIMEOUT,
+                "The upload took too long.".into(),
+            )
+            .into_response()
+        }
+    };
+    next.run(axum::extract::Request::from_parts(
+        parts,
+        axum::body::Body::from(bytes),
+    ))
+    .await
 }
 
 #[derive(Clone)]
@@ -635,17 +1037,12 @@ struct Ctx {
 impl Ctx {
     fn auth(&self, peer: &SocketAddr, headers: &HeaderMap) -> Result<Scope, ApiError> {
         self.remote
-            .authorize(self.epoch, peer.ip(), headers, None)
+            .authorize(self.epoch, peer.ip(), headers)
             .map(|(s, _)| s)
     }
 }
 
 type Peer = ConnectInfo<SocketAddr>;
-
-#[derive(Deserialize)]
-struct TokenQuery {
-    token: Option<String>,
-}
 
 fn owner(scope: &Scope) -> Result<(), ApiError> {
     match scope {
@@ -665,8 +1062,33 @@ fn visible(scope: &Scope, agent_id: &str) -> Result<(), ApiError> {
     }
 }
 
-async fn index() -> Response {
+/// The phone app's ETag: it changes only with a new Armada build.
+fn index_etag() -> &'static str {
+    static ETAG: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ETAG.get_or_init(|| {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        REMOTE_HTML.hash(&mut h);
+        format!("\"{:016x}\"", h.finish())
+    })
+}
+
+async fn index(headers: HeaderMap) -> Response {
+    let etag = index_etag();
+    // Revalidated on every launch (cheap 304), so updates show up right away.
+    let cache = [
+        (header::ETAG, HeaderValue::from_static(etag)),
+        (header::CACHE_CONTROL, HeaderValue::from_static("no-cache")),
+    ];
+    if headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.split(',').any(|t| t.trim() == etag))
+    {
+        return (StatusCode::NOT_MODIFIED, cache).into_response();
+    }
     let mut res = (
+        cache,
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
         REMOTE_HTML,
     )
@@ -703,13 +1125,25 @@ async fn manifest() -> impl IntoResponse {
             "display": "standalone",
             "background_color": "#0B0D10",
             "theme_color": "#0B0D10",
-            "icons": [{ "src": "/icon.png", "sizes": "256x256", "type": "image/png" }]
+            "icons": [
+                { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+                { "src": "/icon.png", "sizes": "256x256", "type": "image/png" },
+                { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+            ]
         })),
     )
 }
 
 async fn icon() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "image/png")], ICON_PNG)
+}
+
+async fn icon_192() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "image/png")], ICON_192)
+}
+
+async fn icon_512() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "image/png")], ICON_512)
 }
 
 async fn session(
@@ -764,7 +1198,9 @@ async fn state(
                     "name": a.name,
                     "provider": a.provider,
                     "color": a.color,
-                    "label": a.status.and_then(|s| s.label),
+                    "label": a.status.as_ref().and_then(|s| s.label.clone()),
+                    "loggedIn": a.status.as_ref().map(|s| s.logged_in),
+                    "error": a.status.and_then(|s| s.error),
                 })
             })
             .collect()
@@ -778,29 +1214,197 @@ async fn state(
         .unwrap_or_default()
         .into_iter()
         .filter(|c| scope == Scope::Owner || used_custom.contains(&c.id))
-        .map(|c| json!({ "id": c.id, "name": c.name, "color": c.color }))
+        .map(|c| json!({ "id": c.id, "name": c.name, "color": c.color, "enabled": c.enabled }))
         .collect();
-    Ok(Json(
-        json!({ "agents": agents, "accounts": accounts, "customAgents": custom_agents }),
-    ))
+    // What the phone needs to start new agents: recent folders and prompt templates.
+    let (projects, templates, default_worktree, default_mode) = if scope == Scope::Owner {
+        let settings = core.settings()?;
+        let mut projects = settings.recent_projects.clone();
+        for a in core.agents()? {
+            if !a.archived && !projects.contains(&a.project_path) {
+                projects.push(a.project_path);
+            }
+        }
+        projects.retain(|p| std::path::Path::new(p).is_dir());
+        let templates: Vec<Value> = settings
+            .templates
+            .iter()
+            .map(|t| json!({ "id": t.id, "name": t.name, "text": t.body }))
+            .collect();
+        (
+            projects,
+            templates,
+            settings.default_worktree,
+            settings.default_permission_mode.clone(),
+        )
+    } else {
+        (Vec::new(), Vec::new(), false, String::new())
+    };
+    Ok(Json(json!({
+        "agents": agents,
+        "accounts": accounts,
+        "customAgents": custom_agents,
+        "projects": projects,
+        "templates": templates,
+        "defaultWorktree": default_worktree,
+        "defaultPermissionMode": default_mode,
+    })))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ItemsQuery {
+    before_seq: Option<i64>,
+    limit: Option<usize>,
+}
+
+/// An agent's timeline; with `limit`, the last `limit` items before `beforeSeq`
+/// (oldest first), so the phone can load the tail first and page back.
 async fn items(
     State(c): State<Ctx>,
     ConnectInfo(peer): Peer,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Query(q): Query<ItemsQuery>,
 ) -> Result<Response, ApiError> {
     let scope = c.auth(&peer, &headers)?;
     visible(&scope, &id)?;
     let core = c.remote.core();
     core.agent(&id)?;
-    Ok(Json(core.items(&id)?).into_response())
+    let items = tokio::task::spawn_blocking(move || match q.limit {
+        Some(limit) => core.items_page(&id, q.before_seq, limit.clamp(1, 1000)),
+        None => core.items(&id),
+    })
+    .await
+    .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))??;
+    Ok(Json(items).into_response())
 }
 
 #[derive(Deserialize)]
 struct PromptBody {
     text: String,
+    #[serde(default)]
+    attachments: Vec<Attachment>,
+}
+
+/// The request's Idempotency-Key, scoped to its route.
+fn idem_key(headers: &HeaderMap, route: &str) -> Option<String> {
+    let key = headers.get("idempotency-key")?.to_str().ok()?.trim();
+    (!key.is_empty() && key.len() <= 128).then(|| format!("{route}:{key}"))
+}
+
+/// Runs `work` at most once per Idempotency-Key; a retry gets the first result.
+async fn once<F>(remote: &Remote, key: Option<String>, work: F) -> Result<Response, ApiError>
+where
+    F: std::future::Future<Output = Result<(StatusCode, String), ApiError>>,
+{
+    let Some(key) = key else {
+        return work.await.map(json_response);
+    };
+    match remote.idem_begin(&key) {
+        IdemBegin::Done(status, body) => return Ok(json_response((status, body))),
+        IdemBegin::InFlight => {
+            return Err(ApiError(
+                StatusCode::CONFLICT,
+                "That request is still being processed.".into(),
+            ))
+        }
+        IdemBegin::New => {}
+    }
+    let result = work.await;
+    remote.idem_finish(&key, result.as_ref().ok().cloned());
+    result.map(json_response)
+}
+
+fn json_response((status, body): (StatusCode, String)) -> Response {
+    if body.is_empty() {
+        return status.into_response();
+    }
+    (status, [(header::CONTENT_TYPE, "application/json")], body).into_response()
+}
+
+fn check_images(attachments: &[Attachment]) -> Result<(), ApiError> {
+    if attachments.len() > MAX_REMOTE_IMAGES {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            format!("Attach at most {MAX_REMOTE_IMAGES} images"),
+        ));
+    }
+    if attachments
+        .iter()
+        .any(|a| !a.mime_type.starts_with("image/"))
+    {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "Only images can be attached".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateBody {
+    provider: Provider,
+    account_id: String,
+    project_path: String,
+    #[serde(default)]
+    prompt: String,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    worktree: Option<bool>,
+    #[serde(default)]
+    custom_agent_id: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    /// "auto" or "ask"; omitted uses the settings default.
+    #[serde(default)]
+    permission_mode: Option<String>,
+    #[serde(default)]
+    attachments: Vec<Attachment>,
+}
+
+/// Starts a new agent (any provider: Claude, Codex, Grok or a custom ACP agent).
+async fn create_agent(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Json(body): Json<CreateBody>,
+) -> Result<Response, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    check_images(&body.attachments)?;
+    let core = c.remote.core();
+    let key = idem_key(&headers, "create");
+    once(&c.remote, key, async move {
+        let worktree = match body.worktree {
+            Some(w) => w,
+            None => core.settings()?.default_worktree,
+        };
+        let project = body.project_path.clone();
+        let agent = core
+            .create_agent(CreateAgentRequest {
+                provider: body.provider,
+                account_id: body.account_id,
+                project_path: body.project_path,
+                prompt: body.prompt,
+                title: body.title,
+                worktree,
+                model: body.model.filter(|m| !m.trim().is_empty()),
+                group_id: None,
+                custom_agent_id: body.custom_agent_id,
+                permission_mode: body.permission_mode,
+                attachments: body.attachments,
+            })
+            .await?;
+        if let Err(e) = crate::commands::remember_project(&core, &project) {
+            warn!("could not update recent projects: {e:#}");
+        }
+        let json = serde_json::to_string(&agent)
+            .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        Ok((StatusCode::OK, json))
+    })
+    .await
 }
 
 async fn prompt(
@@ -809,13 +1413,48 @@ async fn prompt(
     headers: HeaderMap,
     Path(id): Path<String>,
     Json(body): Json<PromptBody>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<Response, ApiError> {
     owner(&c.auth(&peer, &headers)?)?;
-    c.remote
-        .core()
-        .send_prompt(&id, &body.text, Vec::new())
-        .await?;
-    Ok(StatusCode::NO_CONTENT)
+    check_images(&body.attachments)?;
+    let core = c.remote.core();
+    let key = idem_key(&headers, &format!("prompt:{id}"));
+    once(&c.remote, key, async move {
+        core.send_prompt(&id, &body.text, body.attachments).await?;
+        Ok((StatusCode::NO_CONTENT, String::new()))
+    })
+    .await
+}
+
+/// Pending approvals across the agents this token can see (so the phone's inbox
+/// doesn't need whole timelines).
+async fn permissions(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+) -> Result<Json<Vec<armada_core::TimelineItem>>, ApiError> {
+    let scope = c.auth(&peer, &headers)?;
+    let core = c.remote.core();
+    let pending = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+        let mut out = Vec::new();
+        for agent in core.agents()? {
+            if agent.pending_permissions == 0 || !scope.can_see(&agent.id) {
+                continue;
+            }
+            out.extend(core.items(&agent.id)?.into_iter().filter(|i| {
+                matches!(
+                    i.body,
+                    armada_core::ItemBody::Permission {
+                        resolution: None,
+                        ..
+                    }
+                )
+            }));
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))??;
+    Ok(Json(pending))
 }
 
 #[derive(Deserialize)]
@@ -860,11 +1499,253 @@ async fn resume(
     owner(&c.auth(&peer, &headers)?)?;
     let core = c.remote.core();
     let interrupted = core.agent(&id)?.status == armada_core::AgentStatus::Interrupted;
-    core.resume_agent(&id, interrupted).await?;
+    // Starting an agent can take a while; answer now; progress and failures reach the
+    // phone as agent updates and notices.
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = core.resume_agent(&id, interrupted).await {
+            warn!(agent = %id, "remote resume failed: {e:#}");
+        }
+    });
+    Ok(StatusCode::ACCEPTED)
+}
+
+async fn stop(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    c.remote.core().stop_agent(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigBody {
+    option_id: String,
+    value: String,
+}
+
+/// Mode / model / reasoning effort — whatever options the agent advertises.
+async fn config(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<ConfigBody>,
+) -> Result<StatusCode, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    c.remote
+        .core()
+        .set_agent_config(&id, &body.option_id, &body.value)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountBody {
+    account_id: String,
+}
+
+async fn switch_account(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<AccountBody>,
+) -> Result<Json<Agent>, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    Ok(Json(
+        c.remote
+            .core()
+            .switch_account(&id, &body.account_id)
+            .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct ArchiveBody {
+    archived: bool,
+}
+
+async fn archive(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<ArchiveBody>,
+) -> Result<StatusCode, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    c.remote.core().archive_agent(&id, body.archived)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Patch text sent to the phone at most (the file list is always complete).
+const MAX_REMOTE_PATCH: usize = 1024 * 1024;
+
+/// What changed: file list, counts, and the patch (capped) for reviewing on the phone.
+async fn diff_summary(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    let agent = c.remote.core().agent(&id)?;
+    let diff = crate::git_review::get_diff(&agent).await?;
+    let mut patch = diff.patch;
+    let truncated = patch.len() > MAX_REMOTE_PATCH;
+    if truncated {
+        let mut cut = MAX_REMOTE_PATCH;
+        while !patch.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        patch.truncate(cut);
+    }
+    Ok(Json(json!({
+        "files": diff.files,
+        "ahead": diff.ahead,
+        "uncommitted": diff.uncommitted,
+        "patch": patch,
+        "truncated": truncated,
+        "worktree": agent.worktree,
+        "branch": agent.branch,
+        "baseBranch": agent.base_branch,
+    })))
+}
+
+#[derive(Deserialize)]
+struct MessageBody {
+    #[serde(default)]
+    message: String,
+}
+
+async fn commit(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<MessageBody>,
+) -> Result<Json<Value>, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    let result = crate::commands::commit_impl(&c.remote.core(), &id, &body.message).await?;
+    Ok(Json(json!({ "result": result })))
+}
+
+/// "Commit & merge" from the phone.
+async fn ship(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<MessageBody>,
+) -> Result<Json<Value>, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    let result = crate::commands::ship_impl(&c.remote.core(), &id, &body.message).await?;
+    Ok(Json(serde_json::to_value(result).unwrap_or_default()))
+}
+
+#[derive(Deserialize)]
+struct ImageQuery {
+    path: String,
+}
+
+/// An image the agent referenced by path (screenshots), with the same sandbox as
+/// the desktop app (project/worktree and temp folders, image types, size cap).
+async fn image(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<ImageQuery>,
+) -> Result<Json<Attachment>, ApiError> {
+    // Viewers too: screenshots are part of the agent's conversation they follow.
+    visible(&c.auth(&peer, &headers)?, &id)?;
+    let core = c.remote.core();
+    let image = tokio::task::spawn_blocking(move || core.read_image(&id, &q.path))
+        .await
+        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))??;
+    Ok(Json(image))
+}
+
+async fn mark_read(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    c.remote.core().mark_read(&id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Drops a queued message; returns it so the phone can put it back in the composer.
+async fn remove_queued(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Path((id, qid)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    let removed = c.remote.core().remove_queued(&id, &qid)?;
+    Ok(Json(json!({
+        "text": removed.as_ref().map(|r| &r.text),
+        "attachments": removed.map(|r| r.attachments).unwrap_or_default(),
+    })))
+}
+
+async fn send_queued_now(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Path((id, qid)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    c.remote.core().send_queued_now(&id, &qid).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn resume_queue(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    c.remote.core().resume_queue(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn clear_queue(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    let removed = c.remote.core().clear_queue(&id)?;
+    Ok(Json(json!({ "removed": removed })))
+}
+
 /// Which agent an event is about (None = not forwarded).
+/// A serialized event, tagged so streams can filter without parsing it.
+struct Published {
+    /// The agent it's about; None for owner-only events (accounts).
+    agent_id: Option<String>,
+    kind: PublishedKind,
+    json: String,
+}
+
+#[derive(PartialEq)]
+enum PublishedKind {
+    AgentUpdated,
+    AgentRemoved,
+    Other,
+}
+
+#[cfg(test)]
 fn event_agent(json: &Value) -> Option<&str> {
     json["agent"]["id"]
         .as_str()
@@ -872,9 +1753,52 @@ fn event_agent(json: &Value) -> Option<&str> {
         .or_else(|| json["item"]["agentId"].as_str())
 }
 
+/// One counted event stream for a token; released on drop.
+struct StreamSlot {
+    streams: Arc<Mutex<HashMap<String, usize>>>,
+    token: String,
+}
+
+impl StreamSlot {
+    fn take(
+        streams: &Arc<Mutex<HashMap<String, usize>>>,
+        token: &str,
+        scope: &Scope,
+    ) -> Option<StreamSlot> {
+        let max = match scope {
+            Scope::Owner => MAX_OWNER_STREAMS,
+            Scope::Viewer(_) => MAX_VIEWER_STREAMS,
+        };
+        let mut map = streams.lock();
+        let n = map.entry(token.to_string()).or_insert(0);
+        if *n >= max {
+            return None;
+        }
+        *n += 1;
+        Some(StreamSlot {
+            streams: streams.clone(),
+            token: token.to_string(),
+        })
+    }
+}
+
+impl Drop for StreamSlot {
+    fn drop(&mut self) {
+        let mut map = self.streams.lock();
+        if let Some(n) = map.get_mut(&self.token) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                map.remove(&self.token);
+            }
+        }
+    }
+}
+
 /// Per-connection state of a live event stream.
 struct Stream_ {
-    rx: broadcast::Receiver<String>,
+    _slot: StreamSlot,
+    deadline: tokio::time::Instant,
+    rx: broadcast::Receiver<Arc<Published>>,
     generation: watch::Receiver<u64>,
     remote: Arc<Remote>,
     epoch: u64,
@@ -893,27 +1817,30 @@ impl Stream_ {
     async fn next(&mut self) -> Option<String> {
         loop {
             tokio::select! {
+                () = tokio::time::sleep_until(self.deadline) => return None,
                 changed = self.generation.changed() => {
                     if changed.is_err() || !self.still_valid() {
                         return None;
                     }
                 }
                 msg = self.rx.recv() => match msg {
-                    Ok(json) => {
+                    Ok(event) => {
                         let Scope::Viewer(id) = &self.scope else {
-                            return Some(json);
+                            return Some(event.json.clone());
                         };
-                        let mut v: Value = serde_json::from_str(&json).unwrap_or_default();
-                        if event_agent(&v) != Some(id.as_str()) {
+                        if event.agent_id.as_deref() != Some(id.as_str()) {
                             continue;
                         }
-                        if v["type"] == "agent_removed" {
-                            return None;
+                        match event.kind {
+                            PublishedKind::AgentRemoved => return None,
+                            PublishedKind::AgentUpdated => {
+                                let mut v: Value =
+                                    serde_json::from_str(&event.json).unwrap_or_default();
+                                trim_agent(&mut v["agent"]);
+                                return Some(v.to_string());
+                            }
+                            PublishedKind::Other => return Some(event.json.clone()),
                         }
-                        if v["type"] == "agent_updated" {
-                            trim_agent(&mut v["agent"]);
-                        }
-                        return Some(v.to_string());
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => {
                         return Some(r#"{"type":"resync"}"#.to_string());
@@ -929,15 +1856,24 @@ async fn events(
     State(c): State<Ctx>,
     ConnectInfo(peer): Peer,
     headers: HeaderMap,
-    Query(q): Query<TokenQuery>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
-    // EventSource can't send headers, so this route also accepts `?token=`.
-    let (scope, token) = c
-        .remote
-        .authorize(c.epoch, peer.ip(), &headers, q.token.as_deref())?;
+    // Subscribe before authorizing: a revoke that lands in between bumps the
+    // generation after this point, so the stream re-checks and ends.
+    let mut generation = c.remote.generation.subscribe();
+    generation.mark_unchanged();
+    let rx = c.remote.events.subscribe();
+    let (scope, token) = c.remote.authorize(c.epoch, peer.ip(), &headers)?;
+    let slot = StreamSlot::take(&c.remote.streams, &token, &scope).ok_or_else(|| {
+        ApiError(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Too many open connections for this device or link.".into(),
+        )
+    })?;
     let state = Stream_ {
-        rx: c.remote.events.subscribe(),
-        generation: c.remote.generation.subscribe(),
+        _slot: slot,
+        deadline: tokio::time::Instant::now() + STREAM_LIFETIME,
+        rx,
+        generation,
         remote: c.remote.clone(),
         epoch: c.epoch,
         token,
@@ -951,6 +1887,8 @@ async fn events(
 }
 
 #[cfg(test)]
+// The end-to-end test (and its helpers) needs Unix mock agents.
+#[cfg_attr(not(unix), allow(dead_code, unused_imports))]
 mod tests {
     use super::*;
     use armada_core::{CreateAgentRequest, EventSink, ItemBody, Provider};
@@ -1015,6 +1953,13 @@ mod tests {
                     }
                     req.call().unwrap()
                 }
+                ("DELETE", _) => {
+                    let mut req = agent.delete(&url);
+                    if let Some(a) = &auth {
+                        req = req.header("Authorization", a);
+                    }
+                    req.call().unwrap()
+                }
                 (_, body) => {
                     let mut req = agent.post(&url);
                     if let Some(a) = &auth {
@@ -1048,10 +1993,15 @@ mod tests {
 
     /// Opens an event stream; returns a channel of data lines that closes when the
     /// server ends the stream.
-    fn open_stream(url: String) -> tokio::sync::mpsc::UnboundedReceiver<String> {
+    fn open_stream(url: String, token: &str) -> tokio::sync::mpsc::UnboundedReceiver<String> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let auth = format!("Bearer {token}");
         std::thread::spawn(move || {
-            let res = http().get(&url).call().unwrap();
+            let res = http()
+                .get(&url)
+                .header("Authorization", &auth)
+                .call()
+                .unwrap();
             let reader = std::io::BufReader::new(res.into_body().into_reader());
             for line in reader.lines().map_while(Result::ok) {
                 if let Some(data) = line.strip_prefix("data: ") {
@@ -1090,18 +2040,25 @@ mod tests {
         let remote = Remote::new(core.clone(), "9.9.9".into(), dir.join("data"));
         *forward.0.lock() = Some(remote.clone());
 
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        remote
-            .apply(&RemoteSettings {
-                enabled: true,
-                lan: false,
-                port,
-            })
-            .await;
+        // A free port can be taken by a parallel test between probing and binding; retry.
+        let mut port = 0;
+        for _ in 0..5 {
+            port = std::net::TcpListener::bind("127.0.0.1:0")
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            remote
+                .apply(&RemoteSettings {
+                    enabled: true,
+                    lan: false,
+                    port,
+                })
+                .await;
+            if remote.status().running {
+                break;
+            }
+        }
         let status = remote.status();
         assert!(status.running, "{:?}", status.error);
         let base = status.url.clone().unwrap();
@@ -1164,13 +2121,14 @@ mod tests {
                 model: None,
                 group_id: None,
                 custom_agent_id: None,
+                permission_mode: None,
                 attachments: vec![],
             })
             .await
             .unwrap();
 
         // Open the event stream before answering so we see the turn finish.
-        let mut events = open_stream(format!("{base}/api/events?token={owner}"));
+        let mut events = open_stream(format!("{base}/api/events"), &owner);
 
         let request_id = tokio::time::timeout(Duration::from_secs(20), async {
             loop {
@@ -1216,6 +2174,138 @@ mod tests {
         .await
         .expect("done event over SSE");
 
+        // The phone can start an agent of any provider, then stop it.
+        let (code, body) = call(
+            "POST",
+            format!("{base}/api/agents"),
+            Some(owner.clone()),
+            Some(json!({
+                "provider": "grok",
+                "accountId": agent.account_id,
+                "projectPath": project.to_string_lossy(),
+            })),
+        )
+        .await;
+        assert_eq!(code, 200, "{body}");
+        let started: Agent = serde_json::from_str(&body).unwrap();
+        assert_eq!(started.provider, Provider::Grok);
+        let (_, body) = call(
+            "GET",
+            format!("{base}/api/state"),
+            Some(owner.clone()),
+            None,
+        )
+        .await;
+        let state: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(state["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p.as_str() == Some(&*project.to_string_lossy())));
+        let (code, _) = call(
+            "POST",
+            format!("{base}/api/agents/{}/stop", started.id),
+            Some(owner.clone()),
+            None,
+        )
+        .await;
+        assert_eq!(code, 204);
+        let (code, _) = call(
+            "DELETE",
+            format!("{base}/api/agents/{}/queue/nope", started.id),
+            Some(owner.clone()),
+            None,
+        )
+        .await;
+        assert_eq!(code, 200);
+        let (code, _) = call(
+            "POST",
+            format!("{base}/api/agents/{}/queue/nope/send", started.id),
+            Some(owner.clone()),
+            None,
+        )
+        .await;
+        assert_eq!(code, 400);
+        let (code, _) = call(
+            "POST",
+            format!("{base}/api/agents"),
+            Some(owner.clone()),
+            Some(json!({
+                "provider": "grok",
+                "accountId": agent.account_id,
+                "projectPath": project.to_string_lossy(),
+                "attachments": [{ "name": "a.txt", "mimeType": "text/plain", "data": "" }],
+            })),
+        )
+        .await;
+        assert_eq!(code, 400, "only images can be attached");
+
+        // Retrying with the same Idempotency-Key returns the first agent, not a new one.
+        let create = |key: &'static str| {
+            let url = format!("{base}/api/agents");
+            let owner = owner.clone();
+            let body = serde_json::to_vec(&json!({
+                "provider": "grok",
+                "accountId": agent.account_id,
+                "projectPath": project.to_string_lossy(),
+            }))
+            .unwrap();
+            tokio::task::spawn_blocking(move || {
+                let mut res = http()
+                    .post(&url)
+                    .header("Authorization", &format!("Bearer {owner}"))
+                    .header("Idempotency-Key", key)
+                    .header("Content-Type", "application/json")
+                    .send(&body[..])
+                    .unwrap();
+                (
+                    res.status().as_u16(),
+                    res.body_mut().read_to_string().unwrap_or_default(),
+                )
+            })
+        };
+        let (code, first) = create("k1").await.unwrap();
+        assert_eq!(code, 200, "{first}");
+        let (code, again) = create("k1").await.unwrap();
+        assert_eq!(code, 200);
+        let first: Agent = serde_json::from_str(&first).unwrap();
+        let again: Agent = serde_json::from_str(&again).unwrap();
+        assert_eq!(first.id, again.id, "a retried create is not a second agent");
+        let (code, _) = call(
+            "POST",
+            format!("{base}/api/agents/{}/stop", first.id),
+            Some(owner.clone()),
+            None,
+        )
+        .await;
+        assert_eq!(code, 204);
+
+        // Pending approvals without whole timelines; paged timelines.
+        let (code, body) = call(
+            "GET",
+            format!("{base}/api/permissions"),
+            Some(owner.clone()),
+            None,
+        )
+        .await;
+        assert_eq!(code, 200, "{body}");
+        let (code, body) = call(
+            "GET",
+            format!("{base}/api/agents/{}/items?limit=1", agent.id),
+            Some(owner.clone()),
+            None,
+        )
+        .await;
+        assert_eq!(code, 200);
+        let page: Vec<armada_core::TimelineItem> = serde_json::from_str(&body).unwrap();
+        assert_eq!(page.len(), 1, "limit is honored");
+
+        // Unauthenticated requests are refused before any body is read.
+        assert_eq!(
+            raw(port, format!("POST /api/agents HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: 20000000\r\nConnection: close\r\n\r\n{{")).await,
+            401
+        );
+
         // Read-only share link: sees only its agent, can't act.
         let share = remote.create_share(&agent.id).unwrap();
         let (code, body) = call(
@@ -1241,23 +2331,44 @@ mod tests {
             state["agents"][0]["cwd"].is_null(),
             "viewers don't see local paths"
         );
+        assert!(
+            state["agents"][0]["queue"].is_null() && state["agents"][0]["accountId"].is_null(),
+            "viewers don't see queued drafts or accounts"
+        );
+        assert!(
+            state["agents"][0]
+                .as_object()
+                .unwrap()
+                .contains_key("customAgentId"),
+            "viewers keep the custom agent id (for its name chip)"
+        );
         assert!(state["agents"][0]["title"].is_string());
-        // Query tokens only work for the event stream.
-        let (code, _) = call(
-            "GET",
-            format!("{base}/api/state?token={}", share.token),
-            None,
-            None,
-        )
-        .await;
-        assert_eq!(code, 401);
-        let mut viewer_stream = open_stream(format!("{base}/api/events?token={}", share.token));
+        // Tokens are only accepted in the Authorization header (never in URLs).
+        for path in ["state", "events"] {
+            let (code, _) = call(
+                "GET",
+                format!("{base}/api/{path}?token={}", share.token),
+                None,
+                None,
+            )
+            .await;
+            assert_eq!(code, 401, "{path}");
+        }
+        let mut viewer_stream = open_stream(format!("{base}/api/events"), &share.token);
         tokio::time::sleep(Duration::from_millis(300)).await;
         let (code, _) = call(
             "POST",
             format!("{base}/api/agents/{}/prompt", agent.id),
             Some(share.token.clone()),
             Some(json!({ "text": "hi" })),
+        )
+        .await;
+        assert_eq!(code, 403);
+        let (code, _) = call(
+            "POST",
+            format!("{base}/api/agents/{}/stop", agent.id),
+            Some(share.token.clone()),
+            None,
         )
         .await;
         assert_eq!(code, 403);
@@ -1305,7 +2416,16 @@ mod tests {
         )
         .await;
         assert_eq!(code, 204);
-        let mut owner_stream = open_stream(format!("{base}/api/events?token={owner}"));
+        // Resuming answers right away; the agent starts in the background.
+        let (code, _) = call(
+            "POST",
+            format!("{base}/api/agents/{}/resume", agent.id),
+            Some(owner.clone()),
+            None,
+        )
+        .await;
+        assert_eq!(code, 202);
+        let mut owner_stream = open_stream(format!("{base}/api/events"), &owner);
         tokio::time::sleep(Duration::from_millis(300)).await;
         remote.rotate_owner_token();
         assert_eq!(
@@ -1351,7 +2471,7 @@ mod tests {
         );
 
         // Changing the port restarts cleanly and ends streams on the old server.
-        let mut old_stream = open_stream(format!("{base}/api/events?token={owner}"));
+        let mut old_stream = open_stream(format!("{base}/api/events"), &owner);
         tokio::time::sleep(Duration::from_millis(300)).await;
         let port2 = std::net::TcpListener::bind("127.0.0.1:0")
             .unwrap()
@@ -1388,6 +2508,55 @@ mod tests {
             "old port released"
         );
 
+        // A client that never finishes its request headers is disconnected.
+        {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut slow = tokio::net::TcpStream::connect(("127.0.0.1", port2))
+                .await
+                .unwrap();
+            slow.write_all(b"GET /api/session HTTP/1.1\r\nHost: 127.0.0.1\r\n")
+                .await
+                .unwrap();
+            let mut buf = [0u8; 256];
+            let closed = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    match slow.read(&mut buf).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(_) => continue,
+                    }
+                }
+            })
+            .await;
+            assert!(closed.is_ok(), "slow client wasn't disconnected");
+        }
+
+        // A port taken by another program fails fast (no retry loop) on a fresh start.
+        let squatter = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let taken = squatter.local_addr().unwrap().port();
+        remote
+            .apply(&RemoteSettings {
+                enabled: false,
+                lan: false,
+                port: taken,
+            })
+            .await;
+        let started = Instant::now();
+        remote
+            .apply(&RemoteSettings {
+                enabled: true,
+                lan: false,
+                port: taken,
+            })
+            .await;
+        let st = remote.status();
+        assert!(!st.running && st.error.is_some());
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
+        drop(squatter);
+
         // Privileged ports are refused with a clear error.
         remote
             .apply(&RemoteSettings {
@@ -1407,6 +2576,75 @@ mod tests {
             })
             .await;
         assert!(!remote.status().running);
+
+        // After app shutdown, a late `apply` (e.g. the startup one) does nothing.
+        remote.shutdown().await;
+        remote
+            .apply(&RemoteSettings {
+                enabled: true,
+                lan: false,
+                port: port2,
+            })
+            .await;
+        assert!(!remote.status().running);
         core.shutdown().await;
+    }
+
+    fn temp_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("armada-tokens-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn token_file_lifecycle() {
+        let dir = temp_dir();
+        let path = dir.join("remote.json");
+
+        // First run: new owner token.
+        let first = load_tokens(&path);
+        assert!(first.persist && first.dirty && first.problem.is_none());
+        assert_eq!(first.tokens.owner.len(), 64);
+
+        // Saved atomically, owner-only, no temp files left behind.
+        let data = serde_json::to_vec(&first.tokens).unwrap();
+        write_private_atomic(&path, &data).unwrap();
+        write_private_atomic(&path, &data).unwrap();
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["remote.json"]);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let again = load_tokens(&path);
+        assert_eq!(again.tokens.owner, first.tokens.owner);
+        assert!(again.problem.is_none());
+
+        // Damaged: reset, but the old file is kept and the user told.
+        std::fs::write(&path, b"{not json").unwrap();
+        let damaged = load_tokens(&path);
+        assert!(damaged.persist);
+        assert_ne!(damaged.tokens.owner, first.tokens.owner);
+        assert!(damaged.problem.as_deref().unwrap().contains("damaged"));
+        assert!(std::fs::read_dir(&dir).unwrap().any(|e| e
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains("damaged")));
+
+        // Unreadable (a directory here): nothing is overwritten, nothing authorizes.
+        let unreadable = dir.join("dir.json");
+        std::fs::create_dir_all(&unreadable).unwrap();
+        let blocked = load_tokens(&unreadable);
+        assert!(!blocked.persist && !blocked.dirty);
+        assert!(blocked.tokens.owner.is_empty());
+        assert!(blocked.problem.is_some());
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

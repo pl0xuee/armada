@@ -82,6 +82,10 @@ pub fn run() {
             commands::create_agent,
             commands::send_prompt,
             commands::cancel_turn,
+            commands::remove_queued,
+            commands::send_queued_now,
+            commands::resume_queue,
+            commands::clear_queue,
             commands::respond_permission,
             commands::resume_agent,
             commands::stop_agent,
@@ -95,6 +99,13 @@ pub fn run() {
             commands::get_diff,
             commands::commit_agent,
             commands::merge_agent,
+            commands::ship_agent,
+            commands::revert_patch,
+            commands::test_mcp_server,
+            commands::acknowledge_agent,
+            commands::update_account_key,
+            commands::discover_projects,
+            commands::is_git_repo,
             commands::create_pr,
             commands::discard_worktree,
             commands::create_account,
@@ -122,6 +133,7 @@ pub fn run() {
             commands::run_schedule,
             commands::test_custom_agent,
             commands::list_files,
+            commands::read_image,
             commands::remote_status,
             commands::remote_rotate_token,
             commands::create_share_link,
@@ -180,8 +192,13 @@ fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()>
     let attention = Arc::new(Attention::new(app.clone(), icon_path));
     app.manage(attention.clone());
 
-    tray::create(app)?;
+    // Not fatal: some desktops have no tray (closing the window then quits).
+    match tray::create(app) {
+        Ok(()) => tray::AVAILABLE.store(true, Ordering::Relaxed),
+        Err(e) => warn!("could not create the tray icon: {e}"),
+    }
     events::spawn_dispatcher(app.clone(), rx);
+    spawn_signal_handler(app.clone());
     attention.spawn_escalation();
 
     // Settings-driven OS integration.
@@ -193,14 +210,33 @@ fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()>
         // Registration hops to the main thread and waits; do it off the main thread.
         let app = app.clone();
         let hotkey = settings.global_hotkey.clone();
-        tauri::async_runtime::spawn_blocking(move || hotkey::apply(&app, &hotkey));
+        // Failures are logged; Settings reports them when the user changes the hotkey.
+        tauri::async_runtime::spawn_blocking(move || {
+            let _ = hotkey::apply(&app, &hotkey);
+        });
     }
     apply_autostart(app, settings.launch_at_login);
     {
         let remote_settings = settings.remote.clone();
+        let remote = remote.clone();
         tauri::async_runtime::spawn(async move { remote.apply(&remote_settings).await });
     }
-    if settings.close_to_tray && std::env::args().any(|a| a == "--autostart") {
+    {
+        // Follow LAN address changes (new Wi-Fi, DHCP) even while the window is closed.
+        let remote = remote.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(30));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tick.tick().await;
+                if EXIT_STATE.load(Ordering::SeqCst) != RUNNING {
+                    break;
+                }
+                remote.refresh_lan().await;
+            }
+        });
+    }
+    if settings.close_to_tray && tray::available() && std::env::args().any(|a| a == "--autostart") {
         // Launched at login: start quietly in the tray.
         window::hide_main(app);
     }
@@ -246,8 +282,24 @@ fn init_logging(log_dir: &Path) -> tracing_appender::non_blocking::WorkerGuard {
     use tracing_subscriber::{fmt, EnvFilter};
 
     let _ = std::fs::create_dir_all(log_dir);
-    let file = tracing_appender::rolling::daily(log_dir, "armada.log");
-    let (file_writer, guard) = tracing_appender::non_blocking(file);
+    // Logs can include agent output: keep them private and keep a week.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(log_dir, std::fs::Permissions::from_mode(0o700));
+    }
+    let (file_writer, guard) = match tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("armada.log")
+        .max_log_files(7)
+        .build(log_dir)
+    {
+        Ok(file) => tracing_appender::non_blocking(file),
+        Err(e) => {
+            eprintln!("could not open the log file: {e}");
+            tracing_appender::non_blocking(std::io::sink())
+        }
+    };
     let filter = EnvFilter::try_from_env("ARMADA_LOG")
         .unwrap_or_else(|_| EnvFilter::new("info,armada_core=debug,armada_desktop_lib=debug"));
     let _ = tracing_subscriber::registry()
@@ -290,26 +342,76 @@ pub(crate) fn apply_autostart(app: &AppHandle, enabled: bool) {
 const RUNNING: u8 = 0;
 const SHUTTING_DOWN: u8 = 1;
 const DONE: u8 = 2;
+/// An update is being installed; it restarts the app itself.
+const UPDATING: u8 = 3;
 static EXIT_STATE: AtomicU8 = AtomicU8::new(RUNNING);
 
-/// Records busy agents as interrupted (bounded, so a stuck agent can't block exit),
-/// kills PTYs and stops the remote server. Used on exit and before an update installs.
+/// Claims the app's shutdown for an update install. `false` if the app is already
+/// quitting (or updating).
+pub(crate) fn begin_update() -> bool {
+    EXIT_STATE
+        .compare_exchange(RUNNING, UPDATING, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+}
+
+/// Stops the remote server first (no new work from the phone), then records busy
+/// agents as interrupted and ends PTYs. Bounded (server 3 s, agents 10 s,
+/// terminals ~1 s) so nothing stuck can block exit. Used on exit and before an
+/// update installs.
 pub(crate) async fn shutdown_services(app: &AppHandle) {
-    if let Some(core) = app.try_state::<Core>().map(|c| c.inner().clone()) {
-        info!("shutting down agents");
-        if tokio::time::timeout(Duration::from_secs(10), core.shutdown())
-            .await
-            .is_err()
-        {
-            warn!("core shutdown timed out");
-        }
-    }
-    if let Some(terminals) = app.try_state::<Terminals>() {
-        terminals.kill_all();
-    }
     if let Some(remote) = app.try_state::<Arc<remote::Remote>>() {
-        remote.stop();
+        // Also keeps a still-running startup `apply` from starting it again.
+        remote.shutdown().await;
     }
+    let agents = async {
+        if let Some(core) = app.try_state::<Core>().map(|c| c.inner().clone()) {
+            info!("shutting down agents");
+            if tokio::time::timeout(Duration::from_secs(10), core.shutdown())
+                .await
+                .is_err()
+            {
+                warn!("core shutdown timed out");
+            }
+        }
+    };
+    let terminals = async {
+        if let Some(terminals) = app.try_state::<Terminals>().map(|t| t.inner().clone()) {
+            let _ = tauri::async_runtime::spawn_blocking(move || terminals.kill_all()).await;
+        }
+    };
+    tokio::join!(agents, terminals);
+    // Anything still alive (a stuck handshake, a timed-out stop): end its whole
+    // process tree rather than leave it running after Armada is gone.
+    let _ = tauri::async_runtime::spawn_blocking(armada_core::kill_all_children).await;
+}
+
+/// Total time allowed for a clean shutdown before the app exits anyway.
+pub(crate) const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(20);
+
+/// SIGTERM/SIGINT/SIGHUP (logout, `kill`, system shutdown) take the normal quit
+/// path, so agents are recorded as interrupted and their processes are stopped.
+fn spawn_signal_handler(app: AppHandle) {
+    #[cfg(unix)]
+    tauri::async_runtime::spawn(async move {
+        use tokio::signal::unix::{signal, SignalKind};
+        let (Ok(mut term), Ok(mut int), Ok(mut hup)) = (
+            signal(SignalKind::terminate()),
+            signal(SignalKind::interrupt()),
+            signal(SignalKind::hangup()),
+        ) else {
+            warn!("could not install signal handlers");
+            return;
+        };
+        tokio::select! {
+            _ = term.recv() => {}
+            _ = int.recv() => {}
+            _ = hup.recv() => {}
+        }
+        info!("signal received; quitting");
+        app.exit(0);
+    });
+    #[cfg(not(unix))]
+    let _ = app;
 }
 
 fn on_run_event(app: &AppHandle, event: RunEvent) {
@@ -321,21 +423,39 @@ fn on_run_event(app: &AppHandle, event: RunEvent) {
             if app.try_state::<Core>().is_none() {
                 return;
             }
-            match EXIT_STATE.load(Ordering::SeqCst) {
-                DONE => {}
-                SHUTTING_DOWN => api.prevent_exit(),
-                _ => {
-                    EXIT_STATE.store(SHUTTING_DOWN, Ordering::SeqCst);
+            match EXIT_STATE.compare_exchange(
+                RUNNING,
+                SHUTTING_DOWN,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Err(DONE) => {}
+                // Already shutting down, or installing an update (which restarts the
+                // app when done): quitting now would leave a half-installed update.
+                Err(_) => api.prevent_exit(),
+                Ok(_) => {
                     api.prevent_exit();
                     let app = app.clone();
                     tauri::async_runtime::spawn(async move {
-                        shutdown_services(&app).await;
+                        if tokio::time::timeout(SHUTDOWN_DEADLINE, shutdown_services(&app))
+                            .await
+                            .is_err()
+                        {
+                            warn!("shutdown took too long; exiting anyway");
+                            let _ = tauri::async_runtime::spawn_blocking(
+                                armada_core::kill_all_children,
+                            )
+                            .await;
+                        }
                         EXIT_STATE.store(DONE, Ordering::SeqCst);
                         app.exit(code.unwrap_or(0));
                     });
                 }
             }
         }
+        // Last resort (e.g. a quit path that skipped ExitRequested): no agent
+        // process may outlive the app.
+        RunEvent::Exit => armada_core::kill_all_children(),
         #[cfg(target_os = "macos")]
         RunEvent::Reopen { .. } => window::show_main(app),
         _ => {}

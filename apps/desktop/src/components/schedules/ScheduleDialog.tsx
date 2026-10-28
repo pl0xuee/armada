@@ -1,4 +1,4 @@
-import { CalendarClock, Check, FolderOpen, GitBranch, TriangleAlert } from "lucide-react";
+import { CalendarClock, Check, FolderOpen, GitBranch, ShieldCheck, TriangleAlert, Zap } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -7,7 +7,7 @@ import { DAY_LONG, DAY_SHORT, nextRun, normalizeDays, runsOn, untilLabel, whenLa
 import type { Account, Provider, Schedule } from "@/lib/types";
 import { basename, cn, errorMessage, prettyPath } from "@/lib/utils";
 import { pickFolder } from "@/lib/window";
-import { useNow } from "@/hooks/useNow";
+import { useFreshNow } from "./useFreshNow";
 import { useApp } from "@/store/app";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { TemplatePicker } from "../TemplatePicker";
@@ -76,6 +76,8 @@ export function blankSchedule(): Schedule {
     days: [...WEEKDAYS],
     lastRunAt: null,
     lastAgentId: null,
+    lastError: null,
+    permissionMode: null,
     updatedAt: 0,
   };
 }
@@ -91,11 +93,12 @@ function ScheduleForm({
 }) {
   const accounts = useApp((s) => s.accounts);
   const recent = useApp((s) => s.settings?.recentProjects ?? []);
+  const defaultMode = useApp((s) => s.settings?.defaultPermissionMode ?? "ask");
   const [draft, setDraft] = useState<Schedule>(initial);
   const [saving, setSaving] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
-  const now = useNow();
+  const now = useFreshNow();
 
   useEffect(() => {
     const t = setTimeout(() => nameRef.current?.focus(), 60);
@@ -183,6 +186,18 @@ function ScheduleForm({
       }}
     >
       <DialogBody className="space-y-4 pt-2">
+        {initial.id && initial.lastError && (
+          <div
+            role="note"
+            className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/[0.07] px-3 py-2 text-[12.5px]"
+          >
+            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
+            <span className="min-w-0 text-muted">
+              <span className="font-medium text-fg">The last run didn't start.</span>{" "}
+              <span className="selectable break-words">{initial.lastError}</span>
+            </span>
+          </div>
+        )}
         <div className="grid grid-cols-[1fr_auto] items-end gap-3">
           <div>
             <Label htmlFor="sch-name">Name</Label>
@@ -404,6 +419,27 @@ function ScheduleForm({
             Isolated worktree
             <span className="text-[11.5px] text-steel">(each run gets its own branch)</span>
           </label>
+          <div className="flex items-center gap-2 text-[12.5px] text-fg">
+            <span className="flex items-center gap-1.5">
+              {(draft.permissionMode ?? defaultMode) === "auto" ? (
+                <Zap className="h-3.5 w-3.5 text-accent" />
+              ) : (
+                <ShieldCheck className="h-3.5 w-3.5 text-steel" />
+              )}
+              Starts in
+            </span>
+            <Segmented
+              size="sm"
+              aria-label="Permission mode for runs"
+              value={draft.permissionMode ?? "default"}
+              onChange={(v) => set("permissionMode", v === "default" ? null : v)}
+              options={[
+                { value: "default", label: `Default (${defaultMode === "auto" ? "Auto" : "Ask"})` },
+                { value: "auto", label: "Auto" },
+                { value: "ask", label: "Ask" },
+              ]}
+            />
+          </div>
         </div>
 
         <div

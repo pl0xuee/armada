@@ -20,7 +20,7 @@ export function CopyButton({ text, label = "Copy", className }: { text: string; 
         timer.current = setTimeout(() => setState("idle"), 1600);
       }}
       className={cn(
-        "press inline-flex h-8 min-w-8 items-center justify-center gap-1 rounded-lg px-2 text-[11.5px] font-medium",
+        "press hit relative inline-flex h-8 min-w-8 items-center justify-center gap-1 rounded-lg px-2 text-[11.5px] font-medium",
         state === "ok" ? "text-ok" : state === "fail" ? "text-err" : "text-steel active:text-fg",
         className,
       )}

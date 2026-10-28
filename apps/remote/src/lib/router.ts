@@ -4,21 +4,28 @@ import { useSyncExternalStore } from "react";
  * Hash routing: the desktop server only serves `/`, and the hash never reaches
  * the server (or its logs). Routes: `#/`, `#/agent/<id>`, `#/inbox`.
  */
-export type Route = { name: "fleet" } | { name: "agent"; agentId: string } | { name: "inbox" };
+export type Route =
+  | { name: "fleet" }
+  | { name: "agent"; agentId: string }
+  | { name: "review"; agentId: string }
+  | { name: "inbox" }
+  | { name: "new" };
 
 const ROUTE_EVENT = "armada:route";
 
 export function parseRoute(hash: string): Route {
   const path = hash.replace(/^#/, "");
-  const agent = /^\/agent\/([^/?#]+)/.exec(path);
+  const agent = /^\/agent\/([^/?#]+)(\/review)?/.exec(path);
   if (agent) {
     try {
-      return { name: "agent", agentId: decodeURIComponent(agent[1]) };
+      const agentId = decodeURIComponent(agent[1]);
+      return agent[2] ? { name: "review", agentId } : { name: "agent", agentId };
     } catch {
       return { name: "fleet" };
     }
   }
   if (path.startsWith("/inbox")) return { name: "inbox" };
+  if (path === "/new" || path.startsWith("/new?")) return { name: "new" };
   return { name: "fleet" };
 }
 
@@ -26,8 +33,12 @@ export function routeHash(route: Route): string {
   switch (route.name) {
     case "agent":
       return `#/agent/${encodeURIComponent(route.agentId)}`;
+    case "review":
+      return `#/agent/${encodeURIComponent(route.agentId)}/review`;
     case "inbox":
       return "#/inbox";
+    case "new":
+      return "#/new";
     default:
       return "#/";
   }
@@ -55,6 +66,11 @@ function subscribe(cb: () => void) {
     window.removeEventListener("popstate", handler);
     window.removeEventListener(ROUTE_EVENT, handler);
   };
+}
+
+/** Re-read the location after it was changed without an event (e.g. `replaceState`). */
+export function notifyRouteChange() {
+  window.dispatchEvent(new Event(ROUTE_EVENT));
 }
 
 export function useRoute(): Route {

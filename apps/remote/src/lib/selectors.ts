@@ -1,15 +1,43 @@
 import { useMemo } from "react";
-import { useStore, type Timeline } from "./store";
-import type { Agent, PermissionItem } from "./types";
+import { useStore, type State } from "./store";
+import type { Agent, PermissionItem, RemoteAccount } from "./types";
 
-/** Approvals still waiting for this agent, net of answers we've just sent. */
-export function pendingCount(agent: Agent, timeline: Timeline | undefined, resolving: Record<string, string>): number {
-  if (agent.pendingPermissions <= 0) return 0;
-  if (!timeline || timeline.status !== "ready") return agent.pendingPermissions;
-  let n = 0;
-  for (const it of timeline.items) {
-    if (it.kind === "permission" && it.resolution === null && !resolving[it.requestId]) n++;
+/** The agent's account, if known (share links don't include accounts). */
+export function accountOf(accounts: Record<string, RemoteAccount>, agent: Pick<Agent, "accountId">): RemoteAccount | undefined {
+  return agent.accountId ? accounts[agent.accountId] : undefined;
+}
+
+/** Pending approvals grouped by agent (memoised on the permissions slice). */
+let indexMemo: { permissions: State["permissions"]; index: Map<string, PermissionItem[]> } | null = null;
+export function permissionIndex(permissions: State["permissions"]): Map<string, PermissionItem[]> {
+  if (indexMemo && indexMemo.permissions === permissions) return indexMemo.index;
+  const index = new Map<string, PermissionItem[]>();
+  for (const p of Object.values(permissions)) {
+    if (p.resolution !== null) continue;
+    const list = index.get(p.agentId);
+    if (list) list.push(p);
+    else index.set(p.agentId, [p]);
   }
+  for (const list of index.values()) list.sort((a, b) => a.ts - b.ts);
+  indexMemo = { permissions, index };
+  return index;
+}
+
+/**
+ * Approvals still waiting for this agent, net of answers being sent. Uses the
+ * permissions list once loaded (the agent's own counter until then); an agent
+ * whose counter is 0 never shows stale items.
+ */
+export function pendingCount(
+  agent: Agent,
+  items: PermissionItem[] | undefined,
+  loaded: boolean,
+  resolving: Record<string, string>,
+): number {
+  if (agent.pendingPermissions <= 0) return 0;
+  if (!loaded) return agent.pendingPermissions;
+  let n = 0;
+  for (const it of items ?? []) if (!resolving[it.requestId]) n++;
   return Math.min(n, agent.pendingPermissions);
 }
 
@@ -20,41 +48,87 @@ export interface InboxEntry {
 
 export interface InboxData {
   entries: InboxEntry[];
-  /** Agents with approvals whose timelines are still loading. */
-  loading: number;
-  /** Agents with approvals whose timelines failed to load. */
-  failed: Agent[];
+  /** The permissions list is still loading. */
+  loading: boolean;
+  /** Loading the permissions list failed. */
+  failed: boolean;
   count: number;
+}
+
+let countMemo: {
+  agents: State["agents"];
+  permissions: State["permissions"];
+  status: State["permissionsStatus"];
+  resolving: State["resolving"];
+  count: number;
+} | null = null;
+
+/**
+ * Total approvals waiting, memoised on the slices it reads. Returning a
+ * number lets subscribers (title, badges) skip re-rendering when it's unchanged,
+ * e.g. on every streamed text chunk.
+ */
+export function selectInboxCount(s: State): number {
+  if (
+    countMemo &&
+    countMemo.agents === s.agents &&
+    countMemo.permissions === s.permissions &&
+    countMemo.status === s.permissionsStatus &&
+    countMemo.resolving === s.resolving
+  ) {
+    return countMemo.count;
+  }
+  const index = permissionIndex(s.permissions);
+  const loaded = s.permissionsStatus === "ready";
+  let count = 0;
+  for (const agent of Object.values(s.agents)) {
+    if (agent.archived) continue;
+    count += pendingCount(agent, index.get(agent.id), loaded, s.resolving);
+  }
+  countMemo = { agents: s.agents, permissions: s.permissions, status: s.permissionsStatus, resolving: s.resolving, count };
+  return count;
+}
+
+export function useInboxCount(): number {
+  return useStore(selectInboxCount);
+}
+
+/** Pending approvals for one agent (for its row badge). */
+export function useAgentPending(agent: Agent): number {
+  return useStore((s) =>
+    pendingCount(agent, permissionIndex(s.permissions).get(agent.id), s.permissionsStatus === "ready", s.resolving),
+  );
+}
+
+/** Approvals waiting on other agents than `agentId`. */
+export function useOtherPendingCount(agentId: string | null): number {
+  return useStore((s) => {
+    const total = selectInboxCount(s);
+    const a = agentId ? s.agents[agentId] : undefined;
+    if (!a || a.archived) return total;
+    return total - pendingCount(a, permissionIndex(s.permissions).get(a.id), s.permissionsStatus === "ready", s.resolving);
+  });
 }
 
 export function useInbox(): InboxData {
   const agents = useStore((s) => s.agents);
-  const timelines = useStore((s) => s.timelines);
+  const permissions = useStore((s) => s.permissions);
+  const status = useStore((s) => s.permissionsStatus);
   const resolving = useStore((s) => s.resolving);
   return useMemo(() => {
+    const index = permissionIndex(permissions);
+    const loaded = status === "ready";
     const entries: InboxEntry[] = [];
-    const failed: Agent[] = [];
-    let loading = 0;
     let count = 0;
     for (const agent of Object.values(agents)) {
       if (agent.archived || agent.pendingPermissions <= 0) continue;
-      const t = timelines[agent.id];
-      count += pendingCount(agent, t, resolving);
-      if (!t || t.status === "loading") {
-        loading++;
-        continue;
-      }
-      if (t.status === "error") {
-        failed.push(agent);
-        continue;
-      }
-      for (const it of t.items) {
-        if (it.kind === "permission" && it.resolution === null) entries.push({ agent, item: it });
-      }
+      const items = index.get(agent.id);
+      count += pendingCount(agent, items, loaded, resolving);
+      for (const item of items ?? []) entries.push({ agent, item });
     }
     entries.sort((a, b) => a.item.ts - b.item.ts);
-    return { entries, loading, failed, count };
-  }, [agents, timelines, resolving]);
+    return { entries, loading: !loaded && status !== "error" && count > 0, failed: status === "error", count };
+  }, [agents, permissions, status, resolving]);
 }
 
 export type FleetGroupId = "needs" | "working" | "recent" | "archived";
@@ -90,4 +164,17 @@ export function groupFleet(agents: Agent[]): FleetGroup[] {
     { id: "recent", label: "Recent", agents: recent },
     { id: "archived", label: "Archived", agents: archived },
   ];
+}
+
+/** Same matching as the desktop sidebar: title, project, branch, last message. */
+export function filterAgents(agents: Agent[], query: string): Agent[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return agents;
+  return agents.filter(
+    (a) =>
+      a.title.toLowerCase().includes(q) ||
+      (a.projectPath ?? "").toLowerCase().includes(q) ||
+      (a.branch ?? "").toLowerCase().includes(q) ||
+      (a.lastMessage ?? "").toLowerCase().includes(q),
+  );
 }

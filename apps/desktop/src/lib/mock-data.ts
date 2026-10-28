@@ -2,12 +2,14 @@
 import { createTwoFilesPatch } from "diff";
 import type {
   Account,
+  Attachment,
   Agent,
   AgentDiff,
   ConfigOption,
   PermissionOption,
   Provider,
   ProviderInfo,
+  QueuedPrompt,
   Schedule,
   Settings,
   SlashCommand,
@@ -217,6 +219,7 @@ export function seedSettings(onboarded: boolean): Settings {
     ],
     autoCheckUpdates: true,
     failover: "ask",
+    defaultPermissionMode: "auto",
     remote: { enabled: false, lan: false, port: 47821 },
     customAgents: [
       {
@@ -407,6 +410,8 @@ interface AgentSeed {
   rateLimited?: boolean;
   scheduleId?: string;
   customAgentId?: string;
+  queue?: QueuedPrompt[];
+  queuePaused?: boolean;
 }
 
 function makeAgent(s: AgentSeed): Agent {
@@ -443,6 +448,12 @@ function makeAgent(s: AgentSeed): Agent {
     rateLimited: s.rateLimited ?? false,
     scheduleId: s.scheduleId ?? null,
     customAgentId: s.customAgentId ?? null,
+    queuedPrompts: s.queue?.length ?? 0,
+    queue: s.queue ?? [],
+    queuePaused: s.queuePaused ?? false,
+    acknowledgedAt: null,
+    needsBriefing: false,
+    permissionMode: "auto",
   };
 }
 
@@ -461,6 +472,10 @@ export function seedAgents(): Agent[] {
       tokens: 412_300,
       context: [82_400, 200_000],
       lastMessage: "Running the auth suite to confirm the fix…",
+      queue: [
+        { id: "q-1", text: "After that, also cover the logout-on-refresh-failure path with a test.", attachments: 0 },
+        { id: "q-2", text: "Then summarize the change as a PR description.", attachments: 0 },
+      ],
     }),
     makeAgent({
       id: "a-billing",
@@ -536,6 +551,10 @@ export function seedAgents(): Agent[] {
       context: [210_000, 272_000],
       lastMessage: "Rate limit reached for this account.",
       rateLimited: true,
+      queuePaused: true,
+      queue: [
+        { id: "q-3", text: "Once the slices compile, migrate the billing page to the new hooks.", attachments: 0 },
+      ],
     }),
     makeAgent({
       id: "a-react19",
@@ -864,6 +883,59 @@ export function seedItems(): Record<string, TimelineItem[]> {
     },
     {
       kind: "tool_call",
+      toolCallId: "sa-1",
+      title: "Explore auth call sites",
+      toolKind: "other",
+      status: "completed",
+      locations: [],
+      diffs: [],
+      output: "Found 3 refresh call sites; only the response interceptor retries concurrently.",
+      command: null,
+      subagent: {
+        kind: "Explore",
+        description: "Find every caller of refreshToken() and how retries are queued",
+        prompt:
+          "Search the codebase for every call to refreshToken() and the HTTP interceptor that retries 401s. Report file:line for each call site and whether concurrent requests can trigger parallel refreshes. Do not edit files.",
+      },
+    },
+    {
+      kind: "tool_call",
+      toolCallId: "sa-1-a",
+      title: "Search for `refreshToken`",
+      toolKind: "search",
+      status: "completed",
+      locations: ["src/auth/session.ts", "src/http/client.ts"],
+      diffs: [],
+      output: "3 matches in 2 files",
+      command: null,
+      parentToolCallId: "sa-1",
+    },
+    {
+      kind: "tool_call",
+      toolCallId: "sa-1-b",
+      title: "Read src/http/client.ts",
+      toolKind: "read",
+      status: "completed",
+      locations: ["src/http/client.ts"],
+      diffs: [],
+      output: "",
+      command: null,
+      parentToolCallId: "sa-1",
+    },
+    {
+      kind: "tool_call",
+      toolCallId: "sa-1-c",
+      title: "Read src/auth/store.ts",
+      toolKind: "read",
+      status: "completed",
+      locations: ["src/auth/store.ts"],
+      diffs: [],
+      output: "",
+      command: null,
+      parentToolCallId: "sa-1",
+    },
+    {
+      kind: "tool_call",
       toolCallId: "tc-2",
       title: "Read src/http/client.ts",
       toolKind: "read",
@@ -1126,6 +1198,18 @@ export function seedItems(): Record<string, TimelineItem[]> {
     },
     {
       kind: "tool_call",
+      toolCallId: "e-shot",
+      title: "Screenshot /checkout (guest, 3DS)",
+      toolKind: "other",
+      status: "completed",
+      locations: ["e2e/__screenshots__/checkout-guest.png", "e2e/__screenshots__/checkout-3ds.png"],
+      diffs: [],
+      output: "Saved 2 screenshots to e2e/__screenshots__/",
+      command: null,
+      images: [mockScreenshot("checkout-guest.png"), mockScreenshot("checkout-3ds.png")],
+    },
+    {
+      kind: "tool_call",
       toolCallId: "e-4",
       title: "Run npx playwright test e2e/checkout.spec.ts",
       toolKind: "execute",
@@ -1138,7 +1222,20 @@ export function seedItems(): Record<string, TimelineItem[]> {
     },
     {
       kind: "agent_message",
+      text: "Here's the guest checkout after the fix, captured by the spec run:\n\n![Guest checkout](e2e/__screenshots__/checkout-guest-final.png)\n\nThe 3DS challenge iframe now renders inside the modal instead of a new tab.",
+    },
+    {
+      kind: "agent_message",
       text: 'All **14 checkout specs pass** locally (11.8s on 4 workers).\n\n### Coverage\n\n| Flow | Specs | Notes |\n|---|---|---|\n| Guest checkout | 3 | email validation, address autocomplete |\n| Saved cards | 4 | default card preselected, remove card |\n| Coupons | 4 | percent, fixed, expired, stacked (rejected) |\n| 3DS challenge | 3 | success, failure, abandoned |\n\n### Helpers\n\nI added `e2e/helpers.ts` with `seedCart()` (hits the test-only `/__test/cart` route) and `fillCard()`, which handles the Stripe iframe:\n\n```ts\nexport async function fillCard(page: Page, number: string) {\n  const card = page.frameLocator("iframe[title*=\'card number\']");\n  await card.getByPlaceholder("1234 1234 1234 1234").fill(number);\n  await card.getByPlaceholder("MM / YY").fill("12 / 34");\n  await card.getByPlaceholder("CVC").fill("123");\n}\n```\n\n> The 3DS specs need `STRIPE_TEST_MODE=1`; I added it to `.env.test`.\n\nWant me to wire these into CI as a separate job?',
+    },
+    {
+      kind: "turn_summary",
+      durationMs: 6 * 60_000 + 42_000,
+      files: ["e2e/checkout.spec.ts", "e2e/helpers.ts", ".env.test"],
+      toolCalls: 7,
+      commands: 2,
+      costUsd: 0.84,
+      tokens: 212_400,
     },
   ]);
 
@@ -1232,6 +1329,21 @@ export function seedItems(): Record<string, TimelineItem[]> {
       command: null,
     },
     {
+      kind: "tool_call",
+      toolCallId: "dm-shot",
+      title: "Capture dashboard screenshots (light, dark)",
+      toolKind: "execute",
+      status: "completed",
+      locations: [
+        "screenshots/dashboard-light.png",
+        "screenshots/dashboard-dark.png",
+        "screenshots/missing-retina.png",
+      ],
+      diffs: [],
+      output: "Wrote screenshots/dashboard-light.png\nWrote screenshots/dashboard-dark.png",
+      command: "npx playwright screenshot --full-page http://localhost:5173/analytics screenshots/",
+    },
+    {
       kind: "notice",
       level: "warn",
       text: "Armada closed while this agent was working. Resume to pick up where it left off.",
@@ -1256,7 +1368,7 @@ export function seedItems(): Record<string, TimelineItem[]> {
       kind: "agent_message",
       text: "Upgraded **23 packages**. `cdk synth` now fails with 2 type errors in `lib/queue-stack.ts` (the `Queue` props were renamed). Fixing those next.",
     },
-    { kind: "notice", level: "info", text: "Stopped by you." },
+    { kind: "notice", level: "info", text: "Shut down by you." },
   ]);
 
   const cmpUser = "Debounce the product search input so we don't fire a request per keystroke. Keep it testable.";
@@ -1409,7 +1521,13 @@ export function seedDiff(items: TimelineItem[]): AgentDiff {
       });
     }
   }
-  return { files, patch: parts.join(""), ahead: files.length ? 2 : 0 };
+  return {
+    files,
+    patch: parts.join(""),
+    ahead: files.length ? 2 : 0,
+    uncommitted: Math.min(files.length, 3),
+    truncated: false,
+  };
 }
 
 // ---------------------------------------------------------------- slash commands
@@ -1442,6 +1560,16 @@ export function commandsFor(provider: Provider): SlashCommand[] {
 
 // ---------------------------------------------------------------- schedules
 
+export const MOCK_PROJECTS = [
+  "/home/sam/Projects/atlas-api",
+  "/home/sam/Projects/storefront",
+  "/home/sam/Projects/console-web",
+  "/home/sam/Projects/infra",
+  "/home/sam/Projects/design-tokens",
+  "/home/sam/code/oss/vitest-plugin-armada",
+  "/home/sam/code/scratch/rust-cli",
+];
+
 export function seedSchedules(): Schedule[] {
   return [
     {
@@ -1460,6 +1588,8 @@ export function seedSchedules(): Schedule[] {
       lastAgentId: null,
       customAgentId: null,
       updatedAt: min(60 * 24 * 6),
+      lastError: null,
+      permissionMode: null,
     },
     {
       id: "sch-deps",
@@ -1476,6 +1606,8 @@ export function seedSchedules(): Schedule[] {
       lastAgentId: "a-deps",
       customAgentId: null,
       updatedAt: min(60 * 24 * 20),
+      lastError: null,
+      permissionMode: null,
     },
     {
       id: "sch-triage",
@@ -1493,6 +1625,41 @@ export function seedSchedules(): Schedule[] {
       lastAgentId: null,
       customAgentId: null,
       updatedAt: min(60 * 24 * 2),
+      lastError: "Didn't start at 08:30: Codex · Personal hit its usage limit (resets 10:00).",
+      permissionMode: "ask",
     },
   ];
+}
+
+// ---------------------------------------------------------------- sample screenshots
+
+/** A UI-looking SVG "screenshot" (stands in for PNGs the real backend reads from disk). */
+export function mockScreenshot(name: string, seed = name): Attachment {
+  let h = 0;
+  for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const hue = h % 360;
+  const title = name.replace(/\.[a-z]+$/i, "").replace(/[-_]+/g, " ");
+  const esc = (t: string) =>
+    t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600">
+<rect width="960" height="600" fill="#f6f7f9"/>
+<rect width="960" height="56" fill="#ffffff"/><rect y="56" width="960" height="1" fill="#e3e6ea"/>
+<circle cx="32" cy="28" r="9" fill="hsl(${hue},70%,50%)"/><rect x="52" y="20" width="120" height="16" rx="4" fill="#1f2937"/>
+<rect x="760" y="16" width="168" height="24" rx="12" fill="#eef1f4"/>
+<rect x="48" y="96" width="520" height="440" rx="14" fill="#ffffff" stroke="#e3e6ea"/>
+<text x="76" y="140" font-family="sans-serif" font-size="22" font-weight="700" fill="#111827">${esc(title)}</text>
+<rect x="76" y="168" width="464" height="44" rx="8" fill="#f3f4f6" stroke="#e5e7eb"/>
+<rect x="76" y="228" width="464" height="44" rx="8" fill="#f3f4f6" stroke="#e5e7eb"/>
+<rect x="76" y="288" width="220" height="44" rx="8" fill="#f3f4f6" stroke="#e5e7eb"/>
+<rect x="320" y="288" width="220" height="44" rx="8" fill="#f3f4f6" stroke="#e5e7eb"/>
+<rect x="76" y="460" width="464" height="48" rx="10" fill="hsl(${hue},70%,48%)"/>
+<text x="308" y="490" font-family="sans-serif" font-size="17" font-weight="600" fill="#ffffff" text-anchor="middle">Pay $48.00</text>
+<rect x="600" y="96" width="312" height="260" rx="14" fill="#ffffff" stroke="#e3e6ea"/>
+<rect x="628" y="128" width="72" height="72" rx="10" fill="hsl(${(hue + 40) % 360},55%,85%)"/>
+<rect x="716" y="136" width="160" height="14" rx="4" fill="#374151"/><rect x="716" y="162" width="96" height="12" rx="4" fill="#9ca3af"/>
+<rect x="628" y="232" width="256" height="1" fill="#e5e7eb"/>
+<rect x="628" y="256" width="90" height="12" rx="4" fill="#6b7280"/><rect x="820" y="256" width="64" height="12" rx="4" fill="#111827"/>
+<rect x="628" y="292" width="90" height="12" rx="4" fill="#6b7280"/><rect x="820" y="292" width="64" height="12" rx="4" fill="#111827"/>
+</svg>`;
+  return { name, mimeType: "image/svg+xml", data: btoa(svg) };
 }

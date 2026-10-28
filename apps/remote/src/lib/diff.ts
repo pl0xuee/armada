@@ -17,7 +17,12 @@ export interface ParsedDiff {
   status: "added" | "deleted" | "modified";
   /** Lines were dropped to keep rendering cheap. */
   truncated: boolean;
+  /** Inputs too big to diff on a phone: no lines, counts are line totals. */
+  tooLarge?: boolean;
 }
+
+/** Above this many characters (old + new) the line diff isn't computed. */
+export const MAX_DIFF_INPUT = 400_000;
 
 const CONTEXT = 3;
 const MAX_LINES = 1500;
@@ -215,7 +220,13 @@ export function parseUnified(unified: string, fallbackPath: string): ParsedDiff[
 export function parseFileDiff(d: FileDiff): ParsedDiff[] {
   if (d.unified) return parseUnified(d.unified, d.path);
   const status: ParsedDiff["status"] = d.oldText === null ? "added" : d.newText === null ? "deleted" : "modified";
-  const { lines, additions, deletions } = toHunks(diffLines(d.oldText ?? "", d.newText ?? ""));
+  const oldText = d.oldText ?? "";
+  const newText = d.newText ?? "";
+  if (oldText.length + newText.length > MAX_DIFF_INPUT) {
+    const count = (t: string) => (t ? t.split("\n").length : 0);
+    return [{ path: d.path, lines: [], additions: count(newText), deletions: count(oldText), status, truncated: true, tooLarge: true }];
+  }
+  const { lines, additions, deletions } = toHunks(diffLines(oldText, newText));
   return [cap({ path: d.path, lines, additions, deletions, status, truncated: false })];
 }
 

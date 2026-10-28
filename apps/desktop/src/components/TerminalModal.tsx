@@ -8,7 +8,8 @@ import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/misc";
 import { api } from "@/lib/api";
 import { attachTerminal } from "@/lib/terminal-bus";
-import { errorMessage } from "@/lib/utils";
+import { errorMessage, isMac } from "@/lib/utils";
+import { ConfirmDialog } from "@/components/ui/alert-dialog";
 import { useApp } from "@/store/app";
 import { useUi, type TerminalSession } from "@/store/ui";
 
@@ -19,6 +20,20 @@ type RunState = { kind: "running" } | { kind: "exited"; code: number | null };
  * can replay output the bus already handed to a previous instance.
  */
 const transcripts = new Map<string, { data: string; exit?: number | null }>();
+
+/** Per-terminal transcript cap (UTF-16 units ≈ bytes for terminal text); the oldest output is dropped. */
+const TRANSCRIPT_MAX = 2_000_000;
+const TRANSCRIPT_KEEP = 1_500_000;
+
+function appendTranscript(tr: { data: string }, d: string) {
+  tr.data += d;
+  if (tr.data.length > TRANSCRIPT_MAX) {
+    const cut = tr.data.length - TRANSCRIPT_KEEP;
+    // Resume at a line start so a replay doesn't begin mid escape sequence.
+    const nl = tr.data.indexOf("\n", cut);
+    tr.data = tr.data.slice(nl >= 0 ? nl + 1 : cut);
+  }
+}
 
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -118,14 +133,49 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
     const ro = new ResizeObserver(() => doFit());
     ro.observe(host);
 
+    // Clipboard: copy with a selection (Ctrl+C, or Ctrl+Shift+C; ⌘C on macOS); paste with
+    // Ctrl+Shift+V (⌘V on macOS). Ctrl+C without a selection still sends ^C to the process.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== "keydown") return true;
+      const k = e.key.toLowerCase();
+      const copyCombo = isMac ? e.metaKey && k === "c" : e.ctrlKey && k === "c" && (e.shiftKey || term.hasSelection());
+      const pasteCombo = isMac ? e.metaKey && k === "v" : e.ctrlKey && e.shiftKey && k === "v";
+      if (copyCombo) {
+        if (term.hasSelection()) {
+          void navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+          term.clearSelection();
+        }
+        e.preventDefault();
+        return false;
+      }
+      if (pasteCombo) {
+        e.preventDefault();
+        void navigator.clipboard
+          .readText()
+          .then((t) => {
+            if (t && stateRef.current.kind === "running") term.paste(t);
+          })
+          .catch(() => toast.error("Couldn't read the clipboard"));
+        return false;
+      }
+      return true;
+    });
+
     const dataSub = term.onData((d) => {
       if (stateRef.current.kind !== "running") return;
-      void api.terminalWrite(session.terminalId, d).catch(() => {});
+      // One toast per terminal (same id), so typing into a stuck process doesn't spam.
+      void api.terminalWrite(session.terminalId, d).catch((e: unknown) =>
+        toast.error("Couldn't send input to the terminal", {
+          id: `term-write-${session.terminalId}`,
+          description: errorMessage(e),
+        }),
+      );
     });
 
     const exitLine = (code: number | null) =>
       `\r\n\x1b[2m[process exited${code !== null ? ` with code ${code}` : ""}]\x1b[0m\r\n`;
     let transcript = transcripts.get(session.terminalId);
+    const fresh = !transcript;
     if (transcript) {
       term.write(transcript.data);
       if (transcript.exit !== undefined) {
@@ -139,7 +189,7 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
     const tr = transcript;
     const detach = attachTerminal(session.terminalId, {
       write: (d) => {
-        tr.data += d;
+        appendTranscript(tr, d);
         term.write(d);
       },
       exit: (code) => {
@@ -150,6 +200,12 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
       },
     });
 
+    // The core reuses a sign-in that's already running for this account without replaying its
+    // earlier output; it tells us so (`reused`), so say it once when we have no transcript.
+    if (fresh && session.reused) {
+      term.write("\x1b[2m(Continuing an existing sign-in… earlier output isn't shown.)\x1b[0m\r\n");
+    }
+
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
@@ -157,13 +213,18 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
       detach();
       term.dispose();
     };
-  }, [session, host]);
+    // Keyed on the terminal id (the session's other fields are fixed per id): re-opening the
+    // same deduplicated terminal keeps it as is instead of tearing it down.
+  }, [session.terminalId, host]);
 
   const close = () => {
     if (stateRef.current.kind === "running") void api.terminalKill(session.terminalId).catch(() => {});
     transcripts.delete(session.terminalId);
     onClose();
   };
+  // Stopping a running login/install is destructive: confirm first.
+  const [confirmStop, setConfirmStop] = useState(false);
+  const what = session.kind === "login" ? "sign-in" : "install";
 
   const exited = state.kind === "exited";
   const ok = exited && state.code === 0;
@@ -177,12 +238,27 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
         </span>
       }
       description={session.subtitle}
-      className="w-[min(760px,calc(100vw-32px))]"
+      className="w-[min(760px,calc(100vw-16px))]"
+      sheet
+      // No header X while the process runs (it would kill a login midway); use Stop in the footer.
+      hideClose={state.kind === "running"}
       onOpenAutoFocus={(e) => e.preventDefault()}
+      // While the process runs (or keys go to xterm), Esc and clicks outside must not
+      // close the modal: that would kill a login/install. Use the Close/Cancel button.
+      onEscapeKeyDown={(e) => {
+        const inTerminal = host?.contains(document.activeElement) ?? false;
+        if (inTerminal || stateRef.current.kind === "running") e.preventDefault();
+      }}
+      onPointerDownOutside={(e) => {
+        if (stateRef.current.kind === "running") e.preventDefault();
+      }}
+      onInteractOutside={(e) => {
+        if (stateRef.current.kind === "running") e.preventDefault();
+      }}
     >
-      <div className="px-5 pb-4 pt-2">
-        <div className="overflow-hidden rounded-xl border border-line bg-code shadow-[inset_0_1px_0_var(--edge)]">
-          <div className="flex h-8 items-center gap-2 border-b border-line bg-panel/70 px-3">
+      <div className="flex min-h-0 flex-1 flex-col px-5 pb-4 pt-2 max-sm:px-3">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-line bg-code shadow-[inset_0_1px_0_var(--edge)]">
+          <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line bg-panel/70 px-3">
             <span className="flex gap-1.5" aria-hidden>
               <span className="h-2.5 w-2.5 rounded-full bg-raised" />
               <span className="h-2.5 w-2.5 rounded-full bg-raised" />
@@ -195,7 +271,11 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
               <StatusChip state={state} />
             </span>
           </div>
-          <div ref={setHost} className="xterm-host h-[340px] w-full" aria-label="Terminal" />
+          <div
+            ref={setHost}
+            className="xterm-host h-[min(340px,calc(100dvh-260px))] min-h-[180px] w-full max-sm:h-auto max-sm:flex-1"
+            aria-label="Terminal"
+          />
         </div>
         {session.kind === "login" && !exited && (
           <p className="mt-2.5 text-[12px] text-muted">
@@ -209,11 +289,28 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
             {ok ? "Done" : "Close"}
           </Button>
         ) : (
-          <Button variant="ghost" onClick={close}>
-            Cancel
+          <Button variant="ghost" onClick={() => setConfirmStop(true)}>
+            Stop {what}
           </Button>
         )}
       </DialogFooter>
+      <ConfirmDialog
+        open={confirmStop}
+        onOpenChange={setConfirmStop}
+        danger
+        title={`Stop the ${what}?`}
+        description={
+          session.kind === "login"
+            ? "The sign-in process ends and this account stays signed out. You can start it again from Accounts."
+            : "The installer is stopped midway. You can run it again from Settings → Providers."
+        }
+        confirmLabel={`Stop ${what}`}
+        cancelLabel="Keep going"
+        onConfirm={() => {
+          setConfirmStop(false);
+          close();
+        }}
+      />
     </DialogContent>
   );
 }

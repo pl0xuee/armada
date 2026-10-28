@@ -25,7 +25,7 @@ jobs:
         os: [ubuntu-22.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -38,7 +38,7 @@ jobs:
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
             libxdo-dev libssl-dev libasound2-dev libdbus-1-dev patchelf
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -61,6 +61,11 @@ jobs:
           npm ci
           npm run build
 
+      - name: Test frontend
+        if: runner.os == 'Linux'
+        working-directory: apps/desktop
+        run: npm run test --if-present
+
       # Embedded into the desktop binary by src-tauri/build.rs.
       - name: Build mobile companion
         working-directory: apps/remote
@@ -68,12 +73,17 @@ jobs:
           npm ci
           npm run build
 
+      - name: Test mobile companion
+        if: runner.os == 'Linux'
+        working-directory: apps/remote
+        run: npm test
+
       - name: Formatting
         if: runner.os == 'Linux'
         run: cargo fmt --all --check
 
+      # On every OS: there are cfg(windows)/cfg(unix)/cfg(target_os) code paths.
       - name: Clippy
-        if: runner.os == 'Linux'
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test
@@ -85,3 +95,16 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: apps/desktop
         run: npm run tauri build -- --ci --debug --bundles deb --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      # The same check for the macOS app bundle and the Windows installer, which are
+      # otherwise first built on a release tag.
+      - name: Bundle (app, debug)
+        if: runner.os == 'macOS'
+        working-directory: apps/desktop
+        run: npm run tauri build -- --ci --debug --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Bundle (nsis, debug)
+        if: runner.os == 'Windows'
+        working-directory: apps/desktop
+        shell: bash
+        run: npm run tauri build -- --ci --debug --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'

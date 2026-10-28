@@ -21,18 +21,19 @@ export function SettingRow({
   return (
     <div
       className={cn(
-        "flex gap-4 px-4 py-3.5",
-        stack ? "flex-col items-stretch" : "items-center justify-between",
+        "flex gap-x-4 gap-y-2.5 px-4 py-3.5",
+        // Wraps the control under its label only when both don't fit side by side.
+        stack ? "flex-col items-stretch" : "flex-wrap items-center justify-between",
         className,
       )}
     >
-      <div className="min-w-0">
+      <div className={cn("min-w-0", !stack && "flex-1 basis-[220px]")}>
         <label htmlFor={htmlFor} className="block text-[13px] font-medium text-fg">
           {title}
         </label>
         {description && <p className="mt-0.5 text-[12px] leading-relaxed text-muted">{description}</p>}
       </div>
-      <div className={cn("flex shrink-0 items-center gap-2", stack && "w-full")}>{children}</div>
+      <div className={cn("flex max-w-full shrink-0 flex-wrap items-center gap-2", stack && "w-full")}>{children}</div>
     </div>
   );
 }
@@ -54,8 +55,8 @@ export function SettingGroup({
   return (
     <section className={cn("space-y-2.5", className)}>
       {(title || right) && (
-        <div className="flex items-end justify-between gap-4 px-0.5">
-          <div>
+        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 px-0.5">
+          <div className="min-w-0">
             {title && <h3 className="text-[13px] font-semibold tracking-tight text-fg">{title}</h3>}
             {description && <p className="mt-0.5 text-[12px] text-muted">{description}</p>}
           </div>
@@ -77,8 +78,8 @@ export function SectionHeader({
   right?: ReactNode;
 }) {
   return (
-    <div className="mb-6 flex items-end justify-between gap-4">
-      <div>
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+      <div className="min-w-0 flex-1 basis-[260px]">
         <h2 className="text-[17px] font-semibold tracking-[-0.015em] text-fg">{title}</h2>
         {description && <p className="mt-1 text-[13px] text-muted">{description}</p>}
       </div>

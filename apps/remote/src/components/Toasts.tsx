@@ -13,7 +13,8 @@ const TONE: Record<ToastTone, { icon: IconName; color: string }> = {
 };
 
 function ToastCard({ toast }: { toast: Toast }) {
-  const tone = TONE[toast.tone];
+  const base = TONE[toast.tone];
+  const tone = toast.tone === "warn" && toast.reason !== "permission" ? { ...base, icon: "alert" as IconName } : base;
   const actionable = !!toast.agentId;
   const open = () => {
     if (!toast.agentId) return;
@@ -49,6 +50,18 @@ function ToastCard({ toast }: { toast: Toast }) {
           )}
         </span>
       </button>
+      {toast.action && (
+        <button
+          type="button"
+          onClick={() => {
+            dismissToast(toast.id);
+            toast.action?.run();
+          }}
+          className="press my-auto inline-flex h-11 shrink-0 items-center rounded-xl px-3 text-[14px] font-semibold text-accent"
+        >
+          {toast.action.label}
+        </button>
+      )}
       <button
         type="button"
         onClick={() => dismissToast(toast.id)}
@@ -64,9 +77,12 @@ function ToastCard({ toast }: { toast: Toast }) {
 export function Toasts() {
   const toasts = useStore((s) => s.toasts);
   return createPortal(
+    // Bottom of the screen, above the composer and keyboard, so it never covers
+    // the header's back/inbox buttons. Each toast carries its own role (status
+    // or alert), so there's no extra live region here (it would announce twice).
     <div
-      aria-live="polite"
-      className="pointer-events-none fixed inset-x-0 top-0 z-[60] mx-auto flex w-full max-w-[560px] flex-col gap-2 px-3 pt-[calc(var(--safe-top)+8px)]"
+      className="pointer-events-none fixed inset-x-0 z-[60] mx-auto flex w-full max-w-[560px] flex-col gap-2 px-3"
+      style={{ bottom: "calc(max(12px, var(--safe-bottom)) + var(--composer-h, 0px) + var(--kb, 0px) + 8px)" }}
     >
       {toasts.map((t) => (
         <ToastCard key={t.id} toast={t} />

@@ -1,17 +1,32 @@
-import { LayoutGrid, Plus, Radar } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { LayoutGrid, Plus, Radar, Rows3 } from "lucide-react";
+import { m, AnimatePresence } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { AgentTile } from "@/components/mission/AgentTile";
-import { PageHeader } from "@/components/PageHeader";
+import { HeaderAction, PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
-import { useNow } from "@/hooks/useNow";
+import { splitCost } from "@/lib/costSplit";
 import { formatCost } from "@/lib/format";
 import type { Agent, AgentStatus } from "@/lib/types";
 import { isMac, modKey } from "@/lib/utils";
-import { collectPending, useApp } from "@/store/app";
+
+import { AgentRowCompact } from "@/components/mission/AgentRowCompact";
+import { EMPTY_SUMMARY, useTileSummaries } from "@/components/mission/useTileSummaries";
+import { Tooltip } from "@/components/ui/tooltip";
+import { useApp, usePendingPermissions, type PendingPermission } from "@/store/app";
 import { useUi } from "@/store/ui";
+
+type Density = "comfortable" | "compact";
+const DENSITY_KEY = "armada.missionDensity";
+
+function readDensity(): Density {
+  try {
+    return localStorage.getItem(DENSITY_KEY) === "compact" ? "compact" : "comfortable";
+  } catch {
+    return "comfortable";
+  }
+}
 
 type Filter = "all" | "live" | "needs" | "idle";
 
@@ -38,28 +53,39 @@ function matches(a: Agent, f: Filter) {
 
 export function MissionControlView() {
   const agentsMap = useApp((s) => s.agents);
-  const items = useApp((s) => s.items);
+  const pending = usePendingPermissions();
+  const summaries = useTileSummaries();
   const accounts = useApp((s) => s.accounts);
   const openAgent = useUi((s) => s.openAgent);
   const openNewAgent = useUi((s) => s.openNewAgent);
-  const now = useNow();
   const [filter, setFilter] = useState<Filter>("all");
+  const [density, setDensityState] = useState<Density>(readDensity);
+  const setDensity = (d: Density) => {
+    setDensityState(d);
+    try {
+      localStorage.setItem(DENSITY_KEY, d);
+    } catch {
+      /* ignore */
+    }
+  };
 
   const agents = useMemo(
     () =>
       Object.values(agentsMap)
         .filter((a) => !a.archived)
-        .sort((a, b) => ORDER[a.status] - ORDER[b.status] || b.lastActivityAt - a.lastActivityAt),
+        // Stable order: status group, then creation time. (Sorting by activity made tiles jump on
+        // every cost/token tick.)
+        .sort((a, b) => ORDER[a.status] - ORDER[b.status] || b.createdAt - a.createdAt),
     [agentsMap],
   );
 
   const pendingByAgent = useMemo(() => {
-    const map = new Map<string, ReturnType<typeof collectPending>[number]["item"]>();
-    for (const p of collectPending({ agents: agentsMap, items })) {
+    const map = new Map<string, PendingPermission["item"]>();
+    for (const p of pending) {
       if (!map.has(p.agent.id)) map.set(p.agent.id, p.item);
     }
     return map;
-  }, [agentsMap, items]);
+  }, [pending]);
 
   // Lazily load timelines for live agents so tiles can show their last action.
   const liveIds = agents
@@ -82,7 +108,7 @@ export function MissionControlView() {
     return c;
   }, [agents]);
 
-  const spend = agents.reduce((s, a) => s + a.costUsd, 0);
+  const cost = splitCost(agents, accounts);
   const visible = agents.filter((a) => matches(a, filter));
   const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
 
@@ -99,43 +125,84 @@ export function MissionControlView() {
   );
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="@container flex h-full flex-col">
       <PageHeader
         icon={<LayoutGrid />}
         title="Mission Control"
         subtitle={
           <>
             <span className="tabular">{counts.live}</span> live · <span className="tabular">{counts.needs}</span> need
-            you · <span className="tabular">{formatCost(spend)}</span> spent across the fleet
+            you ·{" "}
+            {cost.billed > 0 && (
+              <>
+                <span className="tabular">{formatCost(cost.billed)}</span> billed
+                {cost.equivalent > 0 && " · "}
+              </>
+            )}
+            {cost.equivalent > 0 && (
+              <>
+                <span className="tabular">{formatCost(cost.equivalent)}</span> API-equivalent on subscriptions
+              </>
+            )}
+            {cost.billed === 0 && cost.equivalent === 0 && "no usage yet"}
           </>
         }
         right={
-          <Button variant="primary" size="sm" onClick={() => openNewAgent()}>
-            <Plus /> New agent
-            <span className="ml-1 text-[10.5px] opacity-70">
-              {modKey}
-              {isMac ? "" : "+"}N
-            </span>
-          </Button>
+          <>
+            <Segmented<Density>
+              size="sm"
+              aria-label="Density"
+              value={density}
+              onChange={setDensity}
+              options={[
+                {
+                  value: "comfortable",
+                  label: (
+                    <Tooltip content="Tiles">
+                      <LayoutGrid className="h-3.5 w-3.5" aria-label="Comfortable" />
+                    </Tooltip>
+                  ),
+                },
+                {
+                  value: "compact",
+                  label: (
+                    <Tooltip content="Compact rows">
+                      <Rows3 className="h-3.5 w-3.5" aria-label="Compact" />
+                    </Tooltip>
+                  ),
+                },
+              ]}
+            />
+            <HeaderAction
+              variant="primary"
+              icon={<Plus />}
+              label="New agent"
+              hint={`${modKey}${isMac ? "" : "+"}N`}
+              onClick={() => openNewAgent()}
+            />
+          </>
         }
       >
-        <Segmented<Filter>
-          size="sm"
-          aria-label="Filter agents"
-          value={filter}
-          onChange={setFilter}
-          options={[
-            { value: "all", label: chip("All", counts.all) },
-            { value: "live", label: chip("Live", counts.live, "var(--accent)") },
-            { value: "needs", label: chip("Needs you", counts.needs, "var(--warn)") },
-            { value: "idle", label: chip("Idle", counts.idle) },
-          ]}
-        />
+        <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] @2xl/ph:mx-0 @2xl/ph:px-0 [&::-webkit-scrollbar]:hidden">
+          <Segmented<Filter>
+            size="sm"
+            aria-label="Filter agents"
+            value={filter}
+            onChange={setFilter}
+            options={[
+              { value: "all", label: chip("All", counts.all) },
+              { value: "live", label: chip("Live", counts.live, "var(--accent)") },
+              { value: "needs", label: chip("Needs you", counts.needs, "var(--warn)") },
+              { value: "idle", label: chip("Idle", counts.idle) },
+            ]}
+          />
+        </div>
       </PageHeader>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 @2xl:px-6 @2xl:py-5">
         {agents.length === 0 ? (
           <EmptyState
+            className="my-auto"
             icon={<Radar />}
             title="Your fleet is docked"
             description="Launch an agent and it shows up here as a live tile: status, last action and approvals at a glance."
@@ -147,6 +214,7 @@ export function MissionControlView() {
           />
         ) : visible.length === 0 ? (
           <EmptyState
+            className="my-auto"
             icon={<Radar />}
             title="All quiet on this channel"
             description="No agents match this filter right now."
@@ -156,13 +224,33 @@ export function MissionControlView() {
               </Button>
             }
           />
-        ) : (
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
-            <AnimatePresence initial={false} mode="popLayout">
+        ) : density === "compact" ? (
+          <div
+            role="list"
+            aria-label="Agents"
+            className="@container overflow-hidden rounded-xl border border-line bg-card edge"
+          >
+            <div className="contents">
               {visible.map((a) => (
-                <motion.div
+                <AgentRowCompact
                   key={a.id}
-                  layout="position"
+                  agent={a}
+                  account={accountMap.get(a.accountId)}
+                  summary={summaries.get(a.id) ?? EMPTY_SUMMARY}
+                  pending={pendingByAgent.get(a.id) ?? null}
+                  onOpen={openAgent}
+                />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 @2xl:grid-cols-2 @5xl:[grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
+            <AnimatePresence initial={false}>
+              {visible.map((a) => (
+                // No `layout`: it measured every tile on every render. Tiles only move when an agent
+                // changes status group, which is a deliberate jump, not an animation.
+                <m.div
+                  key={a.id}
                   className="h-full"
                   initial={{ opacity: 0, scale: 0.97 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -172,12 +260,11 @@ export function MissionControlView() {
                   <AgentTile
                     agent={a}
                     account={accountMap.get(a.accountId)}
-                    items={items[a.id]}
+                    summary={summaries.get(a.id) ?? EMPTY_SUMMARY}
                     pending={pendingByAgent.get(a.id) ?? null}
-                    now={now}
                     onOpen={openAgent}
                   />
-                </motion.div>
+                </m.div>
               ))}
             </AnimatePresence>
           </div>
