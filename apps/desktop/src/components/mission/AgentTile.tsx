@@ -76,6 +76,7 @@ export const AgentTile = memo(function AgentTile({
 
   return (
     <div
+      data-agent-id={agent.id}
       role="button"
       tabIndex={0}
       aria-label={`${agent.title}, ${meta.label}`}

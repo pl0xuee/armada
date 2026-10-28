@@ -86,7 +86,7 @@ function ActiveDictate({
       <span
         className={cn(
           "inline-flex items-center gap-1.5 text-[11.5px] text-muted",
-          round ? "h-7 w-7 shrink-0 justify-center rounded-full border border-line-strong bg-raised" : "h-6 px-1.5",
+          round ? "h-6 w-6 shrink-0 justify-center rounded-md" : "h-6 px-1.5",
           className,
         )}
         role="status"
@@ -108,7 +108,7 @@ function ActiveDictate({
           aria-label="Stop dictation and transcribe"
           className={cn(
             "inline-flex shrink-0 items-center gap-1.5 border border-err/30 bg-err/12 text-[11.5px] text-err transition-colors hover:bg-err/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-err",
-            round ? "h-7 rounded-full pl-2.5 pr-3" : "h-6 rounded-md pl-1.5 pr-2",
+            round ? "h-6 rounded-md pl-2 pr-2.5" : "h-6 rounded-md pl-1.5 pr-2",
             className,
           )}
         >
@@ -159,7 +159,7 @@ function IdleDictate({
           className={cn(
             "inline-flex items-center gap-1 text-[11.5px] text-muted transition-colors hover:bg-raised hover:text-fg disabled:opacity-40",
             round
-              ? "h-7 w-7 shrink-0 justify-center rounded-full border border-line-strong bg-raised/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              ? "h-6 w-6 shrink-0 justify-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
               : "h-6 rounded-md px-1.5",
             className,
           )}

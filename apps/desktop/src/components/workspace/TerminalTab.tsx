@@ -9,7 +9,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import type { Agent } from "@/lib/types";
 import { cn, errorMessage, isMac } from "@/lib/utils";
-import { bufferTail, fenced, themeFromCss, XTERM_FONT, XTERM_LINK_HANDLER } from "@/lib/xterm-theme";
+import { bufferTail, fenced, themeFromCss, XTERM_FONT, xtermLinkHandler } from "@/lib/xterm-theme";
 import { useUi } from "@/store/ui";
 import {
   agentWs,
@@ -93,7 +93,7 @@ export function TerminalTab({ agent }: { agent: Agent }) {
         </Tooltip>
       </div>
       {active ? (
-        <XtermView key={active.id} term={active} />
+        <XtermView key={active.id} term={active} agentId={agent.id} />
       ) : (
         <div className="flex flex-1 items-center justify-center text-[12.5px] text-steel">
           {ws.autoStarted ? "No terminals. Press + to open one." : "Starting a shell…"}
@@ -169,7 +169,7 @@ function TermChip({
   );
 }
 
-function XtermView({ term: session }: { term: WsTerm }) {
+function XtermView({ term: session, agentId }: { term: WsTerm; agentId: string }) {
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const exitedRef = useRef(session.exit !== undefined);
   exitedRef.current = session.exit !== undefined;
@@ -178,7 +178,7 @@ function XtermView({ term: session }: { term: WsTerm }) {
     if (!host) return;
     const id = session.id;
     const term = new Terminal({
-      linkHandler: XTERM_LINK_HANDLER,
+      linkHandler: xtermLinkHandler(agentId),
       fontFamily: XTERM_FONT,
       fontSize: 12.5,
       lineHeight: 1.3,

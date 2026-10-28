@@ -15,6 +15,7 @@ import {
   FolderOpen,
   GitBranch,
   GitCompare,
+  Globe,
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
@@ -39,6 +40,7 @@ import { useElementWidth } from "@/hooks/useElementWidth";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { INSPECTOR_DOCK_QUERY } from "@/lib/layout";
 import { useApp } from "@/store/app";
+import { hasNewServer, previewOf, togglePreview, usePreview } from "@/store/preview";
 import { useUi } from "@/store/ui";
 import { AccountAvatar } from "../AccountAvatar";
 import { ProviderGlyph } from "../ProviderGlyph";
@@ -63,6 +65,37 @@ import { UsageMeters, pctTextTone, windowLabel } from "../UsageMeter";
 import { relativeTimeLong } from "@/lib/format";
 
 const EMPTY_CUSTOM: CustomAgent[] = [];
+
+/** Opens / closes the right-side Preview pane; shown while a dev server is live (or the pane is open). */
+function PreviewChip({ agentId, showLabel }: { agentId: string; showLabel: boolean }) {
+  const open = usePreview((s) => previewOf(s, agentId).open);
+  const hasLive = usePreview((s) => previewOf(s, agentId).live.length > 0);
+  const fresh = usePreview((s) => hasNewServer(previewOf(s, agentId)));
+  if (!open && !hasLive) return null;
+  const label = open ? "Close preview" : fresh ? "Open preview (new server detected)" : "Open preview";
+  return (
+    <Tooltip content={label} shortcut={[modKey, "⇧", "P"]}>
+      <Button
+        size={showLabel ? "xs" : "icon-sm"}
+        variant={open ? "secondary" : "ghost"}
+        aria-label={label}
+        aria-pressed={open}
+        onClick={() => togglePreview(agentId)}
+        className="relative"
+      >
+        <Globe className={showLabel ? "!h-3.5 !w-3.5" : undefined} />
+        {showLabel && "Preview"}
+        {fresh && !open && (
+          <span
+            className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-accent ring-2 ring-base"
+            role="img"
+            aria-label="New server detected"
+          />
+        )}
+      </Button>
+    </Tooltip>
+  );
+}
 
 function AgentHeaderImpl({ agent }: { agent: Agent }) {
   const account = useApp((s) => s.accounts.find((a) => a.id === agent.accountId));
@@ -187,6 +220,7 @@ function AgentHeaderImpl({ agent }: { agent: Agent }) {
           {tier !== "compact" && (
             <HandoffMenu agent={agent} onCustom={() => setHandoffAgent(agent)} showLabel={tier === "full"} />
           )}
+          <PreviewChip agentId={agent.id} showLabel={tier === "full"} />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button size="icon-sm" variant="ghost" aria-label="More actions">

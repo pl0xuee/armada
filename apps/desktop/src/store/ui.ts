@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { PREVIEW_DEFAULT_WIDTH } from "@/lib/layout";
 import type { Agent, Provider, Schedule } from "@/lib/types";
 
 export type View =
@@ -71,6 +72,9 @@ interface UiStore {
   /** Tallest the workspace panel can be right now (0 = the window is too small for it). Not persisted. */
   workspaceRoom: number;
   setWorkspaceRoom: (px: number) => void;
+  /** Width of the right-side Preview pane (clamped to the room at layout time); remembered across restarts. */
+  previewWidth: number;
+  setPreviewWidth: (px: number) => void;
   /** Bumps to ask the composer to focus itself. */
   composerFocusTick: number;
   /** A timeline item to scroll into view once its agent's timeline is showing (see `revealItem`). */
@@ -127,6 +131,18 @@ function saveWorkspace(open: boolean, height: number) {
   } catch {
     /* ignore */
   }
+}
+
+const PREVIEW_WIDTH_KEY = "armada.previewWidth";
+
+function readPreviewWidth(): number {
+  try {
+    const n = Number(localStorage.getItem(PREVIEW_WIDTH_KEY));
+    if (Number.isFinite(n) && n > 0) return Math.min(4000, Math.round(n));
+  } catch {
+    /* ignore */
+  }
+  return PREVIEW_DEFAULT_WIDTH;
 }
 
 const INSPECTOR_KEY = "armada.inspectorOpen";
@@ -193,6 +209,16 @@ export const useUi = create<UiStore>((set) => ({
   workspaceOpen: readWorkspace().open,
   workspaceHeight: readWorkspace().height,
   workspaceRoom: 1000,
+  previewWidth: readPreviewWidth(),
+  setPreviewWidth: (w) => {
+    const previewWidth = Math.min(4000, Math.max(1, Math.round(w)));
+    try {
+      localStorage.setItem(PREVIEW_WIDTH_KEY, String(previewWidth));
+    } catch {
+      /* ignore */
+    }
+    set({ previewWidth });
+  },
   setWorkspaceRoom: (workspaceRoom) => set((s) => (s.workspaceRoom === workspaceRoom ? s : { workspaceRoom })),
 
   setView: (view) => set({ view }),

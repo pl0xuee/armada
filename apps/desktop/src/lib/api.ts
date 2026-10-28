@@ -223,6 +223,8 @@ const tauriApi = {
   workspaceScripts: (agentId: string) => invoke<ProjectScript[]>("workspace_scripts", { agentId }),
   /** Subset of `ports` accepting TCP connections on loopback (Preview tab). */
   probePorts: (ports: number[]) => invoke<number[]>("probe_ports", { ports }),
+  /** Like probePorts, but says which loopback families (127.0.0.1 / [::1]) accept on each live port. */
+  probeLoopback: (ports: number[]) => invoke<PortFamilies[]>("probe_loopback", { ports }),
 
   // settings & attention
   updateSettings: (settings: Settings) => invoke<Settings>("update_settings", { settings }),
@@ -302,6 +304,12 @@ function createMockProxy(): ArmadaApi {
     out[key] = (...args: unknown[]) => loadMock().then((m) => (m.mockApi[key] as unknown as AnyAsyncFn)(...args));
   }
   return out as unknown as ArmadaApi;
+}
+
+export interface PortFamilies {
+  port: number;
+  v4: boolean;
+  v6: boolean;
 }
 
 export const api: ArmadaApi = isTauri() ? tauriApi : createMockProxy();

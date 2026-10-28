@@ -3,7 +3,15 @@ import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markd
 import remarkGfm from "remark-gfm";
 import { ImageOff } from "lucide-react";
 import { toast } from "sonner";
-import { isExternalUrl, linkMismatchHost, openExternal } from "@/lib/external";
+import {
+  isExternalUrl,
+  linkMismatchHost,
+  loopbackLink,
+  openExternal,
+  openLink,
+  PREVIEW_LINK_HINT,
+  resolveAgentId,
+} from "@/lib/external";
 import { cn } from "@/lib/utils";
 import { localImagePath } from "@/lib/images";
 import { CopyButton } from "./CopyButton";
@@ -135,12 +143,15 @@ const components: Components = {
     <a
       href={href}
       rel="noreferrer noopener"
-      title={href}
+      title={loopbackLink(href) ? PREVIEW_LINK_HINT : href}
+      // Handled here, not by the document navigation guard (which would open it before the
+      // mismatch check below could warn).
+      data-own-click=""
       onClick={(e) => {
         e.preventDefault();
         if (!href) return;
         const host = linkMismatchHost(textOf(children), href);
-        if (!host) return void openExternal(href);
+        if (!host) return void openLink(href, e.nativeEvent, resolveAgentId(e.currentTarget));
         toast(`This link goes to ${host}`, {
           description: "The link text shows a different address.",
           action: { label: "Open", onClick: () => void openExternal(href) },

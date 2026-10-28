@@ -903,6 +903,9 @@ function mockProbe(kind: LocalKind, baseUrl: string): LocalProbe {
 
 const mockBase: Record<string, BaseBranchStatus> = {};
 
+/** Port the mock agent "a-token" says its dev server runs on. */
+const MOCK_DEV_PORT = 4723;
+
 export const mockApi: ArmadaApi = {
   async getState(): Promise<AppState> {
     setTimeout(startLiveActivity, 600);
@@ -1873,8 +1876,32 @@ export const mockApi: ArmadaApi = {
     return delay(t.id, 60);
   },
 
+  async probeLoopback(ports) {
+    const up = await mockApi.probePorts(ports);
+    // The mock's fictional server is IPv4-only, like a plain `python -m http.server`.
+    return up.map((port) => ({ port, v4: true, v6: false }));
+  },
+
   async probePorts(ports) {
-    return delay(ports, 40);
+    // The fictional dev server (4723) is always up; any other port is probed for real, which works in
+    // a plain browser because a no-cors fetch to loopback settles only when something is listening.
+    const up = await Promise.all(
+      ports.map(async (p) => {
+        if (p === MOCK_DEV_PORT) return true;
+        if (typeof fetch !== "function" || typeof AbortController === "undefined") return false;
+        const ctl = new AbortController();
+        const t = setTimeout(() => ctl.abort(), 700);
+        try {
+          await fetch(`http://127.0.0.1:${p}/`, { mode: "no-cors", signal: ctl.signal });
+          return true;
+        } catch {
+          return false;
+        } finally {
+          clearTimeout(t);
+        }
+      }),
+    );
+    return ports.filter((_, i) => up[i]);
   },
 
   async workspaceScripts() {
