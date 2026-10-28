@@ -6,7 +6,10 @@
 use armada_core::Attachment;
 use serde::Serialize;
 
+// Only the Linux reader uses these (macOS/Windows are a no-op).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub const MAX_IMAGES: usize = 8;
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub const MAX_BYTES: usize = 5 * 1024 * 1024;
 
 #[derive(Debug, Default, Serialize)]

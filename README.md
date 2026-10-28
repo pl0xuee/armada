@@ -189,13 +189,13 @@ Armada is fully usable from the keyboard. Press `Ctrl/Cmd+/` (or `?`) in the app
 Prerequisites:
 
 - Rust (stable) and Node.js 22
-- `cmake` and a C++ compiler (voice dictation builds whisper.cpp; preinstalled on GitHub runners)
+- `cmake`, a C++ compiler and libclang (voice dictation builds whisper.cpp and generates its bindings; preinstalled on GitHub's macOS and Windows runners)
 - On Linux, the Tauri system libraries:
   ```bash
   sudo apt-get install -y \
     build-essential pkg-config cmake \
     libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
-    libxdo-dev libssl-dev libasound2-dev libdbus-1-dev patchelf
+    libxdo-dev libssl-dev libasound2-dev libdbus-1-dev libclang-dev patchelf
   ```
 
 ```bash
