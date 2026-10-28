@@ -13,6 +13,7 @@ import {
   Play,
   Power,
   Square,
+  SquareTerminal,
   Sun,
   CalendarClock,
   Download,
@@ -62,6 +63,7 @@ import { toast } from "sonner";
 import { useDebounced } from "@/hooks/useDebounced";
 import { useApp, usePendingPermissions } from "@/store/app";
 import { useUi, type SettingsSection } from "@/store/ui";
+import { openTerminal } from "@/store/workspace";
 import { openShortcutHelp } from "./shell/ShortcutHelp";
 import { ProviderGlyph } from "./ProviderGlyph";
 import { StatusDot } from "./StatusDot";
@@ -323,12 +325,15 @@ function Palette({ onClose }: { onClose: () => void }) {
                   <span className="w-24 truncate text-right text-[11.5px] text-steel max-[480px]:hidden">
                     {basename(a.projectPath)}
                   </span>
-                  {i < 9 && !a.archived && (
-                    <span className="hidden gap-0.5 group-data-[selected=true]:flex">
-                      <Kbd>{modKey}</Kbd>
-                      <Kbd>{i + 1}</Kbd>
-                    </span>
-                  )}
+                  {/* Always reserve the badge's width so rows don't shift when one is selected. */}
+                  <span className="invisible flex w-[52px] shrink-0 justify-end gap-0.5 group-data-[selected=true]:visible max-[480px]:hidden">
+                    {i < 9 && !a.archived && (
+                      <>
+                        <Kbd>{modKey}</Kbd>
+                        <Kbd>{i + 1}</Kbd>
+                      </>
+                    )}
+                  </span>
                 </Command.Item>
               ))}
             </Command.Group>
@@ -351,6 +356,26 @@ function Palette({ onClose }: { onClose: () => void }) {
                     onSelect={() => run(() => void resumeAgent(current))}
                   />
                 )}
+                <PaletteAction
+                  icon={<SquareTerminal />}
+                  label="Toggle workspace panel"
+                  shortcut={[modKey, "`"]}
+                  keywords={["terminal", "scripts", "shell", "console"]}
+                  onSelect={() => run(() => ui.setWorkspaceOpen(!useUi.getState().workspaceOpen))}
+                />
+                <PaletteAction
+                  icon={<SquareTerminal />}
+                  label="New terminal"
+                  keywords={["terminal", "shell", "console", "workspace"]}
+                  onSelect={() =>
+                    run(() => {
+                      ui.setWorkspaceOpen(true);
+                      void openTerminal(current.id).catch((e: unknown) =>
+                        toast.error("Couldn't open a terminal", { description: errorMessage(e) }),
+                      );
+                    })
+                  }
+                />
                 {current.worktree && (
                   <PaletteAction
                     icon={<GitCompare />}

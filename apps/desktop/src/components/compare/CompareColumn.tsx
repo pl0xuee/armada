@@ -8,8 +8,9 @@ import { StatusPill } from "@/components/StatusDot";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { diffStats } from "@/lib/diff";
-import { formatCost, formatTokens, relativeTime } from "@/lib/format";
+import { agentCostText, formatTokens, relativeTime } from "@/lib/format";
 import { STATUS } from "@/lib/providers";
+import { useIsDone } from "@/store/completion";
 import { useIdentity } from "@/hooks/useIdentity";
 import type { Account, Agent, FileDiff, TimelineItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,7 @@ export function CompareColumn({
   onKeep: () => void;
   keeping: boolean;
 }) {
+  const done = useIsDone(agent);
   const meta = STATUS[agent.status];
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const working = agent.status === "working" || agent.status === "starting";
@@ -99,11 +101,11 @@ export function CompareColumn({
               <span>{relativeTime(agent.lastActivityAt, now)}</span>
             </div>
           </div>
-          <StatusPill status={agent.status} />
+          <StatusPill status={agent.status} done={done} />
         </div>
         <div className="relative mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-muted tabular">
           <span className={cn("flex items-center gap-1", cheapest && "text-ok")}>
-            {formatCost(agent.costUsd)}
+            {agentCostText(agent)}
             {cheapest && <span className="text-[10px] uppercase tracking-wider">cheapest</span>}
           </span>
           <span>{formatTokens(agent.tokensUsed)} tokens</span>

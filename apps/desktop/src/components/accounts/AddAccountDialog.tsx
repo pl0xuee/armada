@@ -9,19 +9,23 @@ import { Segmented } from "@/components/ui/segmented";
 import { startLogin } from "@/lib/actions";
 import { api } from "@/lib/api";
 import { ACCOUNT_COLORS, PROVIDER_ORDER, PROVIDERS, type BuiltinProvider } from "@/lib/providers";
-import type { AuthKind } from "@/lib/types";
+import { LOCAL_KIND_LABEL } from "@/lib/local";
+import type { AuthKind, LocalServer } from "@/lib/types";
 import { cn, errorMessage } from "@/lib/utils";
 import { useApp } from "@/store/app";
+import { LocalSetup } from "@/components/local/LocalSetup";
 import { ColorSwatches } from "./ColorSwatches";
 import { onRadioGroupKeyDown } from "../ui/radioKeys";
 
-const SUBSCRIPTION: Record<BuiltinProvider, string> = {
+type CloudProvider = Exclude<BuiltinProvider, "local">;
+
+const SUBSCRIPTION: Record<CloudProvider, string> = {
   claude: "Claude Pro or Max",
   codex: "ChatGPT Plus, Pro or Team",
   grok: "SuperGrok or X Premium+",
 };
 
-const KEY_HINT: Record<BuiltinProvider, { env: string; placeholder: string }> = {
+const KEY_HINT: Record<CloudProvider, { env: string; placeholder: string }> = {
   claude: { env: "ANTHROPIC_API_KEY", placeholder: "sk-ant-…" },
   codex: { env: "OPENAI_API_KEY", placeholder: "sk-proj-…" },
   grok: { env: "XAI_API_KEY", placeholder: "xai-…" },
@@ -44,6 +48,9 @@ export function AddAccountDialog({
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [localServer, setLocalServer] = useState<LocalServer | null>(null);
+  const [localKey, setLocalKey] = useState<string | null>(null);
+  const isLocal = provider === "local";
 
   useEffect(() => {
     if (!open) return;
@@ -59,9 +66,17 @@ export function AddAccountDialog({
   }, [open, defaultProvider]);
 
   const existing = accounts.filter((a) => a.provider === provider).length;
-  const placeholder = existing === 0 ? "Personal" : existing === 1 ? "Work" : `Account ${existing + 1}`;
+  const placeholder = isLocal
+    ? localServer
+      ? LOCAL_KIND_LABEL[localServer.kind]
+      : "Local model"
+    : existing === 0
+      ? "Personal"
+      : existing === 1
+        ? "Work"
+        : `Account ${existing + 1}`;
   const finalName = name.trim() || placeholder;
-  const valid = auth === "oauth" || apiKey.trim().length >= 8;
+  const valid = isLocal ? localServer !== null : auth === "oauth" || apiKey.trim().length >= 8;
 
   const submit = async () => {
     if (!valid || busy) return;
@@ -71,12 +86,15 @@ export function AddAccountDialog({
         provider,
         name: finalName,
         color,
-        authKind: auth,
-        apiKey: auth === "api_key" ? apiKey.trim() : null,
+        authKind: isLocal ? "default" : auth,
+        apiKey: isLocal ? localKey : auth === "api_key" ? apiKey.trim() : null,
+        local: isLocal ? localServer : null,
       });
       useApp.getState().upsertAccount(acc);
       onOpenChange(false);
-      if (auth === "oauth") {
+      if (isLocal) {
+        toast.success(`Added “${acc.name}”`, { description: acc.status?.label ?? "Start the server to use it." });
+      } else if (auth === "oauth") {
         await startLogin(acc);
       } else {
         toast.success(`Added “${acc.name}”`, { description: "API key stored in your OS keychain." });
@@ -92,7 +110,11 @@ export function AddAccountDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         title="Add account"
-        description="Each account gets its own isolated profile, so you can stay signed in to several at once."
+        description={
+          isLocal
+            ? "Run models on this computer, or on a machine you control. Free to use, and nothing goes to a cloud provider."
+            : "Each account gets its own isolated profile, so you can stay signed in to several at once."
+        }
         className="w-[min(520px,calc(100vw-32px))]"
       >
         <form
@@ -141,63 +163,74 @@ export function AddAccountDialog({
               <ColorSwatches value={color} onChange={setColor} />
             </div>
 
-            <div>
-              <Label>Sign-in method</Label>
-              <div
-                className="grid grid-cols-2 gap-2"
-                role="radiogroup"
-                aria-label="Sign-in method"
-                onKeyDown={onRadioGroupKeyDown}
-              >
-                <AuthOption
-                  active={auth === "oauth"}
-                  onClick={() => setAuth("oauth")}
-                  icon={<LogIn />}
-                  title="Subscription"
-                  description={SUBSCRIPTION[provider]}
-                />
-                <AuthOption
-                  active={auth === "api_key"}
-                  onClick={() => setAuth("api_key")}
-                  icon={<KeyRound />}
-                  title="API key"
-                  description="Billed per token"
-                />
-              </div>
-            </div>
-
-            {auth === "api_key" ? (
-              <div>
-                <Label htmlFor="add-acc-key">{KEY_HINT[provider].env}</Label>
-                <div className="relative">
-                  <Input
-                    id="add-acc-key"
-                    type={showKey ? "text" : "password"}
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={KEY_HINT[provider].placeholder}
-                    autoComplete="off"
-                    className="pr-10 font-mono"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowKey((s) => !s)}
-                    aria-label={showKey ? "Hide key" : "Show key"}
-                    className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-steel hover:bg-raised hover:text-fg"
-                  >
-                    {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-                <p className="mt-2 flex items-center gap-1.5 text-[11.5px] text-steel">
-                  <ShieldCheck className="h-3.5 w-3.5 text-ok" />
-                  Stored in your OS keychain, only injected into this account's agents.
-                </p>
-              </div>
+            {isLocal ? (
+              <LocalSetup
+                onChange={(server, key) => {
+                  setLocalServer(server);
+                  setLocalKey(key);
+                }}
+              />
             ) : (
-              <p className="rounded-lg border border-line bg-base/50 px-3 py-2.5 text-[12px] leading-relaxed text-muted">
-                After you click <span className="text-fg">Add & sign in</span>, {PROVIDERS[provider].tagline}'s own
-                login runs in a terminal and opens your browser. Armada never sees your password or tokens.
-              </p>
+              <>
+                <div>
+                  <Label>Sign-in method</Label>
+                  <div
+                    className="grid grid-cols-2 gap-2"
+                    role="radiogroup"
+                    aria-label="Sign-in method"
+                    onKeyDown={onRadioGroupKeyDown}
+                  >
+                    <AuthOption
+                      active={auth === "oauth"}
+                      onClick={() => setAuth("oauth")}
+                      icon={<LogIn />}
+                      title="Subscription"
+                      description={SUBSCRIPTION[provider as CloudProvider]}
+                    />
+                    <AuthOption
+                      active={auth === "api_key"}
+                      onClick={() => setAuth("api_key")}
+                      icon={<KeyRound />}
+                      title="API key"
+                      description="Billed per token"
+                    />
+                  </div>
+                </div>
+
+                {auth === "api_key" ? (
+                  <div>
+                    <Label htmlFor="add-acc-key">{KEY_HINT[provider as CloudProvider].env}</Label>
+                    <div className="relative">
+                      <Input
+                        id="add-acc-key"
+                        type={showKey ? "text" : "password"}
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        placeholder={KEY_HINT[provider as CloudProvider].placeholder}
+                        autoComplete="off"
+                        className="pr-10 font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowKey((s) => !s)}
+                        aria-label={showKey ? "Hide key" : "Show key"}
+                        className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-steel hover:bg-raised hover:text-fg"
+                      >
+                        {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <p className="mt-2 flex items-center gap-1.5 text-[11.5px] text-steel">
+                      <ShieldCheck className="h-3.5 w-3.5 text-ok" />
+                      Stored in your OS keychain, only injected into this account's agents.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-line bg-base/50 px-3 py-2.5 text-[12px] leading-relaxed text-muted">
+                    After you click <span className="text-fg">Add & sign in</span>, {PROVIDERS[provider].tagline}'s own
+                    login runs in a terminal and opens your browser. Armada never sees your password or tokens.
+                  </p>
+                )}
+              </>
             )}
           </DialogBody>
           <DialogFooter>
@@ -205,7 +238,9 @@ export function AddAccountDialog({
               Cancel
             </Button>
             <Button variant="primary" type="submit" disabled={!valid || busy}>
-              {auth === "oauth" ? (
+              {isLocal ? (
+                "Add server"
+              ) : auth === "oauth" ? (
                 <>
                   <LogIn /> Add & sign in
                 </>

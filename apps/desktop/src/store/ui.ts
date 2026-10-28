@@ -14,6 +14,8 @@ export type SettingsSection =
   | "providers"
   | "agents"
   | "remote"
+  | "voice"
+  | "assistant"
   | "about";
 
 export interface TerminalSession {
@@ -63,11 +65,22 @@ interface UiStore {
   shareAgent: Agent | null;
   terminal: TerminalSession | null;
   windowFocused: boolean;
+  /** Workspace panel (terminals, scripts) under the conversation; remembered across restarts. */
+  workspaceOpen: boolean;
+  workspaceHeight: number;
+  /** Tallest the workspace panel can be right now (0 = the window is too small for it). Not persisted. */
+  workspaceRoom: number;
+  setWorkspaceRoom: (px: number) => void;
   /** Bumps to ask the composer to focus itself. */
   composerFocusTick: number;
+  /** A timeline item to scroll into view once its agent's timeline is showing (see `revealItem`). */
+  revealTarget: { agentId: string; itemId: string; tick: number } | null;
 
   setView: (v: View) => void;
   openAgent: (id: string) => void;
+  /** Open an agent and scroll its timeline to one item (e.g. a sub-agent's card). */
+  revealItem: (agentId: string, itemId: string) => void;
+  clearRevealTarget: () => void;
   openCompare: (groupId: string | null) => void;
   openSettings: (section?: SettingsSection) => void;
   setInspectorOpen: (open: boolean) => void;
@@ -86,6 +99,34 @@ interface UiStore {
   setTerminal: (t: TerminalSession | null) => void;
   setWindowFocused: (f: boolean) => void;
   focusComposer: () => void;
+  setWorkspaceOpen: (open: boolean) => void;
+  setWorkspaceHeight: (px: number) => void;
+}
+
+const WORKSPACE_KEY = "armada.workspace";
+export const WORKSPACE_MIN_HEIGHT = 120;
+export const WORKSPACE_DEFAULT_HEIGHT = 280;
+
+function readWorkspace(): { open: boolean; height: number } {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_KEY);
+    if (raw) {
+      const v = JSON.parse(raw) as Partial<{ open: boolean; height: number }>;
+      const h = typeof v.height === "number" && Number.isFinite(v.height) ? v.height : WORKSPACE_DEFAULT_HEIGHT;
+      return { open: v.open === true, height: Math.max(WORKSPACE_MIN_HEIGHT, Math.min(2000, Math.round(h))) };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { open: false, height: WORKSPACE_DEFAULT_HEIGHT };
+}
+
+function saveWorkspace(open: boolean, height: number) {
+  try {
+    localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ open, height }));
+  } catch {
+    /* ignore */
+  }
 }
 
 const INSPECTOR_KEY = "armada.inspectorOpen";
@@ -148,9 +189,21 @@ export const useUi = create<UiStore>((set) => ({
   terminal: null,
   windowFocused: typeof document !== "undefined" ? document.hasFocus() : true,
   composerFocusTick: 0,
+  revealTarget: null,
+  workspaceOpen: readWorkspace().open,
+  workspaceHeight: readWorkspace().height,
+  workspaceRoom: 1000,
+  setWorkspaceRoom: (workspaceRoom) => set((s) => (s.workspaceRoom === workspaceRoom ? s : { workspaceRoom })),
 
   setView: (view) => set({ view }),
   openAgent: (id) => set({ view: "agents", selectedAgentId: id }),
+  revealItem: (agentId, itemId) =>
+    set((s) => ({
+      view: "agents",
+      selectedAgentId: agentId,
+      revealTarget: { agentId, itemId, tick: (s.revealTarget?.tick ?? 0) + 1 },
+    })),
+  clearRevealTarget: () => set({ revealTarget: null }),
   openCompare: (compareGroupId) => set({ view: "compare", compareGroupId }),
   openSettings: (section) => set((s) => ({ view: "settings", settingsSection: section ?? s.settingsSection })),
   setInspectorOpen: (inspectorOpen) => {
@@ -186,4 +239,13 @@ export const useUi = create<UiStore>((set) => ({
   setTerminal: (terminal) => set({ terminal }),
   setWindowFocused: (windowFocused) => set({ windowFocused }),
   focusComposer: () => set((s) => ({ composerFocusTick: s.composerFocusTick + 1 })),
+  setWorkspaceOpen: (workspaceOpen) => {
+    saveWorkspace(workspaceOpen, useUi.getState().workspaceHeight);
+    set({ workspaceOpen });
+  },
+  setWorkspaceHeight: (h) => {
+    const workspaceHeight = Math.max(WORKSPACE_MIN_HEIGHT, Math.round(h));
+    saveWorkspace(useUi.getState().workspaceOpen, workspaceHeight);
+    set({ workspaceHeight });
+  },
 }));

@@ -5,19 +5,29 @@ Installed copies of Armada check GitHub Releases for updates (15 seconds after l
 - **Windows, macOS, Linux AppImage** install updates in place. The updater reads `latest.json` from the latest published release and verifies each download against the public key in `apps/desktop/src-tauri/tauri.conf.json` before installing.
 - **deb / rpm** installs are owned by the system package manager. Armada asks the GitHub Releases API whether a newer version exists and links to the release page.
 
+## Release notes
+
+Every release has notes, written in [`CHANGELOG.md`](../CHANGELOG.md). Add user-facing entries under `## Unreleased` as you go (what changed for people using the app, not commit subjects). The section for a version becomes:
+
+- the GitHub release body (followed by install instructions and a "Full changelog" compare link), and
+- the notes shown by the in-app updater ("Release notes" on the update pill), via `latest.json`.
+
+`scripts/release_notes.py` enforces this. CI runs `release_notes.py --check`, which fails when the version in `Cargo.toml` has no non-empty section. The Release workflow fails before building anything when the tag has none. Preview a release body with `python3 scripts/release_notes.py v0.2.0`.
+
 ## Cutting a release
 
 1. Bump the version everywhere (they must match the tag; the Release workflow refuses to build otherwise):
    - `Cargo.toml` → `[workspace.package] version` (then `cargo check` to update `Cargo.lock`)
    - `apps/desktop/package.json` and `apps/remote/package.json` → `version` (then `npm install` in each to update the lock files)
    - `tauri.conf.json` has no version on purpose: Tauri takes it from `Cargo.toml`.
-2. Commit, then tag and push:
+2. In `CHANGELOG.md`, rename `## Unreleased` to `## v0.2.0 — <date>`, review the notes, and start a fresh empty `## Unreleased` above it.
+3. Commit, then tag and push:
    ```bash
    git tag v0.2.0
    git push origin v0.2.0
    ```
-3. The **Release** workflow first checks that the tag matches the version and runs the tests, then builds macOS (universal), Windows and Linux installers, signs the update bundles and uploads everything plus `latest.json` to a **draft** release.
-4. Review the draft on GitHub and press **Publish**. Only published releases are visible to the updater, so this is the moment the update rolls out.
+4. The **Release** workflow first checks that the tag matches the version, that `CHANGELOG.md` has notes for it, and that the tests pass. It then builds macOS (universal), Windows and Linux installers, signs the update bundles and uploads everything plus `latest.json` to a **draft** release with the notes as its body.
+5. Review the draft on GitHub and press **Publish**. Edits to the draft's notes change the GitHub page only: the in-app updater reads the copy already baked into `latest.json`, so fix notes in `CHANGELOG.md` before tagging. Only published releases are visible to the updater, so this is the moment the update rolls out.
 
 ## Signing key
 

@@ -12,7 +12,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { useNow } from "@/hooks/useNow";
 import { api } from "@/lib/api";
 import { relativeTimeLong } from "@/lib/format";
-import type { RemoteSettings, RemoteStatus, Settings, ShareLink } from "@/lib/types";
+import type { RemoteDevice, RemoteSettings, RemoteStatus, Settings, ShareLink } from "@/lib/types";
 import { cn, errorMessage } from "@/lib/utils";
 import { useShallow } from "zustand/react/shallow";
 import { useApp } from "@/store/app";
@@ -23,7 +23,7 @@ import { useCommitOnUnmount } from "./useCommitOnUnmount";
 import { SectionHeader, SettingGroup, SettingRow } from "./SettingRow";
 
 const SECURITY_COPY =
-  "Off by default. With LAN access on, traffic isn't encrypted: use it on networks you trust, or over a VPN such as Tailscale. Anyone with the pairing link has full control; share links are read-only and limited to one agent.";
+  "Off by default. On your local network, traffic between your phone and this computer is not encrypted (plain HTTP): anyone on the same Wi-Fi could read or tamper with it. Use it at home or on networks you trust, and use Tailscale (or another VPN) to reach Armada from anywhere else. The pairing code in the QR works once and expires after 5 minutes; each paired device gets its own key you can revoke below. Share links are read-only, limited to one agent, and expire.";
 
 function validPort(raw: string): number | null {
   if (!/^\d+$/.test(raw.trim())) return null;
@@ -63,6 +63,14 @@ export function RemoteSection({ settings }: { settings: Settings }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // The pairing code is single use: keep the QR, the code's expiry and the device list current.
+  const live = !!status?.running;
+  useEffect(() => {
+    if (!live) return;
+    const id = setInterval(() => void refresh(), 5000);
+    return () => clearInterval(id);
+  }, [live, refresh]);
 
   /** Persist remote settings (the backend starts/stops/restarts the server), then re-read status. */
   const apply = async (patch: Partial<RemoteSettings>) => {
@@ -107,7 +115,7 @@ export function RemoteSection({ settings }: { settings: Settings }) {
     setRotating(true);
     try {
       setStatus(await api.remoteRotateToken());
-      toast.success("All devices unpaired", { description: "Scan the new code to pair again." });
+      toast.success("All devices unpaired", { description: "Scan the pairing code to pair again." });
     } catch (e) {
       toast.error("Couldn't unpair devices", { description: errorMessage(e) });
     } finally {
@@ -219,6 +227,12 @@ export function RemoteSection({ settings }: { settings: Settings }) {
                 onUnpair={() => setConfirmUnpair(true)}
               />
             )}
+            <DevicesGroup
+              devices={status.devices}
+              onChanged={(st) => setStatus(st)}
+              onUnpairAll={() => setConfirmUnpair(true)}
+              rotating={rotating}
+            />
             <SharesGroup shares={status.shares} enabled={status.enabled} onChanged={() => void refresh()} />
           </>
         )}
@@ -230,8 +244,9 @@ export function RemoteSection({ settings }: { settings: Settings }) {
         title="Allow devices on your network?"
         description={
           <>
-            Anyone on this network who gets the pairing link can control your agents, and traffic isn't encrypted. Use
-            it on networks you trust (home, or a VPN such as Tailscale), not on public Wi-Fi.
+            Anyone on this network who scans the pairing code while it's shown can control your agents, and traffic on
+            the local network isn't encrypted. Use it on networks you trust (home, or a VPN such as Tailscale), not on
+            public Wi-Fi. Armada refuses to listen on a public address.
           </>
         }
         confirmLabel="Allow network access"
@@ -247,7 +262,7 @@ export function RemoteSection({ settings }: { settings: Settings }) {
         danger
         busy={rotating}
         title="Unpair all devices?"
-        description="Every paired phone and browser is signed out right away and the old pairing link stops working. Share links stay active."
+        description="Every paired phone and browser is signed out right away. Share links stay active."
         confirmLabel="Unpair all"
         onConfirm={unpair}
       />
@@ -310,7 +325,7 @@ function PairingCard({
 }: {
   status: RemoteStatus;
   rotating: boolean;
-  /** The QR and link grant full control: keep them hidden until asked for (screen sharing, shoulder surfing). */
+  /** The QR and link let a device pair with full control: keep them hidden until asked for (screen sharing, shoulder surfing). */
   shown: boolean;
   onShow: (shown: boolean) => void;
   onUnpair: () => void;
@@ -328,7 +343,8 @@ function PairingCard({
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium">Pair your phone</div>
           <div className="text-[12px] text-muted">
-            The pairing code gives full control. It's hidden so it doesn't show up in screen shares.
+            The pairing code is hidden so it doesn't show up in screen shares. It works once and expires after 5
+            minutes.
           </div>
         </div>
         <Button size="sm" variant="secondary" onClick={() => onShow(true)}>
@@ -373,7 +389,8 @@ function PairingCard({
             <span className="mr-1.5 text-steel tabular">1.</span>Open the camera on your phone.
           </li>
           <li>
-            <span className="mr-1.5 text-steel tabular">2.</span>Scan the code and open the link.
+            <span className="mr-1.5 text-steel tabular">2.</span>Scan the code and open the link. It works once, for 5
+            minutes.
           </li>
           <li>
             <span className="mr-1.5 text-steel tabular">3.</span>Add it to your home screen for one-tap access.
@@ -406,9 +423,9 @@ function SharesGroup({ shares, enabled, onChanged }: { shares: ShareLink[]; enab
   const [revoking, setRevoking] = useState<string | null>(null);
 
   const revoke = async (link: ShareLink) => {
-    setRevoking(link.token);
+    setRevoking(link.id);
     try {
-      await api.revokeShareLink(link.token);
+      await api.revokeShareLink(link.id);
       toast("Share link revoked", { description: link.agentTitle ?? undefined });
       onChanged();
     } catch (e) {
@@ -421,7 +438,7 @@ function SharesGroup({ shares, enabled, onChanged }: { shares: ShareLink[]; enab
   return (
     <SettingGroup
       title="Share links"
-      description="Read-only live views of a single agent. Create one from an agent's menu: Share live view…"
+      description="Read-only live views of a single agent: messages and a tool outline, no command output, files or local paths. Create one from an agent's menu: Share live view…"
     >
       {shares.length === 0 ? (
         <div className="flex items-center gap-3 px-4 py-4 text-[12.5px] text-steel">
@@ -432,7 +449,7 @@ function SharesGroup({ shares, enabled, onChanged }: { shares: ShareLink[]; enab
         shares.map((s) => {
           const title = s.agentTitle ?? titles[shares.indexOf(s)] ?? "Deleted agent";
           return (
-            <div key={s.token} className="flex items-center gap-3 px-4 py-3">
+            <div key={s.id} className="flex items-center gap-3 px-4 py-3">
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line-strong bg-raised text-steel">
                 <Link2 className="h-4 w-4" />
               </span>
@@ -440,30 +457,100 @@ function SharesGroup({ shares, enabled, onChanged }: { shares: ShareLink[]; enab
                 <div className="truncate text-[13px] font-medium">{title}</div>
                 <div className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-steel">
                   <span className="shrink-0">Created {relativeTimeLong(s.createdAt, now)}</span>
-                  {s.url && (
-                    <>
-                      <span className="text-line-strong">·</span>
-                      <span className="selectable min-w-0 truncate font-mono text-[11px]">{s.url}</span>
-                    </>
-                  )}
+                  <span className="text-line-strong">·</span>
+                  <span className="shrink-0">Expires {new Date(s.expiresAt).toLocaleString()}</span>
                 </div>
               </div>
-              {s.url && <CopyButton text={s.url} label="Copy" />}
               <Tooltip content="Revoke link">
                 <Button
                   size="icon-sm"
                   variant="ghost"
                   aria-label={`Revoke share link for ${title}`}
-                  disabled={revoking === s.token}
+                  disabled={revoking === s.id}
                   onClick={() => void revoke(s)}
                   className="hover:text-err"
                 >
-                  {revoking === s.token ? <Spinner className="h-3.5 w-3.5" /> : <Trash2 className="!h-3.5 !w-3.5" />}
+                  {revoking === s.id ? <Spinner className="h-3.5 w-3.5" /> : <Trash2 className="!h-3.5 !w-3.5" />}
                 </Button>
               </Tooltip>
             </div>
           );
         })
+      )}
+    </SettingGroup>
+  );
+}
+
+function DevicesGroup({
+  devices,
+  onChanged,
+  onUnpairAll,
+  rotating,
+}: {
+  devices: RemoteDevice[];
+  onChanged: (status: RemoteStatus) => void;
+  onUnpairAll: () => void;
+  rotating: boolean;
+}) {
+  const now = useNow();
+  const [revoking, setRevoking] = useState<string | null>(null);
+
+  const revoke = async (device: RemoteDevice) => {
+    setRevoking(device.id);
+    try {
+      onChanged(await api.remoteRevokeDevice(device.id));
+      toast("Device unpaired", { description: `${device.name} lost access immediately.` });
+    } catch (e) {
+      toast.error("Couldn't unpair the device", { description: errorMessage(e) });
+    } finally {
+      setRevoking(null);
+    }
+  };
+
+  return (
+    <SettingGroup
+      title="Paired devices"
+      description="Each phone has its own key. Revoke one to sign that device out right away."
+    >
+      {devices.length === 0 ? (
+        <div className="flex items-center gap-3 px-4 py-4 text-[12.5px] text-steel">
+          <Smartphone className="h-4 w-4 shrink-0" />
+          No paired devices. Scan the pairing code with your phone.
+        </div>
+      ) : (
+        <>
+          {devices.map((d) => (
+            <div key={d.id} className="flex items-center gap-3 px-4 py-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line-strong bg-raised text-steel">
+                <Smartphone className="h-4 w-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-medium">{d.name}</div>
+                <div className="text-[11.5px] text-steel">
+                  {d.lastSeen > 0 ? `Last seen ${relativeTimeLong(d.lastSeen, now)}` : "Not seen yet"} · paired{" "}
+                  {relativeTimeLong(d.createdAt, now)}
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label={`Revoke ${d.name}`}
+                disabled={revoking === d.id}
+                onClick={() => void revoke(d)}
+                className="hover:text-err"
+              >
+                {revoking === d.id ? <Spinner className="h-3.5 w-3.5" /> : <Trash2 className="!h-3.5 !w-3.5" />}
+                Revoke
+              </Button>
+            </div>
+          ))}
+          <div className="flex justify-end px-4 py-2.5">
+            <Button size="sm" variant="danger" disabled={rotating} onClick={onUnpairAll}>
+              {rotating ? <Spinner className="h-3.5 w-3.5 text-current" /> : <Unplug className="!h-3.5 !w-3.5" />}
+              Unpair all devices
+            </Button>
+          </div>
+        </>
       )}
     </SettingGroup>
   );

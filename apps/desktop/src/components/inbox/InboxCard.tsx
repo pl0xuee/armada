@@ -10,6 +10,7 @@ import { relativeTime } from "@/lib/format";
 import { useIdentity } from "@/hooks/useIdentity";
 import type { Account, Agent, PermissionOption, TimelineItem, ToolKind } from "@/lib/types";
 import { basename, cn } from "@/lib/utils";
+import { CodeText } from "../CodeText";
 
 type PermissionItem = Extract<TimelineItem, { kind: "permission" }>;
 
@@ -126,7 +127,7 @@ export const InboxCard = memo(
                 </div>
                 <pre className="selectable whitespace-pre-wrap px-3 py-2.5 font-mono text-[12.5px] leading-relaxed text-fg [overflow-wrap:anywhere]">
                   <span className="select-none text-ok">$ </span>
-                  {item.command}
+                  <CodeText code={item.command} lang="shellscript" />
                 </pre>
               </div>
             )}

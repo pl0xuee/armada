@@ -5,8 +5,10 @@ import { selectNextTriage, triageQueueNow } from "@/components/triage/useTriage"
 import { toggleAgentList } from "./useAgentListLayout";
 import { isEditableTarget, isMac } from "@/lib/utils";
 import { openShortcutHelp, toggleShortcutHelp } from "@/components/shell/ShortcutHelp";
+import { stepInterfaceScale } from "@/lib/zoom";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
+import { toggleVoiceAssistant } from "@/store/voiceAssistant";
 
 /** App-wide keyboard shortcuts. Mod = ⌘ on macOS, Ctrl elsewhere. */
 export function useGlobalShortcuts(enabled: boolean) {
@@ -28,6 +30,23 @@ export function useGlobalShortcuts(enabled: boolean) {
       if (e.key === "/" && !e.shiftKey) {
         e.preventDefault();
         toggleShortcutHelp();
+        return;
+      }
+
+      // Interface zoom works anywhere, even over a dialog.
+      if (e.key === "=" || e.key === "+") {
+        e.preventDefault();
+        stepInterfaceScale(1);
+        return;
+      }
+      if (e.key === "-" && !e.shiftKey) {
+        e.preventDefault();
+        stepInterfaceScale(-1);
+        return;
+      }
+      if (e.key === "0" && !e.shiftKey) {
+        e.preventDefault();
+        stepInterfaceScale(0);
         return;
       }
 
@@ -57,6 +76,13 @@ export function useGlobalShortcuts(enabled: boolean) {
         }
         return;
       }
+      if (e.key === "`" && !e.shiftKey) {
+        // Workspace panel (terminals, scripts) of the open agent.
+        if (ui.view !== "agents" || !ui.selectedAgentId) return;
+        e.preventDefault();
+        ui.setWorkspaceOpen(!ui.workspaceOpen);
+        return;
+      }
       if (key === "j" && !e.shiftKey) {
         e.preventDefault();
         // Opens "Needs you"; pressed again while it's open, moves to the next waiting agent.
@@ -67,6 +93,11 @@ export function useGlobalShortcuts(enabled: boolean) {
       if (key === "i" && !e.shiftKey) {
         e.preventDefault();
         ui.setView("inbox");
+        return;
+      }
+      if (key === "a" && e.shiftKey) {
+        e.preventDefault();
+        toggleVoiceAssistant();
         return;
       }
       if (key === "m" && e.shiftKey) {

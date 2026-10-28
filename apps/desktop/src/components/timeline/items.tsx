@@ -32,6 +32,7 @@ import { cn, errorMessage } from "@/lib/utils";
 import { toast } from "sonner";
 import { useUi } from "@/store/ui";
 import { RelTime } from "../RelTime";
+import { RestoreAction } from "./RestoreAction";
 import { Textarea } from "../ui/input";
 import { Kbd } from "../ui/kbd";
 import { permissionKeyOptions } from "./usePermissionKeys";
@@ -49,6 +50,7 @@ import { AttachmentStrip } from "../AttachmentStrip";
 import { CopyButton } from "../CopyButton";
 import { DiffStat, FileDiffView } from "../DiffView";
 import { Markdown } from "../Markdown";
+import { CodeText } from "../CodeText";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/misc";
@@ -71,6 +73,7 @@ export const UserBubble = memo(function UserBubble({ item }: { item: Item<"user_
         )}
         <div className="mt-1 flex justify-end gap-1 text-[10.5px] text-steel opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
           {item.text && <CopyButton text={item.text} className="h-5" />}
+          <RestoreAction item={item} />
           <RelTime ts={item.ts} long className="self-center" />
         </div>
       </div>
@@ -102,7 +105,12 @@ export const AgentMessage = memo(function AgentMessage({
         </div>
       )}
       {item.text ? (
-        <Markdown text={item.text} streaming={streaming} agentId={agent.id} />
+        <Markdown
+          text={item.text}
+          streaming={streaming}
+          agentId={agent.id}
+          runAgentId={agent.cwd ? agent.id : undefined}
+        />
       ) : !streaming ? (
         <p className="text-[12.5px] italic text-steel">No reply (the turn ended before any text).</p>
       ) : (
@@ -263,7 +271,7 @@ export function TerminalOutput({
         {command && (
           <div className="mb-1 text-fg">
             <span className="select-none text-accent">❯ </span>
-            {command}
+            <CodeText code={command} lang="shellscript" />
           </div>
         )}
         {hidden > 0 && (

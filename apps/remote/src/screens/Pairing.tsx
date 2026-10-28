@@ -2,7 +2,12 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AppMark, Icon, type IconName } from "@/components/Icon";
 import { Button } from "@/components/ui";
 import { parsePasted } from "@/lib/auth";
-import { pairWithToken, retryConnect, unpair } from "@/lib/controller";
+import {
+  pairWithCode,
+  pairWithToken,
+  retryConnect,
+  unpair,
+} from "@/lib/controller";
 import { cn } from "@/lib/cn";
 import { isIOS, isStandalone } from "@/lib/platform";
 import { confirmAction } from "@/lib/confirm";
@@ -14,10 +19,15 @@ function Frame({ children }: { children: ReactNode }) {
       {/* Soft ice-blue glow behind the mark. */}
       <div
         className="pointer-events-none absolute -top-40 left-1/2 h-[420px] w-[620px] -translate-x-1/2 rounded-full opacity-60"
-        style={{ background: "radial-gradient(closest-side, color-mix(in srgb, var(--accent) 16%, transparent), transparent)" }}
+        style={{
+          background:
+            "radial-gradient(closest-side, color-mix(in srgb, var(--accent) 16%, transparent), transparent)",
+        }}
         aria-hidden
       />
-      <div className="animate-enter relative flex w-full max-w-[400px] flex-1 flex-col">{children}</div>
+      <div className="animate-enter relative flex w-full max-w-[400px] flex-1 flex-col">
+        {children}
+      </div>
     </main>
   );
 }
@@ -30,7 +40,15 @@ function Mark() {
   );
 }
 
-function Step({ n, icon, children }: { n: number; icon: IconName; children: ReactNode }) {
+function Step({
+  n,
+  icon,
+  children,
+}: {
+  n: number;
+  icon: IconName;
+  children: ReactNode;
+}) {
   return (
     <li className="flex items-center gap-3.5 py-3">
       <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-line bg-raised text-accent edge">
@@ -44,18 +62,35 @@ function Step({ n, icon, children }: { n: number; icon: IconName; children: Reac
   );
 }
 
-function Callout({ tone, icon, title, children }: { tone: "warn" | "err"; icon: IconName; title: string; children?: ReactNode }) {
+function Callout({
+  tone,
+  icon,
+  title,
+  children,
+}: {
+  tone: "warn" | "err";
+  icon: IconName;
+  title: string;
+  children?: ReactNode;
+}) {
   const color = tone === "warn" ? "var(--warn)" : "var(--err)";
   return (
     <div
       role="alert"
       className="mt-6 flex items-start gap-3 rounded-2xl border p-3.5"
-      style={{ borderColor: `color-mix(in srgb, ${color} 35%, var(--border))`, background: `color-mix(in srgb, ${color} 8%, var(--bg-1))` }}
+      style={{
+        borderColor: `color-mix(in srgb, ${color} 35%, var(--border))`,
+        background: `color-mix(in srgb, ${color} 8%, var(--bg-1))`,
+      }}
     >
       <Icon name={icon} size={20} className="mt-px shrink-0" />
       <div className="min-w-0">
         <p className="text-[14.5px] font-semibold text-fg">{title}</p>
-        {children && <p className="mt-0.5 text-[13.5px] leading-snug text-muted">{children}</p>}
+        {children && (
+          <p className="mt-0.5 text-[13.5px] leading-snug text-muted">
+            {children}
+          </p>
+        )}
       </div>
     </div>
   );
@@ -73,43 +108,71 @@ export function Pairing() {
     if (pasteOpen) inputRef.current?.focus();
   }, [pasteOpen]);
 
-  const submit = () => {
+  const submit = async () => {
     const parsed = parsePasted(value);
     if (parsed.kind === "invalid") {
       setError("That doesn't look like an Armada pairing link.");
       return;
     }
     setError(null);
-    if (parsed.kind === "link") location.assign(parsed.url);
+    if (parsed.kind === "link") {
+      // Only private/loopback addresses are followed silently; anything else could be a look-alike.
+      if (!parsed.trusted) {
+        const ok = await confirmAction({
+          title: "Open a link to another address?",
+          body: `${parsed.host} isn't a private network address. Only continue if it is your own computer, for example over Tailscale.`,
+          confirmLabel: "Open link",
+          destructive: true,
+        });
+        if (!ok) return;
+      }
+      location.assign(parsed.url);
+    } else if (parsed.kind === "pair") void pairWithCode(parsed.code);
     else void pairWithToken(parsed.token);
   };
 
   return (
     <Frame>
       <Mark />
-      <h1 className="mt-6 text-center text-[26px] leading-tight font-semibold tracking-[-0.02em] text-fg">Pair with Armada</h1>
+      <h1 className="mt-6 text-center text-[26px] leading-tight font-semibold tracking-[-0.02em] text-fg">
+        Pair with Armada
+      </h1>
       <p className="mx-auto mt-2 max-w-[330px] text-center text-[15px] leading-relaxed text-muted">
         Watch your agents, approve requests and send prompts from your phone.
       </p>
 
       {reason === "revoked" && (
         <Callout tone="warn" icon="unlink" title="This device was unpaired">
-          Its access was revoked or expired. Scan the QR code again to reconnect.
+          Its access was revoked or expired. Scan a new QR code from Armada's
+          Settings to reconnect.
         </Callout>
       )}
       {reason === "invalid_link" && (
-        <Callout tone="err" icon="alertCircle" title="That pairing link didn't work">
-          It may have expired. Show a fresh QR code in Armada and scan it again.
+        <Callout
+          tone="err"
+          icon="alertCircle"
+          title="That pairing link didn't work"
+        >
+          Pairing codes work once and expire after 5 minutes. Show a fresh QR
+          code in Armada and scan it again.
         </Callout>
       )}
 
-      <ol className="mt-7 divide-y divide-line/70 rounded-2xl border border-line bg-panel px-4 edge" aria-label="How to pair">
+      <ol
+        className="mt-7 divide-y divide-line/70 rounded-2xl border border-line bg-panel px-4 edge"
+        aria-label="How to pair"
+      >
         <Step n={1} icon="laptop">
           Open <span className="font-semibold">Armada</span> on your computer
         </Step>
         <Step n={2} icon="cog">
           Go to <span className="font-semibold">Settings</span>
-          <Icon name="chevronRight" size={14} strokeWidth={2.4} className="mx-0.5 inline-block align-[-2px] text-steel" />
+          <Icon
+            name="chevronRight"
+            size={14}
+            strokeWidth={2.4}
+            className="mx-0.5 inline-block align-[-2px] text-steel"
+          />
           <span className="font-semibold">Remote</span>
         </Step>
         <Step n={3} icon="qr">
@@ -131,10 +194,13 @@ export function Pairing() {
             className="animate-fade space-y-2"
             onSubmit={(e) => {
               e.preventDefault();
-              submit();
+              void submit();
             }}
           >
-            <label htmlFor="pair-link" className="block text-[13px] font-medium text-muted">
+            <label
+              htmlFor="pair-link"
+              className="block text-[13px] font-medium text-muted"
+            >
               Paste the pairing link
             </label>
             <input
@@ -145,7 +211,7 @@ export function Pairing() {
                 setValue(e.target.value);
                 setError(null);
               }}
-              placeholder="http://192.168.1.20:47821/#token=…"
+              placeholder="http://192.168.1.20:47821/#pair=…"
               inputMode="url"
               autoCapitalize="off"
               autoCorrect="off"
@@ -162,20 +228,37 @@ export function Pairing() {
                 {error}
               </p>
             )}
-            <Button type="submit" variant="primary" size="lg" className="w-full" disabled={!value.trim()}>
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              className="w-full"
+              disabled={!value.trim()}
+            >
               Connect
             </Button>
           </form>
         ) : (
-          <Button variant="secondary" size="lg" icon="link" className="w-full" onClick={() => setPasteOpen(true)}>
+          <Button
+            variant="secondary"
+            size="lg"
+            icon="link"
+            className="w-full"
+            onClick={() => setPasteOpen(true)}
+          >
             Paste a pairing link instead
           </Button>
         )}
       </div>
 
       <p className="mx-auto mt-auto max-w-[340px] pt-8 text-center text-[12.5px] leading-relaxed text-steel">
-        <Icon name="shield" size={14} className="mr-1.5 inline-block align-[-2px]" />
-        Keep pairing links private. Anyone who has one can control your agents.
+        <Icon
+          name="shield"
+          size={14}
+          className="mr-1.5 inline-block align-[-2px]"
+        />
+        Pairing links work once and expire after 5 minutes. Only pair with a
+        computer you own.
       </p>
     </Frame>
   );
@@ -211,10 +294,18 @@ export function Blocked() {
       <span
         className={cn(
           "mx-auto inline-flex h-[72px] w-[72px] items-center justify-center rounded-[22px] border edge-strong",
-          rate ? "border-warn/30 bg-warn/10 text-warn" : unreachable ? "border-line-strong bg-raised text-steel" : "border-err/30 bg-err/10 text-err",
+          rate
+            ? "border-warn/30 bg-warn/10 text-warn"
+            : unreachable
+              ? "border-line-strong bg-raised text-steel"
+              : "border-err/30 bg-err/10 text-err",
         )}
       >
-        <Icon name={rate ? "clock" : unreachable ? "wifiOff" : "alertCircle"} size={32} strokeWidth={1.6} />
+        <Icon
+          name={rate ? "clock" : unreachable ? "wifiOff" : "alertCircle"}
+          size={32}
+          strokeWidth={1.6}
+        />
       </span>
       <h1 className="mt-6 text-center text-[24px] leading-tight font-semibold tracking-[-0.02em] text-fg">
         {rate
@@ -245,13 +336,18 @@ export function Blocked() {
             "Your phone is on the same network as your computer",
           ].map((t) => (
             <li key={t} className="flex items-start gap-2.5">
-              <Icon name="check" size={17} className="mt-0.5 shrink-0 text-steel" />
+              <Icon
+                name="check"
+                size={17}
+                className="mt-0.5 shrink-0 text-steel"
+              />
               {t}
             </li>
           ))}
           <li className="flex items-start gap-2.5 border-t border-line/70 pt-3 text-muted">
             <Icon name="qr" size={17} className="mt-0.5 shrink-0 text-steel" />
-            If your computer's network address changed (new Wi-Fi, router restart), scan the QR code in Armada again.
+            If your computer's network address changed (new Wi-Fi, router
+            restart), scan the QR code in Armada again.
           </li>
         </ul>
       )}
@@ -288,7 +384,11 @@ export function Blocked() {
           Pair a different computer
         </Button>
       </div>
-      {(unreachable || unavailable) && <p className="mt-4 text-center text-[12.5px] text-steel">Retrying automatically…</p>}
+      {(unreachable || unavailable) && (
+        <p className="mt-4 text-center text-[12.5px] text-steel">
+          Retrying automatically…
+        </p>
+      )}
     </Frame>
   );
 }
@@ -300,11 +400,20 @@ export function Boot() {
     return () => clearTimeout(t);
   }, []);
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-5" aria-busy="true">
+    <main
+      className="flex min-h-dvh flex-col items-center justify-center gap-5"
+      aria-busy="true"
+    >
       <span className="animate-breathe">
         <AppMark size={44} />
       </span>
-      <p className={cn("text-[14px] text-muted transition-opacity duration-200", slow ? "opacity-100" : "opacity-0")} role="status">
+      <p
+        className={cn(
+          "text-[14px] text-muted transition-opacity duration-200",
+          slow ? "opacity-100" : "opacity-0",
+        )}
+        role="status"
+      >
         Connecting to Armada…
       </p>
     </main>

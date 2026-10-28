@@ -5,11 +5,18 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type { Agent, TimelineItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
+import { isBusy } from "@/lib/agents";
 import { useApp } from "@/store/app";
+import { useUi } from "@/store/ui";
 import { Spinner } from "../ui/misc";
 import { Skeleton } from "../ui/skeleton";
 import { AgentMessage, NoticeBanner, PermissionCard, PlanCard, ThoughtBlock, ToolCallCard, UserBubble } from "./items";
+import { ActivityGroup } from "./ActivityGroup";
+import { groupActivity } from "./activityGroups";
 import { SubagentCard } from "./SubagentCard";
+import { ThinkingIndicator } from "./ThinkingIndicator";
+import { shouldShowThinking, turnEndOf, turnStart } from "./thinking";
+import { TurnEndLine } from "./TurnEndLine";
 import { TurnSummaryCard, TurnSummaryLine } from "./TurnSummaryCard";
 import { latestPending, usePermissionKeys } from "./usePermissionKeys";
 
@@ -73,12 +80,29 @@ export function Timeline({
   // Keyed on structure on purpose: it reads the current list, but deltas never change the structure.
   const view = useMemo(() => buildView(list), [structureKey]);
   const rows = view.top;
-  const childrenOf = useResolvedChildren(view, list);
+  const childrenOf = useResolvedLists(view.children, list, isToolItem);
+  const groupItems = useResolvedLists(view.groups, list);
+
+  // Expanded activity groups, keyed by group id (kept here so it survives row virtualization).
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(new Set());
+  useLayoutEffect(() => setOpenGroups(new Set()), [agent.id]);
+  const toggleGroup = useCallback((id: string) => {
+    setOpenGroups((s) => {
+      const n = new Set(s);
+      if (!n.delete(id)) n.add(id);
+      return n;
+    });
+  }, []);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (i) => estimateSize(list[rows[i]]),
+    estimateSize: (i) => {
+      const it = list[rows[i]];
+      const g = it && groupItems.get(it.id);
+      if (g) return openGroups.has(it.id) ? 60 + g.length * 48 : 48;
+      return estimateSize(it);
+    },
     getItemKey: (i) => list[rows[i]]?.id ?? i,
     overscan: 6,
     paddingStart: 16,
@@ -124,6 +148,38 @@ export function Timeline({
       lastCount.current = n;
     }
   }, [rows.length, scrollToBottom]);
+
+  // Scroll to an item another part of the UI asked for (a sub-agent's card), once its row exists.
+  const revealTarget = useUi((s) => (s.revealTarget?.agentId === agent.id ? s.revealTarget : null));
+  const [flashId, setFlashId] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    if (!revealTarget || (loading && !items)) return;
+    const idxOf = new Map<string, number>();
+    list.forEach((it, i) => idxOf.set(it.id, i));
+    let at = idxOf.get(revealTarget.itemId);
+    // Climb out of nested sub-agents to the top-level card.
+    for (let guard = 0; at !== undefined && guard < 8; guard++) {
+      const it = list[at];
+      const parent =
+        it.kind === "tool_call" && it.parentToolCallId ? view.parentIdx.get(it.parentToolCallId) : undefined;
+      if (parent === undefined) break;
+      at = parent;
+    }
+    const row = at === undefined ? -1 : rows.indexOf(at);
+    useUi.getState().clearRevealTarget();
+    if (row < 0) return;
+    stick.current = false;
+    setAtBottom(false);
+    virtualizer.scrollToIndex(row, { align: "center" });
+    setFlashId(list[at as number].id);
+    // Measurement can shift rows after the first jump; settle on the target again.
+    requestAnimationFrame(() => virtualizer.scrollToIndex(row, { align: "center" }));
+  }, [revealTarget, rows, list, items, loading, view, virtualizer]);
+  useEffect(() => {
+    if (!flashId) return;
+    const t = setTimeout(() => setFlashId(null), 1600);
+    return () => clearTimeout(t);
+  }, [flashId]);
 
   // Paging up: remember the first visible row and keep it in place once older items land.
   const anchor = useRef<{ id: string; offset: number } | null>(null);
@@ -208,6 +264,25 @@ export function Timeline({
 
   const virtualRows = virtualizer.getVirtualItems();
 
+  // "Thinking" indicator: busy agent, but nothing at the end of the timeline is visibly streaming.
+  const lastRowItem = rows.length ? list[rows[rows.length - 1]] : undefined;
+  const messageSettled = useQuietFor(
+    lastRowItem?.kind === "agent_message" ? `${lastRowItem.id}:${lastRowItem.text.length}` : null,
+    MESSAGE_SETTLE_MS,
+  );
+  const showThinking =
+    !(loading && !items) &&
+    shouldShowThinking(agent.status, lastRowItem, !!lastRowItem && groupItems.has(lastRowItem.id), messageSettled);
+  const turnEnd = !loading && !showThinking ? turnEndOf(agent.status, list, lastRowItem, agent.lastActivityAt) : null;
+  const fallbackStart = useRef(Date.now());
+  useLayoutEffect(() => {
+    if (!showThinking) fallbackStart.current = Date.now();
+  }, [showThinking]);
+  // Keep it in view when it appears while following the stream.
+  useLayoutEffect(() => {
+    if ((showThinking || turnEnd) && stick.current) scrollToBottom();
+  }, [showThinking, turnEnd, scrollToBottom]);
+
   return (
     <div className="@container relative min-h-0 flex-1">
       <LiveAnnouncer agent={agent} items={items} />
@@ -245,31 +320,50 @@ export function Timeline({
                 const it = list[rows[v.index]];
                 if (!it) return null;
                 const prev = v.index > 0 ? list[rows[v.index - 1]] : undefined;
+                const group = groupItems.get(it.id);
                 return (
                   <div
                     key={v.key}
                     role="listitem"
                     data-index={v.index}
                     ref={virtualizer.measureElement}
-                    className={cn("absolute left-0 top-0 w-full pb-3", spacingFor(it, prev))}
+                    className={cn(
+                      "absolute left-0 top-0 w-full pb-3",
+                      spacingFor(it, prev),
+                      flashId === it.id && "[&>*]:rounded-xl [&>*]:ring-2 [&>*]:ring-accent/50",
+                    )}
                     style={{ transform: `translateY(${v.start}px)` }}
                   >
-                    {renderItem(it, {
-                      agent: stableAgent,
-                      prev,
-                      liveTail: live && it.id === lastId,
-                      view,
-                      childrenOf,
-                      lastPrompt: lastPrompt?.kind === "user_message" ? lastPrompt : null,
-                      pendingId,
-                      reasonFor,
-                      reasonHandler,
-                    })}
+                    {group ? (
+                      <ActivityGroup
+                        groupId={it.id}
+                        items={group}
+                        agent={stableAgent}
+                        live={live && group[group.length - 1].id === lastId}
+                        agentLive={stableAgent.running && stableAgent.status !== "interrupted"}
+                        open={openGroups.has(it.id)}
+                        onToggle={toggleGroup}
+                      />
+                    ) : (
+                      renderItem(it, {
+                        agent: stableAgent,
+                        prev,
+                        liveTail: live && it.id === lastId,
+                        view,
+                        childrenOf,
+                        lastPrompt: lastPrompt?.kind === "user_message" ? lastPrompt : null,
+                        pendingId,
+                        reasonFor,
+                        reasonHandler,
+                      })
+                    )}
                   </div>
                 );
               })}
             </div>
           )}
+          {showThinking && <ThinkingIndicator agent={agent} since={turnStart(list, fallbackStart.current)} />}
+          {turnEnd && <TurnEndLine end={turnEnd} lastActivityAt={agent.lastActivityAt} />}
           {footer}
         </div>
       </div>
@@ -297,6 +391,20 @@ export function Timeline({
       </AnimatePresence>
     </div>
   );
+}
+
+/** An agent message that stopped growing this long ago is done; the model is on its next step. */
+const MESSAGE_SETTLE_MS = 1500;
+
+/** True once `key` (null = not watching) has stayed the same for `ms`. */
+function useQuietFor(key: string | null, ms: number): boolean {
+  const [quietKey, setQuietKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (key === null) return;
+    const t = setTimeout(() => setQuietKey(key), ms);
+    return () => clearTimeout(t);
+  }, [key, ms]);
+  return key !== null && quietKey === key;
 }
 
 /** Same object while the fields timeline rows read are unchanged. */
@@ -336,8 +444,12 @@ type UserItem = Extract<TimelineItem, { kind: "user_message" }>;
 interface TimelineView {
   /** Top-level rows (sub-agent children are nested in their card). */
   top: number[];
+  /** Collapsed activity runs: member indices keyed by the group id (its first item's id). */
+  groups: Map<string, number[]>;
   /** Child call indices per sub-agent toolCallId (any depth). */
   children: Map<string, number[]>;
+  /** Index of each sub-agent call by its toolCallId. */
+  parentIdx: Map<string, number>;
   lastSummaryId: string | null;
   lastErrorId: string | null;
   lastPromptIdx: number | null;
@@ -347,7 +459,13 @@ const NO_ITEMS: TimelineItem[] = [];
 
 function buildView(items: TimelineItem[]): TimelineView {
   const parents = new Set<string>();
-  for (const it of items) if (it.kind === "tool_call" && it.subagent) parents.add(it.toolCallId);
+  const parentIdx = new Map<string, number>();
+  items.forEach((it, i) => {
+    if (it.kind === "tool_call" && it.subagent) {
+      parents.add(it.toolCallId);
+      parentIdx.set(it.toolCallId, i);
+    }
+  });
   const children = new Map<string, number[]>();
   let lastSummaryId: string | null = null;
   let lastErrorId: string | null = null;
@@ -369,7 +487,10 @@ function buildView(items: TimelineItem[]): TimelineView {
     }
     top.push(i);
   });
-  return { top, children, lastSummaryId, lastErrorId, lastPromptIdx };
+  const grouped = groupActivity(items, top);
+  const groups = new Map<string, number[]>();
+  for (const [first, idxs] of grouped.groups) groups.set(items[first].id, idxs);
+  return { top: grouped.rows, groups, children, parentIdx, lastSummaryId, lastErrorId, lastPromptIdx };
 }
 
 function sameList<T>(a: T[] | undefined, b: T[]): boolean {
@@ -378,20 +499,32 @@ function sameList<T>(a: T[] | undefined, b: T[]): boolean {
   return true;
 }
 
+function isToolItem(it: TimelineItem): it is ToolItem {
+  return it.kind === "tool_call";
+}
+
 /**
- * Child calls per sub-agent, resolved to the current item objects. The map keeps its identity
- * (and each list too) while nothing inside changed, so memoized sub-agent cards skip re-rendering.
+ * Index lists (sub-agent children, activity groups) resolved to the current item objects. The map
+ * keeps its identity (and each list too) while nothing inside changed, so memoized cards skip re-rendering.
  */
-function useResolvedChildren(view: TimelineView, items: TimelineItem[]): Map<string, ToolItem[]> {
-  const prev = useRef<Map<string, ToolItem[]>>(new Map());
-  if (view.children.size === 0) {
+function useResolvedLists<T extends TimelineItem = TimelineItem>(
+  src: Map<string, number[]>,
+  items: TimelineItem[],
+  keep?: (it: TimelineItem) => it is T,
+): Map<string, T[]> {
+  const prev = useRef<Map<string, T[]>>(new Map());
+  if (src.size === 0) {
     if (prev.current.size) prev.current = new Map();
     return prev.current;
   }
-  let changed = view.children.size !== prev.current.size;
-  const next = new Map<string, ToolItem[]>();
-  for (const [k, idxs] of view.children) {
-    const resolved = idxs.map((i) => items[i]).filter((it): it is ToolItem => it?.kind === "tool_call");
+  let changed = src.size !== prev.current.size;
+  const next = new Map<string, T[]>();
+  for (const [k, idxs] of src) {
+    const resolved: T[] = [];
+    for (const i of idxs) {
+      const it = items[i];
+      if (it && (!keep || keep(it))) resolved.push(it as T);
+    }
     const old = prev.current.get(k);
     if (old && sameList(old, resolved)) next.set(k, old);
     else {
@@ -430,7 +563,23 @@ function renderItem(
       return <ThoughtBlock item={it} live={liveTail} agentId={agent.id} />;
     case "tool_call":
       if (it.subagent) {
-        return <SubagentCard item={it} childrenOf={ctx.childrenOf} agentId={agent.id} agentLive={agentLive} />;
+        // Same rule as subagentRuns: a background sub-agent's call completes at launch but it keeps
+        // running while the agent is busy and the call belongs to the current turn.
+        const bgRunning =
+          !!it.subagent.background &&
+          it.status === "completed" &&
+          isBusy(agent) &&
+          !!ctx.lastPrompt &&
+          it.ts >= ctx.lastPrompt.ts;
+        return (
+          <SubagentCard
+            item={it}
+            childrenOf={ctx.childrenOf}
+            agentId={agent.id}
+            agentLive={agentLive}
+            bgRunning={bgRunning}
+          />
+        );
       }
       return <ToolCallCard item={it} agentId={agent.id} agentLive={agentLive} />;
     case "permission":

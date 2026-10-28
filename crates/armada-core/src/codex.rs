@@ -67,6 +67,10 @@ pub struct CodexDriver {
     turn_id: Mutex<Option<String>>,
     /// Sub-agent thread id → the collaborator item that started it.
     sub_threads: Mutex<HashMap<String, String>>,
+    /// Sub-agent thread id → whether Codex last reported it still working. A
+    /// `spawnAgent` call completes as soon as the thread exists, so this is what
+    /// tells whether the sub-agent itself has finished.
+    sub_running: Mutex<HashMap<String, bool>>,
     /// Last turn Codex reported complete (its `turn/start` reply can arrive later).
     completed_turn: Mutex<Option<String>>,
     /// Cancel was requested before Codex told us the turn id.
@@ -78,6 +82,7 @@ pub struct CodexDriver {
     approval_policy: Mutex<String>,
     attachments_dir: std::path::PathBuf,
     model: Mutex<Option<String>>,
+    local_models: Option<Vec<LocalModel>>,
     effort: Mutex<Option<String>>,
 }
 
@@ -97,6 +102,9 @@ pub struct StartOptions<'a> {
     pub attachments_dir: &'a Path,
     pub version: &'a str,
     pub mcp_servers: &'a [McpServer],
+    /// For local-model agents: the models the server offers (replaces the OpenAI
+    /// model list in the model picker).
+    pub local_models: Option<&'a [LocalModel]>,
 }
 
 const APPROVAL_CHOICES: [(&str, &str, &str); 3] = [
@@ -170,7 +178,16 @@ impl CodexDriver {
             match peer
                 .request_timeout(
                     "thread/resume",
-                    json!({ "threadId": prev, "cwd": cwd, "excludeTurns": true, "config": codex_config(opts.mcp_servers) }),
+                    // Same sandbox and approval policy as a fresh thread: a resumed
+                    // thread must not fall back to a looser value from config.toml.
+                    json!({
+                        "threadId": prev,
+                        "cwd": cwd,
+                        "excludeTurns": true,
+                        "approvalPolicy": opts.approval_policy,
+                        "sandbox": "workspace-write",
+                        "config": codex_config(opts.mcp_servers)
+                    }),
                     Some(Duration::from_secs(120)),
                 )
                 .await
@@ -214,6 +231,7 @@ impl CodexDriver {
             thread_id,
             turn_id: Mutex::new(None),
             sub_threads: Mutex::default(),
+            sub_running: Mutex::default(),
             completed_turn: Mutex::new(None),
             cancel_requested: std::sync::atomic::AtomicBool::new(false),
             perms: Mutex::default(),
@@ -226,6 +244,7 @@ impl CodexDriver {
             ),
             attachments_dir: opts.attachments_dir.to_path_buf(),
             model: Mutex::new(resp["model"].as_str().map(str::to_string)),
+            local_models: opts.local_models.map(<[LocalModel]>::to_vec),
             effort: Mutex::new(resp["reasoningEffort"].as_str().map(str::to_string)),
         });
         tokio::spawn(event_loop(
@@ -246,13 +265,16 @@ impl CodexDriver {
     async fn publish_config(&self) {
         let mut options = Vec::new();
         let current_model = self.model.lock().clone().unwrap_or_default();
-        let models = self
-            .peer
-            .request_timeout("model/list", json!({}), Some(Duration::from_secs(20)))
-            .await
-            .ok()
-            .and_then(|v| v["data"].as_array().cloned())
-            .unwrap_or_default();
+        let models = if self.local_models.is_some() {
+            Vec::new()
+        } else {
+            self.peer
+                .request_timeout("model/list", json!({}), Some(Duration::from_secs(20)))
+                .await
+                .ok()
+                .and_then(|v| v["data"].as_array().cloned())
+                .unwrap_or_default()
+        };
         let mut choices: Vec<ConfigOptionChoice> = models
             .iter()
             .filter(|m| !m["hidden"].as_bool().unwrap_or(false))
@@ -265,6 +287,16 @@ impl CodexDriver {
                 })
             })
             .collect();
+        if let Some(local) = &self.local_models {
+            choices = local
+                .iter()
+                .map(|m| ConfigOptionChoice {
+                    value: m.id.clone(),
+                    name: m.id.clone(),
+                    description: local_model_blurb(m),
+                })
+                .collect();
+        }
         if !current_model.is_empty() && !choices.iter().any(|c| c.value == current_model) {
             choices.insert(
                 0,
@@ -344,6 +376,7 @@ impl CodexDriver {
         if !self.ctx.is_current(self.generation) || !self.ctx.begin_turn(prompt.token) {
             return None;
         }
+        self.ctx.checkpoint_before_turn().await;
         self.peer.mark_turn();
         let mark = self.peer.stderr_mark();
         let preamble = self.ctx.take_preamble();
@@ -712,6 +745,20 @@ impl CodexDriver {
                 };
                 let prompt = item["prompt"].as_str().map(str::to_string);
                 let model = item["model"].as_str().map(str::to_string);
+                let tool = item["tool"].as_str().unwrap_or("");
+                // spawn/resume start a sub-agent; wait / close / send-input only
+                // manage existing ones.
+                let control = !tool.is_empty() && !matches!(tool, "spawnAgent" | "resumeAgent");
+                let finished = self.record_sub_states(&item["agentsStates"]);
+                let owned: Vec<String> = item["receiverThreadIds"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .chain(item["agentThreadId"].as_str())
+                    .map(str::to_string)
+                    .collect();
+                let still_running = !control && self.any_running(&owned);
                 ctx.tool_call(id, |b| {
                     if let ItemBody::ToolCall {
                         title,
@@ -730,18 +777,89 @@ impl CodexDriver {
                             .unwrap_or_else(|| format!("Sub-agent: {label}"));
                         *tool_kind = ToolKind::Think;
                         *status = codex_status(item["status"].as_str(), completed);
+                        // The call completing only means the thread was created.
+                        if still_running && *status == ToolStatus::Completed {
+                            *status = ToolStatus::InProgress;
+                        }
                         *subagent = Some(SubAgent {
                             kind: Some(label.clone()),
                             description,
                             prompt: prompt.clone(),
+                            background: false,
+                            control,
                         });
                     }
                 });
+                // A `wait` (or any later call) can report that sub-agents started
+                // by earlier calls have now finished: close those calls.
+                self.close_finished_spawns(&finished, id);
                 for child in adopted {
                     self.set_parent(&child, id.to_string());
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Record the sub-agent states a collaborator call reports; returns the
+    /// threads that are no longer working.
+    fn record_sub_states(&self, states: &Value) -> Vec<String> {
+        let mut finished = Vec::new();
+        let Some(map) = states.as_object() else {
+            return finished;
+        };
+        let mut running = self.sub_running.lock();
+        for (thread, st) in map {
+            let working = sub_state_working(st["status"].as_str());
+            running.insert(thread.clone(), working);
+            if !working {
+                finished.push(thread.clone());
+            }
+        }
+        finished
+    }
+
+    fn any_running(&self, threads: &[String]) -> bool {
+        let running = self.sub_running.lock();
+        threads
+            .iter()
+            .any(|t| running.get(t).copied().unwrap_or(false))
+    }
+
+    /// Mark spawn calls (other than `current`) completed once every thread they
+    /// started has finished.
+    fn close_finished_spawns(&self, finished: &[String], current: &str) {
+        if finished.is_empty() {
+            return;
+        }
+        let owners: Vec<(String, String)> = {
+            let threads = self.sub_threads.lock();
+            finished
+                .iter()
+                .filter_map(|t| threads.get(t).map(|c| (t.clone(), c.clone())))
+                .collect()
+        };
+        for (_, call) in owners {
+            if call == current {
+                continue;
+            }
+            let siblings: Vec<String> = self
+                .sub_threads
+                .lock()
+                .iter()
+                .filter(|(_, c)| **c == call)
+                .map(|(t, _)| t.clone())
+                .collect();
+            if self.any_running(&siblings) || self.ctx.tool_call_body(&call).is_none() {
+                continue;
+            }
+            self.ctx.tool_call(&call, |b| {
+                if let ItemBody::ToolCall { status, .. } = b {
+                    if matches!(status, ToolStatus::InProgress | ToolStatus::Pending) {
+                        *status = ToolStatus::Completed;
+                    }
+                }
+            });
         }
     }
 
@@ -841,6 +959,24 @@ impl CodexDriver {
             "turn/completed" => {
                 *self.turn_id.lock() = None;
                 *self.completed_turn.lock() = p["turn"]["id"].as_str().map(str::to_string);
+                // Spawn calls are kept open while their sub-agents run; none may outlive
+                // the turn, or its card would spin on an idle agent.
+                let mut calls: Vec<String> = self.sub_threads.lock().values().cloned().collect();
+                calls.sort();
+                calls.dedup();
+                // (`tool_call` would create an item for an unknown id: only patch known ones.)
+                for call in calls {
+                    if self.ctx.tool_call_body(&call).is_none() {
+                        continue;
+                    }
+                    self.ctx.tool_call(&call, |b| {
+                        if let ItemBody::ToolCall { status, .. } = b {
+                            if matches!(status, ToolStatus::InProgress | ToolStatus::Pending) {
+                                *status = ToolStatus::Completed;
+                            }
+                        }
+                    });
+                }
                 // Approvals from the finished turn can't be answered anymore.
                 self.perms.lock().clear();
                 let turn = &p["turn"];
@@ -1119,6 +1255,20 @@ async fn event_loop(
 }
 
 /// Config overrides for a Codex thread: Armada's MCP servers under `mcp_servers`.
+/// "30.5B · Q4_K_M · 256k context" for the model picker.
+fn local_model_blurb(m: &LocalModel) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    parts.extend(m.parameters.clone());
+    parts.extend(m.quantization.clone());
+    if let Some(c) = m.context_length {
+        parts.push(format!("{}k context", c / 1000));
+    }
+    if m.tools == Some(false) {
+        parts.push("no tool support".into());
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
 fn codex_config(servers: &[McpServer]) -> Value {
     let mut map = serde_json::Map::new();
     for s in servers.iter().filter(|s| s.enabled) {
@@ -1155,11 +1305,13 @@ fn codex_config(servers: &[McpServer]) -> Value {
         };
         map.insert(key, entry);
     }
-    if map.is_empty() {
-        Value::Null
-    } else {
-        json!({ "mcp_servers": map })
+    // Network access follows the user's own Codex config (agents can't write it from the
+    // workspace-write sandbox), so it isn't overridden here.
+    let mut config = json!({});
+    if !map.is_empty() {
+        config["mcp_servers"] = Value::Object(map);
     }
+    config
 }
 
 /// Codex reads attachments when the turn starts; anything older than a day is done.
@@ -1205,6 +1357,11 @@ async fn write_attachment(dir: &Path, a: &Attachment) -> anyhow::Result<String> 
     let path = dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
     tokio::fs::write(&path, bytes).await?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// Whether a Codex collaborator-agent state means the sub-agent is still working.
+fn sub_state_working(status: Option<&str>) -> bool {
+    matches!(status, Some("pendingInit" | "running"))
 }
 
 fn codex_status(s: Option<&str>, completed: bool) -> ToolStatus {
@@ -1301,5 +1458,27 @@ fn capitalize(s: &str) -> String {
     match c.next() {
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
         None => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod subagent_state_tests {
+    use super::*;
+
+    #[test]
+    fn working_states() {
+        for s in ["pendingInit", "running"] {
+            assert!(sub_state_working(Some(s)), "{s}");
+        }
+        for s in [
+            "completed",
+            "errored",
+            "shutdown",
+            "interrupted",
+            "notFound",
+        ] {
+            assert!(!sub_state_working(Some(s)), "{s}");
+        }
+        assert!(!sub_state_working(None));
     }
 }

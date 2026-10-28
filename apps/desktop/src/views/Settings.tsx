@@ -13,6 +13,8 @@ import {
   Send,
   SlidersHorizontal,
   Volume2,
+  Mic,
+  AudioLines,
   ExternalLink,
   Download,
   Sparkles,
@@ -29,6 +31,8 @@ import { CustomSoundLine } from "@/components/settings/CustomSound";
 import { McpSection } from "@/components/settings/McpSection";
 import { ProviderCard } from "@/components/settings/ProviderCard";
 import { RemoteSection } from "@/components/settings/RemoteSection";
+import { VoiceSection } from "@/components/settings/VoiceSection";
+import { VoiceAssistantSection } from "@/components/settings/VoiceAssistantSection";
 import { SectionHeader, SettingGroup, SettingRow } from "@/components/settings/SettingRow";
 import { TemplatesSection } from "@/components/settings/TemplatesSection";
 import { ThemeCard, THEMES } from "@/components/settings/ThemeCard";
@@ -50,6 +54,7 @@ import { api } from "@/lib/api";
 import { relativeTimeLong } from "@/lib/format";
 import type { AttentionReason, Settings } from "@/lib/types";
 import { cn, errorMessage, modKey } from "@/lib/utils";
+import { MAX_SCALE, MIN_SCALE, DEFAULT_SCALE, SCALE_PRESETS, SCALE_STEP } from "@/lib/zoom";
 import { useApp } from "@/store/app";
 import { useUi, type SettingsSection } from "@/store/ui";
 
@@ -62,6 +67,8 @@ const SECTIONS: { id: SettingsSection; label: string; icon: ComponentType<{ clas
   { id: "mcp", label: "Tools (MCP)", icon: Plug },
   { id: "providers", label: "Providers", icon: Package },
   { id: "agents", label: "Agents", icon: Bot },
+  { id: "voice", label: "Voice", icon: Mic },
+  { id: "assistant", label: "Voice assistant", icon: AudioLines },
   { id: "remote", label: "Remote & mobile", icon: Smartphone },
   { id: "about", label: "About", icon: Info },
 ];
@@ -106,6 +113,8 @@ export function SettingsView() {
           {section === "mcp" && <McpSection servers={settings.mcpServers} />}
           {section === "providers" && <Providers />}
           {section === "agents" && <AgentsSection agents={settings.customAgents} />}
+          {section === "voice" && <VoiceSection settings={settings} />}
+          {section === "assistant" && <VoiceAssistantSection settings={settings} />}
           {section === "remote" && <RemoteSection settings={settings} />}
           {section === "about" && <About />}
         </div>
@@ -185,6 +194,9 @@ function SettingsNav({ section, onSelect }: { section: SettingsSection; onSelect
 // ---------------------------------------------------------------- Appearance
 
 function Appearance({ settings }: { settings: Settings }) {
+  // Zoom applies on release: resizing the UI under the dragged thumb would make it jump.
+  const [dragScale, setDragScale] = useState<number | null>(null);
+  const shownScale = dragScale ?? settings.interfaceScale;
   return (
     <>
       <SectionHeader title="Appearance" description="Pick the finish for your command deck." />
@@ -198,6 +210,45 @@ function Appearance({ settings }: { settings: Settings }) {
           />
         ))}
       </div>
+      <SettingGroup className="mt-5">
+        <SettingRow
+          title="Interface scale"
+          description={`Make the whole interface bigger or smaller. Shortcuts: ${modKey} + and ${modKey} - to change it, ${modKey} 0 to reset.`}
+          stack
+        >
+          <div className="flex w-full flex-wrap items-center gap-3">
+            <Slider
+              aria-label="Interface scale"
+              className="min-w-[140px] flex-1"
+              value={shownScale}
+              min={MIN_SCALE}
+              max={MAX_SCALE}
+              step={SCALE_STEP}
+              onValueChange={setDragScale}
+              onValueCommit={(v) => {
+                setDragScale(null);
+                void save({ interfaceScale: v });
+              }}
+            />
+            <span className="w-12 text-right font-mono text-[12px] tabular-nums text-fg">{shownScale}%</span>
+            <Segmented
+              size="sm"
+              aria-label="Scale presets"
+              value={String(settings.interfaceScale)}
+              onChange={(v) => void save({ interfaceScale: Number(v) })}
+              options={SCALE_PRESETS.map((p) => ({ value: String(p), label: `${p}%` }))}
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={settings.interfaceScale === DEFAULT_SCALE}
+              onClick={() => void save({ interfaceScale: DEFAULT_SCALE })}
+            >
+              Reset
+            </Button>
+          </div>
+        </SettingRow>
+      </SettingGroup>
       <p className="mt-4 text-[12px] text-steel">
         Animations follow your system's reduce-motion setting automatically.
       </p>
@@ -459,6 +510,18 @@ function Notifications({ settings }: { settings: Settings }) {
               onCheckedChange={(v) => void save({ notifications: { ...n, smartMute: v } })}
             />
           </SettingRow>
+          <SettingRow
+            title="Chime when the agent I'm watching finishes a long task"
+            description="A soft sound for turns longer than 30 seconds, even with smart mute on. Needs sounds enabled."
+            htmlFor="ntf-chime"
+          >
+            <Switch
+              id="ntf-chime"
+              checked={settings.sounds.chimeWhenWatching}
+              disabled={!settings.sounds.enabled}
+              onCheckedChange={(v) => void save({ sounds: { ...settings.sounds, chimeWhenWatching: v } })}
+            />
+          </SettingRow>
         </SettingGroup>
 
         <SettingGroup title="Quiet hours" description="Notifications and sounds are held during this window.">
@@ -558,6 +621,30 @@ function Notifications({ settings }: { settings: Settings }) {
                 </p>
               )}
             </div>
+          </SettingRow>
+          <SettingRow
+            stack
+            title="Push detail"
+            description={
+              <>
+                {settings.ntfyDetail === "full"
+                  ? "Pushes include the agent's last message or the command awaiting approval, with secrets scrubbed. "
+                  : "Pushes only say which agent needs you and why. "}
+                The topic name is a shared secret: anyone who knows it can read your pushes, and the ntfy server sees
+                them.
+              </>
+            }
+          >
+            <Segmented
+              aria-label="Push detail"
+              value={settings.ntfyDetail}
+              onChange={(v) => void save({ ntfyDetail: v })}
+              className="w-full"
+              options={[
+                { value: "minimal", label: "Minimal" },
+                { value: "full", label: "Full text" },
+              ]}
+            />
           </SettingRow>
         </SettingGroup>
       </div>

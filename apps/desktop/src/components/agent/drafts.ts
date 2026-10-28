@@ -53,3 +53,29 @@ export function setDraft(agentId: string, text: string) {
   if (text) drafts.set(agentId, text.slice(0, MAX_CHARS));
   persist();
 }
+
+// Inserting into the composer of a mounted agent view (e.g. terminal output): the composer
+// owns its text state, so it subscribes and applies the insert itself.
+type InsertListener = (text: string) => void;
+const insertListeners = new Map<string, Set<InsertListener>>();
+
+export function onDraftInsert(agentId: string, fn: InsertListener): () => void {
+  let set = insertListeners.get(agentId);
+  if (!set) insertListeners.set(agentId, (set = new Set()));
+  set.add(fn);
+  return () => {
+    set.delete(fn);
+    if (set.size === 0) insertListeners.delete(agentId);
+  };
+}
+
+/** Appends `text` to the agent's draft (separated by a blank line) and focuses the composer. */
+export function insertIntoDraft(agentId: string, text: string) {
+  const subs = insertListeners.get(agentId);
+  if (subs && subs.size > 0) {
+    for (const fn of subs) fn(text);
+    return;
+  }
+  const cur = getDraft(agentId);
+  setDraft(agentId, cur.trim() ? `${cur.trimEnd()}\n\n${text}` : text);
+}

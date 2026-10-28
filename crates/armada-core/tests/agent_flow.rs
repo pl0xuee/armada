@@ -371,6 +371,7 @@ async fn failover_mcp_commands_and_export() {
             color: "#4FC3F7".into(),
             auth_kind: AuthKind::Oauth,
             api_key: None,
+            local: None,
         })
         .await
         .unwrap();

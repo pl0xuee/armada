@@ -21,9 +21,10 @@ import {
   Pencil,
   Play,
   Square,
+  SquareTerminal,
   Trash2,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   archiveAgent,
   attempt,
@@ -33,12 +34,12 @@ import {
   resumeAgent,
   stopAgent,
 } from "@/lib/actions";
-import { liveTail } from "@/lib/agents";
+import { isBusy, liveTail, type SubagentRun } from "@/lib/agents";
 import { agentDerived } from "./derived";
 import { canCompact, compactContext, contextRatio } from "./compact";
 import { api } from "@/lib/api";
 import { CUSTOM_ACCOUNT_ID, PROVIDERS } from "@/lib/providers";
-import type { Agent, CustomAgent, Provider } from "@/lib/types";
+import type { Account, Agent, CustomAgent, Provider } from "@/lib/types";
 import { basename, cn, modKey, prettyPath } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useAgentListLayout } from "@/hooks/useAgentListLayout";
@@ -50,6 +51,7 @@ import { useUi } from "@/store/ui";
 import { AccountAvatar } from "../AccountAvatar";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { StatusPill } from "../StatusDot";
+import { useIsDone } from "@/store/completion";
 import { ConfirmDialog } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/misc";
@@ -62,12 +64,18 @@ import {
   DropdownMenuTrigger,
 } from "../ui/menu";
 import { Tooltip } from "../ui/tooltip";
+import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { PrChip } from "./PrChip";
+import { SubagentList } from "./SubagentList";
+import { UsageMeters, pctTextTone, windowLabel } from "../UsageMeter";
+import { relativeTimeLong } from "@/lib/format";
 
 const EMPTY_CUSTOM: CustomAgent[] = [];
 
-export function AgentHeader({ agent }: { agent: Agent }) {
+function AgentHeaderImpl({ agent }: { agent: Agent }) {
   const account = useApp((s) => s.accounts.find((a) => a.id === agent.accountId));
   const identity = useIdentity(agent.provider, agent.customAgentId);
+  const done = useIsDone(agent);
   const wide = useMediaQuery(INSPECTOR_DOCK_QUERY);
   const list = useAgentListLayout();
   const [ref, width] = useElementWidth<HTMLElement>();
@@ -76,6 +84,8 @@ export function AgentHeader({ agent }: { agent: Agent }) {
   const inspectorPref = useUi((s) => s.inspectorOpen);
   const overlay = useUi((s) => s.inspectorOverlay);
   const inspectorOpen = wide ? inspectorPref : overlay;
+  const workspaceOpen = useUi((s) => s.workspaceOpen);
+  const workspaceRoom = useUi((s) => s.workspaceRoom);
   const toggleInspector = () =>
     wide ? useUi.getState().setInspectorOpen(!inspectorPref) : useUi.getState().setInspectorOverlay(!overlay);
   const setReviewAgent = useUi((s) => s.setReviewAgent);
@@ -86,7 +96,6 @@ export function AgentHeader({ agent }: { agent: Agent }) {
   const live = agent.status === "working" || agent.status === "starting";
   // Primitive selectors: only re-render when the derived value changes, not on every delta.
   const tail = useApp((s) => (live ? liveTail(s.items[agent.id]) : null));
-  const subagents = useApp((s) => agentDerived(agent.id, s.items[agent.id]).runningSubagents);
   const changed = useApp((s) => (agent.worktree ? agentDerived(agent.id, s.items[agent.id]).changedCount : 0));
   const [confirmShutdown, setConfirmShutdown] = useState(false);
 
@@ -214,6 +223,28 @@ export function AgentHeader({ agent }: { agent: Agent }) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <Tooltip
+            content={
+              workspaceOpen
+                ? workspaceRoom === 0
+                  ? "Hide workspace panel (not enough room to show it)"
+                  : "Hide workspace panel"
+                : workspaceRoom === 0
+                  ? "Show workspace panel (window is small)"
+                  : "Show workspace panel"
+            }
+            shortcut={[modKey, "`"]}
+          >
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Toggle workspace panel"
+              aria-pressed={workspaceOpen}
+              onClick={() => useUi.getState().setWorkspaceOpen(!workspaceOpen)}
+            >
+              <SquareTerminal />
+            </Button>
+          </Tooltip>
           <Tooltip content={inspectorOpen ? "Hide inspector" : "Show inspector"}>
             <Button
               size="icon-sm"
@@ -234,15 +265,8 @@ export function AgentHeader({ agent }: { agent: Agent }) {
           tier !== "compact" && (!list.docked || !list.open ? "pl-[72px]" : "pl-[38px]"),
         )}
       >
-        <StatusPill status={agent.status} />
-        {subagents > 0 && (
-          <Tooltip content="Sub-agents working in parallel inside this turn">
-            <Chip className="border-accent/30 bg-accent/[0.08] text-accent">
-              <Workflow className="h-3 w-3" />
-              <span className="tabular">{subagents}</span> sub-agent{subagents === 1 ? "" : "s"} running
-            </Chip>
-          </Tooltip>
-        )}
+        <StatusPill status={agent.status} done={done} />
+        <SubagentsChip agent={agent} />
         {agent.rateLimited && (
           <Chip className="border-warn/35 bg-warn/10 text-warn">
             <Gauge className="h-3 w-3" />
@@ -272,21 +296,68 @@ export function AgentHeader({ agent }: { agent: Agent }) {
             </Chip>
           )
         )}
-        <Tooltip content={prettyPath(agent.projectPath)}>
-          <Chip>
-            <FolderOpen className="h-3 w-3 text-steel" />
-            <span className="text-fg/90">{basename(agent.projectPath)}</span>
-          </Chip>
-        </Tooltip>
-        {agent.branch && (
-          <Tooltip content={agent.worktree ? `Worktree: ${prettyPath(agent.cwd)}` : "Branch"}>
-            <Chip>
-              <GitBranch className="h-3 w-3 text-steel" />
-              <span className="max-w-[180px] truncate font-mono text-[11px] text-fg/90">{agent.branch}</span>
-              {agent.baseBranch && <span className="font-mono text-[11px] text-steel">→ {agent.baseBranch}</span>}
-            </Chip>
-          </Tooltip>
+        {agent.provider !== "custom" && agent.provider !== "local" && account && (
+          <UsageChip account={account} compact={tier === "compact"} />
         )}
+        {tier === "full" ? (
+          <>
+            <Tooltip content={prettyPath(agent.projectPath)}>
+              <Chip>
+                <FolderOpen className="h-3 w-3 text-steel" />
+                <span className="text-fg/90">{basename(agent.projectPath)}</span>
+              </Chip>
+            </Tooltip>
+            {agent.branch && (
+              <Tooltip content={agent.worktree ? `Worktree: ${prettyPath(agent.cwd)}` : "Branch"}>
+                <Chip>
+                  <GitBranch className="h-3 w-3 text-steel" />
+                  <span className="max-w-[180px] truncate font-mono text-[11px] text-fg/90">{agent.branch}</span>
+                  {agent.baseBranch && <span className="font-mono text-[11px] text-steel">→ {agent.baseBranch}</span>}
+                </Chip>
+              </Tooltip>
+            )}
+          </>
+        ) : (
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                aria-label="Project and branch"
+                className="inline-flex h-6 items-center gap-1 rounded-full border border-line bg-card/60 px-2 text-[11.5px] text-muted transition-colors hover:bg-raised/60 hover:text-fg focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25"
+              >
+                <Ellipsis className="h-3.5 w-3.5" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-72 space-y-2 text-[12px]">
+              <div className="flex items-start gap-2">
+                <FolderOpen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-steel" />
+                <div className="min-w-0">
+                  <div className="text-fg">{basename(agent.projectPath)}</div>
+                  <div className="selectable break-all font-mono text-[11px] text-steel">
+                    {prettyPath(agent.projectPath)}
+                  </div>
+                </div>
+              </div>
+              {agent.branch && (
+                <div className="flex items-start gap-2">
+                  <GitBranch className="mt-0.5 h-3.5 w-3.5 shrink-0 text-steel" />
+                  <div className="min-w-0">
+                    <div className="selectable break-all font-mono text-[11.5px] text-fg">
+                      {agent.branch}
+                      {agent.baseBranch && <span className="text-steel"> → {agent.baseBranch}</span>}
+                    </div>
+                    {agent.worktree && (
+                      <div className="selectable break-all font-mono text-[11px] text-steel">
+                        {prettyPath(agent.cwd)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </PopoverContent>
+          </Popover>
+        )}
+        <PrChip agent={agent} />
       </div>
       {tail && (
         <div
@@ -355,6 +426,87 @@ function ReviewPill({
     </Tooltip>
   );
 }
+
+function UsageChip({ account, compact }: { account: Account; compact: boolean }) {
+  const usage = account.usage;
+  const rawPlan = usage?.plan ?? null;
+  const plan = account.status?.label ?? (rawPlan ? rawPlan.charAt(0).toUpperCase() + rawPlan.slice(1) : null);
+  const windows = [usage?.primary, usage?.secondary].filter((w): w is NonNullable<typeof w> => !!w);
+  if (!plan && windows.length === 0) return null;
+  const short = (w: (typeof windows)[number]) => (w.windowMins === 300 ? "5h" : windowLabel(w).replace(" window", ""));
+  const shortLabel = (w: (typeof windows)[number]) => (w.windowMins === 10080 ? "Week" : short(w));
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Plan and usage limits${plan ? `, ${plan}` : ""}`}
+          className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border border-line bg-card/60 px-2 text-[11.5px] transition-colors hover:bg-raised/60 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25"
+        >
+          <Gauge className="h-3 w-3 shrink-0 text-steel" />
+          {!compact && plan && <span className="truncate text-fg/90">{plan}</span>}
+          {windows.map((w) => {
+            const pct = Math.max(0, Math.min(100, Math.round(w.usedPercent)));
+            return (
+              <span key={w.windowMins ?? "w"} className="tabular text-muted">
+                {!compact && <>{shortLabel(w)} </>}
+                <span className={cn("font-medium", pctTextTone(pct))}>{pct}%</span>
+              </span>
+            );
+          })}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-64">
+        <div className="mb-2 text-[12px] font-medium text-fg">{plan ?? "Usage limits"}</div>
+        {windows.length > 0 ? (
+          <UsageMeters usage={usage} compact />
+        ) : (
+          <div className="text-[11.5px] text-steel">Limits appear after the first reply.</div>
+        )}
+        {usage && windows.length > 0 && (
+          <div className="mt-2 text-[10.5px] text-steel">Updated {relativeTimeLong(usage.updatedAt)}</div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** "N sub-agents running" chip; opens the list of this agent's sub-agents. Hidden when it has none. */
+function SubagentsChip({ agent }: { agent: Agent }) {
+  const live = isBusy(agent);
+  const runs = useApp((s) => (live ? agentDerived(agent.id, s.items[agent.id], true).subagents : NO_RUNS));
+  const running = runs.filter((r) => r.state === "running").length;
+  if (running === 0) return null;
+  return (
+    <Popover>
+      <Tooltip content="Sub-agents working in parallel inside this turn">
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border border-accent/30 bg-accent/[0.08] px-2 text-[11.5px] text-accent transition-colors hover:border-accent/50 hover:bg-accent/15"
+          >
+            <Workflow className="h-3 w-3" />
+            <span className="tabular">{running}</span> sub-agent{running === 1 ? "" : "s"} running
+          </button>
+        </PopoverTrigger>
+      </Tooltip>
+      <PopoverContent align="start" className="w-[340px] p-1.5">
+        <div className="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel">
+          Sub-agents
+        </div>
+        <div className="max-h-[360px] overflow-y-auto">
+          <PopoverClose asChild>
+            <div>
+              <SubagentList runs={runs} onSelect={(r) => useUi.getState().revealItem(agent.id, r.itemId)} />
+            </div>
+          </PopoverClose>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+const NO_RUNS: SubagentRun[] = [];
 
 function Chip({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
@@ -522,3 +674,5 @@ function ActionButton({
     </Tooltip>
   );
 }
+
+export const AgentHeader = memo(AgentHeaderImpl);

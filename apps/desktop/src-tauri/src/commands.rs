@@ -16,6 +16,7 @@ use tracing::{info, warn};
 
 use crate::attention::Attention;
 use crate::git_review::{self, AgentDiff, CommitSummary};
+use crate::pr_status::{self, PrCache, PrStatus};
 use crate::remote::{Remote, RemoteStatus, ShareLink};
 use crate::state::Shell;
 use crate::terminal::{SpawnSpec, Terminals};
@@ -272,12 +273,63 @@ pub async fn set_focus(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn chime_watched(attention: State<'_, Arc<Attention>>) -> CmdResult<()> {
+    attention.chime_watched();
+    Ok(())
+}
+
+/// Sets the main window's title (taskbar, alt-tab, tiling-WM bars).
+#[tauri::command]
+pub async fn set_window_title(app: tauri::AppHandle, title: String) -> CmdResult<()> {
+    let title: String = title.chars().take(200).collect();
+    if let Some(w) = crate::window::main_window(&app) {
+        w.set_title(&title).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 // ---- review / git ------------------------------------------------------------
 
 #[tauri::command]
 pub async fn get_diff(core: State<'_, Core>, agent_id: String) -> CmdResult<AgentDiff> {
     let agent = core.agent(&agent_id).map_err(err)?;
     git_review::get_diff(&agent).await.map_err(err)
+}
+
+// ---- checkpoints -------------------------------------------------------------
+
+#[tauri::command]
+pub async fn list_checkpoints(
+    core: State<'_, Core>,
+    agent_id: String,
+) -> CmdResult<armada_core::checkpoints::CheckpointList> {
+    core.list_checkpoints(&agent_id).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn preview_checkpoint(
+    core: State<'_, Core>,
+    agent_id: String,
+    checkpoint_id: String,
+) -> CmdResult<armada_core::checkpoints::RestorePreview> {
+    core.preview_checkpoint(&agent_id, &checkpoint_id)
+        .await
+        .map_err(err)
+}
+
+/// Restores the agent's files to a checkpoint. Also used to undo a restore (restore
+/// the `safety_id` it returned).
+#[tauri::command]
+pub async fn restore_checkpoint(
+    core: State<'_, Core>,
+    agent_id: String,
+    checkpoint_id: String,
+) -> CmdResult<armada_core::checkpoints::RestoreResult> {
+    let (_guard, _agent) = lock_idle_agent(&core, &agent_id, "restoring its files").map_err(err)?;
+    core.restore_checkpoint(&agent_id, &checkpoint_id)
+        .await
+        .map_err(err)
 }
 
 /// Refuses to change the agent's files or branch while its turn is running: it may be
@@ -311,13 +363,41 @@ pub(crate) async fn commit_impl(
     agent_id: &str,
     message: &str,
 ) -> anyhow::Result<CommitSummary> {
+    commit_excluding_impl(core, agent_id, message, &[]).await
+}
+
+/// [`commit_impl`], leaving `exclude` (repository-relative paths) out of the commit.
+pub(crate) async fn commit_excluding_impl(
+    core: &Core,
+    agent_id: &str,
+    message: &str,
+    exclude: &[String],
+) -> anyhow::Result<CommitSummary> {
     let (_guard, agent) = lock_idle_agent(core, agent_id, "committing")?;
     let touched = if agent.worktree {
         Vec::new()
     } else {
         core.touched_files(agent_id)
     };
-    git_review::commit(&agent, message, &touched).await
+    git_review::commit_excluding(&agent, message, &touched, exclude).await
+}
+
+/// New files a commit would add whose names look like secrets (`.env`, `*.pem`, …),
+/// so the UI can ask before committing them.
+#[tauri::command]
+pub async fn secret_looking_files(
+    core: State<'_, Core>,
+    agent_id: String,
+) -> CmdResult<Vec<String>> {
+    let agent = core.agent(&agent_id).map_err(err)?;
+    let touched = if agent.worktree {
+        Vec::new()
+    } else {
+        core.touched_files(&agent_id)
+    };
+    git_review::pending_secret_files(&agent, &touched)
+        .await
+        .map_err(err)
 }
 
 /// Outcome of "Commit & merge". `Err` from [`ship_impl`] means nothing changed; `Ok`
@@ -342,6 +422,15 @@ pub(crate) async fn ship_impl(
     agent_id: &str,
     message: &str,
 ) -> anyhow::Result<ShipResult> {
+    ship_excluding_impl(core, agent_id, message, &[]).await
+}
+
+pub(crate) async fn ship_excluding_impl(
+    core: &Core,
+    agent_id: &str,
+    message: &str,
+    exclude: &[String],
+) -> anyhow::Result<ShipResult> {
     let (_guard, agent) = lock_idle_agent(core, agent_id, "committing")?;
     if !agent.worktree {
         anyhow::bail!("Only agents running in their own worktree branch can be merged");
@@ -353,7 +442,7 @@ pub(crate) async fn ship_impl(
     } else {
         message
     };
-    let committed = match git_review::commit(&agent, message, &[]).await {
+    let committed = match git_review::commit_excluding(&agent, message, &[], exclude).await {
         Ok(summary) => Some(summary.hash),
         Err(e) if e.is::<git_review::NothingToCommit>() => None,
         Err(e) => return Err(e),
@@ -384,8 +473,11 @@ pub async fn commit_agent(
     core: State<'_, Core>,
     agent_id: String,
     message: String,
+    exclude: Option<Vec<String>>,
 ) -> CmdResult<CommitSummary> {
-    commit_impl(&core, &agent_id, &message).await.map_err(err)
+    commit_excluding_impl(&core, &agent_id, &message, &exclude.unwrap_or_default())
+        .await
+        .map_err(err)
 }
 
 /// Merge for the desktop and the phone remote (same lock and checks as commit).
@@ -405,8 +497,11 @@ pub async fn ship_agent(
     core: State<'_, Core>,
     agent_id: String,
     message: String,
+    exclude: Option<Vec<String>>,
 ) -> CmdResult<ShipResult> {
-    ship_impl(&core, &agent_id, &message).await.map_err(err)
+    ship_excluding_impl(&core, &agent_id, &message, &exclude.unwrap_or_default())
+        .await
+        .map_err(err)
 }
 
 /// Revert for the desktop and the phone remote (same lock and checks as commit).
@@ -456,6 +551,46 @@ pub async fn create_pr(
 ) -> CmdResult<String> {
     let agent = core.agent(&agent_id).map_err(err)?;
     git_review::create_pr(&agent, &title, &body)
+        .await
+        .map_err(err)
+}
+
+/// PR + CI status for the agent's branch. Quiet by design: problems come back as
+/// `state: "unknown"`, not as errors. Cached per agent (see `pr_status::PrCache`).
+#[tauri::command]
+pub async fn pr_status(
+    core: State<'_, Core>,
+    cache: State<'_, PrCache>,
+    agent_id: String,
+    force: Option<bool>,
+) -> CmdResult<PrStatus> {
+    let agent = core.agent(&agent_id).map_err(err)?;
+    Ok(cache.status(&agent, force.unwrap_or(false)).await)
+}
+
+/// The editable "Fix CI" prompt (failing checks + trimmed logs).
+#[tauri::command]
+pub async fn pr_fix_ci_prompt(
+    core: State<'_, Core>,
+    cache: State<'_, PrCache>,
+    agent_id: String,
+) -> CmdResult<pr_status::PrPrompt> {
+    let agent = core.agent(&agent_id).map_err(err)?;
+    pr_status::build_fix_ci_prompt(&cache, &agent)
+        .await
+        .map_err(err)
+}
+
+/// The editable "Address review comments" prompt.
+#[tauri::command]
+pub async fn pr_review_prompt(
+    core: State<'_, Core>,
+    cache: State<'_, PrCache>,
+    agent_id: String,
+    include_outside: Option<bool>,
+) -> CmdResult<pr_status::PrPrompt> {
+    let agent = core.agent(&agent_id).map_err(err)?;
+    pr_status::build_review_prompt(&cache, &agent, include_outside.unwrap_or(false))
         .await
         .map_err(err)
 }
@@ -711,6 +846,20 @@ pub async fn update_settings(
         }
     }
     Ok(saved)
+}
+
+/// Zooms the whole webview (layout, scrollbars and measurements stay consistent).
+#[tauri::command]
+pub fn set_interface_zoom(app: AppHandle, percent: u32) -> CmdResult<()> {
+    let percent = percent.clamp(
+        armada_core::model::MIN_INTERFACE_SCALE,
+        armada_core::model::MAX_INTERFACE_SCALE,
+    );
+    if let Some(w) = crate::window::main_window(&app) {
+        w.set_zoom(f64::from(percent) / 100.0)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1041,10 +1190,20 @@ pub async fn remote_status(remote: State<'_, Arc<Remote>>) -> CmdResult<RemoteSt
     Ok(remote.status())
 }
 
-/// Unpairs every phone/tablet by issuing a new pairing token.
+/// Unpairs every phone/tablet.
 #[tauri::command]
 pub async fn remote_rotate_token(remote: State<'_, Arc<Remote>>) -> CmdResult<RemoteStatus> {
-    remote.rotate_owner_token();
+    remote.unpair_all();
+    Ok(remote.status())
+}
+
+/// Unpairs one phone/tablet and ends its live connections.
+#[tauri::command]
+pub async fn remote_revoke_device(
+    remote: State<'_, Arc<Remote>>,
+    id: String,
+) -> CmdResult<RemoteStatus> {
+    remote.revoke_device(&id);
     Ok(remote.status())
 }
 
@@ -1053,13 +1212,14 @@ pub async fn remote_rotate_token(remote: State<'_, Arc<Remote>>) -> CmdResult<Re
 pub async fn create_share_link(
     remote: State<'_, Arc<Remote>>,
     agent_id: String,
+    hours: Option<u32>,
 ) -> CmdResult<ShareLink> {
-    remote.create_share(&agent_id).map_err(err)
+    remote.create_share(&agent_id, hours).map_err(err)
 }
 
 #[tauri::command]
-pub async fn revoke_share_link(remote: State<'_, Arc<Remote>>, token: String) -> CmdResult<()> {
-    remote.revoke_share(&token);
+pub async fn revoke_share_link(remote: State<'_, Arc<Remote>>, id: String) -> CmdResult<()> {
+    remote.revoke_share(&id);
     Ok(())
 }
 

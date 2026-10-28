@@ -2,10 +2,15 @@
 //! accounts and local storage. UI-agnostic; the Tauri shell wires it to the window.
 
 pub mod accounts;
+pub mod checkpoints;
 pub mod childenv;
+pub mod local;
 pub mod model;
 pub mod providers;
+pub mod redact;
+pub mod scripts;
 pub mod toolchain;
+pub mod voice;
 
 mod acp;
 mod codex;
@@ -15,8 +20,10 @@ mod git;
 mod jsonrpc;
 mod manager;
 mod mcp;
+mod secrets;
 mod session;
 
+pub use git::{hardened_command, hardening, Hardening, PUSH_REDIRECT_ERROR};
 pub use jsonrpc::kill_all_children;
 
 /// Whether `path` is inside a git work tree with at least one commit (what

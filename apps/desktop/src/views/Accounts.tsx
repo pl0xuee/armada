@@ -79,7 +79,8 @@ export function AccountsView() {
           <div className="space-y-4 @2xl:space-y-5">
             {PROVIDER_ORDER.map((p) => {
               const meta = PROVIDERS[p];
-              const info = providers.find((x) => x.provider === p);
+              // Local models run through the Codex CLI, so its install state is theirs.
+              const info = providers.find((x) => x.provider === (p === "local" ? "codex" : p));
               const list = accounts
                 .filter((a) => a.provider === p)
                 .sort((a, b) => Number(b.isSystem) - Number(a.isSystem) || a.createdAt - b.createdAt);
@@ -110,15 +111,23 @@ export function AccountsView() {
                         <span className="text-[12px] text-steel">{meta.vendor}</span>
                       </div>
                       <p className="text-[12px] text-muted">
-                        {info?.installed
-                          ? `${meta.tagline}${info.version ? ` v${info.version}` : ""}${
-                              info.adapterRequired && !info.adapterInstalled ? " · ACP adapter needs an update" : ""
-                            }`
-                          : `${meta.tagline} is not installed`}
+                        {p === "local"
+                          ? info?.installed
+                            ? "Ollama, LM Studio, llama.cpp or any OpenAI-compatible server · runs through the Codex CLI"
+                            : "Runs through the Codex CLI, which is not installed"
+                          : info?.installed
+                            ? `${meta.tagline}${info.version ? ` v${info.version}` : ""}${
+                                info.adapterRequired && !info.adapterInstalled ? " · ACP adapter needs an update" : ""
+                              }`
+                            : `${meta.tagline} is not installed`}
                       </p>
                     </div>
                     {info && !ready ? (
-                      <Button size="sm" variant="secondary" onClick={() => void startInstall(p)}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void startInstall(p === "local" ? "codex" : p)}
+                      >
                         <Download /> {info.installed ? "Update" : "Install"}
                       </Button>
                     ) : (
@@ -133,12 +142,16 @@ export function AccountsView() {
                       <AccountRow key={a.id} account={a} />
                     ))}
                     {list.length === 0 && (
-                      <div className="px-4 py-6 text-center text-[13px] text-muted">No {meta.short} accounts yet.</div>
+                      <div className="px-4 py-6 text-center text-[13px] text-muted">
+                        {p === "local"
+                          ? "No local model servers yet. Add Ollama or LM Studio to run models on your own hardware."
+                          : `No ${meta.short} accounts yet.`}
+                      </div>
                     )}
                   </div>
                   <div className="relative border-t border-line bg-panel/40 px-2 py-1.5">
                     <Button size="sm" variant="ghost" onClick={() => setAddFor(p)}>
-                      <Plus /> Add {meta.short} account
+                      <Plus /> {p === "local" ? "Add local model server" : `Add ${meta.short} account`}
                     </Button>
                   </div>
                 </section>
