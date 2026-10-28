@@ -471,6 +471,20 @@ impl AgentCtx {
         }
     }
 
+    /// Whether `generation` is still the agent's current process.
+    pub fn is_current(&self, generation: u64) -> bool {
+        self.st.lock().generation == generation
+    }
+
+    /// The current process was stopped and its effects already settled: anything
+    /// it still reports (late exit, failed prompt, queued output) is ignored.
+    pub fn retire_generation(&self) {
+        let mut st = self.st.lock();
+        st.generation += 1;
+        st.exit_intent = ExitIntent::None;
+        st.starting = false;
+    }
+
     pub fn is_starting(&self) -> bool {
         self.st.lock().starting
     }
@@ -828,5 +842,74 @@ pub fn preview_of(text: &str) -> String {
         format!("{s}…")
     } else {
         flat
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ctx() -> AgentCtx {
+        AgentCtx::new(WeakCore::dangling(), "agent".into(), 0)
+    }
+
+    /// The CI failure: stop, then a new prompt is accepted before the killed
+    /// process's exit is processed. That late exit must not end the new turn.
+    #[test]
+    fn late_exit_of_a_stopped_process_is_ignored() {
+        let ctx = ctx();
+        let old = ctx.begin_start();
+        ctx.end_start(old);
+        assert!(ctx.submit_prompt("one", vec![]).is_some());
+        ctx.turn_started();
+
+        // stop_agent: settle immediately and retire the old process.
+        ctx.set_exit_intent(ExitIntent::Stop);
+        ctx.end_turn_early(ExitIntent::Stop);
+        ctx.retire_generation();
+        assert!(!ctx.is_turn_active());
+
+        // New prompt accepted before the new process registers…
+        assert!(ctx.submit_prompt("two", vec![]).is_some());
+        // …and only now does the old process's exit arrive.
+        ctx.process_exited(old, String::new());
+        assert!(ctx.is_turn_active(), "the late exit ended the new turn");
+        assert!(!ctx.is_current(old));
+
+        // The new process is unaffected by the old generation.
+        let new = ctx.begin_start();
+        assert!(ctx.is_current(new));
+        ctx.end_start(new);
+        ctx.turn_started();
+        assert!(ctx.turn_finished(TurnOutcome::Completed).is_none());
+        assert!(!ctx.is_turn_active());
+    }
+
+    /// An exit during the handshake is reported by the starter, not here.
+    #[test]
+    fn exit_while_starting_does_not_end_the_turn() {
+        let ctx = ctx();
+        assert!(ctx.submit_prompt("hi", vec![]).is_some());
+        let g = ctx.begin_start();
+        ctx.process_exited(g, "boom".into());
+        assert!(ctx.is_turn_active(), "fail_start owns this report");
+    }
+
+    /// Stopping is idempotent: the second path to notice it does nothing.
+    #[test]
+    fn stop_settles_exactly_once() {
+        let ctx = ctx();
+        let g = ctx.begin_start();
+        ctx.end_start(g);
+        ctx.submit_prompt("hi", vec![]);
+        ctx.turn_started();
+        ctx.set_exit_intent(ExitIntent::Stop);
+        ctx.end_turn_early(ExitIntent::Stop);
+        // The prompt task's failure and the exit both arrive afterwards.
+        assert!(ctx
+            .turn_finished(TurnOutcome::Failed("agent process exited".into()))
+            .is_none());
+        ctx.process_exited(g, String::new());
+        assert!(!ctx.is_turn_active());
     }
 }

@@ -215,7 +215,14 @@ async fn session_load_replay_is_not_duplicated() {
             "user_message",
             "agent_message"
         ],
-        "replayed history leaked into the timeline"
+        "replayed history leaked into the timeline; notices: {:?}",
+        items
+            .iter()
+            .filter_map(|i| match &i.body {
+                ItemBody::Notice { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
     );
     env.core.shutdown().await;
 }
@@ -347,4 +354,55 @@ async fn codex_crash_after_failed_start_is_reported() {
     assert_eq!(a.status, AgentStatus::Error);
     assert!(!a.running);
     core.shutdown().await;
+}
+
+/// Stop followed immediately by a new prompt: the old process's late exit and
+/// queued output must not end (or leak into) the new turn. The flood mode keeps
+/// the old process's queue busy so its exit is always processed late.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stop_then_prompt_keeps_the_new_turn_clean() {
+    let mut env = setup("stop-then-prompt", mode("flood")).await;
+    let agent = env
+        .core
+        .create_agent(request(&env, "PERM 0"))
+        .await
+        .unwrap();
+    for i in 0..5 {
+        if i > 0 {
+            env.core
+                .send_prompt(&agent.id, &format!("PERM {i}"), vec![])
+                .await
+                .unwrap();
+        }
+        wait_for(&mut env.rx, 30, |e| {
+            is_attention(e, AttentionReason::Permission)
+        })
+        .await
+        .expect("permission");
+        env.core.stop_agent(&agent.id).await.unwrap();
+        let next = format!("plain {i}");
+        env.core
+            .send_prompt(&agent.id, &next, vec![])
+            .await
+            .unwrap();
+        wait_for(&mut env.rx, 30, |e| is_attention(e, AttentionReason::Done))
+            .await
+            .expect("new turn finished");
+        let items = env.core.items(&agent.id).unwrap();
+        let start = items
+            .iter()
+            .rposition(|i| matches!(&i.body, ItemBody::UserMessage { text, .. } if *text == next))
+            .expect("new prompt recorded");
+        let after: Vec<&str> = items[start + 1..]
+            .iter()
+            .map(|i| i.body.kind_str())
+            .collect();
+        assert_eq!(
+            after,
+            ["agent_message"],
+            "iteration {i}: new turn got {after:?}"
+        );
+        assert_eq!(env.core.agent(&agent.id).unwrap().status, AgentStatus::Idle);
+    }
+    env.core.shutdown().await;
 }
