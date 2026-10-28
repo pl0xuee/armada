@@ -7,7 +7,7 @@ import { StatusDot } from "@/components/StatusDot";
 import { Button } from "@/components/ui/button";
 import { findOption, respondPermission } from "@/lib/actions";
 import { RelTime } from "@/components/RelTime";
-import { formatCost, formatTokens } from "@/lib/format";
+import { agentCostText, formatTokens } from "@/lib/format";
 import { DONE_META, STATUS } from "@/lib/providers";
 import { useIsDone } from "@/store/completion";
 import type { Account, Agent, PermissionOption, TimelineItem } from "@/lib/types";
@@ -229,7 +229,7 @@ export const AgentTile = memo(function AgentTile({
       )}
 
       <div className="relative mt-3 flex items-center gap-3 border-t border-line/70 px-3.5 py-2 text-[11px] text-steel tabular">
-        <span>{formatCost(agent.costUsd)}</span>
+        <span>{agentCostText(agent)}</span>
         <span>{formatTokens(agent.tokensUsed)} tok</span>
         {agent.contextUsed !== null && agent.contextSize ? (
           <span className="flex items-center gap-1.5" title="Context used">

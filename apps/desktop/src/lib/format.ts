@@ -45,6 +45,11 @@ export function formatCost(usd: number): string {
   return `$${Math.round(usd).toLocaleString()}`;
 }
 
+/** An agent's cost for display: local models are free, everything else is priced per token. */
+export function agentCostText(agent: { provider: string; costUsd: number }): string {
+  return agent.provider === "local" ? "Free" : formatCost(agent.costUsd);
+}
+
 export function formatTokens(n: number): string {
   if (n < 1000) return `${n}`;
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;

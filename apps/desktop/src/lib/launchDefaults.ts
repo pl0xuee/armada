@@ -1,6 +1,7 @@
 // Remembered launch choices (provider / account / folder / worktree), shared by the
 // New agent dialog, the prompt-first home and "Start agent" in the command palette.
 import { api } from "./api";
+import { recallLocalModel } from "./local";
 import { CUSTOM_ACCOUNT_ID, PROVIDER_ORDER, type BuiltinProvider } from "./providers";
 import type { Account, Agent, CreateAgentRequest, CustomAgent, Provider, ProviderInfo, Settings } from "./types";
 
@@ -129,7 +130,7 @@ export async function launchAgent(
     prompt: prompt.trim(),
     title: null,
     worktree: t.worktree,
-    model: null,
+    model: t.provider === "local" ? recallLocalModel(t.accountId) : null,
     groupId: null,
     attachments: [],
     permissionMode,
@@ -173,7 +174,13 @@ export function preflight(p: {
   const out: PreflightIssue[] = [];
   if (p.provider !== "custom") {
     if (p.account?.status && !p.account.status.loggedIn) {
-      out.push({ id: "signed_out", text: `${p.account.name} isn't signed in, so the agent may fail to start.` });
+      out.push({
+        id: "signed_out",
+        text:
+          p.provider === "local"
+            ? `${p.account.name} isn't running, so the agent can't start. Start the server first.`
+            : `${p.account.name} isn't signed in, so the agent may fail to start.`,
+      });
     }
     if (p.providerInfo && !p.providerInfo.installed) {
       out.push({

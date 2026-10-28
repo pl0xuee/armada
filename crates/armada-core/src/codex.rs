@@ -82,6 +82,7 @@ pub struct CodexDriver {
     approval_policy: Mutex<String>,
     attachments_dir: std::path::PathBuf,
     model: Mutex<Option<String>>,
+    local_models: Option<Vec<LocalModel>>,
     effort: Mutex<Option<String>>,
 }
 
@@ -101,6 +102,9 @@ pub struct StartOptions<'a> {
     pub attachments_dir: &'a Path,
     pub version: &'a str,
     pub mcp_servers: &'a [McpServer],
+    /// For local-model agents: the models the server offers (replaces the OpenAI
+    /// model list in the model picker).
+    pub local_models: Option<&'a [LocalModel]>,
 }
 
 const APPROVAL_CHOICES: [(&str, &str, &str); 3] = [
@@ -231,6 +235,7 @@ impl CodexDriver {
             ),
             attachments_dir: opts.attachments_dir.to_path_buf(),
             model: Mutex::new(resp["model"].as_str().map(str::to_string)),
+            local_models: opts.local_models.map(<[LocalModel]>::to_vec),
             effort: Mutex::new(resp["reasoningEffort"].as_str().map(str::to_string)),
         });
         tokio::spawn(event_loop(
@@ -251,13 +256,16 @@ impl CodexDriver {
     async fn publish_config(&self) {
         let mut options = Vec::new();
         let current_model = self.model.lock().clone().unwrap_or_default();
-        let models = self
-            .peer
-            .request_timeout("model/list", json!({}), Some(Duration::from_secs(20)))
-            .await
-            .ok()
-            .and_then(|v| v["data"].as_array().cloned())
-            .unwrap_or_default();
+        let models = if self.local_models.is_some() {
+            Vec::new()
+        } else {
+            self.peer
+                .request_timeout("model/list", json!({}), Some(Duration::from_secs(20)))
+                .await
+                .ok()
+                .and_then(|v| v["data"].as_array().cloned())
+                .unwrap_or_default()
+        };
         let mut choices: Vec<ConfigOptionChoice> = models
             .iter()
             .filter(|m| !m["hidden"].as_bool().unwrap_or(false))
@@ -270,6 +278,16 @@ impl CodexDriver {
                 })
             })
             .collect();
+        if let Some(local) = &self.local_models {
+            choices = local
+                .iter()
+                .map(|m| ConfigOptionChoice {
+                    value: m.id.clone(),
+                    name: m.id.clone(),
+                    description: local_model_blurb(m),
+                })
+                .collect();
+        }
         if !current_model.is_empty() && !choices.iter().any(|c| c.value == current_model) {
             choices.insert(
                 0,
@@ -1228,6 +1246,20 @@ async fn event_loop(
 }
 
 /// Config overrides for a Codex thread: Armada's MCP servers under `mcp_servers`.
+/// "30.5B · Q4_K_M · 256k context" for the model picker.
+fn local_model_blurb(m: &LocalModel) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    parts.extend(m.parameters.clone());
+    parts.extend(m.quantization.clone());
+    if let Some(c) = m.context_length {
+        parts.push(format!("{}k context", c / 1000));
+    }
+    if m.tools == Some(false) {
+        parts.push("no tool support".into());
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
 fn codex_config(servers: &[McpServer]) -> Value {
     let mut map = serde_json::Map::new();
     for s in servers.iter().filter(|s| s.enabled) {

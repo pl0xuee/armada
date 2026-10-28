@@ -13,6 +13,7 @@ export const PROVIDERS: Record<Provider, ProviderMeta> = {
   claude: { name: "Claude", short: "Claude", color: "#D97757" },
   codex: { name: "ChatGPT (Codex)", short: "Codex", color: "#10A37F" },
   grok: { name: "Grok", short: "Grok", color: "#E5E7EB" },
+  local: { name: "Local model", short: "Local", color: "#4FC3F7" },
   custom: { name: "Custom agent", short: "Agent", color: CUSTOM_AGENT_COLOR },
 };
 

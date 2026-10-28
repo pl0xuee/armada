@@ -6,7 +6,7 @@ import { isBusy } from "@/lib/agents";
 import { canCompact, COMPACT_SUGGEST_RATIO, compactContext, contextRatio } from "./compact";
 import { attempt } from "@/lib/actions";
 import { api } from "@/lib/api";
-import { formatCost, formatTokens } from "@/lib/format";
+import { agentCostText, formatTokens } from "@/lib/format";
 import type { Agent, TimelineItem } from "@/lib/types";
 import { cn, prettyPath } from "@/lib/utils";
 import { ContextRing } from "../ContextRing";
@@ -75,7 +75,7 @@ export function Inspector({
             </div>
           )}
           <dl className="grid flex-1 grid-cols-1 gap-2 text-[12px]">
-            <Stat label="Cost" value={formatCost(agent.costUsd)} />
+            <Stat label="Cost" value={agentCostText(agent)} />
             <Stat label="Tokens" value={formatTokens(agent.tokensUsed)} />
             {agent.contextSize ? (
               <Stat

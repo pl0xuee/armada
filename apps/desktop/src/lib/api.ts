@@ -5,7 +5,7 @@
 // in-memory mock backend (./mock.ts) so the UI can be developed and reviewed
 // without the Rust side. The mock is code-split and never loaded inside Tauri.
 
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   CheckpointList,
@@ -23,7 +23,10 @@ import type {
   PrStatus,
   CreateAgentRequest,
   CustomAgent,
+  LocalKind,
+  LocalProbe,
   McpServer,
+  PullProgress,
   Provider,
   ProjectScript,
   ProviderInfo,
@@ -170,6 +173,22 @@ const tauriApi = {
   checkAccount: (accountId: string) => invoke<Account>("check_account", { accountId }),
   /** Starts the provider's own login flow in a PTY; returns a terminal id. */
   loginAccount: (accountId: string) => invoke<{ terminalId: string; reused: boolean }>("login_account", { accountId }),
+
+  // local model servers
+  /** Probes the default Ollama and LM Studio addresses. */
+  detectLocalServers: () => invoke<LocalProbe[]>("detect_local_servers"),
+  /** Probes one server address (`apiKey` is its optional bearer token). */
+  probeLocalServer: (kind: LocalKind, baseUrl: string, apiKey?: string | null) =>
+    invoke<LocalProbe>("probe_local_server", { kind, baseUrl, apiKey: apiKey ?? null }),
+  /** Live model list of an existing local account's server. */
+  probeLocalAccount: (accountId: string) => invoke<LocalProbe>("probe_local_account", { accountId }),
+  /** Downloads a model into Ollama; resolves when done, rejects on failure or cancel. */
+  pullLocalModel: (baseUrl: string, model: string, pullId: string, onProgress: (p: PullProgress) => void) => {
+    const channel = new Channel<PullProgress>();
+    channel.onmessage = onProgress;
+    return invoke<void>("pull_local_model", { baseUrl, model, pullId, onProgress: channel });
+  },
+  cancelLocalPull: (pullId: string) => invoke<void>("cancel_local_pull", { pullId }),
 
   // providers
   detectProviders: () => invoke<ProviderInfo[]>("detect_providers"),

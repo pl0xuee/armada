@@ -308,6 +308,7 @@ pub fn launch_spec(provider: Provider, data_dir: &Path) -> anyhow::Result<(PathB
             })?;
             Ok((cli, vec!["agent".into(), "stdio".into()]))
         }
+        Provider::Local => launch_spec(Provider::Codex, data_dir),
         Provider::Custom => anyhow::bail!("Custom agents are launched from their own definition"),
     }
 }
@@ -329,7 +330,7 @@ pub fn install_command(provider: Provider, data_dir: &Path) -> String {
                 format!("npm install -g @anthropic-ai/claude-code && {adapter}")
             }
         }
-        Provider::Codex => "npm install -g @openai/codex".into(),
+        Provider::Codex | Provider::Local => "npm install -g @openai/codex".into(),
         Provider::Grok => "npm install -g @xai-official/grok".into(),
         Provider::Custom => String::new(),
     }
@@ -339,6 +340,7 @@ pub fn docs_url(provider: Provider) -> &'static str {
     match provider {
         Provider::Claude => "https://docs.claude.com/en/docs/claude-code/overview",
         Provider::Codex => "https://developers.openai.com/codex/cli",
+        Provider::Local => "https://ollama.com/download",
         Provider::Grok => "https://docs.x.ai",
         Provider::Custom => "https://agentclientprotocol.com/overview/agents",
     }

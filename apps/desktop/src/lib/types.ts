@@ -2,7 +2,7 @@
 // Field names are camelCase on the wire; Rust uses #[serde(rename_all = "camelCase")].
 // Keep this file in sync with crates/armada-core/src/model.rs.
 
-export type Provider = "claude" | "codex" | "grok" | "custom";
+export type Provider = "claude" | "codex" | "grok" | "local" | "custom";
 
 export type AuthKind = "default" | "oauth" | "api_key";
 
@@ -28,6 +28,44 @@ export interface Account {
   status: AccountStatus | null;
   /** Rate-limit windows reported by the provider (Codex and Claude). */
   usage: AccountUsage | null;
+  /** Provider "local": the model server this account talks to. */
+  local?: LocalServer | null;
+}
+
+export type LocalKind = "ollama" | "lmstudio" | "custom";
+
+/** baseUrl is the server root for Ollama / LM Studio, the OpenAI-compatible base for custom. */
+export interface LocalServer {
+  kind: LocalKind;
+  baseUrl: string;
+}
+
+export interface LocalModel {
+  id: string;
+  sizeBytes: number | null;
+  parameters: string | null;
+  quantization: string | null;
+  contextLength: number | null;
+  /** null = the server doesn't say. */
+  tools: boolean | null;
+}
+
+export interface LocalProbe {
+  kind: LocalKind;
+  baseUrl: string;
+  running: boolean;
+  models: LocalModel[];
+  error: string | null;
+  /** The server is not on this machine: prompts and code travel over the network. */
+  remote: boolean;
+}
+
+export interface PullProgress {
+  status: string;
+  total: number | null;
+  completed: number | null;
+  done: boolean;
+  error: string | null;
 }
 
 export interface UsageWindow {
@@ -101,6 +139,8 @@ export interface Agent {
   scheduleId: string | null;
   /** Set when provider === "custom". */
   customAgentId: string | null;
+  /** Set when provider === "local": the model the server runs for this agent. */
+  model?: string | null;
   /** Messages sent while a turn was running; they run in order right after it. */
   queuedPrompts: number;
   /** The queued messages themselves (not in the timeline until they run). */
@@ -518,6 +558,8 @@ export interface CreateAccountRequest {
   color: string;
   authKind: AuthKind; // "oauth" -> isolated profile + browser login; "api_key" -> key in OS keychain
   apiKey: string | null;
+  /** Provider "local": the server (apiKey is then an optional bearer token for it). */
+  local?: LocalServer | null;
 }
 
 export interface ChangedFile {

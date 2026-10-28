@@ -37,7 +37,10 @@ export function usePreflight(p: {
   folder: string;
   worktree: boolean;
 }): PreflightIssue[] {
-  const providerInfo = useApp((s) => s.providers.find((x) => x.provider === p.provider));
+  const providerInfo = useApp((s) =>
+    // Local models run through the Codex CLI.
+    s.providers.find((x) => x.provider === (p.provider === "local" ? "codex" : p.provider)),
+  );
   const isGitRepo = useIsGitRepo(p.folder, p.worktree);
   return preflight({ ...p, providerInfo, isGitRepo });
 }

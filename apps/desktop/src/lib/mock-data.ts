@@ -129,6 +129,19 @@ export function seedAccounts(): Account[] {
       usage: null,
     },
     {
+      id: "acc-local-ollama",
+      provider: "local",
+      name: "Ollama",
+      color: "#4FC3F7",
+      authKind: "default",
+      isSystem: false,
+      configDir: "~/.local/share/armada/profiles/acc-local-ollama",
+      createdAt: min(60 * 24 * 2),
+      status: { loggedIn: true, label: "Ollama · 4 models", email: null, plan: null, checkedAt: min(3), error: null },
+      usage: null,
+      local: { kind: "ollama", baseUrl: "http://127.0.0.1:11434" },
+    },
+    {
       id: "system-custom",
       provider: "custom",
       name: "Default",
@@ -308,6 +321,33 @@ export function seedSettings(onboarded: boolean): Settings {
 
 export function configFor(provider: Provider, model?: string | null): ConfigOption[] {
   if (provider === "custom") return [];
+  if (provider === "local") {
+    return [
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        currentValue: model ?? "qwen3-coder:30b",
+        options: [
+          { value: "qwen3-coder:30b", name: "qwen3-coder:30b", description: "30.5B · Q4_K_M · 256k context" },
+          { value: "gpt-oss:20b", name: "gpt-oss:20b", description: "20.9B · MXFP4 · 128k context" },
+          { value: "devstral:24b", name: "devstral:24b", description: "23.6B · Q4_K_M · 128k context" },
+          { value: "llama3.2:3b", name: "llama3.2:3b", description: "3.2B · Q4_K_M · 128k context" },
+        ],
+      },
+      {
+        id: "approval",
+        name: "Approvals",
+        category: "mode",
+        currentValue: "on-request",
+        options: [
+          { value: "untrusted", name: "Untrusted", description: "Ask for anything non-trivial" },
+          { value: "on-request", name: "On request", description: "Model decides when to ask" },
+          { value: "never", name: "Full auto", description: "Never ask" },
+        ],
+      },
+    ];
+  }
   if (provider === "claude") {
     return [
       {

@@ -423,6 +423,7 @@ fn packages_for(provider: Provider, data_dir: &Path) -> Vec<String> {
             }
         }
         Provider::Custom => {}
+        Provider::Local => return packages_for(Provider::Codex, data_dir),
     }
     pkgs
 }

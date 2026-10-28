@@ -4,6 +4,7 @@
 pub mod accounts;
 pub mod checkpoints;
 pub mod childenv;
+pub mod local;
 pub mod model;
 pub mod providers;
 pub mod scripts;
