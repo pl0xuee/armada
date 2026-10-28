@@ -49,6 +49,11 @@ export function RestoreAction({ item }: { item: UserItem }) {
 
   async function run(editPrompt: boolean) {
     if (!checkpointId) return;
+    const st = useApp.getState().agents[agentId]?.status;
+    if (st === "working" || st === "needs_permission" || st === "starting") {
+      toast.info("The agent is working. Stop it to restore files.");
+      return;
+    }
     setBusy(true);
     const res = await attempt("Couldn't restore the files", () => api.restoreCheckpoint(agentId, checkpointId));
     setBusy(false);
@@ -145,11 +150,15 @@ export function RestoreAction({ item }: { item: UserItem }) {
               Cancel
             </Button>
             {item.text && (
-              <Button variant="secondary" onClick={() => void run(true)} disabled={busy || !!error || !preview}>
+              <Button
+                variant="secondary"
+                onClick={() => void run(true)}
+                disabled={busy || working || !!error || !preview}
+              >
                 Restore and edit prompt
               </Button>
             )}
-            <Button variant="primary" onClick={() => void run(false)} disabled={busy || !!error || !preview}>
+            <Button variant="primary" onClick={() => void run(false)} disabled={busy || working || !!error || !preview}>
               {busy ? <Spinner className="h-3.5 w-3.5 text-current" /> : <RotateCcw />}
               Restore files
             </Button>

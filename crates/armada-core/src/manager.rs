@@ -988,10 +988,13 @@ impl Core {
                 .local
                 .clone()
                 .ok_or_else(|| anyhow!("This account has no model server configured"))?;
-            let key = accounts::get_api_key(&account.id);
-            let probe = tokio::task::spawn_blocking(move || local::probe(&server, key.as_deref()))
-                .await
-                .map_err(|e| anyhow!("{e}"))?;
+            let account_id = account.id.clone();
+            let probe = tokio::task::spawn_blocking(move || {
+                let key = accounts::get_api_key(&account_id);
+                local::probe(&server, key.as_deref())
+            })
+            .await
+            .map_err(|e| anyhow!("{e}"))?;
             if !probe.running {
                 bail!(probe
                     .error
@@ -1020,6 +1023,17 @@ impl Core {
             (program, args, env, Vec::new())
         } else {
             let (program, mut args) = providers::launch_spec(agent.provider, &self.inner.data_dir)?;
+            // The OS keychain can block (prompts, locked), so keep it off the runtime.
+            let acct = account.clone();
+            let (has_key, acct_env, acct_env_remove) = tokio::task::spawn_blocking(move || {
+                (
+                    accounts::get_api_key(&acct.id).is_some(),
+                    accounts::account_env(&acct),
+                    accounts::env_to_remove(&acct),
+                )
+            })
+            .await
+            .map_err(|e| anyhow!("reading the account's credentials: {e}"))?;
             if agent.provider == Provider::Local {
                 let server = account
                     .local
@@ -1028,15 +1042,10 @@ impl Core {
                 args.extend(local::codex_override_args(
                     server,
                     local_model.as_deref(),
-                    accounts::get_api_key(&account.id).is_some(),
+                    has_key,
                 ));
             }
-            (
-                program,
-                args,
-                accounts::account_env(&account),
-                accounts::env_to_remove(&account),
-            )
+            (program, args, acct_env, acct_env_remove)
         };
         let children_file = self.inner.data_dir.join("children.json");
         let attachments_dir = self.attachments_dir();
@@ -1414,9 +1423,27 @@ impl Core {
                 }
                 bail!("That account was just removed. Pick another account.");
             }
-            self.inner.db.put_agent(&agent)?;
-            if custom_title.is_some() {
-                self.inner.db.set_title_custom(&id)?;
+            let saved = self.inner.db.put_agent(&agent).and_then(|()| {
+                if custom_title.is_some() {
+                    self.inner.db.set_title_custom(&id)?;
+                }
+                Ok(())
+            });
+            if let Err(e) = saved {
+                drop(agents);
+                let _ = self.inner.db.delete_agent(&id);
+                if worktree {
+                    // Don't leave a worktree and branch behind for an agent that doesn't exist.
+                    let _ = git::remove_worktree(
+                        &self.inner.data_dir,
+                        &project,
+                        Path::new(&agent.cwd),
+                        agent.branch.as_deref(),
+                        true,
+                    )
+                    .await;
+                }
+                return Err(e);
             }
             agents.insert(
                 id.clone(),
@@ -1533,11 +1560,39 @@ impl Core {
         let Ok(agent) = self.agent(agent_id) else {
             return;
         };
+        let ctx = self.ctx(agent_id);
+        ctx.set_turn_tree(None);
         let work = crate::checkpoints::take_for_turn(&self.inner.db, &agent, item_id);
         match tokio::time::timeout(std::time::Duration::from_secs(60), work).await {
-            Ok(Ok(_)) => {}
+            Ok(Ok(c)) => ctx.set_turn_tree(c.map(|c| c.tree)),
             Ok(Err(e)) => tracing::warn!("checkpoint for {agent_id}: {e:#}"),
             Err(_) => tracing::warn!("checkpoint for {agent_id} took too long; skipped"),
+        }
+    }
+
+    /// Adds the files that changed on disk since `tree` (the checkpoint taken as the
+    /// turn began) to a finished turn's summary. Commands the agent ran (sed, a
+    /// formatter, a script) change files without any edit call. One git pass.
+    pub(crate) async fn refine_turn_summary(
+        &self,
+        agent_id: &str,
+        item_id: &str,
+        tree: &str,
+        tool_files: Vec<String>,
+    ) {
+        let Ok(agent) = self.agent(agent_id) else {
+            return;
+        };
+        let Some(changed) = crate::checkpoints::changed_since(&agent, tree).await else {
+            return;
+        };
+        let merged = crate::session::merge_changed_files(&tool_files, &changed);
+        if merged != tool_files {
+            self.ctx(agent_id).update_item(item_id, |b| {
+                if let ItemBody::TurnSummary { files, .. } = b {
+                    *files = merged;
+                }
+            });
         }
     }
 
@@ -1871,7 +1926,6 @@ impl Core {
             d.shutdown().await;
             ctx.retire_generation(d.generation());
         }
-        crate::checkpoints::forget_agent(&agent).await;
         if remove {
             // Checked again inside: the agent may have written more before it stopped.
             if let Err(e) = git::remove_worktree(
@@ -1894,6 +1948,8 @@ impl Core {
                 return Err(e);
             }
         }
+        // Only now that nothing was refused: the checkpoints went with the agent.
+        crate::checkpoints::forget_agent(&agent).await;
         self.inner.db.delete_agent(agent_id)?;
         self.inner.agents.lock().remove(agent_id);
         self.inner.ctxs.lock().remove(agent_id);
@@ -2794,25 +2850,60 @@ impl Core {
         if let Ok(mut account) = self.account(&agent.account_id) {
             // Merge: providers report partial snapshots (e.g. only the window that
             // changed), so a missing window or plan keeps its previous value.
-            let prev = account.usage.take();
-            let merged = match prev {
-                Some(prev) => AccountUsage {
-                    primary: usage.primary.or(prev.primary),
-                    secondary: usage.secondary.or(prev.secondary),
-                    plan: usage.plan.or(prev.plan),
-                    updated_at: usage.updated_at,
-                },
-                None => usage,
-            };
+            let merged = merge_usage(account.usage.take(), usage, now_ms());
             account.usage = Some(merged);
             let _ = self.put_account(account);
         }
     }
 }
 
+/// Merges a usage snapshot into the previous one. A window whose reset time has
+/// passed describes a finished period, so it is dropped rather than shown stale.
+fn merge_usage(prev: Option<AccountUsage>, usage: AccountUsage, now: i64) -> AccountUsage {
+    let live = |w: Option<UsageWindow>| w.filter(|w| w.resets_at.is_none_or(|r| r > now));
+    match prev {
+        Some(prev) => AccountUsage {
+            primary: live(usage.primary).or(live(prev.primary)),
+            secondary: live(usage.secondary).or(live(prev.secondary)),
+            plan: usage.plan.or(prev.plan),
+            updated_at: usage.updated_at,
+        },
+        None => AccountUsage {
+            primary: live(usage.primary),
+            secondary: live(usage.secondary),
+            ..usage
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expired_usage_windows_are_dropped_on_merge() {
+        let w = |p: f64, r: Option<i64>| UsageWindow {
+            used_percent: p,
+            window_mins: None,
+            resets_at: r,
+        };
+        let prev = AccountUsage {
+            primary: Some(w(90.0, Some(1_000))),
+            secondary: Some(w(40.0, Some(9_000))),
+            plan: Some("pro".into()),
+            updated_at: 1,
+        };
+        let new = AccountUsage {
+            primary: None,
+            secondary: None,
+            plan: None,
+            updated_at: 2,
+        };
+        let m = merge_usage(Some(prev), new, 5_000);
+        assert!(m.primary.is_none(), "stale 90% must not linger");
+        assert_eq!(m.secondary.unwrap().used_percent, 40.0);
+        assert_eq!(m.plan.as_deref(), Some("pro"));
+    }
 
     #[test]
     fn history_fences_outgrow_the_content() {

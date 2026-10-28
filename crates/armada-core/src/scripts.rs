@@ -131,6 +131,10 @@ fn make_scripts(dir: &Path) -> Vec<ProjectScript> {
         if rest.starts_with('=') || rest.starts_with(":=") {
             continue;
         }
+        // `URL = http://x`, `X ?= a:b`, `X += c:d`: assignments whose value has a colon.
+        if head.contains('=') {
+            continue;
+        }
         for t in head.split_whitespace() {
             if t.starts_with('.') || t.contains('%') || t.contains('$') || !safe_name(t) {
                 continue;
@@ -223,6 +227,17 @@ mod tests {
 
     fn ids(d: &Path) -> Vec<String> {
         detect_scripts(d).into_iter().map(|s| s.id).collect()
+    }
+
+    #[test]
+    fn makefile_assignments_are_not_targets() {
+        let d = tmp();
+        write(
+            &d,
+            "Makefile",
+            "URL = http://x\nA ?= b:c\nB += d:e\nC := f\nbuild:\n\techo\n",
+        );
+        assert_eq!(ids(&d), ["make:build"]);
     }
 
     #[test]

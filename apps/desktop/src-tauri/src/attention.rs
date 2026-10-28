@@ -7,10 +7,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::AppHandle;
 use armada_core::{AgentStatus, AttentionReason, Core, ItemBody, QuietHours, Settings};
 use chrono::{NaiveTime, Timelike};
 use parking_lot::Mutex;
-use tauri::{AppHandle, Manager, UserAttentionType};
+use tauri::{Manager, UserAttentionType};
 use tracing::{debug, info, warn};
 
 use crate::notify::{self, Toast};

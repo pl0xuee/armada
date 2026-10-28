@@ -220,7 +220,16 @@ impl Peer {
         for var in opts.env_remove {
             cmd.env_remove(var);
         }
-        cmd.envs(opts.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+        // A reference the keychain couldn't resolve is not a value: never hand the
+        // literal `keychain:…` text to a child.
+        let env = opts.env.iter().filter(|(k, v)| {
+            let unresolved = v.starts_with("keychain:");
+            if unresolved {
+                tracing::warn!("dropping {k}: its stored secret couldn't be read");
+            }
+            !unresolved
+        });
+        cmd.envs(env.map(|(k, v)| (k.as_str(), v.as_str())))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -454,6 +463,15 @@ impl Peer {
         let child = self.child.lock().take();
         match child {
             Some(mut child) => {
+                // If this future is dropped midway, later callers must not wait forever
+                // (the child is dropped with it, and `kill_on_drop` ends it).
+                struct Done<'a>(&'a watch::Sender<bool>);
+                impl Drop for Done<'_> {
+                    fn drop(&mut self) {
+                        self.0.send_replace(true);
+                    }
+                }
+                let _done = Done(&self.killed);
                 #[cfg(windows)]
                 if let Some(pid) = self.pid {
                     kill_tree_windows(pid).await;
@@ -822,5 +840,30 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn second_kill_does_not_hang_after_the_first_is_dropped() {
+        let args = [
+            "-c".to_string(),
+            "trap '' TERM; while :; do sleep 1; done".to_string(),
+        ];
+        let (peer, _rx) = Peer::spawn(SpawnOptions {
+            program: Path::new("sh"),
+            args: &args,
+            cwd: &std::env::temp_dir(),
+            env: &[],
+            env_remove: &[],
+            label: "test",
+            children_file: None,
+        })
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await; // let sh install its trap
+                                                              // The first kill is abandoned while waiting for the child to exit.
+        let _ = tokio::time::timeout(Duration::from_millis(200), peer.kill()).await;
+        tokio::time::timeout(Duration::from_secs(5), peer.kill())
+            .await
+            .expect("second kill hung");
     }
 }

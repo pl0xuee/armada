@@ -16,26 +16,36 @@ export const useCheckpoints = create<{ byAgent: Record<string, Entry> }>(() => (
 const known = new Set<string>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
+const loadSeq = new Map<string, number>();
+
 async function load(agentId: string) {
+  const seq = (loadSeq.get(agentId) ?? 0) + 1;
+  loadSeq.set(agentId, seq);
   try {
     const list = await api.listCheckpoints(agentId);
+    if (loadSeq.get(agentId) !== seq) return; // a newer load superseded this one
     const byItem: Record<string, Checkpoint> = {};
     for (const c of list.checkpoints) if (c.kind === "turn" && c.itemId) byItem[c.itemId] = c;
     useCheckpoints.setState((s) => ({ byAgent: { ...s.byAgent, [agentId]: { available: list.available, byItem } } }));
+    known.add(agentId);
   } catch {
-    /* the feature just stays hidden */
+    // Stay unknown so the next ensureCheckpoints retries; the feature just stays hidden meanwhile.
+  } finally {
+    if (loadSeq.get(agentId) === seq) inflight.delete(agentId);
   }
 }
 
-/** Start tracking an agent's checkpoints (idempotent). */
+const inflight = new Set<string>();
+
+/** Start tracking an agent's checkpoints (idempotent; retries after a failed first load). */
 export function ensureCheckpoints(agentId: string) {
-  if (known.has(agentId)) return;
-  known.add(agentId);
+  if (known.has(agentId) || inflight.has(agentId)) return;
+  inflight.add(agentId);
   void load(agentId);
 }
 
 export function refreshCheckpoints(agentId: string, delayMs = 0) {
-  if (!known.has(agentId)) return;
+  if (!known.has(agentId) && !inflight.has(agentId)) return;
   const prev = timers.get(agentId);
   if (prev) clearTimeout(prev);
   timers.set(

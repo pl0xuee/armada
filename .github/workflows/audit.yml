@@ -1,0 +1,41 @@
+name: Audit
+
+# Known-vulnerability check of Cargo.lock against the RustSec advisory database.
+# Fails on vulnerabilities only; unmaintained/yanked notices are warnings.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.lock"
+      - "**/Cargo.toml"
+  pull_request:
+    paths:
+      - "Cargo.lock"
+      - "**/Cargo.toml"
+  schedule:
+    - cron: "17 5 * * 1" # weekly: new advisories appear without any change here
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-audit
+
+      - name: Audit
+        run: cargo audit

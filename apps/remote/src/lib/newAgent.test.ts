@@ -26,6 +26,19 @@ describe("agentChoices", () => {
   });
 });
 
+describe("local provider", () => {
+  it("is offered with its own name and color, and passes the model through", () => {
+    const withLocal = [...accounts, acc("l1", "local")];
+    const c = agentChoices(withLocal, customs).find((x) => x.key === "local");
+    expect(c).toMatchObject({ provider: "local", name: "Local", color: "#4FC3F7" });
+    const v = validate(
+      { choiceKey: "local", accountId: "l1", projectPath: "/home/me/p", worktree: false, title: "", prompt: "", attachments: [], model: " qwen3 ", permissionMode: null },
+      agentChoices(withLocal, customs),
+    );
+    expect(v.ok && v.request).toMatchObject({ provider: "local", accountId: "l1", model: "qwen3" });
+  });
+});
+
 describe("validate", () => {
   const choices = agentChoices(accounts, customs);
   const base: NewAgentForm = { choiceKey: "claude", accountId: "c2", projectPath: " /home/me/app ", worktree: true, title: "", prompt: "", attachments: [], model: "", permissionMode: null };

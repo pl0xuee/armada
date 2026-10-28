@@ -2,50 +2,92 @@
 //! calls the UI uses, so they behave exactly like clicking.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use crate::AppHandle;
 use armada_core::{
     Agent, AgentStatus, Core, CreateAgentRequest, ItemBody, Provider, TimelineItem, ToolStatus,
 };
+use parking_lot::Mutex;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager};
+use tauri::Manager;
 
-use super::session::{ActionLog, ToolFuture, ToolHost, ToolOutcome, VaEvent, VaSink};
+use super::session::{
+    ActionLog, PendingAction, ToolFuture, ToolHost, ToolOutcome, VaEvent, VaSink,
+};
 use super::tools::{self, basename, clean, AgentRef, OpenView, Resolved, ToolCall};
 
+/// A voice-started agent with the same project and prompt inside this window is the
+/// same request retried (a tool timeout makes the model ask again), not a new one.
+const DUPLICATE_WINDOW: Duration = Duration::from_secs(120);
+
+#[derive(Clone)]
 pub struct ArmadaTools {
-    pub app: AppHandle,
-    pub core: Core,
-    pub sink: Arc<dyn VaSink>,
+    app: AppHandle,
+    core: Core,
+    sink: Arc<dyn VaSink>,
+    /// (project path + prompt, when, agent id) of agents this session started.
+    recent: Arc<Mutex<Vec<(String, Instant, String)>>>,
+}
+
+impl ArmadaTools {
+    pub fn new(app: AppHandle, core: Core, sink: Arc<dyn VaSink>) -> Self {
+        ArmadaTools {
+            app,
+            core,
+            sink,
+            recent: Arc::default(),
+        }
+    }
 }
 
 impl ToolHost for ArmadaTools {
     fn call(&self, name: String, arguments: String) -> ToolFuture {
-        let (app, core, sink) = (self.app.clone(), self.core.clone(), self.sink.clone());
+        let host = self.clone();
         Box::pin(async move {
-            let host = ArmadaTools { app, core, sink };
             match tools::parse_call(&name, &arguments) {
-                Err(e) => ToolOutcome {
-                    output: tools::wrap_error(&e),
-                    action: None,
-                },
+                Err(e) => fail(&e),
                 Ok(call) => host.run(&name, call).await,
             }
         })
     }
 }
 
+/// The id of an agent started from this exact request within [`DUPLICATE_WINDOW`].
+pub fn find_duplicate(
+    recent: &mut Vec<(String, Instant, String)>,
+    key: &str,
+    now: Instant,
+) -> Option<String> {
+    recent.retain(|(_, at, _)| now.duration_since(*at) < DUPLICATE_WINDOW);
+    recent
+        .iter()
+        .find(|(k, _, _)| k == key)
+        .map(|(_, _, id)| id.clone())
+}
+
 fn ok(data: Value) -> ToolOutcome {
     ToolOutcome {
         output: tools::wrap_data(data),
         action: None,
+        pending: None,
     }
 }
 
 fn fail(msg: &str) -> ToolOutcome {
+    ToolOutcome::error(msg)
+}
+
+/// A side effect the user must confirm on screen before it runs.
+fn propose(kind: &str, summary: String, run: ToolFuture) -> ToolOutcome {
     ToolOutcome {
-        output: tools::wrap_error(msg),
+        output: String::new(),
         action: None,
+        pending: Some(PendingAction {
+            kind: kind.into(),
+            summary,
+            run,
+        }),
     }
 }
 
@@ -59,8 +101,14 @@ fn done(data: Value, kind: &str, summary: String, agent_id: Option<String>) -> T
             agent_id,
             ok: true,
         }),
+        pending: None,
     }
 }
+
+/// Permission mode for every agent the assistant starts (`CreateAgentRequest`).
+pub const ASSISTANT_AGENT_MODE: &str = "ask";
+/// Longest prompt or message shown on the confirmation card (and then sent).
+const MAX_SHOWN_PROMPT: usize = 4000;
 
 fn provider_label(p: Provider) -> &'static str {
     match p {
@@ -170,6 +218,7 @@ impl ArmadaTools {
             Resolved::Ambiguous(c) => Err(Box::new(ToolOutcome {
                 output: tools::wrap_ambiguous("agents", &c),
                 action: None,
+                pending: None,
             })),
             Resolved::None => Err(Box::new(fail(
                 "No agent matches that. Use list_agents to see them.",
@@ -329,6 +378,7 @@ impl ArmadaTools {
                 return ToolOutcome {
                     output: tools::wrap_ambiguous("projects", &c),
                     action: None,
+                    pending: None,
                 }
             }
             Resolved::None => return fail(
@@ -360,41 +410,82 @@ impl ArmadaTools {
             .settings()
             .map(|s| s.default_worktree)
             .unwrap_or(true);
-        let req = CreateAgentRequest {
-            provider,
-            account_id: chosen.id.clone(),
-            project_path: path.clone(),
-            prompt: prompt.to_string(),
-            title: None,
-            worktree,
-            model: None,
-            group_id: None,
-            custom_agent_id: None,
-            permission_mode: None,
-            attachments: Vec::new(),
-        };
-        match self.core.create_agent(req).await {
-            Ok(agent) => {
-                if let Err(e) = crate::commands::remember_project(&self.core, &agent.project_path) {
-                    tracing::warn!("could not update recent projects: {e:#}");
-                }
-                let project = basename(&agent.project_path);
-                done(
-                    json!({ "started": true, "id": agent.id, "title": agent.title,
-                            "provider": agent.provider.as_str(), "project": project,
-                            "worktree": agent.worktree }),
-                    "start_agent",
-                    format!(
-                        "Started {} agent '{}' in {}",
-                        provider_label(agent.provider),
-                        agent.title,
-                        project
-                    ),
-                    Some(agent.id.clone()),
-                )
-            }
-            Err(e) => fail(&format!("Couldn't start the agent: {e:#}")),
+        // The card shows exactly this text and this is what runs: no invisible
+        // characters or secrets ride along.
+        let prompt = clean(prompt, MAX_SHOWN_PROMPT);
+        let key = format!("{path}\u{0}{prompt}");
+        if let Some(existing) = self.duplicate(&key) {
+            return existing;
         }
+        let summary = format!(
+            "Start {} agent in {}: {}",
+            provider_label(provider),
+            basename(&path),
+            prompt
+        );
+        let host = self.clone();
+        let account_id = chosen.id.clone();
+        propose(
+            "start_agent",
+            summary,
+            Box::pin(async move {
+                if let Some(existing) = host.duplicate(&key) {
+                    return existing;
+                }
+                let req = CreateAgentRequest {
+                    provider,
+                    account_id,
+                    project_path: path.clone(),
+                    prompt,
+                    title: None,
+                    worktree,
+                    model: None,
+                    group_id: None,
+                    custom_agent_id: None,
+                    // Agents the assistant starts always ask before acting.
+                    permission_mode: Some(ASSISTANT_AGENT_MODE.into()),
+                    attachments: Vec::new(),
+                };
+                match host.core.create_agent(req).await {
+                    Ok(agent) => {
+                        host.recent
+                            .lock()
+                            .push((key, Instant::now(), agent.id.clone()));
+                        if let Err(e) =
+                            crate::commands::remember_project(&host.core, &agent.project_path)
+                        {
+                            tracing::warn!("could not update recent projects: {e:#}");
+                        }
+                        let project = basename(&agent.project_path);
+                        done(
+                            json!({ "started": true, "id": agent.id, "title": agent.title,
+                                    "provider": agent.provider.as_str(), "project": project,
+                                    "worktree": agent.worktree }),
+                            "start_agent",
+                            format!(
+                                "Started {} agent '{}' in {}",
+                                provider_label(agent.provider),
+                                agent.title,
+                                project
+                            ),
+                            Some(agent.id.clone()),
+                        )
+                    }
+                    Err(e) => fail(&format!("Couldn't start the agent: {e:#}")),
+                }
+            }),
+        )
+    }
+
+    /// The earlier outcome for an identical start request, if there was one.
+    fn duplicate(&self, key: &str) -> Option<ToolOutcome> {
+        let id = find_duplicate(&mut self.recent.lock(), key, Instant::now())?;
+        let agent = self.core.agents().ok()?.into_iter().find(|a| a.id == id)?;
+        Some(ok(json!({
+            "started": true, "alreadyStarted": true, "id": agent.id, "title": agent.title,
+            "provider": agent.provider.as_str(), "project": basename(&agent.project_path),
+            "note": "An identical request already started this agent; nothing new was started."
+        })))
     }
 
     async fn send_message(&self, query: &str, text: &str) -> ToolOutcome {
@@ -402,19 +493,33 @@ impl ArmadaTools {
             Ok(a) => a,
             Err(o) => return *o,
         };
-        match self.core.send_prompt(&agent.id, text, Vec::new()).await {
-            Ok(()) => done(
-                json!({ "sent": true, "agent": agent.title, "queued": agent.running }),
-                "send_message",
-                format!(
-                    "Sent to '{}': \u{201c}{}\u{201d}",
-                    agent.title,
-                    text.chars().take(80).collect::<String>()
-                ),
-                Some(agent.id),
-            ),
-            Err(e) => fail(&format!("Couldn't send the message: {e:#}")),
-        }
+        let text = clean(text, MAX_SHOWN_PROMPT);
+        let summary = format!(
+            "Send to '{}' ({}): {}",
+            clean(&agent.title, 80),
+            basename(&agent.project_path),
+            text
+        );
+        let core = self.core.clone();
+        propose(
+            "send_message",
+            summary,
+            Box::pin(async move {
+                match core.send_prompt(&agent.id, &text, Vec::new()).await {
+                    Ok(()) => done(
+                        json!({ "sent": true, "agent": agent.title, "queued": agent.running }),
+                        "send_message",
+                        format!(
+                            "Sent to '{}': \u{201c}{}\u{201d}",
+                            agent.title,
+                            text.chars().take(80).collect::<String>()
+                        ),
+                        Some(agent.id),
+                    ),
+                    Err(e) => fail(&format!("Couldn't send the message: {e:#}")),
+                }
+            }),
+        )
     }
 
     async fn stop_agent(&self, query: &str) -> ToolOutcome {
@@ -562,6 +667,25 @@ mod tests {
         ];
         assert_eq!(running_subagents(&items, true), 2);
         assert_eq!(running_subagents(&items, false), 1);
+    }
+
+    #[test]
+    fn identical_starts_within_two_minutes_are_duplicates() {
+        let t0 = Instant::now();
+        let mut recent = vec![("p\0fix".to_string(), t0, "agent-1".to_string())];
+        assert_eq!(
+            find_duplicate(&mut recent, "p\0fix", t0).as_deref(),
+            Some("agent-1")
+        );
+        assert_eq!(find_duplicate(&mut recent, "p\0other", t0), None);
+        let later = t0 + DUPLICATE_WINDOW;
+        assert_eq!(find_duplicate(&mut recent, "p\0fix", later), None);
+        assert!(recent.is_empty());
+    }
+
+    #[test]
+    fn assistant_agents_always_ask() {
+        assert_eq!(ASSISTANT_AGENT_MODE, "ask");
     }
 
     #[test]

@@ -45,7 +45,7 @@ fn tools_list_params(cursor: Option<&str>) -> Value {
 fn named(list: &[crate::model::KeyValue]) -> impl Iterator<Item = (&str, &str)> {
     list.iter()
         .map(|kv| (kv.name.trim(), kv.value.as_str()))
-        .filter(|(name, _)| !name.is_empty())
+        .filter(|(name, value)| !name.is_empty() && !crate::secrets::is_unresolved(value))
 }
 
 fn initialize_params() -> Value {

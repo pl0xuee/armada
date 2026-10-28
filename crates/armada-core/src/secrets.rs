@@ -14,12 +14,19 @@ use parking_lot::Mutex;
 use std::collections::BTreeMap;
 
 const REF_PREFIX: &str = "keychain:";
+
+/// A `keychain:` reference the vault couldn't resolve. Such values are dropped rather than
+/// handed to an MCP server or agent as if they were the secret.
+pub(crate) fn is_unresolved(value: &str) -> bool {
+    value.starts_with(REF_PREFIX)
+}
 const ACCOUNT_PREFIX: &str = "secret/";
 const VAULT_ACCOUNT: &str = "settings-secrets";
 
 pub trait SecretStore: Send + Sync {
     fn set(&self, account: &str, value: &str) -> anyhow::Result<()>;
-    fn get(&self, account: &str) -> Option<String>;
+    /// `Ok(None)` = no such entry; `Err` = the keychain couldn't be read.
+    fn get(&self, account: &str) -> anyhow::Result<Option<String>>;
     fn delete(&self, account: &str);
 }
 
@@ -33,11 +40,13 @@ impl SecretStore for Keyring {
             .set_password(value)
             .context("saving to the OS keychain")
     }
-    fn get(&self, account: &str) -> Option<String> {
-        keyring::Entry::new(crate::accounts::KEYRING_SERVICE, account)
-            .ok()?
-            .get_password()
-            .ok()
+    fn get(&self, account: &str) -> anyhow::Result<Option<String>> {
+        let entry = keyring::Entry::new(crate::accounts::KEYRING_SERVICE, account)?;
+        match entry.get_password() {
+            Ok(v) => Ok(Some(v)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
     fn delete(&self, account: &str) {
         if let Ok(e) = keyring::Entry::new(crate::accounts::KEYRING_SERVICE, account) {
@@ -75,26 +84,29 @@ impl Vault {
         }
     }
 
-    fn load(&self) -> parking_lot::MappedMutexGuard<'_, BTreeMap<String, String>> {
+    /// The cached map; a failed keychain read is an error and is never cached.
+    fn load(&self) -> anyhow::Result<parking_lot::MappedMutexGuard<'_, BTreeMap<String, String>>> {
         let mut g = self.cache.lock();
         if g.is_none() {
-            let map = self
-                .store
-                .get(VAULT_ACCOUNT)
-                .and_then(|j| serde_json::from_str(&j).ok())
-                .unwrap_or_default();
+            let map = match self.store.get(VAULT_ACCOUNT)? {
+                None => BTreeMap::new(),
+                Some(j) => serde_json::from_str(&j)
+                    .map_err(|e| anyhow::anyhow!("the keychain item isn't readable: {e}"))?,
+            };
             *g = Some(map);
         }
-        parking_lot::MutexGuard::map(g, |o| o.as_mut().expect("loaded"))
+        Ok(parking_lot::MutexGuard::map(g, |o| {
+            o.as_mut().expect("loaded")
+        }))
     }
 
-    fn get(&self, key: &str) -> Option<String> {
-        self.load().get(key).cloned()
+    fn get(&self, key: &str) -> anyhow::Result<Option<String>> {
+        Ok(self.load()?.get(key).cloned())
     }
 
     /// Makes the stored map exactly `next`; writes only if it differs.
     fn replace(&self, next: BTreeMap<String, String>) -> anyhow::Result<()> {
-        if *self.load() == next {
+        if *self.load()? == next {
             return Ok(());
         }
         if next.is_empty() {
@@ -118,8 +130,8 @@ impl SecretStore for Memory {
         self.0.lock().insert(account.into(), value.into());
         Ok(())
     }
-    fn get(&self, account: &str) -> Option<String> {
-        self.0.lock().get(account).cloned()
+    fn get(&self, account: &str) -> anyhow::Result<Option<String>> {
+        Ok(self.0.lock().get(account).cloned())
     }
     fn delete(&self, account: &str) {
         self.0.lock().remove(account);
@@ -163,13 +175,19 @@ pub(crate) fn resolve(settings: &mut Settings, vault: &Vault) -> bool {
     if slots.iter().all(|(_, kv)| kv.value.is_empty()) {
         return false; // nothing stored: don't touch the keychain
     }
-    for (_, kv) in slots.iter_mut() {
-        if let Some(key) = kv.value.strip_prefix(REF_PREFIX) {
-            match vault.get(key) {
-                Some(v) => kv.value = v,
-                None => {
+    for (slot_key, kv) in slots.iter_mut() {
+        // Only a reference to the field's own key is one (a value typed as
+        // `keychain:other` must not read another field's secret; it is plain text).
+        if kv.value.strip_prefix(REF_PREFIX) == Some(slot_key.as_str()) {
+            match vault.get(slot_key.as_str()) {
+                Ok(Some(v)) => kv.value = v,
+                Ok(None) => {
                     tracing::warn!("a stored secret ({}) is missing from the keychain", kv.name)
                 }
+                Err(e) => tracing::warn!(
+                    "couldn't read the keychain for a stored secret ({}): {e:#}",
+                    kv.name
+                ),
             }
         } else if !kv.value.is_empty() {
             plaintext = true;
@@ -187,6 +205,9 @@ pub(crate) fn externalize(settings: &Settings, vault: &Vault) -> Settings {
         return out; // no secrets, keychain never needed
     }
     let mut next = BTreeMap::new();
+    // Set when a reference couldn't be resolved because the keychain failed: the
+    // item is then left exactly as it is (rewriting it would lose those entries).
+    let mut unreadable = false;
     for (key, kv) in slots.iter() {
         if kv.value.is_empty() {
             continue;
@@ -194,12 +215,22 @@ pub(crate) fn externalize(settings: &Settings, vault: &Vault) -> Settings {
         // Unresolved reference to this very slot (keychain was unavailable at load):
         // keep the stored value, never store the reference text as the secret.
         if kv.value.strip_prefix(REF_PREFIX) == Some(key.as_str()) {
-            if let Some(v) = vault.get(key) {
-                next.insert(key.clone(), v);
+            match vault.get(key) {
+                Ok(Some(v)) => {
+                    next.insert(key.clone(), v);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!("keychain unreadable, leaving stored secrets untouched: {e:#}");
+                    unreadable = true;
+                }
             }
             continue;
         }
         next.insert(key.clone(), kv.value.clone());
+    }
+    if unreadable {
+        return out;
     }
     match vault.replace(next) {
         Ok(()) => {
@@ -259,7 +290,7 @@ mod tests {
             self.sets.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             self.inner.set(a, v)
         }
-        fn get(&self, a: &str) -> Option<String> {
+        fn get(&self, a: &str) -> anyhow::Result<Option<String>> {
             self.gets.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             self.inner.get(a)
         }
@@ -278,10 +309,10 @@ mod tests {
         assert!(!resolve(&mut back, &vault));
         assert_eq!(back.mcp_servers[0].env[0].value, "abc");
         assert_eq!(back.mcp_servers[0].headers[0].value, "Bearer xyz");
-        assert_eq!(vault.load().len(), 2);
+        assert_eq!(vault.load().unwrap().len(), 2);
         // Removing the server drops its secrets from the item.
         externalize(&Settings::default(), &vault);
-        assert!(vault.load().is_empty());
+        assert!(vault.load().unwrap().is_empty());
     }
 
     #[test]
@@ -310,5 +341,78 @@ mod tests {
         changed.mcp_servers[0].env[0].value = "new".into();
         externalize(&changed, &vault);
         assert_eq!(sets.load(SeqCst), 2);
+    }
+
+    /// Fails reads while `fail` is set; counts writes.
+    struct Flaky {
+        inner: Memory,
+        fail: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        writes: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl SecretStore for Flaky {
+        fn set(&self, a: &str, v: &str) -> anyhow::Result<()> {
+            self.writes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.set(a, v)
+        }
+        fn get(&self, a: &str) -> anyhow::Result<Option<String>> {
+            if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+                anyhow::bail!("locked");
+            }
+            self.inner.get(a)
+        }
+        fn delete(&self, a: &str) {
+            self.writes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.delete(a)
+        }
+    }
+
+    #[test]
+    fn failed_read_is_not_cached_and_never_rewrites_the_vault() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let fail = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let writes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mem = Memory::default();
+        let seed = Vault::new(Box::new(Memory::default()));
+        let stored = externalize(&settings(), &seed);
+        mem.set(
+            VAULT_ACCOUNT,
+            &serde_json::to_string(&*seed.load().unwrap()).unwrap(),
+        )
+        .unwrap();
+        let vault = Vault::new(Box::new(Flaky {
+            inner: mem,
+            fail: fail.clone(),
+            writes: writes.clone(),
+        }));
+        fail.store(true, SeqCst);
+        let mut s = stored.clone();
+        resolve(&mut s, &vault);
+        assert!(s.mcp_servers[0].env[0].value.starts_with(REF_PREFIX));
+        // Saving while the keychain is unreadable leaves it alone.
+        externalize(&s, &vault);
+        assert_eq!(writes.load(SeqCst), 0);
+        // The failure wasn't cached: once readable, references resolve.
+        fail.store(false, SeqCst);
+        let mut s = stored.clone();
+        resolve(&mut s, &vault);
+        assert_eq!(s.mcp_servers[0].env[0].value, "abc");
+    }
+
+    #[test]
+    fn a_reference_to_another_field_is_not_resolved() {
+        let vault = Vault::new(Box::new(Memory::default()));
+        let mut stored = externalize(&settings(), &vault);
+        let mut other = settings();
+        other.mcp_servers[0].id = "m2".into();
+        other.mcp_servers[0].env[0].value = "keychain:secret/mcp/m1/env/TOKEN".into();
+        let _ = &mut stored;
+        resolve(&mut other, &vault);
+        assert_eq!(
+            other.mcp_servers[0].env[0].value,
+            "keychain:secret/mcp/m1/env/TOKEN"
+        );
     }
 }

@@ -108,6 +108,9 @@ struct CtxState {
     queue_paused: bool,
     /// When the current turn started, and the agent's cost/tokens at that point.
     turn_started_at: i64,
+    /// Tree of the checkpoint taken as this turn began (None: no checkpoint). The
+    /// turn summary lists the files that differ from it.
+    turn_tree: Option<String>,
     turn_cost_start: f64,
     turn_tokens_start: i64,
     /// "Send now" interrupted the turn: when it ends, run the head of the queue.
@@ -167,6 +170,7 @@ impl AgentCtx {
                 last_user_item: None,
                 queue_paused: false,
                 turn_started_at: 0,
+                turn_tree: None,
                 turn_cost_start: 0.0,
                 turn_tokens_start: 0,
                 advance_on_cancel: false,
@@ -490,15 +494,21 @@ impl AgentCtx {
             return;
         };
         let before = tool_shape(&item.body);
-        let old_len = match &item.body {
-            ItemBody::ToolCall { output, .. } => output.len(),
-            _ => 0,
+        let old_output = match &item.body {
+            ItemBody::ToolCall { output, .. } => output.clone(),
+            _ => String::new(),
         };
+        let old_len = old_output.len();
         patch(&mut item.body);
         let mut appended: Option<String> = None;
         if let ItemBody::ToolCall { output, .. } = &mut item.body {
             truncate_output(output);
-            if output.len() > old_len && output.is_char_boundary(old_len) {
+            // A delta is only exact when the old output is a prefix of the new one
+            // (a rewrite or a truncation that happens to grow must be sent whole).
+            if output.len() > old_len
+                && output.is_char_boundary(old_len)
+                && output.as_bytes().starts_with(old_output.as_bytes())
+            {
                 appended = Some(output[old_len..].to_string());
             }
         }
@@ -831,6 +841,16 @@ impl AgentCtx {
     /// Snapshots the agent's folder just before the turn's prompt is forwarded to
     /// the agent (so the files are saved before the agent can change them). Never
     /// fails the turn: a problem only means this message has no checkpoint.
+    /// Rewrites one timeline item in place (no-op if it is gone).
+    pub(crate) fn update_item(&self, id: &str, f: impl FnOnce(&mut ItemBody)) {
+        let mut st = self.st.lock();
+        self.update_locked(&mut st, id, f);
+    }
+
+    pub(crate) fn set_turn_tree(&self, tree: Option<String>) {
+        self.st.lock().turn_tree = tree;
+    }
+
     pub async fn checkpoint_before_turn(&self) {
         let item = self.st.lock().last_user_item.clone();
         if let Some(core) = self.core.upgrade() {
@@ -1077,6 +1097,7 @@ impl AgentCtx {
         let next: Option<Prompt>;
         let summary;
         let finish_epoch: u64;
+        let turn_tree: Option<String>;
         {
             let mut st = self.st.lock();
             if !st.turn_active || generation.is_some_and(|g| g != st.generation) {
@@ -1101,6 +1122,7 @@ impl AgentCtx {
             );
             // Computed now, from this turn's items (the next turn clears them).
             summary = completed.then(|| self.turn_summary_locked(&st)).flatten();
+            turn_tree = st.turn_tree.take();
             let normal = !matches!(outcome, TurnOutcome::Failed(_) | TurnOutcome::Cancelled);
             let advance =
                 normal || (matches!(outcome, TurnOutcome::Cancelled) && advance_on_cancel);
@@ -1135,7 +1157,8 @@ impl AgentCtx {
                 .agent_snapshot()
                 .map(|a| (a.cost_usd, a.tokens_used))
                 .unwrap_or_default();
-            self.push(ItemBody::TurnSummary {
+            let tool_files = files.clone();
+            let id = self.push(ItemBody::TurnSummary {
                 duration_ms,
                 files,
                 tool_calls,
@@ -1143,6 +1166,19 @@ impl AgentCtx {
                 cost_usd: (cost - cost0).max(0.0),
                 tokens: (tokens - tokens0).max(0),
             });
+            // Files changed through shell commands never show up as edit calls, so
+            // the folder itself is compared with how it was when the turn began.
+            if let (Some(tree), Some(core), Ok(rt)) = (
+                turn_tree,
+                self.core.upgrade(),
+                tokio::runtime::Handle::try_current(),
+            ) {
+                let agent_id = self.agent_id.clone();
+                rt.spawn(async move {
+                    core.refine_turn_summary(&agent_id, &id, &tree, tool_files)
+                        .await;
+                });
+            }
         }
         if let Some(mut next) = next {
             // Advance to the queued prompt, unless a stop got in meanwhile.
@@ -1514,6 +1550,18 @@ type ToolShape = (
     bool,
 );
 
+/// The turn summary's file list: the files the agent's edit calls named, plus those
+/// found changed on disk (absolute paths), without listing a file twice.
+pub(crate) fn merge_changed_files(tool_files: &[String], changed: &[String]) -> Vec<String> {
+    let mut out = tool_files.to_vec();
+    for f in changed {
+        if !out.contains(f) {
+            out.push(f.clone());
+        }
+    }
+    out
+}
+
 fn tool_shape(b: &ItemBody) -> Option<ToolShape> {
     match b {
         ItemBody::ToolCall {
@@ -1848,6 +1896,43 @@ mod tests {
         );
         drop(st);
         assert!(ctx.begin_turn(next.token));
+    }
+
+    /// A tool output that was rewritten (not just appended to) is sent whole.
+    #[test]
+    fn rewritten_tool_output_is_not_sent_as_a_tail_delta() {
+        let set = |text: &'static str| {
+            move |b: &mut ItemBody| {
+                if let ItemBody::ToolCall { output, .. } = b {
+                    *output = text.to_string();
+                }
+            }
+        };
+        let has_delta = |ctx: &AgentCtx| {
+            let st = ctx.st.lock();
+            let id = st.ext.get("t1").cloned().unwrap();
+            st.lens.contains_key(&(id, LenField::Output))
+        };
+        let ctx = ctx();
+        run(&ctx, "one");
+        let wait = || std::thread::sleep(Duration::from_millis(120));
+        ctx.tool_call("t1", set("abcd"));
+        wait();
+        ctx.tool_call("t1", set("abcdef")); // sent whole (it was held back)
+        ctx.tool_call("t1", set("abcdefg"));
+        assert!(has_delta(&ctx), "an append is a delta");
+        let ctx = ctx_after_run();
+        ctx.tool_call("t1", set("abcd"));
+        wait();
+        ctx.tool_call("t1", set("abcde"));
+        ctx.tool_call("t1", set("wxyzuvw"));
+        assert!(!has_delta(&ctx), "a rewrite must send the full item");
+    }
+
+    fn ctx_after_run() -> AgentCtx {
+        let c = ctx();
+        run(&c, "one");
+        c
     }
 
     #[test]

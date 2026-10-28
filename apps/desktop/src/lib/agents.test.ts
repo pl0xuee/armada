@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { liveTail, needsAttention, runningCount, subagentRuns, triageQueue } from "./agents";
+import {
+  liveTail,
+  needsAttention,
+  runningCount,
+  subagentRuns,
+  SUBAGENT_ACTIVE_WINDOW_MS,
+  SUBAGENT_LAUNCH_GRACE_MS,
+  triageQueue,
+} from "./agents";
 import { seedAgents } from "./mock-data";
 import type { Agent, TimelineItem } from "./types";
 
@@ -169,5 +177,58 @@ describe("subagentRuns", () => {
     const runs = subagentRuns(items, true);
     expect(runs.map((r) => r.state)).toEqual(["done", "failed"]);
     expect(runningCount(runs)).toBe(0);
+  });
+
+  describe("background sub-agents over time", () => {
+    const T0 = 1_000_000;
+    const at = (ts: number, it: TimelineItem): TimelineItem => ({ ...it, ts });
+    const running = (items: TimelineItem[], busy: boolean, now: number, live = true) =>
+      runningCount(subagentRuns(items, busy, { now, live }));
+    const launched = () => at(T0, call("bg", "completed", { background: true }));
+    const userAt = (ts: number, id = "u"): TimelineItem => ({ ...user, id, ts: ts });
+
+    it("keeps counting through a busy -> idle gap", () => {
+      const items = [userAt(T0 - 10), launched(), at(T0 + 5_000, call("c1", "completed", undefined, "bg"))];
+      expect(running(items, true, T0 + 10_000)).toBe(1);
+      // Idle between automatic turns, child active 20 s ago.
+      expect(running(items, false, T0 + 25_000)).toBe(1);
+    });
+
+    it("keeps counting after a new user message while children are active", () => {
+      const items = [
+        userAt(T0 - 10),
+        launched(),
+        at(T0 + 100_000, call("c1", "in_progress", undefined, "bg")),
+        userAt(T0 + 110_000, "u2"),
+      ];
+      expect(running(items, true, T0 + 120_000)).toBe(1);
+      const finished = [...items.slice(0, 2), at(T0 + 100_000, call("c1", "completed", undefined, "bg")), items[3]];
+      expect(running(finished, true, T0 + 120_000)).toBe(1); // child within active window
+    });
+
+    it("counts a fresh launch for the grace period, then drops when idle and quiet", () => {
+      const items = [userAt(T0 - 10), launched()];
+      expect(running(items, false, T0 + SUBAGENT_LAUNCH_GRACE_MS - 1)).toBe(1);
+      expect(running(items, false, T0 + SUBAGENT_LAUNCH_GRACE_MS + 1)).toBe(0);
+    });
+
+    it("drops once child activity is older than the window and the agent is idle", () => {
+      const items = [userAt(T0 - 10), launched(), at(T0 + 1_000, call("c1", "completed", undefined, "bg"))];
+      expect(running(items, false, T0 + 1_000 + SUBAGENT_ACTIVE_WINDOW_MS - 1)).toBe(1);
+      expect(running(items, false, T0 + 1_000 + SUBAGENT_ACTIVE_WINDOW_MS + 1)).toBe(0);
+      // Still busy in the same turn: counts regardless.
+      expect(running(items, true, T0 + 1_000 + SUBAGENT_ACTIVE_WINDOW_MS + 1)).toBe(1);
+    });
+
+    it("drops immediately when the agent is stopped, errored or interrupted", () => {
+      const items = [userAt(T0 - 10), launched(), at(T0 + 1_000, call("c1", "in_progress", undefined, "bg"))];
+      expect(running(items, true, T0 + 2_000, false)).toBe(0);
+    });
+
+    it("leaves foreground sub-agents on the busy rule", () => {
+      const items = [userAt(T0 - 10), at(T0, call("fg", "in_progress", { kind: "Explore" }))];
+      expect(running(items, false, T0 + 1_000)).toBe(0);
+      expect(running(items, true, T0 + 1_000)).toBe(1);
+    });
   });
 });
