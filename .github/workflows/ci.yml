@@ -19,6 +19,12 @@ on:
       - "**/*.jpg"
       - "**/*.gif"
   workflow_dispatch:
+    inputs:
+      only:
+        description: "Run just one platform's job (skips the Linux checks), e.g. to retry a Windows fix"
+        type: choice
+        options: [all, windows, macos]
+        default: all
 
 permissions:
   contents: read
@@ -35,6 +41,7 @@ env:
 jobs:
   checks:
     name: checks (linux)
+    if: github.event_name != 'workflow_dispatch' || inputs.only == 'all'
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
@@ -105,14 +112,12 @@ jobs:
   native:
     name: ${{ matrix.name }}
     needs: checks
+    # After checks pass, or straight away for a single-platform manual run.
+    if: ${{ !cancelled() && (needs.checks.result == 'success' || (needs.checks.result == 'skipped' && inputs.only != 'all')) }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: macOS
-            os: macos-latest
-          - name: Windows
-            os: windows-latest
+        include: ${{ fromJSON(inputs.only == 'windows' && '[{"name":"Windows","os":"windows-latest"}]' || inputs.only == 'macos' && '[{"name":"macOS","os":"macos-latest"}]' || '[{"name":"macOS","os":"macos-latest"},{"name":"Windows","os":"windows-latest"}]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
