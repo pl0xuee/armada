@@ -197,25 +197,39 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
     }
   };
 
-  const commit = () =>
+  // New files whose names look like credentials: ask before a commit takes them.
+  const [secrets, setSecrets] = useState<{ files: string[]; then: "commit" | "ship" } | null>(null);
+  const checkSecrets = async (then: "commit" | "ship", go: (exclude: string[]) => void) => {
+    let files: string[] = [];
+    try {
+      files = await api.secretLookingFiles(agent.id);
+    } catch {
+      // The commit itself reports git problems.
+    }
+    if (files.length > 0) setSecrets({ files, then });
+    else go([]);
+  };
+
+  const doCommit = (exclude: string[]) =>
     void run(
       "commit",
-      () => api.commitAgent(agent.id, commitMsg.trim() || agent.title),
+      () => api.commitAgent(agent.id, commitMsg.trim() || agent.title, exclude),
       (summary) => {
         toastCommit(summary);
         setCommitMsg("");
         refreshPrSoon(agent.id);
       },
     );
+  const commit = () => void checkSecrets("commit", doCommit);
 
   const hasChanges = (diff?.files.length ?? 0) > 0;
   const uncommitted = diff?.uncommitted ?? 0;
   const message = commitMsg.trim() || agent.title;
 
-  const ship = () =>
+  const doShip = (exclude: string[]) =>
     void run(
       "ship",
-      () => api.shipAgent(agent.id, message),
+      () => api.shipAgent(agent.id, message, exclude),
       (result) => {
         setCommitMsg("");
         const o = shipOutcome(result);
@@ -231,6 +245,8 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         }
       },
     );
+
+  const ship = () => void checkSecrets("ship", doShip);
 
   const merge = () =>
     void run(
@@ -803,6 +819,40 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         </div>
       </footer>
 
+      <ConfirmDialog
+        open={secrets !== null}
+        onOpenChange={(o) => {
+          if (!o) setSecrets(null);
+        }}
+        title="These files look like secrets"
+        description="These files look like secrets and will be committed:"
+        confirmLabel="Exclude them"
+        onConfirm={() => {
+          const cur = secrets;
+          setSecrets(null);
+          if (cur) (cur.then === "commit" ? doCommit : doShip)(cur.files);
+        }}
+      >
+        <ul className="max-h-40 space-y-0.5 overflow-y-auto rounded-lg border border-line bg-base/40 px-3 py-2 font-mono text-[12px]">
+          {secrets?.files.map((f) => (
+            <li key={f} className="truncate" title={f}>
+              {f}
+            </li>
+          ))}
+        </ul>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="mt-2"
+          onClick={() => {
+            const cur = secrets;
+            setSecrets(null);
+            if (cur) (cur.then === "commit" ? doCommit : doShip)([]);
+          }}
+        >
+          Commit anyway
+        </Button>
+      </ConfirmDialog>
       <ConfirmDialog
         open={confirmDiscard}
         onOpenChange={setConfirmDiscard}

@@ -1,5 +1,5 @@
 import { Link2, Radio, ShieldCheck, Trash2, TriangleAlert } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { relativeTimeLong } from "@/lib/format";
@@ -37,7 +37,10 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   const [busy, setBusy] = useState<null | "enable" | "create" | string>(null);
   /** Consent step: where the shared view may be opened from (defaults to this computer only). */
   const [scope, setScope] = useState<"local" | "lan">("local");
-  const autoCreated = useRef(false);
+  /** How long a new link works (hours). */
+  const [hours, setHours] = useState(24);
+  /** Links created in this dialog: only their creation response carries the URL. */
+  const [urls, setUrls] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     try {
@@ -60,22 +63,15 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
     setBusy("create");
     setCreateError(null);
     try {
-      await api.createShareLink(agent.id);
+      const link = await api.createShareLink(agent.id, hours);
+      if (link.url) setUrls((u) => ({ ...u, [link.id]: link.url as string }));
       await refresh();
     } catch (e) {
       setCreateError(errorMessage(e));
     } finally {
       setBusy(null);
     }
-  }, [agent.id, refresh]);
-
-  // Opening the dialog is the intent to share: create a link once the server is up.
-  useEffect(() => {
-    if (!status?.running || autoCreated.current) return;
-    if (status.shares.some((s) => s.agentId === agent.id)) return;
-    autoCreated.current = true;
-    void create();
-  }, [status, agent.id, create]);
+  }, [agent.id, hours, refresh]);
 
   const enable = async () => {
     if (!settings) return;
@@ -95,9 +91,9 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   };
 
   const revoke = async (link: ShareLink) => {
-    setBusy(link.token);
+    setBusy(link.id);
     try {
-      await api.revokeShareLink(link.token);
+      await api.revokeShareLink(link.id);
       await refresh();
       toast("Share link revoked", { description: "Anyone using it loses access immediately." });
     } catch (e) {
@@ -142,7 +138,7 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
                     checked={scope === "lan"}
                     onSelect={() => setScope("lan")}
                     title="Allow devices on my network"
-                    hint="Phones and computers on this network can open share links, and anyone with the pairing link gets full control. Traffic isn't encrypted: only on networks you trust, or over a VPN such as Tailscale."
+                    hint="Phones and computers on this network can open share links, and anyone who scans a pairing code while it's shown gets full control. Traffic on the local network isn't encrypted: only on networks you trust, or over a VPN such as Tailscale."
                     warn
                   />
                 </div>
@@ -202,46 +198,59 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
               ) : (
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed border-line-strong px-3.5 py-3">
                   <span className="text-[12.5px] text-muted">No active link for this agent.</span>
-                  <Button size="sm" variant="primary" disabled={busy !== null} onClick={() => void create()}>
-                    <Link2 /> Create link
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <ExpiryPicker hours={hours} onChange={setHours} disabled={busy !== null} />
+                    <Button size="sm" variant="primary" disabled={busy !== null} onClick={() => void create()}>
+                      <Link2 /> Create link
+                    </Button>
+                  </div>
                 </div>
               ))}
-            {links.map((l) => (
-              <div key={l.token} className="rounded-xl border border-line-strong bg-card/70 p-3">
-                <div className="flex items-center gap-2">
-                  <Link2 className="h-4 w-4 shrink-0 text-accent" />
-                  <span className="selectable min-w-0 flex-1 truncate font-mono text-[12px] text-fg">
-                    {l.url ?? "Link unavailable"}
-                  </span>
-                  {l.url && <CopyButton text={l.url} label="Copy link" />}
+            {links.map((l) => {
+              const url = urls[l.id] ?? l.url;
+              return (
+                <div key={l.id} className="rounded-xl border border-line-strong bg-card/70 p-3">
+                  <div className="flex items-center gap-2">
+                    <Link2 className="h-4 w-4 shrink-0 text-accent" />
+                    <span className="selectable min-w-0 flex-1 truncate font-mono text-[12px] text-fg">
+                      {url ?? "The link was shown when it was created. Revoke it and create a new one to copy it."}
+                    </span>
+                    {url && <CopyButton text={url} label="Copy link" />}
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-[11.5px] text-steel">
+                    <span>
+                      Created {relativeTimeLong(l.createdAt)} · expires {new Date(l.expiresAt).toLocaleString()}
+                    </span>
+                    <Button size="xs" variant="ghost" disabled={busy !== null} onClick={() => void revoke(l)}>
+                      {busy === l.id ? <Spinner className="h-3 w-3" /> : <Trash2 className="!h-3 !w-3" />}
+                      Revoke
+                    </Button>
+                  </div>
                 </div>
-                <div className="mt-2 flex items-center justify-between text-[11.5px] text-steel">
-                  <span>Created {relativeTimeLong(l.createdAt)}</span>
-                  <Button size="xs" variant="ghost" disabled={busy !== null} onClick={() => void revoke(l)}>
-                    {busy === l.token ? <Spinner className="h-3 w-3" /> : <Trash2 className="!h-3 !w-3" />}
-                    Revoke
-                  </Button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {links.length > 0 && createError && (
               <p className="text-[12px] text-err" role="alert">
                 Couldn't create another link: {createError}
               </p>
             )}
             {links.length > 0 && (
-              <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => void create()}>
-                {busy === "create" ? <Spinner className="h-3.5 w-3.5" /> : <Link2 />}
-                Create another link
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => void create()}>
+                  {busy === "create" ? <Spinner className="h-3.5 w-3.5" /> : <Link2 />}
+                  Create another link
+                </Button>
+                <ExpiryPicker hours={hours} onChange={setHours} disabled={busy !== null} />
+              </div>
             )}
           </div>
         )}
         <p className="flex items-start gap-2 text-[11.5px] leading-relaxed text-steel">
           <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          Share links are read-only and limited to this agent. With LAN access on, traffic isn't encrypted: use it on
-          networks you trust, or over a VPN such as Tailscale.
+          Viewers see this agent's messages (secrets hidden) and a short outline of the tools it ran. They can't see
+          command output, file contents, diffs, approval requests or local paths, and can't change anything. The link
+          stops working when it expires or the agent is archived or deleted. With LAN access on, traffic isn't
+          encrypted: use it on networks you trust, or over a VPN such as Tailscale.
         </p>
       </DialogBody>
       <DialogFooter>
@@ -250,6 +259,32 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         </Button>
       </DialogFooter>
     </>
+  );
+}
+
+function ExpiryPicker({
+  hours,
+  onChange,
+  disabled,
+}: {
+  hours: number;
+  onChange: (hours: number) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="flex items-center gap-1.5 text-[11.5px] text-steel">
+      Expires after
+      <select
+        value={hours}
+        disabled={disabled}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="h-7 rounded-md border border-line-strong bg-card px-1.5 text-[12px] text-fg outline-none focus:border-accent/60"
+      >
+        <option value={1}>1 hour</option>
+        <option value={24}>24 hours</option>
+        <option value={168}>7 days</option>
+      </select>
+    </label>
   );
 }
 

@@ -180,7 +180,7 @@ export function Inspector({
             {agent.sessionId ? (
               <span className="flex min-w-0 items-center gap-1">
                 <span className="selectable truncate font-mono text-[11px] text-fg/90">{agent.sessionId}</span>
-                <CopyButton text={agent.sessionId} label="" className="h-5 px-1" />
+                <CopyButton text={agent.sessionId} label="" ariaLabel="Copy session id" className="h-5 px-1" />
               </span>
             ) : (
               <span className="text-steel">Starting…</span>

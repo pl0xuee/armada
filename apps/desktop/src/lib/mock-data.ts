@@ -231,6 +231,7 @@ export function seedSettings(onboarded: boolean): Settings {
     globalHotkey: "CmdOrCtrl+Shift+Space",
     escalateAfterMins: 5,
     ntfyUrl: null,
+    ntfyDetail: "minimal",
     recentProjects: [
       "/home/sam/Projects/atlas-api",
       "/home/sam/Projects/storefront",
@@ -242,6 +243,14 @@ export function seedSettings(onboarded: boolean): Settings {
     defaultPermissionMode: "auto",
     remote: { enabled: false, lan: false, port: 47821 },
     voice: { inputDevice: null, model: "base.en", language: "auto", autoSend: false },
+    voiceAssistant: {
+      enabled: true,
+      accountId: null,
+      voice: "marin",
+      model: "gpt-realtime",
+      maxSessionMins: 10,
+      silenceTimeoutSecs: 60,
+    },
     customAgents: [
       {
         id: "ca-gemini",

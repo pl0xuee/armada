@@ -7,6 +7,7 @@
 //! `spawn_blocking`.
 
 use std::io::BufRead;
+use std::net::{IpAddr, Ipv6Addr, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -59,6 +60,9 @@ pub fn normalize_url(raw: &str) -> anyhow::Result<String> {
     if rest.contains('?') || rest.contains('#') {
         bail!("Leave the query string off the address");
     }
+    if host.contains('@') {
+        bail!("Leave the username and password off the address");
+    }
     Ok(url.to_string())
 }
 
@@ -70,8 +74,8 @@ pub fn validate(server: &LocalServer) -> anyhow::Result<LocalServer> {
     })
 }
 
-/// True when the server's host is this machine.
-pub fn is_loopback(base_url: &str) -> bool {
+/// The host of an http(s) URL, lowercased, without brackets, port or userinfo.
+fn url_host(base_url: &str) -> String {
     let rest = base_url
         .strip_prefix("http://")
         .or_else(|| base_url.strip_prefix("https://"))
@@ -83,12 +87,94 @@ pub fn is_loopback(base_url: &str) -> bool {
     } else {
         authority.split(':').next().unwrap_or("")
     };
-    let host = host.to_ascii_lowercase();
-    host == "localhost"
-        || host.ends_with(".localhost")
-        || host == "::1"
-        || host == "0.0.0.0"
-        || host.starts_with("127.")
+    host.to_ascii_lowercase()
+}
+
+/// True when the server's host is this machine: a loopback IP literal, `localhost` or `*.localhost`.
+pub fn is_loopback(base_url: &str) -> bool {
+    let host = url_host(base_url);
+    match host.parse::<IpAddr>() {
+        Ok(ip) => ip.is_loopback(),
+        Err(_) => host == "localhost" || host.ends_with(".localhost"),
+    }
+}
+
+/// Link-local (169.254/16, fe80::/10, incl. cloud metadata), unspecified and multicast addresses.
+fn is_blocked_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_link_local() || v4.is_unspecified() || v4.is_multicast() || v4.is_broadcast()
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_blocked_ip(IpAddr::V4(v4));
+            }
+            v6.is_unspecified()
+                || v6.is_multicast()
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+                // AWS IMDS over IPv6.
+                || v6 == Ipv6Addr::new(0xfd00, 0xec2, 0, 0, 0, 0, 0, 0x254)
+        }
+    }
+}
+
+/// Loopback, RFC 1918, CGNAT (Tailscale) and unique-local addresses.
+fn is_local_network_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 64)
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_local_network_ip(IpAddr::V4(v4));
+            }
+            v6.is_loopback() || (v6.segments()[0] & 0xfe00) == 0xfc00
+        }
+    }
+}
+
+/// Vets a server address before any request: no link-local/metadata targets, and (when
+/// `local_only`) only loopback/private ranges. Hostnames are resolved and every address
+/// checked. Residual risk: the HTTP client resolves again at connect time.
+pub fn check_target(base_url: &str, local_only: bool) -> anyhow::Result<()> {
+    let host = url_host(base_url);
+    let rest = base_url.split("://").nth(1).unwrap_or("");
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.contains('@') {
+        bail!("Leave the username and password off the address");
+    }
+    let https = base_url.starts_with("https://");
+    let port = authority
+        .rsplit_once(':')
+        .filter(|(h, _)| !h.ends_with(']') || h.starts_with('['))
+        .and_then(|(_, p)| p.parse::<u16>().ok())
+        .unwrap_or(if https { 443 } else { 80 });
+    let ips: Vec<IpAddr> = match host.parse::<IpAddr>() {
+        Ok(ip) => vec![ip],
+        Err(_) if host == "localhost" || host.ends_with(".localhost") => vec![],
+        Err(_) => (host.as_str(), port)
+            .to_socket_addrs()
+            .map(|a| a.map(|s| s.ip()).collect())
+            .unwrap_or_default(),
+    };
+    for ip in ips {
+        if is_blocked_ip(ip) {
+            bail!("Addresses like {ip} (link-local or cloud metadata) aren't allowed");
+        }
+        if local_only && !is_local_network_ip(ip) {
+            bail!("Downloads are only allowed from this machine or your local network");
+        }
+    }
+    if local_only && !is_loopback(base_url) && host.parse::<IpAddr>().is_err() {
+        // A hostname that resolved to nothing local was rejected above; unresolvable names fail here.
+        let resolves = (host.as_str(), port).to_socket_addrs().is_ok();
+        if !resolves {
+            bail!("Couldn't resolve {host}");
+        }
+    }
+    Ok(())
 }
 
 /// The OpenAI-compatible base URL (ending in `/v1` for Ollama and LM Studio).
@@ -154,6 +240,7 @@ fn agent(read: Duration) -> ureq::Agent {
 }
 
 fn get_json(url: &str, key: Option<&str>) -> anyhow::Result<Value> {
+    check_target(url, false)?;
     let mut req = agent(PROBE_READ).get(url);
     if let Some(k) = key {
         req = req.header("Authorization", &format!("Bearer {k}"));
@@ -437,6 +524,7 @@ pub fn pull_ollama(
         kind: LocalKind::Ollama,
         base_url: normalize_url(base_url)?,
     };
+    check_target(&server.base_url, true)?;
     let http = ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
             .proxy(None)
@@ -566,6 +654,34 @@ mod tests {
         assert!(!is_loopback("http://192.168.1.20:8000/v1"));
         assert!(!is_loopback("https://gpu.example.com"));
         assert!(!is_loopback("http://localhost.evil.com"));
+        assert!(!is_loopback("http://127.evil.com"));
+        assert!(!is_loopback("http://0.0.0.0:11434"));
+        assert!(is_loopback("http://127.1.2.3"));
+        assert!(is_loopback("http://foo.localhost:1"));
+        assert!(!is_loopback("http://localhost@evil.com"));
+    }
+
+    #[test]
+    fn rejects_userinfo_and_metadata_targets() {
+        assert!(normalize_url("http://user:pw@127.0.0.1:11434").is_err());
+        assert!(normalize_url("http://localhost@evil.com").is_err());
+        for u in [
+            "http://169.254.169.254",
+            "http://169.254.169.254/latest",
+            "http://[fe80::1]:80",
+            "http://[fd00:ec2::254]",
+            "http://0.0.0.0:11434",
+            "http://[::ffff:169.254.169.254]",
+        ] {
+            assert!(check_target(u, false).is_err(), "{u}");
+        }
+        assert!(check_target("http://127.0.0.1:11434", true).is_ok());
+        assert!(check_target("http://192.168.1.20:11434", true).is_ok());
+        assert!(check_target("http://[fd12::1]:11434", true).is_ok());
+        assert!(check_target("http://100.64.0.5:11434", true).is_ok());
+        assert!(check_target("http://8.8.8.8:11434", true).is_err());
+        assert!(check_target("http://8.8.8.8:11434", false).is_ok());
+        assert!(check_target("http://localhost:11434", true).is_ok());
     }
 
     #[test]

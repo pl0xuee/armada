@@ -81,6 +81,10 @@ Each agent has a workspace panel (`` Ctrl/Cmd+` ``) in its own folder:
 
 Press the mic in the message box (Ctrl/Cmd+Shift+D) and speak. Speech is transcribed on your computer with Whisper; audio never leaves it. The speech model is downloaded once, when you choose to (about 142 MB by default).
 
+### Voice assistant
+
+Optional and off by default. Press Ctrl/Cmd+Shift+A and just talk: ask what your agents are doing, start one, message or stop one, or open a view. It uses OpenAI's Realtime API (`gpt-realtime`), so it needs an OpenAI API key account, **sends your voice and the agent information it reads to OpenAI**, and is billed per minute to that account. It can never approve permissions, delete agents, commit or push.
+
 ### Phone companion
 
 Pair your phone with a QR code and run the fleet from it while it is on the same network as your computer: start agents in any project, send prompts with photos, approve or deny requests, switch mode, model and account, stop, resume or remove agents, manage queued messages, review diffs and Commit & merge, and follow sub-agents and turn summaries live. **Read-only share links** let a teammate follow one agent live.
@@ -108,6 +112,8 @@ Pair your phone with a QR code and run the fleet from it while it is on the same
 - Local-model agents talk only to the server you configure, and voice dictation runs on-device.
 - The phone companion is served by the desktop app on your network. Keep it on a trusted or private network; never expose it to the internet.
 - Updates are signed and verified before installing.
+- Checkpoints are kept as local git refs under `refs/armada/*`. They are never pushed on their own, but `git push --mirror` would send them, so don't mirror a working copy. Untracked credential files (`.env`, `*.pem`, `*.key`, `id_rsa*`, `.npmrc`, ...) are left out of checkpoints.
+- Phone pushes (ntfy) say only which agent needs you by default; full message text is opt-in, with secrets scrubbed. Keep the topic name private.
 
 ## Install
 

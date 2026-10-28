@@ -73,6 +73,9 @@ export function PreviewTab({ agent }: { agent: Agent }) {
               value={text}
               onChange={(e) => setText(e.target.value)}
             />
+            <Button type="submit" size="xs" variant="secondary" disabled={!text.trim()}>
+              Preview
+            </Button>
           </form>
         </div>
       </div>

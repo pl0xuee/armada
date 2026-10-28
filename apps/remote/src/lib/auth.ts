@@ -19,9 +19,56 @@ export function isPlausibleToken(t: string): boolean {
   return /^[A-Za-z0-9._~+/=-]{8,1024}$/.test(t);
 }
 
-/** Whether a URL fragment carries a pairing token. */
+/** Whether a URL fragment carries a pairing code (`pair=`) or a share token (`token=`). */
 export function hasTokenParam(hash: string): boolean {
-  return /(?:^#|[#&?/])token=/.test(hash);
+  return /(?:^#|[#&?/])(?:token|pair)=/.test(hash);
+}
+
+/** One-time pairing codes are 32 hex characters (device and share tokens are 64). */
+export function isPairingCode(t: string): boolean {
+  return /^[0-9a-f]{32}$/i.test(t);
+}
+
+/** Pull the one-time pairing code out of a fragment like `#pair=<code>`. */
+export function pairCodeFromHash(hash: string): string | null {
+  const m = /(?:^#|[#&?/])pair=([^&]*)/.exec(hash);
+  if (!m) return null;
+  let raw = m[1];
+  try {
+    raw = decodeURIComponent(raw);
+  } catch {
+    // keep raw
+  }
+  return isPairingCode(raw) ? raw : null;
+}
+
+/**
+ * Whether `hostname` is a loopback or private-network address (RFC 1918, carrier-grade NAT such
+ * as Tailscale's 100.64.0.0/10, link-local, IPv6 unique-local). Names are not trusted.
+ */
+export function isPrivateHost(hostname: string): boolean {
+  const h = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (h === "localhost") return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (m) {
+    const [a, b] = [Number(m[1]), Number(m[2])];
+    if ([a, b, Number(m[3]), Number(m[4])].some((n) => n > 255)) return false;
+    return (
+      a === 10 ||
+      a === 127 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254) ||
+      (a === 100 && b >= 64 && b <= 127)
+    );
+  }
+  if (h.includes(":"))
+    return (
+      h === "::1" ||
+      /^f[cd][0-9a-f]{2}:/.test(h) ||
+      /^fe[89ab][0-9a-f]:/.test(h)
+    );
+  return false;
 }
 
 /**
@@ -41,6 +88,8 @@ export function tokenFromHash(hash: string): string | null {
 }
 
 export interface LinkToken {
+  /** One-time pairing code from the link (trade it at /api/pair), if any. */
+  pairCode: string | null;
   /** Token from the link, not yet validated. */
   candidate: string | null;
   /** A pairing link was present but its token was malformed. */
@@ -53,10 +102,12 @@ export interface LinkToken {
  */
 export function takeLinkToken(): LinkToken {
   const hash = location.hash;
-  if (!hasTokenParam(hash)) return { candidate: null, malformed: false };
-  const token = tokenFromHash(hash);
+  if (!hasTokenParam(hash))
+    return { pairCode: null, candidate: null, malformed: false };
+  const pairCode = pairCodeFromHash(hash);
+  const token = pairCode ? null : tokenFromHash(hash);
   history.replaceState(null, "", `${location.pathname}${location.search}#/`);
-  return { candidate: token, malformed: !token };
+  return { pairCode, candidate: token, malformed: !pairCode && !token };
 }
 
 export interface StoredToken {
@@ -78,16 +129,27 @@ export function pairedToken(): { token: string; scope: Scope | null } | null {
   const token = storage.get(TOKEN_KEY);
   if (!token) return null;
   const scope = storage.get(TOKEN_SCOPE_KEY);
-  return { token, scope: scope === "owner" || scope === "viewer" ? scope : null };
+  return {
+    token,
+    scope: scope === "owner" || scope === "viewer" ? scope : null,
+  };
 }
 
 /**
  * Persist a token that `/api/session` just accepted. Returns where it went:
  * a viewer link on a device paired as owner stays tab-only.
  */
-export function adoptValidatedToken(token: string, scope: Scope): "stored" | "shared" {
+export function adoptValidatedToken(
+  token: string,
+  scope: Scope,
+): "stored" | "shared" {
   const paired = pairedToken();
-  if (scope === "viewer" && paired && paired.token !== token && paired.scope !== "viewer") {
+  if (
+    scope === "viewer" &&
+    paired &&
+    paired.token !== token &&
+    paired.scope !== "viewer"
+  ) {
     setShared(token);
     return "shared";
   }
@@ -121,7 +183,12 @@ export function clearPairing(token?: string) {
   storage.remove(TOKEN_SCOPE_KEY);
 }
 
-export type PastedPairing = { kind: "token"; token: string } | { kind: "link"; url: string } | { kind: "invalid" };
+export type PastedPairing =
+  | { kind: "pair"; code: string }
+  | { kind: "token"; token: string }
+  /** A link to another address; `trusted` = a private/loopback address, otherwise the user must confirm. */
+  | { kind: "link"; url: string; host: string; trusted: boolean }
+  | { kind: "invalid" };
 
 /** Interpret whatever the user pasted on the pairing screen. */
 export function parsePasted(input: string): PastedPairing {
@@ -134,12 +201,32 @@ export function parsePasted(input: string): PastedPairing {
     } catch {
       return { kind: "invalid" };
     }
-    const token = tokenFromHash(url.hash);
-    if (!token) return { kind: "invalid" };
-    if (url.origin === location.origin) return { kind: "token", token };
-    return { kind: "link", url: url.href };
+    const code = pairCodeFromHash(url.hash);
+    const token = code ? null : tokenFromHash(url.hash);
+    if (!code && !token) return { kind: "invalid" };
+    if (url.origin === location.origin)
+      return code
+        ? { kind: "pair", code }
+        : { kind: "token", token: token as string };
+    if (url.protocol !== "http:" && url.protocol !== "https:")
+      return { kind: "invalid" };
+    return {
+      kind: "link",
+      url: url.href,
+      host: url.host,
+      trusted: isPrivateHost(url.hostname),
+    };
   }
-  const fromFragment = text.includes("token=") ? tokenFromHash(text.startsWith("#") ? text : `#${text}`) : null;
+  const pairFragment = text.includes("pair=")
+    ? pairCodeFromHash(text.startsWith("#") ? text : `#${text}`)
+    : null;
+  if (pairFragment) return { kind: "pair", code: pairFragment };
+  if (isPairingCode(text)) return { kind: "pair", code: text };
+  const fromFragment = text.includes("token=")
+    ? tokenFromHash(text.startsWith("#") ? text : `#${text}`)
+    : null;
   if (fromFragment) return { kind: "token", token: fromFragment };
-  return isPlausibleToken(text) ? { kind: "token", token: text } : { kind: "invalid" };
+  return isPlausibleToken(text)
+    ? { kind: "token", token: text }
+    : { kind: "invalid" };
 }

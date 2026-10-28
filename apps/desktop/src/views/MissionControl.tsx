@@ -157,17 +157,19 @@ export function MissionControlView() {
               options={[
                 {
                   value: "comfortable",
+                  ariaLabel: "Grid view",
                   label: (
                     <Tooltip content="Tiles">
-                      <LayoutGrid className="h-3.5 w-3.5" aria-label="Comfortable" />
+                      <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
                     </Tooltip>
                   ),
                 },
                 {
                   value: "compact",
+                  ariaLabel: "List view",
                   label: (
                     <Tooltip content="Compact rows">
-                      <Rows3 className="h-3.5 w-3.5" aria-label="Compact" />
+                      <Rows3 className="h-3.5 w-3.5" aria-hidden />
                     </Tooltip>
                   ),
                 },

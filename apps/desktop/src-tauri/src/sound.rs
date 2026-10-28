@@ -106,14 +106,14 @@ const REPEAT_WINDOW: Duration = Duration::from_millis(400);
 const IDLE_CLOSE: Duration = Duration::from_secs(45);
 
 /// The open output stream, and whether it has reported an error since.
-struct Output {
-    stream: MixerDeviceSink,
+pub(crate) struct Output {
+    pub(crate) stream: MixerDeviceSink,
     broken: Arc<AtomicBool>,
     last_used: Instant,
 }
 
 impl Output {
-    fn open() -> Result<Output, String> {
+    pub(crate) fn open() -> Result<Output, String> {
         let broken = Arc::new(AtomicBool::new(false));
         let flag = broken.clone();
         let stream = DeviceSinkBuilder::from_default_device()

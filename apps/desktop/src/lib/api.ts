@@ -20,6 +20,7 @@ import type {
   AttentionReason,
   CreateAccountRequest,
   CommitSummary,
+  PrPrompt,
   PrStatus,
   CreateAgentRequest,
   CustomAgent,
@@ -38,12 +39,14 @@ import type {
   ShipResult,
   TimelineItem,
   UpdateInfo,
+  VoiceAssistantUsage,
   VoiceDownloadEvent,
   VoiceInputDevice,
   VoiceStatus,
   VoiceTranscript,
 } from "./types";
 import { onVoiceBus } from "./voiceBus";
+import type { VaEvent } from "./voiceAssistant";
 
 export const EVENT_CHANNEL = "armada://event";
 
@@ -78,7 +81,8 @@ const tauriApi = {
   /** Loads an image file an agent referenced (relative to its cwd; images ≤10 MB in the agent's folders or temp dir). */
   readImage: (agentId: string, path: string) => invoke<Attachment>("read_image", { agentId, path }),
   /** Images on the system clipboard, read natively (fallback when a paste event carries no image file; Linux only). */
-  readClipboardImages: () => invoke<{ attachments: Attachment[]; problems: string[] }>("read_clipboard_images"),
+  readClipboardImages: (agentId?: string) =>
+    invoke<{ attachments: Attachment[]; problems: string[] }>("read_clipboard_images", { agentId: agentId ?? null }),
   /** Fuzzy file search in the agent's cwd: top 50 relative paths. */
   listFiles: (agentId: string, query: string) => invoke<string[]>("list_files", { agentId, query }),
   cancelTurn: (agentId: string) => invoke<void>("cancel_turn", { agentId }),
@@ -145,7 +149,10 @@ const tauriApi = {
   /** Saves the current state, then restores the checkpoint. Restoring `safetyId` undoes it. */
   restoreCheckpoint: (agentId: string, checkpointId: string) =>
     invoke<RestoreResult>("restore_checkpoint", { agentId, checkpointId }),
-  commitAgent: (agentId: string, message: string) => invoke<CommitSummary>("commit_agent", { agentId, message }),
+  commitAgent: (agentId: string, message: string, exclude?: string[]) =>
+    invoke<CommitSummary>("commit_agent", { agentId, message, exclude }),
+  /** New files a commit would add whose names look like secrets (.env, *.pem, ...). */
+  secretLookingFiles: (agentId: string) => invoke<string[]>("secret_looking_files", { agentId }),
   mergeAgent: (agentId: string) => invoke<string>("merge_agent", { agentId }),
   /**
    * Reverse-applies a slice of the agent's diff patch: a file's whole section, or its header
@@ -153,14 +160,19 @@ const tauriApi = {
    */
   revertPatch: (agentId: string, patch: string) => invoke<void>("revert_patch", { agentId, patch }),
   /** Commits anything uncommitted (message defaults to the title), then merges into the base branch. */
-  shipAgent: (agentId: string, message: string) => invoke<ShipResult>("ship_agent", { agentId, message }),
+  shipAgent: (agentId: string, message: string, exclude?: string[]) =>
+    invoke<ShipResult>("ship_agent", { agentId, message, exclude }),
   createPr: (agentId: string, title: string, body: string) => invoke<string>("create_pr", { agentId, title, body }),
   /** PR + CI status of the agent's branch (cached; never rejects for gh/auth/network problems). */
   prStatus: (agentId: string, force = false) => invoke<PrStatus>("pr_status", { agentId, force }),
   /** Editable "Fix CI" prompt: failing checks plus trimmed failing-job logs. Rejects when nothing is failing. */
-  prFixCiPrompt: (agentId: string) => invoke<string>("pr_fix_ci_prompt", { agentId }),
-  /** Editable prompt with the PR's review feedback. Rejects when there's nothing to address. */
-  prReviewPrompt: (agentId: string) => invoke<string>("pr_review_prompt", { agentId }),
+  prFixCiPrompt: (agentId: string) => invoke<PrPrompt>("pr_fix_ci_prompt", { agentId }),
+  /**
+   * Editable prompt with the PR's review feedback. Rejects when there's nothing to address.
+   * Comments from people outside the project are left out (and counted in `omitted`) unless `includeOutside`.
+   */
+  prReviewPrompt: (agentId: string, includeOutside = false) =>
+    invoke<PrPrompt>("pr_review_prompt", { agentId, includeOutside }),
   discardWorktree: (agentId: string) => invoke<void>("discard_worktree", { agentId }),
 
   // accounts
@@ -237,8 +249,10 @@ const tauriApi = {
   // remote control / share links
   remoteStatus: () => invoke<RemoteStatus>("remote_status"),
   remoteRotateToken: () => invoke<RemoteStatus>("remote_rotate_token"),
-  createShareLink: (agentId: string) => invoke<ShareLink>("create_share_link", { agentId }),
-  revokeShareLink: (token: string) => invoke<void>("revoke_share_link", { token }),
+  remoteRevokeDevice: (id: string) => invoke<RemoteStatus>("remote_revoke_device", { id }),
+  /** `hours`: 1, 24 or 168 (7 days). */
+  createShareLink: (agentId: string, hours?: number) => invoke<ShareLink>("create_share_link", { agentId, hours }),
+  revokeShareLink: (id: string) => invoke<void>("revoke_share_link", { id }),
 
   // updates
   checkForUpdate: () => invoke<UpdateInfo | null>("check_for_update"),
@@ -257,6 +271,14 @@ const tauriApi = {
   /** Stops recording and transcribes. */
   voiceStop: () => invoke<VoiceTranscript>("voice_stop"),
   voiceCancel: () => invoke<void>("voice_cancel"),
+
+  // voice assistant (OpenAI Realtime; audio is sent to OpenAI; the key never leaves the backend)
+  vaStart: () => invoke<void>("va_start"),
+  vaStop: () => invoke<void>("va_stop"),
+  vaSetMuted: (muted: boolean) => invoke<void>("va_set_muted", { muted }),
+  vaActive: () => invoke<boolean>("va_active"),
+  vaUsage: () => invoke<VoiceAssistantUsage>("va_usage"),
+  vaVoices: () => invoke<string[]>("va_voices"),
 };
 
 export type ArmadaApi = typeof tauriApi;
@@ -294,6 +316,11 @@ export function onArmadaEvent(cb: (e: ArmadaEvent) => void): Promise<UnlistenFn>
 export function onVoiceLevel(cb: (e: { level: number; elapsedMs: number }) => void): Promise<UnlistenFn> {
   if (!isTauri()) return Promise.resolve(onVoiceBus("voice-level", cb));
   return listen<{ level: number; elapsedMs: number }>("voice-level", (e) => cb(e.payload));
+}
+
+export function onVaEvent(cb: (e: VaEvent) => void): Promise<UnlistenFn> {
+  if (!isTauri()) return Promise.resolve(onVoiceBus("va-event", cb));
+  return listen<VaEvent>("va-event", (e) => cb(e.payload));
 }
 
 export function onVoiceLimit(cb: () => void): Promise<UnlistenFn> {

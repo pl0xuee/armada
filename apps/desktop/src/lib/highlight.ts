@@ -17,6 +17,8 @@ export type HlLine = HlToken[];
 
 export const MAX_HIGHLIGHT_CHARS = 200_000;
 export const MAX_HIGHLIGHT_LINES = 5_000;
+/** While a block is still streaming, only this many leading lines are highlighted (the rest renders plain). */
+export const STREAMING_HIGHLIGHT_LINES = 800;
 
 // ---------------------------------------------------------------- languages
 
@@ -179,6 +181,16 @@ export function canHighlight(code: string): boolean {
   return true;
 }
 
+/** The first `n` lines of `code` (the whole string when it has no more). */
+export function headLines(code: string, n: number): string {
+  let end = -1;
+  for (let i = 0; i < n; i++) {
+    end = code.indexOf("\n", end + 1);
+    if (end < 0) return code;
+  }
+  return code.slice(0, end);
+}
+
 /** Cached result, if any (synchronous, for first paint). */
 export function peekHighlight(lang: string | null, code: string): HlLine[] | null {
   if (!lang) return null;
@@ -226,9 +238,21 @@ function ensureLang(core: Core, lang: string): Promise<void> {
   return p;
 }
 
+export interface HighlightOptions {
+  /** Streaming mode: highlight only the first N lines; the result then has N lines, not all of them. */
+  maxLines?: number;
+}
+
 /** Highlight `code`; resolves null when unsupported, too large, or Shiki fails. Results are cached. */
-export async function highlight(lang: string | null, code: string): Promise<HlLine[] | null> {
-  if (!lang || !(lang in LOADERS) || !canHighlight(code)) return null;
+export async function highlight(
+  lang: string | null,
+  code: string,
+  opts: HighlightOptions = {},
+): Promise<HlLine[] | null> {
+  if (!lang || !(lang in LOADERS)) return null;
+  const partial = opts.maxLines !== undefined && opts.maxLines > 0;
+  if (partial) code = headLines(code, opts.maxLines!);
+  if (!canHighlight(code)) return null;
   const key = cacheKey(lang, code);
   const hit = cache.get(key);
   if (hit) return hit;
@@ -248,6 +272,21 @@ export async function highlight(lang: string | null, code: string): Promise<HlLi
     return lines;
   } catch {
     return null;
+  }
+}
+
+/** Languages worth loading ahead of the first code block. */
+const PREWARM_LANGS = ["typescript", "tsx", "json", "shellscript", "rust", "python"];
+
+/** Load the Shiki core and the common grammars (one at a time, so each is a short task). */
+export async function prewarmHighlighter(langs: string[] = PREWARM_LANGS): Promise<void> {
+  try {
+    const core = await getCore();
+    for (const lang of langs) {
+      if (lang in LOADERS) await ensureLang(core, lang);
+    }
+  } catch {
+    /* highlighting loads on demand later */
   }
 }
 

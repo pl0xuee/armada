@@ -14,6 +14,7 @@ import {
   SlidersHorizontal,
   Volume2,
   Mic,
+  AudioLines,
   ExternalLink,
   Download,
   Sparkles,
@@ -31,6 +32,7 @@ import { McpSection } from "@/components/settings/McpSection";
 import { ProviderCard } from "@/components/settings/ProviderCard";
 import { RemoteSection } from "@/components/settings/RemoteSection";
 import { VoiceSection } from "@/components/settings/VoiceSection";
+import { VoiceAssistantSection } from "@/components/settings/VoiceAssistantSection";
 import { SectionHeader, SettingGroup, SettingRow } from "@/components/settings/SettingRow";
 import { TemplatesSection } from "@/components/settings/TemplatesSection";
 import { ThemeCard, THEMES } from "@/components/settings/ThemeCard";
@@ -66,6 +68,7 @@ const SECTIONS: { id: SettingsSection; label: string; icon: ComponentType<{ clas
   { id: "providers", label: "Providers", icon: Package },
   { id: "agents", label: "Agents", icon: Bot },
   { id: "voice", label: "Voice", icon: Mic },
+  { id: "assistant", label: "Voice assistant", icon: AudioLines },
   { id: "remote", label: "Remote & mobile", icon: Smartphone },
   { id: "about", label: "About", icon: Info },
 ];
@@ -111,6 +114,7 @@ export function SettingsView() {
           {section === "providers" && <Providers />}
           {section === "agents" && <AgentsSection agents={settings.customAgents} />}
           {section === "voice" && <VoiceSection settings={settings} />}
+          {section === "assistant" && <VoiceAssistantSection settings={settings} />}
           {section === "remote" && <RemoteSection settings={settings} />}
           {section === "about" && <About />}
         </div>
@@ -209,7 +213,7 @@ function Appearance({ settings }: { settings: Settings }) {
       <SettingGroup className="mt-5">
         <SettingRow
           title="Interface scale"
-          description={`Make everything bigger or smaller. Also ${modKey} + / ${modKey} - and ${modKey} 0 to reset.`}
+          description={`Make the whole interface bigger or smaller. Shortcuts: ${modKey} + and ${modKey} - to change it, ${modKey} 0 to reset.`}
           stack
         >
           <div className="flex w-full flex-wrap items-center gap-3">
@@ -617,6 +621,30 @@ function Notifications({ settings }: { settings: Settings }) {
                 </p>
               )}
             </div>
+          </SettingRow>
+          <SettingRow
+            stack
+            title="Push detail"
+            description={
+              <>
+                {settings.ntfyDetail === "full"
+                  ? "Pushes include the agent's last message or the command awaiting approval, with secrets scrubbed. "
+                  : "Pushes only say which agent needs you and why. "}
+                The topic name is a shared secret: anyone who knows it can read your pushes, and the ntfy server sees
+                them.
+              </>
+            }
+          >
+            <Segmented
+              aria-label="Push detail"
+              value={settings.ntfyDetail}
+              onChange={(v) => void save({ ntfyDetail: v })}
+              className="w-full"
+              options={[
+                { value: "minimal", label: "Minimal" },
+                { value: "full", label: "Full text" },
+              ]}
+            />
           </SettingRow>
         </SettingGroup>
       </div>

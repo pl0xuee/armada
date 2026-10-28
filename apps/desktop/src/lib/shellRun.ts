@@ -59,22 +59,116 @@ export function looksLikeCommand(code: string): boolean {
 }
 
 const DESTRUCTIVE: RegExp[] = [
-  /\brm\s+(-\w*\s+)*-\w*[rRf]/,
-  /\bgit\s+push\b.*(--force\b|--force-with-lease\b|\s-f\b)/,
-  /\bgit\s+reset\s+--hard\b/,
-  /\bgit\s+clean\b.*-\w*f/,
-  /(^|[\s;&|(])sudo\b/,
+  /\brm\s+(\S+\s+)*-{1,2}\w*[rRf]/,
+  /\b(rmdir|unlink|shred|truncate)\b/,
+  /\bfind\b[^\n]*(-delete\b|-exec\b|-execdir\b|-ok\b)/,
+  /\bgit\s+push\b[^\n]*(--force\b|--force-with-lease\b|--mirror\b|--delete\b|\s-\w*[fd]\b|\s\+\S|\s:\S)/,
+  /\bgit\s+(reset\s+--hard|clean|restore|checkout\s+(\S+\s+)*--|branch\s+(\S+\s+)*-\w*[dD]|stash\s+(drop|clear))(?!\w)/,
+  /(^|[\s;&|(`])(sudo|doas|su|pkexec|runas)\b/,
   /\bmkfs(\.\w+)?\b/,
   /\bdd\s+.*\bif=/,
   /:\(\)\s*\{/,
-  /\b(curl|wget)\b[^\n]*\|\s*(sudo\s+)?(ba|z|da)?sh\b/,
-  /\bchmod\s+(-\w+\s+)*-\w*R\w*\s+0?777\b/,
-  />\s*\/dev\/(sd|nvme|hd|vd)/,
+  /\|\s*(env\s+\S+\s+)?(sudo\s+)?(ba|z|da|k|fi)?sh\b/,
+  /\b(eval|source)\b/,
+  /\bchmod\s+(-\w+\s+)*-\w*R/,
+  />\s*(\/dev\/|~|\$HOME|\/etc\/|\.\w)/,
+  /\b(powershell|pwsh)\b[^\n]*-(e|enc|encodedcommand)\b/i,
+  /\b(rd|rmdir|del|erase)\s+\/[sq]/i,
+  /\bRemove-Item\b/i,
 ];
 
-/** Obviously destructive patterns that warrant a confirmation before running. */
+/** Obviously destructive patterns, used only to choose the confirmation wording. */
 export function isDestructive(cmd: string): boolean {
   return DESTRUCTIVE.some((r) => r.test(cmd));
+}
+
+// ---- Hidden characters -------------------------------------------------------------------
+
+// Everything that can make displayed text differ from what a terminal receives: C0/C1 controls
+// (except \n, \t, and \r in a CRLF pair), DEL, bidi controls, zero-width/invisible formatting,
+// line/paragraph separators, soft hyphen, Arabic letter mark, Mongolian vowel separator, BOM
+// and Unicode tag characters.
+const HIDDEN = new RegExp(
+  "[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F-\\u009F\\u00AD\\u061C\\u180E" +
+    "\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\r(?!\\n)|\\uDB40[\\uDC00-\\uDC7F]",
+  "g",
+);
+
+export interface HiddenChar {
+  index: number;
+  text: string;
+}
+
+/** Characters in `text` that are invisible or would act as terminal/readline controls. */
+export function findHiddenChars(text: string): HiddenChar[] {
+  const out: HiddenChar[] = [];
+  for (const m of text.matchAll(HIDDEN)) out.push({ index: m.index ?? 0, text: m[0] });
+  return out;
+}
+
+function marker(ch: string): string {
+  const cp = ch.codePointAt(0) ?? 0;
+  if (cp < 0x20) return String.fromCodePoint(0x2400 + cp); // ␀ … ␛ …
+  if (cp === 0x7f) return "\u2421";
+  return `\u27e8U+${cp.toString(16).toUpperCase().padStart(4, "0")}\u27e9`;
+}
+
+/** `text` with every hidden character replaced by a visible marker (␛, ⟨U+202E⟩, …). */
+export function revealHidden(text: string): string {
+  return text.replace(HIDDEN, marker);
+}
+
+// ---- Run policy --------------------------------------------------------------------------
+
+/** Shell metacharacters: pipes, lists, background, expansion, redirection, grouping, escapes, history. */
+const META = /[|;&$`<>(){}\\!\n\r]/;
+/** Options that make otherwise read-only tools write files or run other programs. */
+const DANGEROUS_OPT = /(^|\s)--(output|pre|exec|upload-pack|receive-pack|ext-diff|open-files-in-pager|textconv)\b/;
+const NODE_PM = new Set(["npm", "pnpm", "yarn", "bun"]);
+const NODE_SUB = new Set(["run", "test", "ci", "install", "i", "t"]);
+
+function isSimpleLine(line: string): boolean {
+  if (META.test(line) || DANGEROUS_OPT.test(line)) return false;
+  const t = line.trim().split(/\s+/);
+  const [head, sub] = t;
+  switch (head) {
+    case "ls": case "pwd": case "cat": case "head": case "tail": case "wc": case "grep": case "rg":
+    case "cd": case "echo": case "make": case "pytest":
+      return true;
+    case "git":
+      if (sub === "branch") {
+        return !t.slice(2).some((a) => /^-[a-zA-Z]*[dDmMcCfuU]/.test(a) || /^--(delete|move|copy|force|set-upstream|unset-upstream|edit-description)/.test(a));
+      }
+      return ["status", "diff", "log", "show", "fetch"].includes(sub);
+    case "npx":
+      return sub === "tsc";
+    case "cargo":
+      return ["build", "check", "test", "run", "fmt", "clippy"].includes(sub);
+    case "go":
+      return ["build", "test", "vet"].includes(sub);
+    case "python": case "python3":
+      return sub === "-m" && t[2] === "pytest";
+    default:
+      return NODE_PM.has(head) && NODE_SUB.has(sub);
+  }
+} // prettier-ignore
+
+/**
+ * True only when every line is a comment or a single common read-only/dev command with no shell
+ * metacharacters. Anything else (pipes, substitution, redirects, unknown programs, wrappers like
+ * env/doas) must be confirmed by the user before it runs.
+ */
+export function isSimpleCommand(cmd: string): boolean {
+  const lines = norm(cmd).filter((l) => l.trim() !== "" && !l.trim().startsWith("#"));
+  return lines.length > 0 && lines.every(isSimpleLine);
+}
+
+export type RunPolicy = "run" | "confirm" | "confirm-destructive";
+
+/** What the Run button (and Ctrl/Cmd+Enter) must do for this command. */
+export function runPolicy(cmd: string): RunPolicy {
+  if (isDestructive(cmd)) return "confirm-destructive";
+  return isSimpleCommand(cmd) ? "run" : "confirm";
 }
 
 /** Terminal tab title: the first command line, truncated. */
@@ -84,9 +178,18 @@ export function commandTitle(cmd: string, max = 24): string {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 
-/** Bytes for the PTY: lines each executed (run) or held on the prompt (bracketed paste when multi-line). */
+/** Control characters, bidi/zero-width characters and ESC sequences never reach the PTY. */
+function sanitize(cmd: string): string {
+  return cmd.replace(HIDDEN, "");
+}
+
+/**
+ * Bytes for the PTY: lines each executed (run) or held on the prompt (bracketed paste when
+ * multi-line). Control characters (including ESC, so no pasted `\x1b[201~` terminator) are
+ * stripped; tabs become spaces outside a bracketed paste so readline doesn't complete them.
+ */
 export function ptyPayload(cmd: string, run: boolean): string {
-  const lines = norm(cmd);
-  if (run) return lines.join("\r") + "\r";
-  return lines.length > 1 ? `\x1b[200~${lines.join("\n")}\x1b[201~` : lines[0];
+  const lines = norm(sanitize(cmd));
+  if (run) return lines.join("\r").replace(/\t/g, " ") + "\r";
+  return lines.length > 1 ? `\x1b[200~${lines.join("\n")}\x1b[201~` : lines[0].replace(/\t/g, " ");
 }

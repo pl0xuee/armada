@@ -71,13 +71,14 @@ export function blankSchedule(): Schedule {
     accountId: defaultAccount(accounts, "claude")?.id ?? "",
     projectPath: settings?.recentProjects[0] ?? "",
     prompt: "",
-    worktree: settings?.defaultWorktree ?? true,
+    // Unattended runs start isolated and asking, whatever the interactive defaults are.
+    worktree: true,
     time: "09:00",
     days: [...WEEKDAYS],
     lastRunAt: null,
     lastAgentId: null,
     lastError: null,
-    permissionMode: null,
+    permissionMode: "ask",
     updatedAt: 0,
   };
 }
@@ -441,6 +442,11 @@ function ScheduleForm({
             />
           </div>
         </div>
+        {(draft.permissionMode ?? defaultMode) === "auto" && (
+          <p role="note" className="-mt-2 text-[11.5px] text-warn">
+            Runs unattended with auto-approval; changes to the project between runs aren't reviewed.
+          </p>
+        )}
 
         <div
           aria-live="polite"

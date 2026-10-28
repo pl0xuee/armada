@@ -99,6 +99,40 @@ pub fn is_installed(data_dir: &Path, spec: &ModelSpec) -> bool {
     std::fs::metadata(model_path(data_dir, spec)).is_ok_and(|m| m.len() == spec.size_bytes)
 }
 
+/// Models whose full SHA-256 was re-checked in this app run.
+static VERIFIED: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+/// Re-hashes the model file once per app run (the result is cached) so a file that was
+/// swapped or corrupted on disk after download is never handed to Whisper. Blocking:
+/// call from a blocking thread. A mismatching file is deleted so it can be re-downloaded.
+pub fn verify_once(data_dir: &Path, spec: &ModelSpec) -> anyhow::Result<()> {
+    let path = model_path(data_dir, spec);
+    if VERIFIED.lock().is_ok_and(|v| v.contains(&path)) {
+        return Ok(());
+    }
+    let mut f =
+        std::fs::File::open(&path).with_context(|| format!("opening {}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1024 * 1024];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let actual = crate::toolchain::hex_lower(&hasher.finalize());
+    if actual != spec.sha256 {
+        drop(f);
+        let _ = std::fs::remove_file(&path);
+        bail!("The dictation model failed its integrity check and was removed. Download it again");
+    }
+    if let Ok(mut v) = VERIFIED.lock() {
+        v.push(path);
+    }
+    Ok(())
+}
+
 pub fn delete_model(data_dir: &Path, spec: &ModelSpec) -> anyhow::Result<()> {
     match std::fs::remove_file(model_path(data_dir, spec)) {
         Ok(()) => Ok(()),

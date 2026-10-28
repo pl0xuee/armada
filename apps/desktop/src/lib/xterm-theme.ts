@@ -1,4 +1,14 @@
-import type { ITheme } from "@xterm/xterm";
+import type { ILinkHandler, ITheme } from "@xterm/xterm";
+import { openExternal } from "./external";
+
+/**
+ * OSC 8 hyperlinks from terminal output. xterm's default would confirm() and window.open any
+ * scheme; instead only http(s)/mailto go to the OS opener (lib/external.ts allowlist).
+ */
+export const XTERM_LINK_HANDLER: ILinkHandler = {
+  allowNonHttpProtocols: false,
+  activate: (_event, uri) => void openExternal(uri),
+};
 
 export const XTERM_FONT = '"JetBrains Mono Variable", ui-monospace, Menlo, monospace';
 

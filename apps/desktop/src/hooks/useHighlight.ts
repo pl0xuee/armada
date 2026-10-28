@@ -3,6 +3,8 @@ import {
   highlight,
   hunkSides,
   langFromPath,
+  prewarmHighlighter,
+  STREAMING_HIGHLIGHT_LINES,
   mapDiffTokens,
   peekHighlight,
   type HlLine,
@@ -11,6 +13,31 @@ import {
 
 /** Wait this long after the last change before re-highlighting a growing (streaming) block. */
 const STREAM_DEBOUNCE_MS = 250;
+/** Beyond this many lines the wait grows, since each pass re-tokenizes everything shown. */
+const SLOW_STREAM_LINES = 300;
+const SLOW_STREAM_DEBOUNCE_MS = 1000;
+/** A block that hasn't changed for this long is finished: highlight all of it. */
+const SETTLE_MS = 1500;
+
+function lineCount(code: string): number {
+  let n = 1;
+  for (let i = code.indexOf("\n"); i >= 0; i = code.indexOf("\n", i + 1)) n++;
+  return n;
+}
+
+/** Debounce before re-highlighting a block of `lines` lines that is still growing. */
+export function streamDebounceMs(lines: number): number {
+  return lines > SLOW_STREAM_LINES ? SLOW_STREAM_DEBOUNCE_MS : STREAM_DEBOUNCE_MS;
+}
+
+// Load Shiki and the common grammars shortly after startup, off the critical path.
+if (typeof window !== "undefined") {
+  const warm = () => void prewarmHighlighter();
+  setTimeout(() => {
+    if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(warm, { timeout: 10_000 });
+    else setTimeout(warm, 0);
+  }, 4000);
+}
 
 /**
  * Highlighted lines for `code`, or null until ready (callers render plain text meanwhile).
@@ -28,21 +55,25 @@ export function useHighlight(lang: string | null, code: string): HlLine[] | null
   useEffect(() => {
     if (!lang || peekHighlight(lang, code)) return;
     let cancelled = false;
-    const run = () =>
-      void highlight(lang, code).then((lines) => {
-        if (!cancelled && lines) {
+    const lines = lineCount(code);
+    // A big block may still be streaming (the hook can't tell): cap the first passes, then
+    // highlight everything once it stops changing.
+    const big = lines > STREAMING_HIGHLIGHT_LINES;
+    const run = (maxLines?: number) =>
+      void highlight(lang, code, { maxLines }).then((hl) => {
+        if (!cancelled && hl) {
           had.current = true;
-          setState({ lang, code, lines });
+          setState({ lang, code, lines: hl });
         }
       });
-    if (!had.current) {
-      run();
-      return () => void (cancelled = true);
-    }
-    const t = setTimeout(run, STREAM_DEBOUNCE_MS);
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const cap = big ? STREAMING_HIGHLIGHT_LINES : undefined;
+    if (!had.current) run(cap);
+    else timers.push(setTimeout(() => run(cap), streamDebounceMs(lines)));
+    if (big) timers.push(setTimeout(() => run(), SETTLE_MS));
     return () => {
       cancelled = true;
-      clearTimeout(t);
+      timers.forEach(clearTimeout);
     };
   }, [lang, code]);
   if (cached) return cached;

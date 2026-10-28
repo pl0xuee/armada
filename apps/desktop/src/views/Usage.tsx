@@ -243,7 +243,7 @@ export function UsageView() {
               icon={<Bot />}
               label="Agents"
               value={agents.length}
-              sub={`${live} live · ${accountsInUse} ${accountsInUse === 1 ? "account" : "accounts"}`}
+              sub={`incl. archived · ${live} live · ${accountsInUse} ${accountsInUse === 1 ? "account" : "accounts"}`}
             />
           </div>
 

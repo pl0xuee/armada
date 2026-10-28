@@ -371,6 +371,7 @@ export interface Settings {
   globalHotkey: string; // e.g. "CmdOrCtrl+Shift+Space"
   escalateAfterMins: number; // re-ping pending approvals; 0 = off
   ntfyUrl: string | null; // optional phone push, e.g. https://ntfy.sh/my-topic
+  ntfyDetail: "minimal" | "full"; // what a phone push says: generic text, or the agent's own (scrubbed) text
   recentProjects: string[];
   autoCheckUpdates: boolean;
   templates: PromptTemplate[];
@@ -381,6 +382,26 @@ export interface Settings {
   customAgents: CustomAgent[];
   remote: RemoteSettings;
   voice: VoiceSettings;
+  voiceAssistant: VoiceAssistantSettings;
+}
+
+/** The OpenAI Realtime voice assistant (off by default; audio is sent to OpenAI). */
+export interface VoiceAssistantSettings {
+  enabled: boolean;
+  /** The OpenAI API-key account that pays for sessions. */
+  accountId: string | null;
+  voice: string;
+  model: string;
+  maxSessionMins: number;
+  silenceTimeoutSecs: number;
+}
+
+export interface VoiceAssistantUsage {
+  /** "YYYY-MM" */
+  month: string;
+  seconds: number;
+  costUsd: number;
+  sessions: number;
 }
 
 /** Any ACP agent the user configured (Gemini CLI, Goose, OpenCode, ...). */
@@ -459,11 +480,24 @@ export interface RemoteSettings {
 }
 
 export interface ShareLink {
-  token: string;
+  /** Identifies the link for revoking (the token itself is not kept). */
+  id: string;
   agentId: string;
   agentTitle: string | null;
+  /** The link; only present right after it is created (Armada keeps just a hash). */
   url: string | null;
   createdAt: number;
+  /** Unix ms; the link stops working then. */
+  expiresAt: number;
+}
+
+/** A paired phone or tablet. */
+export interface RemoteDevice {
+  id: string;
+  name: string;
+  createdAt: number;
+  /** Unix ms of its last request; 0 when it hasn't connected since pairing. */
+  lastSeen: number;
 }
 
 export interface RemoteStatus {
@@ -472,11 +506,15 @@ export interface RemoteStatus {
   lan: boolean;
   port: number;
   url: string | null;
+  /** One-time pairing link (single use, valid 5 minutes). */
   pairingUrl: string | null;
   /** Server-generated SVG markup of a QR code for pairingUrl. */
   qrSvg: string | null;
+  /** Unix ms when the pairing code stops working. */
+  pairingExpiresAt: number | null;
   error: string | null;
   shares: ShareLink[];
+  devices: RemoteDevice[];
 }
 
 /** `body` may contain {{placeholders}}. */
@@ -650,6 +688,13 @@ export interface ProjectScript {
 }
 
 /** PR + CI status of an agent's branch (pr_status). Problems are quiet "unknown"/"none" states. */
+/** An editable prompt built from third-party text (CI logs, review comments). */
+export interface PrPrompt {
+  text: string;
+  /** Review comments left out because their authors are outside the project. */
+  omitted: number;
+}
+
 export interface PrStatus {
   /** ok: a PR exists · none: the branch has no PR · unknown: couldn't ask (see reason). */
   state: "ok" | "none" | "unknown";

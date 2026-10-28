@@ -8,6 +8,7 @@ import { openShortcutHelp, toggleShortcutHelp } from "@/components/shell/Shortcu
 import { stepInterfaceScale } from "@/lib/zoom";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
+import { toggleVoiceAssistant } from "@/store/voiceAssistant";
 
 /** App-wide keyboard shortcuts. Mod = ⌘ on macOS, Ctrl elsewhere. */
 export function useGlobalShortcuts(enabled: boolean) {
@@ -92,6 +93,11 @@ export function useGlobalShortcuts(enabled: boolean) {
       if (key === "i" && !e.shiftKey) {
         e.preventDefault();
         ui.setView("inbox");
+        return;
+      }
+      if (key === "a" && e.shiftKey) {
+        e.preventDefault();
+        toggleVoiceAssistant();
         return;
       }
       if (key === "m" && e.shiftKey) {

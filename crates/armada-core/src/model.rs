@@ -795,6 +795,9 @@ pub struct Settings {
     pub global_hotkey: String,
     pub escalate_after_mins: u32,
     pub ntfy_url: Option<String>,
+    /// How much a phone push (ntfy) says: "minimal" (generic text) or "full"
+    /// (the agent's own text, secrets scrubbed).
+    pub ntfy_detail: String,
     pub recent_projects: Vec<String>,
     pub auto_check_updates: bool,
     pub templates: Vec<PromptTemplate>,
@@ -807,6 +810,36 @@ pub struct Settings {
     pub default_permission_mode: String,
     pub remote: RemoteSettings,
     pub voice: VoiceSettings,
+    /// The OpenAI Realtime voice assistant (off by default).
+    pub voice_assistant: VoiceAssistantSettings,
+}
+
+/// The voice assistant: talk to Armada through OpenAI's Realtime API. Off by default;
+/// audio and the agent information it reads are sent to OpenAI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct VoiceAssistantSettings {
+    pub enabled: bool,
+    /// The OpenAI API-key account (provider Codex) that pays for the sessions.
+    pub account_id: Option<String>,
+    pub voice: String,
+    pub model: String,
+    pub max_session_mins: u32,
+    /// End the session after this long without anyone speaking.
+    pub silence_timeout_secs: u32,
+}
+
+impl Default for VoiceAssistantSettings {
+    fn default() -> Self {
+        VoiceAssistantSettings {
+            enabled: false,
+            account_id: None,
+            voice: "marin".into(),
+            model: "gpt-realtime".into(),
+            max_session_mins: 10,
+            silence_timeout_secs: 60,
+        }
+    }
 }
 
 /// Voice dictation (local speech-to-text).
@@ -1077,6 +1110,7 @@ impl Default for Settings {
             global_hotkey: "CmdOrCtrl+Shift+Space".into(),
             escalate_after_mins: 5,
             ntfy_url: None,
+            ntfy_detail: "minimal".into(),
             recent_projects: Vec::new(),
             auto_check_updates: true,
             templates: vec![
@@ -1102,6 +1136,7 @@ impl Default for Settings {
             default_permission_mode: "auto".into(),
             remote: RemoteSettings::default(),
             voice: VoiceSettings::default(),
+            voice_assistant: VoiceAssistantSettings::default(),
         }
     }
 }

@@ -22,6 +22,7 @@ import { LocalModelPicker } from "./local/LocalModelPicker";
 import { TemplatePicker } from "./TemplatePicker";
 import { Button } from "./ui/button";
 import { Dialog, DialogBody, DialogContent, DialogFooter } from "./ui/dialog";
+import { DictateButton } from "./DictateButton";
 import { Input, Label, Textarea } from "./ui/input";
 import { Kbd } from "./ui/kbd";
 import { Spinner } from "./ui/misc";
@@ -104,6 +105,21 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+
+  // Dictated text goes in at the caret of the prompt.
+  const insertDictation = (spoken: string) => {
+    const el = promptRef.current;
+    const cur = el?.value ?? "";
+    const start = Math.min(el?.selectionStart ?? cur.length, cur.length);
+    const end = Math.min(el?.selectionEnd ?? start, cur.length);
+    const before = cur.slice(0, start);
+    const inserted = `${before && !/\s$/.test(before) ? " " : ""}${spoken}`;
+    setPrompt(`${before}${inserted}${cur.slice(end)}`);
+    requestAnimationFrame(() => {
+      promptRef.current?.focus();
+      promptRef.current?.setSelectionRange(start + inserted.length, start + inserted.length);
+    });
+  };
   const submittingRef = useRef(false);
   /** Compare group for this dialog session, reused when retrying failed targets. */
   const groupRef = useRef<string | null>(null);
@@ -511,6 +527,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
               {!compare && <span className="ml-1.5 font-normal text-steel">optional</span>}
             </Label>
             <div className="flex items-center gap-1">
+              <DictateButton onText={insertDictation} iconOnly />
               <AttachButton onClick={attach.openPicker} count={attach.attachments.length} />
               <TemplatePicker
                 side="bottom"

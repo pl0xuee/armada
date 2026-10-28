@@ -207,7 +207,8 @@ impl Attention {
         if settings.notifications.enabled && notify_reason_on && !window_focused {
             if let Some(url) = settings.ntfy_url.as_deref().map(str::trim) {
                 if !url.is_empty() {
-                    push_ntfy(url.to_string(), reason, title.to_string(), body.to_string());
+                    let (ptitle, pbody) = push_text(&settings.ntfy_detail, reason, title, body);
+                    push_ntfy(url.to_string(), reason, ptitle, pbody);
                 }
             }
         }
@@ -446,6 +447,24 @@ pub fn quiet_hours_active(q: &QuietHours, now: NaiveTime) -> bool {
 /// nudge, the details are in the app).
 const MAX_PUSH_BODY_CHARS: usize = 200;
 
+/// What a phone push says. The ntfy server is third-party, so by default ("minimal")
+/// only generic text goes out; "full" sends the agent's text with secrets scrubbed.
+fn push_text(detail: &str, reason: AttentionReason, title: &str, body: &str) -> (String, String) {
+    use armada_core::redact::redact_secrets;
+    if detail == "full" {
+        return (
+            redact_secrets(title).into_owned(),
+            redact_secrets(body).into_owned(),
+        );
+    }
+    let generic = match reason {
+        AttentionReason::Permission => "Needs your approval",
+        AttentionReason::Done => "Finished",
+        AttentionReason::Error => "Stopped with an error",
+    };
+    (redact_secrets(title).into_owned(), generic.to_string())
+}
+
 fn push_ntfy(url: String, reason: AttentionReason, title: String, body: String) {
     let spawned = std::thread::Builder::new()
         .name("armada-ntfy".into())
@@ -675,6 +694,23 @@ mod tests {
             start: start.into(),
             end: end.into(),
         }
+    }
+
+    #[test]
+    fn minimal_push_is_generic_and_full_is_scrubbed() {
+        let body = "run: curl -H 'Authorization: Bearer abcdefghijklmnop1234' x";
+        let (t, b) = push_text("minimal", AttentionReason::Permission, "Fix login", body);
+        assert_eq!(
+            (t.as_str(), b.as_str()),
+            ("Fix login", "Needs your approval")
+        );
+        let (_, b) = push_text("minimal", AttentionReason::Error, "x", body);
+        assert_eq!(b, "Stopped with an error");
+        let (_, b) = push_text("full", AttentionReason::Done, "x", body);
+        assert!(
+            b.starts_with("run: curl") && !b.contains("abcdefghijklmnop1234"),
+            "{b}"
+        );
     }
 
     fn t(s: &str) -> NaiveTime {

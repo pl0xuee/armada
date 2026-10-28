@@ -3,8 +3,8 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/menu";
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { commandTitle, isDestructive, ptyPayload } from "@/lib/shellRun";
-import { cn, errorMessage } from "@/lib/utils";
+import { commandTitle, findHiddenChars, ptyPayload, runPolicy } from "@/lib/shellRun";
+import { cn, errorMessage, modKey } from "@/lib/utils";
 import { runInNewTerminal } from "@/store/workspace";
 
 const btn =
@@ -28,8 +28,16 @@ export function RunButton({
       toast.error(run ? "Couldn't run the command" : "Couldn't paste the command", { description: errorMessage(e) });
     }
   };
-  const click = () => (isDestructive(command) ? setConfirm(true) : void go(true));
+  // Anything that isn't a plain, common command asks first; hidden characters never run.
+  const policy = runPolicy(command);
+  const hidden = findHiddenChars(command).length > 0;
+  const click = () => {
+    if (hidden) return;
+    if (policy === "run") void go(true);
+    else setConfirm(true);
+  };
   runRef?.(click);
+  if (hidden) return null;
   return (
     <div className="flex items-center">
       <Popover open={confirm} onOpenChange={setConfirm}>
@@ -37,7 +45,7 @@ export function RunButton({
           <button
             type="button"
             aria-label="Run in terminal"
-            title="Run in a new terminal tab (Ctrl/Cmd+Enter when focused)"
+            title={`Run in a new terminal tab (${modKey}+Enter when focused)`}
             onClick={(e) => {
               e.stopPropagation();
               click();
@@ -49,7 +57,11 @@ export function RunButton({
           </button>
         </PopoverTrigger>
         <PopoverContent align="end" className="w-80">
-          <p className="mb-2 font-medium">This command can change or delete things. Run it?</p>
+          <p className="mb-2 font-medium">
+            {policy === "confirm-destructive"
+              ? "This command can change or delete things. Run it?"
+              : "Run this command from the agent?"}
+          </p>
           <pre className="selectable mb-3 max-h-40 overflow-auto rounded-lg border border-line bg-code p-2 font-mono text-[12px] leading-[1.5] whitespace-pre-wrap break-all">
             {command}
           </pre>

@@ -9,6 +9,7 @@ mod events;
 mod git_review;
 mod hotkey;
 mod local;
+mod log_writer;
 mod notify;
 mod pr_status;
 mod remote;
@@ -17,6 +18,7 @@ mod state;
 mod terminal;
 mod tray;
 mod updater;
+mod voice_assistant;
 mod window;
 mod workspace;
 
@@ -74,6 +76,7 @@ pub fn run() {
                 .build(),
         )
         .setup(move |app| {
+            window::create_main(app.handle())?;
             setup(app.handle(), startup_data_dir.as_deref()).map_err(|e| {
                 error!("startup failed: {e:#}");
                 Box::<dyn std::error::Error>::from(format!("{e:#}"))
@@ -90,6 +93,12 @@ pub fn run() {
             dictation::voice_start,
             dictation::voice_stop,
             dictation::voice_cancel,
+            voice_assistant::va_start,
+            voice_assistant::va_stop,
+            voice_assistant::va_set_muted,
+            voice_assistant::va_active,
+            voice_assistant::va_usage,
+            voice_assistant::va_voices,
             clipboard::read_clipboard_images,
             commands::list_items,
             commands::search,
@@ -117,6 +126,7 @@ pub fn run() {
             commands::preview_checkpoint,
             commands::restore_checkpoint,
             commands::commit_agent,
+            commands::secret_looking_files,
             commands::merge_agent,
             commands::ship_agent,
             commands::revert_patch,
@@ -167,6 +177,7 @@ pub fn run() {
             commands::read_image,
             commands::remote_status,
             commands::remote_rotate_token,
+            commands::remote_revoke_device,
             commands::create_share_link,
             commands::revoke_share_link,
         ])
@@ -212,6 +223,7 @@ fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()>
     app.manage(Shell::new(data_dir.clone()));
     app.manage(Terminals::default());
     app.manage(dictation::Dictation::default());
+    app.manage(voice_assistant::VoiceAssistant::default());
     app.manage(pr_status::PrCache::default());
     app.manage(updater::UpdateState::default());
     let remote = remote::Remote::new(
@@ -321,12 +333,7 @@ fn init_logging(log_dir: &Path) -> tracing_appender::non_blocking::WorkerGuard {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(log_dir, std::fs::Permissions::from_mode(0o700));
     }
-    let (file_writer, guard) = match tracing_appender::rolling::Builder::new()
-        .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .filename_prefix("armada.log")
-        .max_log_files(7)
-        .build(log_dir)
-    {
+    let (file_writer, guard) = match log_writer::CappedLogWriter::new(log_dir.to_path_buf()) {
         Ok(file) => tracing_appender::non_blocking(file),
         Err(e) => {
             eprintln!("could not open the log file: {e}");
@@ -334,7 +341,13 @@ fn init_logging(log_dir: &Path) -> tracing_appender::non_blocking::WorkerGuard {
         }
     };
     let filter = EnvFilter::try_from_env("ARMADA_LOG")
-        .unwrap_or_else(|_| EnvFilter::new("info,armada_core=debug,armada_desktop_lib=debug"));
+        .unwrap_or_else(|_| {
+        // Raw agent stderr / non-JSON stdout can carry secrets: off by default,
+        // opt in with ARMADA_LOG (e.g. `debug,armada::agent_stderr=debug`).
+        EnvFilter::new(
+            "info,armada_core=debug,armada_desktop_lib=debug,armada::agent_stderr=warn,armada::rpc=warn",
+        )
+    });
     let _ = tracing_subscriber::registry()
         .with(filter)
         .with(fmt::layer().with_writer(std::io::stderr))

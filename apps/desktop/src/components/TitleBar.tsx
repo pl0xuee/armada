@@ -18,6 +18,7 @@ import { UsageMeters } from "./UsageMeter";
 import { UpdatePill } from "./UpdatePill";
 import { ProviderGlyph } from "./ProviderGlyph";
 import { SubagentList } from "./agent/SubagentList";
+import { VoiceAssistantButton } from "./voice/VoiceAssistantButton";
 import { useSubagentOverview } from "./agent/useSubagents";
 
 const VIEW_LABEL: Record<View, string> = {
@@ -68,7 +69,7 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
           )}
         </div>
 
-        <div data-tauri-drag-region className="flex min-w-0 flex-1 justify-center px-4">
+        <div data-tauri-drag-region className="@container flex min-w-0 flex-1 justify-center px-4">
           {!minimal && compact ? (
             <Tooltip content="Search and commands" shortcut={[modKey, "K"]} side="bottom">
               <button
@@ -85,12 +86,12 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
               <button
                 type="button"
                 onClick={() => setPaletteOpen(true)}
-                className="group flex h-[26px] w-full min-w-0 max-w-[380px] items-center gap-2 rounded-lg border border-line bg-base/60 px-2.5 text-[12.5px] text-steel transition-colors hover:border-line-strong hover:bg-base hover:text-muted"
+                className="group flex h-[26px] w-full min-w-0 max-w-[380px] @max-[139px]:w-7 @max-[139px]:justify-center @max-[139px]:px-0 items-center gap-2 rounded-lg border border-line bg-base/60 px-2.5 text-[12.5px] text-steel transition-colors hover:border-line-strong hover:bg-base hover:text-muted"
                 aria-label="Open command palette"
               >
                 <Search className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">Search agents, actions, history…</span>
-                <span className="ml-auto flex shrink-0 gap-0.5">
+                <span className="hidden truncate @[250px]:inline">Search agents, actions, history…</span>
+                <span className="ml-auto hidden shrink-0 gap-0.5 @[140px]:flex">
                   <Kbd>{modKey}</Kbd>
                   <Kbd>K</Kbd>
                 </span>
@@ -100,6 +101,7 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
         </div>
 
         <div data-tauri-drag-region className="flex h-full shrink-0 items-center gap-3">
+          {!minimal && <VoiceAssistantButton />}
           {!minimal && <SubagentsIndicator compact={compact} />}
           {!minimal && <UpdatePill />}
           {!minimal && accounts.length > 0 && <AccountSwitcher accounts={accounts} stacked={compact} />}

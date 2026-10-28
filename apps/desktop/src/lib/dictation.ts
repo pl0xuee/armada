@@ -1,5 +1,5 @@
 // Voice dictation state, shared by every composer. One recording at a time; the
-// composer that is currently mounted (the last one registered) receives the text.
+// composer picked by pickTarget receives the text.
 // Audio is captured and transcribed in the Rust core, entirely on this device.
 
 import { toast } from "sonner";
@@ -13,6 +13,54 @@ export interface DictationTarget {
   id: string;
   /** Called with the transcript; `autoSend` when the user asked to send after dictating. */
   insert: (text: string, autoSend: boolean) => void;
+  /** The target's mic button (its position in the page decides which composer a shortcut means). */
+  el?: () => Element | null;
+}
+
+/** Minimal DOM surface the picker needs (lets it be tested without a DOM). */
+export interface NodeLike {
+  contains(other: unknown): boolean;
+}
+export interface Candidate {
+  id: string;
+  /** The mic button. */
+  el: unknown;
+  /** Its composer / dialog region, or null when it isn't in one. */
+  scope: NodeLike | null;
+  visible: boolean;
+}
+
+/**
+ * Which target the shortcut dictates into: the one whose region holds the focused element, else
+ * one inside the topmost open dialog (never a composer hidden behind it), else the visible page
+ * composer. Later registrations win ties.
+ */
+export function pickTarget(cands: Candidate[], active: unknown, topDialog: NodeLike | null): string | null {
+  for (let i = cands.length - 1; i >= 0; i--) {
+    const c = cands[i];
+    if (c.scope && active && c.scope.contains(active)) return c.id;
+  }
+  if (topDialog) {
+    for (let i = cands.length - 1; i >= 0; i--) {
+      if (cands[i].el && topDialog.contains(cands[i].el)) return cands[i].id;
+    }
+    return null;
+  }
+  for (let i = cands.length - 1; i >= 0; i--) if (cands[i].visible) return cands[i].id;
+  return null;
+}
+
+function pickLiveTarget(): DictationTarget | undefined {
+  const dialogs = document.querySelectorAll('[role="dialog"]');
+  const topDialog = dialogs.length ? dialogs[dialogs.length - 1] : null;
+  const cands: Candidate[] = targets.map((t) => {
+    const el = t.el?.() ?? null;
+    const scope = el ? el.closest("[data-dictation-scope], [role=dialog]") : null;
+    const visible = !!el && el.isConnected && !el.closest("[role=dialog]") && (el as HTMLElement).offsetParent !== null;
+    return { id: t.id, el, scope, visible };
+  });
+  const id = pickTarget(cands, document.activeElement, topDialog);
+  return targets.find((t) => t.id === id);
 }
 
 interface DictationState {
@@ -64,12 +112,12 @@ function onKey(e: KeyboardEvent) {
     if (!e.repeat) void toggleDictation();
     return;
   }
-  if (phase !== "recording") return;
+  if (phase !== "recording" && phase !== "starting") return;
   if (e.key === "Escape") {
     e.preventDefault();
     e.stopPropagation();
     void cancelDictation();
-  } else if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+  } else if (phase === "recording" && e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     e.stopPropagation();
     void stopDictation();
@@ -92,8 +140,11 @@ export async function toggleDictation(targetId?: string): Promise<void> {
   const s = useDictation.getState();
   if (s.phase === "recording") return stopDictation();
   if (s.phase !== "idle") return;
-  const target = targetId ? targets.find((t) => t.id === targetId) : targets[targets.length - 1];
-  if (!target) return;
+  const target = targetId ? targets.find((t) => t.id === targetId) : pickLiveTarget();
+  if (!target) {
+    if (!targetId) toast.info("Click a message box to dictate into it");
+    return;
+  }
   useDictation.setState({ phase: "starting", owner: target.id, level: 0, elapsedMs: 0 });
   try {
     const status = await api.voiceStatus();
@@ -103,6 +154,11 @@ export async function toggleDictation(targetId?: string): Promise<void> {
     }
     useDictation.setState({ maxMs: status.maxRecordingSecs * 1000 });
     await api.voiceStart();
+    // Cancelled (Esc, composer closed) while the recorder was starting: stop it again.
+    if (useDictation.getState().owner !== target.id || useDictation.getState().phase !== "starting") {
+      await api.voiceCancel().catch(() => {});
+      return;
+    }
     useDictation.setState({ phase: "recording" });
   } catch (e) {
     useDictation.setState({ phase: "idle", owner: null });

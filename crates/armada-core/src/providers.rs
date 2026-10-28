@@ -9,6 +9,17 @@ use crate::model::{Provider, ProviderInfo};
 pub const CLAUDE_ADAPTER_PKG: &str = "@agentclientprotocol/claude-agent-acp";
 pub const CLAUDE_ADAPTER_VERSION: &str = "0.98.0";
 
+// Agent CLIs installed by Armada: exact, known-good versions (never `@latest`).
+// To bump: `npm view <pkg> version`, test Armada against it (the Codex driver needs
+// the app-server features of codex-cli >= 0.164), then update the constant and, if
+// a package gains install scripts, `SCRIPTED_PKGS` in toolchain.rs.
+pub const CLAUDE_CODE_PKG: &str = "@anthropic-ai/claude-code";
+pub const CLAUDE_CODE_VERSION: &str = "2.1.312";
+pub const CODEX_PKG: &str = "@openai/codex";
+pub const CODEX_VERSION: &str = "0.165.0";
+pub const GROK_PKG: &str = "@xai-official/grok";
+pub const GROK_VERSION: &str = "1.0.70";
+
 pub fn cli_name(provider: Provider) -> &'static str {
     provider.as_str()
 }

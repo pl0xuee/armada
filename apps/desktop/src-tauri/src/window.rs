@@ -7,6 +7,29 @@ use crate::attention::Attention;
 
 pub const MAIN: &str = "main";
 
+/// Creates the main window from its config entry (`create: false`), so it can refuse
+/// `window.open` / `target=_blank` popups: links go to the OS browser via open_path instead.
+pub fn create_main(app: &AppHandle) -> tauri::Result<()> {
+    // A platform config without `create: false` (platform files replace the whole
+    // `windows` list) would have created it already; never fail startup over that.
+    if main_window(app).is_some() {
+        tracing::warn!("main window was created from config; popup blocking is off");
+        return Ok(());
+    }
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == MAIN)
+        .cloned()
+        .ok_or_else(|| tauri::Error::WindowNotFound)?;
+    tauri::WebviewWindowBuilder::from_config(app, &config)?
+        .on_new_window(|_url, _features| tauri::webview::NewWindowResponse::Deny)
+        .build()?;
+    Ok(())
+}
+
 pub fn main_window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(MAIN)
 }

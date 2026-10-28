@@ -1,5 +1,5 @@
 import { ArrowUp, BookText, FileText, ListPlus, Play, RotateCcw, Square } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { cancelTurn, resumeAgent } from "@/lib/actions";
 import { api } from "@/lib/api";
@@ -49,7 +49,7 @@ function slashQuery(text: string): string | null {
   return m ? m[1].toLowerCase() : null;
 }
 
-export function Composer({ agent }: { agent: Agent }) {
+function ComposerImpl({ agent }: { agent: Agent }) {
   const [text, setText] = useState(() => getDraft(agent.id));
   // Latest text for async callbacks (queue Edit resolves after an await).
   const textRef = useRef(text);
@@ -63,7 +63,7 @@ export function Composer({ agent }: { agent: Agent }) {
   const [caret, setCaret] = useState(0);
   // Results tagged with the query they answer, so a fast Enter never picks a stale file.
   const [files, setFiles] = useState<{ query: string; list: string[] }>({ query: "", list: [] });
-  const attach = useAttachments();
+  const attach = useAttachments([], agent.id);
   const [wrapRef, width] = useElementWidth<HTMLDivElement>();
   // Toolbar tiers by available width: labels → icons → extra options in a "+" menu.
   const roomy = width === 0 || width >= 700;
@@ -387,7 +387,7 @@ export function Composer({ agent }: { agent: Agent }) {
           : `Message ${name}…  @ to mention files`;
 
   return (
-    <div ref={wrapRef} className={cn("shrink-0 pb-4 pt-1", tight ? "px-3" : "px-6")}>
+    <div ref={wrapRef} data-dictation-scope className={cn("shrink-0 pb-4 pt-1", tight ? "px-3" : "px-6")}>
       <div className={cn("mx-auto w-full", width >= 1330 ? "max-w-[1000px]" : "max-w-[860px]")}>
         {agent.rateLimited && !resumable && <RateLimitBanner agent={agent} />}
         <QueueStack agent={agent} onEdit={takeBack} />
@@ -683,3 +683,5 @@ function ResumeBanner({ agent }: { agent: Agent }) {
     </div>
   );
 }
+
+export const Composer = memo(ComposerImpl);

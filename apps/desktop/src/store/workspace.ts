@@ -1,6 +1,7 @@
 // Workspace panel sessions: shells and script runs per agent. The PTYs live in the backend
 // and keep running while the panel is closed or another agent is on screen; here we keep a
 // capped transcript per terminal so a re-mounted view can replay what it missed.
+import { toast } from "sonner";
 import { create } from "zustand";
 import { api } from "@/lib/api";
 import { attachTerminal } from "@/lib/terminal-bus";
@@ -185,12 +186,15 @@ useApp.subscribe((state, prev) => {
  * into it through the existing terminal_write command. The webview thereby supplies arbitrary
  * text to the user's own shell, which is acceptable only because it follows the user's explicit
  * click on their own machine. No new Tauri command or capability; callers confirm destructive
- * commands first (lib/shellRun isDestructive).
+ * anything but simple commands first (lib/shellRun runPolicy) and refuse text with hidden characters.
  */
 export async function runInNewTerminal(agentId: string, title: string, payload: string): Promise<void> {
   const id = await openTerminal(agentId, { title });
   if (!id) throw new Error("A terminal is already starting. Try again in a moment.");
   useUi.getState().setWorkspaceOpen(true);
+  if (useUi.getState().workspaceRoom === 0) {
+    toast.info("Running in a terminal", { description: "The window is too small to show it. Enlarge the window." });
+  }
   // Wait for the shell's first output (its prompt) so the text isn't swallowed by startup.
   for (let i = 0; i < 40 && !(runtime.get(id)?.data.length ?? 0); i++) await new Promise((r) => setTimeout(r, 50));
   await new Promise((r) => setTimeout(r, 150));

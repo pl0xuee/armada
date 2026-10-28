@@ -17,7 +17,7 @@ import type { Attachment } from "@/lib/types";
  * Pending image attachments for a prompt: paste, drag & drop and a file picker,
  * with the 8 images / 5 MB / images-only limits enforced and reported via toast.
  */
-export function useAttachments(initial: Attachment[] = []) {
+export function useAttachments(initial: Attachment[] = [], agentId?: string) {
   const [attachments, setRaw] = useState<Attachment[]>(initial);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -69,7 +69,7 @@ export function useAttachments(initial: Attachment[] = []) {
   /** Native fallback: WebKitGTK/Wayland often hands the paste event no image file. */
   const addFromClipboard = useCallback(async () => {
     try {
-      const { attachments: read, problems } = await api.readClipboardImages();
+      const { attachments: read, problems } = await api.readClipboardImages(agentId);
       const room = Math.max(0, MAX_ATTACHMENTS - liveCount.current);
       const accepted = read.slice(0, room);
       if (read.length > accepted.length) {
@@ -87,7 +87,7 @@ export function useAttachments(initial: Attachment[] = []) {
     } catch {
       /* no native clipboard support: the paste simply does nothing */
     }
-  }, [setAttachments]);
+  }, [setAttachments, agentId]);
 
   const onPaste = useCallback(
     (e: ClipboardEvent) => {

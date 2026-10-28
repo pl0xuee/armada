@@ -2,19 +2,28 @@
 //! web app (apps/remote) plus a small JSON + Server-Sent Events API.
 //!
 //! Security model:
-//! - Off by default; binds to 127.0.0.1, or only to the machine's LAN address when
-//!   the user enables LAN access (never every interface).
-//! - Every API call needs a bearer token: the owner token (full control, shown as a
-//!   QR code in Settings → Remote) or a share token (read-only, one agent, with a
-//!   trimmed view of that agent). Tokens are 244-bit random values, compared in
-//!   constant time and stored with owner-only permissions.
-//! - Revoking a share, unpairing devices or stopping the server also ends live
-//!   event streams that were opened with the old credentials.
-//! - Requests must name this server in `Host` (DNS rebinding) and must not be
-//!   cross-site browser requests. Invalid tokens from one address are rate limited;
-//!   a valid token is never locked out.
-//! - Traffic is plain HTTP; the UI explains that LAN use belongs on a trusted
-//!   network or a VPN such as Tailscale.
+//! - Off by default; binds to 127.0.0.1, or only to the machine's private LAN
+//!   address when the user enables LAN access (never every interface, and never a
+//!   public address).
+//! - Pairing: Settings → Remote shows a QR code holding a one-time pairing code
+//!   (valid 5 minutes, single use). The phone trades it at `POST /api/pair` for its
+//!   own device token. The QR code never contains a long-lived credential.
+//! - Every API call needs a bearer token: a device token (full control) or a share
+//!   token (read-only, one agent, expires, and sees only a projection of that
+//!   agent: messages with secrets redacted and a tool-call outline, see `view`).
+//!   Tokens are 244-bit random values, compared in constant time; only their
+//!   SHA-256 hashes are stored (owner-only file permissions).
+//! - Revoking a device or share, unpairing all, or stopping the server also ends
+//!   live event streams that were opened with the old credentials.
+//! - Requests must name this server in `Host` (DNS rebinding), must not be
+//!   cross-site browser requests and must not carry a foreign `Origin`. Invalid
+//!   tokens or pairing codes from one address are rate limited; a valid token is
+//!   never locked out. Connections are capped per peer address, with slots kept for
+//!   peers that authenticated.
+//! - Traffic is plain HTTP; the UI explains that it is not encrypted on the local
+//!   network and recommends a VPN such as Tailscale away from home.
+
+mod view;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -22,6 +31,8 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use sha2::{Digest, Sha256};
 
 use armada_core::{
     now_ms, Agent, ArmadaEvent, Attachment, Core, CreateAgentRequest, Provider, RemoteSettings,
@@ -47,6 +58,25 @@ static ICON_512: &[u8] = include_bytes!("../icons/icon.png");
 const MAX_FAILURES: u32 = 10;
 /// Open connections at once (each SSE stream holds one).
 const MAX_CONNECTIONS: usize = 64;
+/// Connections at once from one peer address that hasn't authenticated.
+const MAX_PEER_CONNECTIONS: usize = 8;
+/// Same for a peer that recently sent a valid token (a phone with several tabs).
+const MAX_TRUSTED_PEER_CONNECTIONS: usize = 24;
+/// Of `MAX_CONNECTIONS`, slots only authenticated peers may use, so unauthenticated
+/// hosts on the network can't fill the server.
+const RESERVED_CONNECTIONS: usize = 16;
+/// How long an address counts as authenticated after its last valid request.
+const TRUSTED_TTL: Duration = Duration::from_secs(10 * 60);
+/// A pairing code works once, for this long.
+const PAIRING_TTL: Duration = Duration::from_secs(5 * 60);
+/// Paired devices at most (bounds the token file).
+const MAX_DEVICES: usize = 25;
+/// Share link lifetimes the UI offers (hours); anything else becomes the default.
+const SHARE_HOURS: [u32; 3] = [1, 24, 24 * 7];
+const DEFAULT_SHARE_HOURS: u32 = 24;
+/// `last_seen` is refreshed (and saved) at most this often.
+const LAST_SEEN_STEP_MS: i64 = 60_000;
+const PUBLIC_ADDRESS_MESSAGE: &str = "Your network address is public; remote access over it is disabled. Use Tailscale (or another VPN) and connect over its private address, or turn LAN access off.";
 /// A client must send its request headers within this time (also closes idle
 /// keep-alive connections), so slow or silent clients can't hold connections.
 const HEADER_READ_TIMEOUT: Duration = if cfg!(test) {
@@ -97,19 +127,228 @@ const VIEWER_FIELDS: &[&str] = &[
     "rateLimited",
 ];
 
+/// A read-only link to one agent. Only the token's hash is stored.
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Share {
+    /// Older files kept the token itself; `migrate` hashes it and clears this.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     token: String,
+    #[serde(default)]
+    token_hash: String,
     agent_id: String,
     created_at: i64,
+    /// Unix ms; 0 = unset (older files), which `migrate` replaces.
+    #[serde(default)]
+    expires_at: i64,
+}
+
+impl Share {
+    /// Stable identifier for the UI (the token itself is not stored).
+    fn id(&self) -> String {
+        self.token_hash.chars().take(16).collect()
+    }
+}
+
+/// A paired phone or tablet. Only its token's hash is stored.
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct Device {
+    id: String,
+    name: String,
+    token_hash: String,
+    created_at: i64,
+    last_seen: i64,
 }
 
 #[derive(Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct Tokens {
+    /// Older files held one plaintext owner token for every phone. `migrate`
+    /// turns it into a single legacy device (hashed) so already-paired phones keep
+    /// working, then clears it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     owner: String,
+    #[serde(default)]
+    devices: Vec<Device>,
+    #[serde(default)]
     shares: Vec<Share>,
+}
+
+/// SHA-256 of a token, lowercase hex.
+fn hash_token(token: &str) -> String {
+    use std::fmt::Write;
+    Sha256::digest(token.as_bytes())
+        .iter()
+        .fold(String::with_capacity(64), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+}
+
+impl Tokens {
+    /// Upgrades older files in place; returns whether anything changed.
+    fn migrate(&mut self, now: i64) -> bool {
+        let mut changed = false;
+        if !self.owner.is_empty() {
+            // Keep the user's current phone(s) working: the old shared owner token
+            // becomes one device. Revoke it (or unpair all) in Settings to cut it off.
+            let hash = hash_token(&self.owner);
+            if !self.devices.iter().any(|d| d.token_hash == hash) {
+                self.devices.push(Device {
+                    id: uuid::Uuid::new_v4().simple().to_string(),
+                    name: "Previously paired phone".into(),
+                    token_hash: hash,
+                    created_at: now,
+                    last_seen: 0,
+                });
+            }
+            self.owner.clear();
+            changed = true;
+        }
+        for share in &mut self.shares {
+            if !share.token.is_empty() {
+                share.token_hash = hash_token(&share.token);
+                share.token.clear();
+                changed = true;
+            }
+            if share.expires_at == 0 {
+                share.expires_at = now + i64::from(DEFAULT_SHARE_HOURS) * 3_600_000;
+                changed = true;
+            }
+        }
+        let before = self.shares.len();
+        self.shares.retain(|s| !s.token_hash.is_empty());
+        changed || before != self.shares.len()
+    }
+}
+
+/// The pairing code currently shown in Settings (memory only; never persisted).
+struct PairingCode {
+    hash: String,
+    /// The server address it was minted for.
+    base: String,
+    url: String,
+    qr_svg: Option<String>,
+    expires: Instant,
+    expires_at_ms: i64,
+}
+
+/// Decides which connections the server accepts: a total cap, a per-address cap,
+/// and slots kept for addresses that sent a valid token recently.
+struct ConnLimiter {
+    max_total: usize,
+    reserved: usize,
+    per_peer: usize,
+    per_trusted_peer: usize,
+    state: Mutex<LimiterState>,
+}
+
+#[derive(Default)]
+struct LimiterState {
+    total: usize,
+    per_ip: HashMap<IpAddr, usize>,
+    trusted: HashMap<IpAddr, Instant>,
+}
+
+/// One admitted connection; released on drop.
+struct ConnGuard {
+    limiter: Arc<ConnLimiter>,
+    ip: IpAddr,
+}
+
+impl ConnLimiter {
+    fn new(max_total: usize, reserved: usize, per_peer: usize, per_trusted_peer: usize) -> Self {
+        ConnLimiter {
+            max_total,
+            reserved,
+            per_peer,
+            per_trusted_peer,
+            state: Mutex::new(LimiterState::default()),
+        }
+    }
+
+    fn standard() -> Arc<Self> {
+        Arc::new(Self::new(
+            MAX_CONNECTIONS,
+            RESERVED_CONNECTIONS,
+            MAX_PEER_CONNECTIONS,
+            MAX_TRUSTED_PEER_CONNECTIONS,
+        ))
+    }
+
+    /// Records a valid request from `ip`.
+    fn trust(&self, ip: IpAddr) {
+        let mut st = self.state.lock();
+        if st.trusted.len() > 1024 {
+            st.trusted.retain(|_, at| at.elapsed() < TRUSTED_TTL);
+        }
+        st.trusted.insert(ip.to_canonical(), Instant::now());
+    }
+
+    fn is_trusted(st: &LimiterState, ip: &IpAddr) -> bool {
+        st.trusted
+            .get(ip)
+            .is_some_and(|at| at.elapsed() < TRUSTED_TTL)
+    }
+
+    /// Admits a new connection from `ip`, or None when it must be refused.
+    fn admit(self: &Arc<Self>, ip: IpAddr) -> Option<ConnGuard> {
+        let ip = ip.to_canonical();
+        let mut st = self.state.lock();
+        if st.total >= self.max_total {
+            return None;
+        }
+        // Loopback is this computer itself: only the total cap applies.
+        if !ip.is_loopback() {
+            let trusted = Self::is_trusted(&st, &ip);
+            let cap = if trusted {
+                self.per_trusted_peer
+            } else {
+                self.per_peer
+            };
+            if st.per_ip.get(&ip).copied().unwrap_or(0) >= cap {
+                return None;
+            }
+            if !trusted && st.total >= self.max_total.saturating_sub(self.reserved) {
+                return None;
+            }
+        }
+        st.total += 1;
+        *st.per_ip.entry(ip).or_insert(0) += 1;
+        Some(ConnGuard {
+            limiter: self.clone(),
+            ip,
+        })
+    }
+}
+
+impl Drop for ConnGuard {
+    fn drop(&mut self) {
+        let mut st = self.limiter.state.lock();
+        st.total = st.total.saturating_sub(1);
+        if let Some(n) = st.per_ip.get_mut(&self.ip) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                st.per_ip.remove(&self.ip);
+            }
+        }
+    }
+}
+
+/// Whether `ip` is a private (non-internet) address: RFC 1918, carrier-grade NAT
+/// 100.64.0.0/10 (Tailscale), link-local, or IPv6 unique-local / link-local.
+fn is_private_address(ip: IpAddr) -> bool {
+    match ip.to_canonical() {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            v4.is_private() || v4.is_link_local() || (o[0] == 100 && (o[1] & 0xc0) == 64)
+        }
+        IpAddr::V6(v6) => {
+            let first = v6.segments()[0];
+            (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
+        }
+    }
 }
 
 struct Running {
@@ -124,11 +363,23 @@ struct Running {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ShareLink {
-    pub token: String,
+    pub id: String,
     pub agent_id: String,
     pub agent_title: Option<String>,
+    /// The link itself; only known when the share is created (just its hash is kept).
     pub url: Option<String>,
     pub created_at: i64,
+    pub expires_at: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceInfo {
+    pub id: String,
+    pub name: String,
+    pub created_at: i64,
+    /// Unix ms of the last request; 0 = never seen since pairing.
+    pub last_seen: i64,
 }
 
 #[derive(Serialize)]
@@ -140,12 +391,15 @@ pub struct RemoteStatus {
     pub port: u16,
     /// e.g. http://192.168.1.20:47821
     pub url: Option<String>,
-    /// Owner pairing link (contains the token in the URL fragment).
+    /// One-time pairing link (`#pair=<code>`; valid 5 minutes, single use).
     pub pairing_url: Option<String>,
     /// QR code for `pairing_url`, as an SVG document.
     pub qr_svg: Option<String>,
+    /// When the pairing code stops working (unix ms).
+    pub pairing_expires_at: Option<i64>,
     pub error: Option<String>,
     pub shares: Vec<ShareLink>,
+    pub devices: Vec<DeviceInfo>,
 }
 
 pub struct Remote {
@@ -172,6 +426,9 @@ pub struct Remote {
     /// then (until the user explicitly unpairs).
     persist: std::sync::atomic::AtomicBool,
     failures: Mutex<HashMap<IpAddr, (u32, Instant)>>,
+    /// The pairing code on display.
+    pairing: Mutex<Option<PairingCode>>,
+    limiter: Arc<ConnLimiter>,
     /// Open event streams per token.
     streams: Arc<Mutex<HashMap<String, usize>>>,
     /// Idempotency-Key → result (None while in flight), so a phone retrying after a
@@ -227,10 +484,43 @@ fn lan_ip() -> Option<IpAddr> {
     (!ip.is_unspecified() && !ip.is_loopback()).then_some(ip)
 }
 
-/// Removes fields a read-only viewer shouldn't see from a serialized agent.
-fn trim_agent(agent: &mut Value) {
+/// Removes fields a read-only viewer shouldn't see from a serialized agent, and
+/// redacts the free text that stays (title, last message).
+fn trim_agent(agent: &mut Value, roots: &[String]) {
     if let Some(obj) = agent.as_object_mut() {
         obj.retain(|k, _| VIEWER_FIELDS.contains(&k.as_str()));
+        for key in ["title", "lastMessage"] {
+            if let Some(text) = obj.get(key).and_then(Value::as_str) {
+                let safe = view::viewer_title(text, roots);
+                obj.insert(key.into(), Value::String(safe));
+            }
+        }
+    }
+}
+
+/// Folders an agent works in (what viewers see paths relative to).
+fn agent_roots(agent: &Agent) -> Vec<String> {
+    vec![agent.cwd.clone(), agent.project_path.clone()]
+}
+
+/// A one-time pairing code: 122 random bits.
+fn new_pairing_code() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
+/// Clamps a device name from the phone to something safe to list in Settings.
+fn clean_device_name(raw: &str) -> String {
+    let name: String = raw
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(40)
+        .collect::<String>()
+        .trim()
+        .to_string();
+    if name.is_empty() {
+        "Phone".into()
+    } else {
+        name
     }
 }
 
@@ -256,6 +546,8 @@ impl Remote {
             save_lock: Mutex::new(()),
             persist: std::sync::atomic::AtomicBool::new(loaded.persist),
             failures: Mutex::new(HashMap::new()),
+            pairing: Mutex::new(None),
+            limiter: ConnLimiter::standard(),
             streams: Arc::new(Mutex::new(HashMap::new())),
             idempotency: Mutex::new(HashMap::new()),
         });
@@ -295,17 +587,13 @@ impl Remote {
 
     /// Forwards agent events to connected remote clients.
     pub fn publish(&self, event: &ArmadaEvent) {
-        if let ArmadaEvent::AgentRemoved { agent_id } = event {
-            let removed = {
-                let mut tokens = self.tokens.lock();
-                let before = tokens.shares.len();
-                tokens.shares.retain(|s| &s.agent_id != agent_id);
-                before != tokens.shares.len()
-            };
-            if removed {
-                self.save_tokens();
-                self.bump_generation();
+        // Share links die with their agent: when it is deleted or archived.
+        match event {
+            ArmadaEvent::AgentRemoved { agent_id } => self.drop_shares_for(agent_id),
+            ArmadaEvent::AgentUpdated { agent } if agent.archived => {
+                self.drop_shares_for(&agent.id)
             }
+            _ => {}
         }
         if self.events.receiver_count() == 0 {
             return;
@@ -349,6 +637,118 @@ impl Remote {
         self.core.clone()
     }
 
+    fn drop_shares_for(&self, agent_id: &str) {
+        let removed = {
+            let mut tokens = self.tokens.lock();
+            let before = tokens.shares.len();
+            tokens.shares.retain(|s| s.agent_id != agent_id);
+            before != tokens.shares.len()
+        };
+        if removed {
+            self.save_tokens();
+            self.bump_generation();
+        }
+    }
+
+    /// The code on display for `base`, minting a fresh one when there is none, it
+    /// expired, was used, or the server address changed. Returns (url, qr, expiry).
+    fn pairing_for(&self, base: &str) -> (String, Option<String>, i64) {
+        let mut slot = self.pairing.lock();
+        if let Some(c) = slot.as_ref() {
+            if c.base == base && c.expires > Instant::now() {
+                return (c.url.clone(), c.qr_svg.clone(), c.expires_at_ms);
+            }
+        }
+        let code = new_pairing_code();
+        let url = format!("{base}/#pair={code}");
+        let qr_svg = qrcode::QrCode::new(url.as_bytes()).ok().map(|qr| {
+            qr.render::<qrcode::render::svg::Color<'_>>()
+                .min_dimensions(220, 220)
+                .quiet_zone(true)
+                .dark_color(qrcode::render::svg::Color("#0B0D10"))
+                .light_color(qrcode::render::svg::Color("#FFFFFF"))
+                .build()
+        });
+        let expires_at_ms = now_ms() + PAIRING_TTL.as_millis() as i64;
+        *slot = Some(PairingCode {
+            hash: hash_token(&code),
+            base: base.to_string(),
+            url: url.clone(),
+            qr_svg: qr_svg.clone(),
+            expires: Instant::now() + PAIRING_TTL,
+            expires_at_ms,
+        });
+        (url, qr_svg, expires_at_ms)
+    }
+
+    /// Spends `code` if it is the live pairing code (single use, constant time).
+    fn redeem_pairing(&self, code: &str) -> bool {
+        let mut slot = self.pairing.lock();
+        let given = hash_token(code.trim());
+        let ok = slot.as_ref().is_some_and(|c| {
+            let same = constant_time_eq(&given, &c.hash);
+            same && c.expires > Instant::now()
+        });
+        if ok || slot.as_ref().is_some_and(|c| c.expires <= Instant::now()) {
+            *slot = None;
+        }
+        ok
+    }
+
+    /// Registers a device and returns its token (shown to the phone once).
+    fn add_device(&self, name: &str) -> Result<String, ApiError> {
+        let token = new_token();
+        {
+            let mut tokens = self.tokens.lock();
+            if tokens.devices.len() >= MAX_DEVICES {
+                return Err(ApiError(
+                    StatusCode::CONFLICT,
+                    "Too many paired devices. Remove one in Armada's Settings → Remote first."
+                        .into(),
+                ));
+            }
+            tokens.devices.push(Device {
+                id: uuid::Uuid::new_v4().simple().to_string(),
+                name: clean_device_name(name),
+                token_hash: hash_token(&token),
+                created_at: now_ms(),
+                last_seen: now_ms(),
+            });
+        }
+        self.save_tokens();
+        Ok(token)
+    }
+
+    /// Notes that a device used its token (saved at most once a minute).
+    fn touch_device(&self, token: &str) {
+        let hash = hash_token(token);
+        let now = now_ms();
+        let changed = {
+            let mut tokens = self.tokens.lock();
+            match tokens.devices.iter_mut().find(|d| d.token_hash == hash) {
+                Some(d) if now - d.last_seen >= LAST_SEEN_STEP_MS => {
+                    d.last_seen = now;
+                    true
+                }
+                _ => false,
+            }
+        };
+        if changed {
+            self.save_tokens();
+        }
+    }
+
+    /// When the share link for `token` stops working (unix ms).
+    fn share_expiry(&self, token: &str) -> Option<i64> {
+        let hash = hash_token(token);
+        self.tokens
+            .lock()
+            .shares
+            .iter()
+            .find(|s| constant_time_eq(&hash, &s.token_hash))
+            .map(|s| s.expires_at)
+    }
+
     fn idem_begin(&self, key: &str) -> IdemBegin {
         let mut map = self.idempotency.lock();
         map.retain(|_, (at, _)| at.elapsed() < IDEMPOTENCY_TTL);
@@ -385,31 +785,47 @@ impl Remote {
         let settings = self.core().settings().map(|s| s.remote).unwrap_or_default();
         let base = self.base_url();
         let running = self.running.lock().is_some();
-        let tokens = self.tokens.lock();
-        let pairing_url = base
+        // Forget expired share links (they no longer authenticate anyway).
+        let pruned = {
+            let mut tokens = self.tokens.lock();
+            let before = tokens.shares.len();
+            let now = now_ms();
+            tokens.shares.retain(|s| s.expires_at > now);
+            before != tokens.shares.len()
+        };
+        if pruned {
+            self.save_tokens();
+        }
+        let pairing = base
             .as_ref()
-            .filter(|_| !tokens.owner.is_empty())
-            .map(|b| format!("{b}/#token={}", tokens.owner));
-        let qr_svg = pairing_url.as_deref().and_then(|u| {
-            qrcode::QrCode::new(u.as_bytes()).ok().map(|code| {
-                code.render::<qrcode::render::svg::Color<'_>>()
-                    .min_dimensions(220, 220)
-                    .quiet_zone(true)
-                    .dark_color(qrcode::render::svg::Color("#0B0D10"))
-                    .light_color(qrcode::render::svg::Color("#FFFFFF"))
-                    .build()
-            })
-        });
+            .filter(|_| self.persist.load(std::sync::atomic::Ordering::SeqCst))
+            .map(|b| self.pairing_for(b));
+        let (pairing_url, qr_svg, pairing_expires_at) = match pairing {
+            Some((url, qr, exp)) => (Some(url), qr, Some(exp)),
+            None => (None, None, None),
+        };
         let core = self.core();
+        let tokens = self.tokens.lock();
         let shares = tokens
             .shares
             .iter()
             .map(|s| ShareLink {
-                token: s.token.clone(),
+                id: s.id(),
                 agent_id: s.agent_id.clone(),
                 agent_title: core.agent(&s.agent_id).ok().map(|a| a.title),
-                url: base.as_ref().map(|b| format!("{b}/#token={}", s.token)),
+                url: None,
                 created_at: s.created_at,
+                expires_at: s.expires_at,
+            })
+            .collect();
+        let devices = tokens
+            .devices
+            .iter()
+            .map(|d| DeviceInfo {
+                id: d.id.clone(),
+                name: d.name.clone(),
+                created_at: d.created_at,
+                last_seen: d.last_seen,
             })
             .collect();
         RemoteStatus {
@@ -420,18 +836,25 @@ impl Remote {
             url: base,
             pairing_url,
             qr_svg,
+            pairing_expires_at,
             error: self
                 .error
                 .lock()
                 .clone()
                 .or_else(|| self.tokens_problem.lock().clone()),
             shares,
+            devices,
         }
     }
 
-    /// Unpairs every device by issuing a new owner token.
-    pub fn rotate_owner_token(&self) {
-        self.tokens.lock().owner = new_token();
+    /// Unpairs every device (their tokens stop working and live streams end).
+    pub fn unpair_all(&self) {
+        {
+            let mut tokens = self.tokens.lock();
+            tokens.devices.clear();
+            tokens.owner.clear();
+        }
+        *self.pairing.lock() = None;
         // An explicit unpair replaces even an unreadable file.
         self.persist
             .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -440,28 +863,42 @@ impl Remote {
         self.bump_generation();
     }
 
-    pub fn create_share(&self, agent_id: &str) -> anyhow::Result<ShareLink> {
+    /// Unpairs one device and ends its live streams.
+    pub fn revoke_device(&self, id: &str) {
+        self.tokens.lock().devices.retain(|d| d.id != id);
+        self.save_tokens();
+        self.bump_generation();
+    }
+
+    /// A read-only link to one agent, valid for `hours` (1, 24 or 168; default 24).
+    pub fn create_share(&self, agent_id: &str, hours: Option<u32>) -> anyhow::Result<ShareLink> {
         let agent = self.core().agent(agent_id)?;
+        let hours = hours
+            .filter(|h| SHARE_HOURS.contains(h))
+            .unwrap_or(DEFAULT_SHARE_HOURS);
+        let token = new_token();
+        let now = now_ms();
         let share = Share {
-            token: new_token(),
+            token: String::new(),
+            token_hash: hash_token(&token),
             agent_id: agent_id.to_string(),
-            created_at: now_ms(),
+            created_at: now,
+            expires_at: now + i64::from(hours) * 3_600_000,
         };
         self.tokens.lock().shares.push(share.clone());
         self.save_tokens();
         Ok(ShareLink {
-            url: self
-                .base_url()
-                .map(|b| format!("{b}/#token={}", share.token)),
-            token: share.token,
+            id: share.id(),
+            url: self.base_url().map(|b| format!("{b}/#token={token}")),
             agent_id: share.agent_id,
             agent_title: Some(agent.title),
             created_at: share.created_at,
+            expires_at: share.expires_at,
         })
     }
 
-    pub fn revoke_share(&self, token: &str) {
-        self.tokens.lock().shares.retain(|s| s.token != token);
+    pub fn revoke_share(&self, id: &str) {
+        self.tokens.lock().shares.retain(|s| s.id() != id);
         self.save_tokens();
         self.bump_generation();
     }
@@ -547,7 +984,7 @@ impl Remote {
         settings: &RemoteSettings,
         retry_in_use: bool,
     ) -> Result<SocketAddr, String> {
-        if self.tokens.lock().owner.is_empty() {
+        if !self.persist.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(self.tokens_problem.lock().clone().unwrap_or_else(|| {
                 "Remote pairing data is unavailable; unpair devices to reset it.".into()
             }));
@@ -556,9 +993,13 @@ impl Remote {
             return Err(format!("Choose a port between {MIN_PORT} and 65535"));
         }
         let ip = if settings.lan {
-            lan_ip().ok_or_else(|| {
+            let ip = lan_ip().ok_or_else(|| {
                 "No network connection found for LAN access. Connect to a network, or turn LAN access off.".to_string()
-            })?
+            })?;
+            if !is_private_address(ip) {
+                return Err(PUBLIC_ADDRESS_MESSAGE.to_string());
+            }
+            ip
         } else {
             IpAddr::V4(Ipv4Addr::LOCALHOST)
         };
@@ -587,7 +1028,7 @@ impl Remote {
         };
         let (tx, rx) = oneshot::channel::<()>();
         let router = self.router(epoch);
-        let task = tauri::async_runtime::spawn(serve(listener, router, rx));
+        let task = tauri::async_runtime::spawn(serve(listener, router, rx, self.limiter.clone()));
         *self.running.lock() = Some(Running {
             addr,
             epoch,
@@ -602,6 +1043,7 @@ impl Remote {
     /// Signals the server to stop and ends its live event streams.
     pub fn stop(&self) -> Option<tauri::async_runtime::JoinHandle<()>> {
         let mut running = self.running.lock().take()?;
+        *self.pairing.lock() = None;
         if let Some(tx) = running.shutdown.take() {
             let _ = tx.send(());
         }
@@ -673,25 +1115,66 @@ impl Remote {
             .route("/icon.png", get(icon))
             .route("/icon-192.png", get(icon_192))
             .route("/icon-512.png", get(icon_512))
+            // Unauthenticated by design (it trades a one-time code for a token).
+            .route(
+                "/api/pair",
+                post(pair).layer(DefaultBodyLimit::max(4 * 1024)),
+            )
             .merge(api)
             .layer(axum::middleware::map_response(no_store))
             .with_state(ctx)
     }
 
     /// Which credentials a token grants, without touching the failure counters.
+    /// Expired share links grant nothing.
     fn token_scope(&self, token: &str) -> Option<Scope> {
         if token.is_empty() {
             return None;
         }
+        let hash = hash_token(token);
+        let now = now_ms();
         let tokens = self.tokens.lock();
-        if constant_time_eq(token, &tokens.owner) {
+        if tokens
+            .devices
+            .iter()
+            .any(|d| constant_time_eq(&hash, &d.token_hash))
+        {
             return Some(Scope::Owner);
         }
         tokens
             .shares
             .iter()
-            .find(|s| constant_time_eq(token, &s.token))
+            .find(|s| s.expires_at > now && constant_time_eq(&hash, &s.token_hash))
             .map(|s| Scope::Viewer(s.agent_id.clone()))
+    }
+
+    /// Counts a failed attempt from `ip`: 401, or 429 once it has failed too often.
+    fn record_failure(&self, ip: IpAddr, message: &str) -> ApiError {
+        let mut failures = self.failures.lock();
+        if failures.len() > 4096 {
+            failures.retain(|_, (_, last)| last.elapsed() < LOCKOUT);
+        }
+        let entry = failures.entry(ip).or_insert((0, Instant::now()));
+        if entry.1.elapsed() > LOCKOUT {
+            *entry = (0, Instant::now());
+        }
+        if entry.0 >= MAX_FAILURES {
+            return ApiError(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Too many failed attempts. Try again in a few minutes.".into(),
+            );
+        }
+        entry.0 += 1;
+        entry.1 = Instant::now();
+        ApiError(StatusCode::UNAUTHORIZED, message.into())
+    }
+
+    /// Whether `ip` has used up its failed attempts.
+    fn locked_out(&self, ip: IpAddr) -> bool {
+        self.failures
+            .lock()
+            .get(&ip)
+            .is_some_and(|(n, last)| *n >= MAX_FAILURES && last.elapsed() <= LOCKOUT)
     }
 
     /// Request checks shared by every API route: host, cross-site, token, rate limit.
@@ -711,27 +1194,15 @@ impl Remote {
             .to_string();
         // A valid token is never rate limited (so others can't lock the owner out).
         if let Some(scope) = self.token_scope(&token) {
+            self.limiter.trust(ip);
+            if scope == Scope::Owner {
+                self.touch_device(&token);
+            }
             return Ok((scope, token));
         }
-        let mut failures = self.failures.lock();
-        if failures.len() > 4096 {
-            failures.retain(|_, (_, last)| last.elapsed() < LOCKOUT);
-        }
-        let entry = failures.entry(ip).or_insert((0, Instant::now()));
-        if entry.1.elapsed() > LOCKOUT {
-            *entry = (0, Instant::now());
-        }
-        if entry.0 >= MAX_FAILURES {
-            return Err(ApiError(
-                StatusCode::TOO_MANY_REQUESTS,
-                "Too many failed attempts. Try again in a few minutes.".into(),
-            ));
-        }
-        entry.0 += 1;
-        entry.1 = Instant::now();
-        Err(ApiError(
-            StatusCode::UNAUTHORIZED,
-            "This device isn't paired with Armada (or was unpaired).".into(),
+        Err(self.record_failure(
+            ip,
+            "This device isn't paired with Armada (or was unpaired).",
         ))
     }
 
@@ -769,14 +1240,23 @@ impl Remote {
         let lan = addr.map(|ip| SocketAddr::new(ip, port).to_string());
         let ok = allowed.iter().any(|a| a.eq_ignore_ascii_case(host))
             || lan.as_deref().is_some_and(|l| l == host);
-        if ok {
-            Ok(())
-        } else {
-            Err(ApiError(
+        if !ok {
+            return Err(ApiError(
                 StatusCode::MISDIRECTED_REQUEST,
                 "Unexpected host.".into(),
-            ))
+            ));
         }
+        // Browsers add `Origin` to cross-origin and POST requests: it must be us.
+        if let Some(origin) = headers.get(header::ORIGIN) {
+            let own = format!("http://{host}");
+            if !origin.to_str().is_ok_and(|o| o.eq_ignore_ascii_case(&own)) {
+                return Err(ApiError(
+                    StatusCode::FORBIDDEN,
+                    "Cross-site requests aren't allowed.".into(),
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -789,20 +1269,17 @@ struct LoadedTokens {
     problem: Option<String>,
 }
 
-/// Reads the pairing tokens. Only a missing file means "first run, new owner token":
+/// Reads the pairing data. Only a missing file means "first run, nothing paired":
 /// a damaged file is kept as a backup and reported (re-pairing is unavoidable), and an
 /// unreadable one is left alone, with remote access unavailable until it's fixed or
-/// the user unpairs, rather than silently unpairing every device.
+/// the user unpairs, rather than silently unpairing every device. Files from older
+/// versions (plaintext owner and share tokens) are upgraded: see `Tokens::migrate`.
 fn load_tokens(path: &std::path::Path) -> LoadedTokens {
-    let fresh = || Tokens {
-        owner: new_token(),
-        shares: Vec::new(),
-    };
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return LoadedTokens {
-                tokens: fresh(),
+                tokens: Tokens::default(),
                 dirty: true,
                 persist: true,
                 problem: None,
@@ -821,22 +1298,21 @@ fn load_tokens(path: &std::path::Path) -> LoadedTokens {
         }
     };
     match serde_json::from_slice::<Tokens>(&bytes) {
-        Ok(tokens) if tokens.owner.len() >= 32 => LoadedTokens {
-            tokens,
-            // Rewrite anyway so older files get owner-only permissions.
-            dirty: true,
-            persist: true,
-            problem: None,
-        },
-        parsed => {
-            let backup = path.with_extension(format!("json.damaged-{}", now_ms()));
-            let kept = std::fs::copy(path, &backup).is_ok();
-            let mut tokens = fresh();
-            if let Ok(old) = parsed {
-                tokens.shares = old.shares;
-            }
+        Ok(mut tokens) if tokens.owner.is_empty() || tokens.owner.len() >= 32 => {
+            tokens.migrate(now_ms());
             LoadedTokens {
                 tokens,
+                // Rewrite anyway so older files get owner-only permissions.
+                dirty: true,
+                persist: true,
+                problem: None,
+            }
+        }
+        _ => {
+            let backup = path.with_extension(format!("json.damaged-{}", now_ms()));
+            let kept = std::fs::copy(path, &backup).is_ok();
+            LoadedTokens {
+                tokens: Tokens::default(),
                 dirty: true,
                 persist: true,
                 problem: Some(format!(
@@ -882,27 +1358,21 @@ fn write_private_atomic(path: &std::path::Path, data: &[u8]) -> std::io::Result<
     result
 }
 
-/// Accept loop for the remote server: at most `MAX_CONNECTIONS` at once, request
-/// headers within `HEADER_READ_TIMEOUT`. On shutdown, stops accepting and lets open
+/// Accept loop for the remote server: connections are admitted by `limiter` (total,
+/// per-address and reserved-for-authenticated caps; others are closed at once),
+/// request headers within `HEADER_READ_TIMEOUT`. On shutdown, stops accepting and lets open
 /// connections finish (live streams end via the generation bump).
 async fn serve(
     listener: tokio::net::TcpListener,
     router: Router,
     mut shutdown: oneshot::Receiver<()>,
+    limiter: Arc<ConnLimiter>,
 ) {
     use tower::ServiceExt;
 
-    let permits = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
     let (closing_tx, closing_rx) = watch::channel(false);
     let mut connections = tokio::task::JoinSet::new();
     loop {
-        let permit = tokio::select! {
-            _ = &mut shutdown => break,
-            permit = permits.clone().acquire_owned() => match permit {
-                Ok(p) => p,
-                Err(_) => break,
-            },
-        };
         let (stream, peer) = tokio::select! {
             _ = &mut shutdown => break,
             accepted = listener.accept() => match accepted {
@@ -914,6 +1384,11 @@ async fn serve(
                     continue;
                 }
             },
+        };
+        let Some(permit) = limiter.admit(peer.ip()) else {
+            // Over a cap: drop the connection rather than queue it.
+            drop(stream);
+            continue;
         };
         let router = router.clone();
         let mut closing = closing_rx.clone();
@@ -1146,6 +1621,41 @@ async fn icon_512() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "image/png")], ICON_512)
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PairBody {
+    code: String,
+    #[serde(default)]
+    device_name: String,
+}
+
+/// Trades the one-time pairing code for this device's own token. Unauthenticated,
+/// so it is rate limited per address and the code is compared in constant time.
+async fn pair(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Json(body): Json<PairBody>,
+) -> Result<Json<Value>, ApiError> {
+    let remote = &c.remote;
+    remote.check_origin(c.epoch, &headers)?;
+    if remote.locked_out(peer.ip()) {
+        return Err(ApiError(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Too many failed attempts. Try again in a few minutes.".into(),
+        ));
+    }
+    if !remote.redeem_pairing(&body.code) {
+        return Err(remote.record_failure(
+            peer.ip(),
+            "That pairing code didn't work or has expired. Show a fresh QR code in Armada.",
+        ));
+    }
+    let token = remote.add_device(&body.device_name)?;
+    remote.limiter.trust(peer.ip());
+    Ok(Json(json!({ "token": token, "scope": "owner" })))
+}
+
 async fn session(
     State(c): State<Ctx>,
     ConnectInfo(peer): Peer,
@@ -1182,9 +1692,10 @@ async fn state(
     let agents: Vec<Value> = visible
         .into_iter()
         .map(|a: Agent| {
+            let roots = agent_roots(&a);
             let mut v = serde_json::to_value(a).unwrap_or_default();
             if scope != Scope::Owner {
-                trim_agent(&mut v);
+                trim_agent(&mut v, &roots);
             }
             v
         })
@@ -1270,14 +1781,55 @@ async fn items(
     let scope = c.auth(&peer, &headers)?;
     visible(&scope, &id)?;
     let core = c.remote.core();
-    core.agent(&id)?;
-    let items = tokio::task::spawn_blocking(move || match q.limit {
-        Some(limit) => core.items_page(&id, q.before_seq, limit.clamp(1, 1000)),
-        None => core.items(&id),
+    let roots = agent_roots(&core.agent(&id)?);
+    let viewer = scope != Scope::Owner;
+    let items = tokio::task::spawn_blocking(move || {
+        if viewer {
+            return viewer_items(&core, &id, q.before_seq, q.limit, &roots);
+        }
+        match q.limit {
+            Some(limit) => core.items_page(&id, q.before_seq, limit.clamp(1, 1000)),
+            None => core.items(&id),
+        }
     })
     .await
     .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))??;
     Ok(Json(items).into_response())
+}
+
+/// A viewer's page of the timeline: only what `view::project_item` lets through.
+/// Items viewers don't get are skipped, so older pages are read until `limit`
+/// visible items are found (the phone treats a short page as "no more history").
+fn viewer_items(
+    core: &Core,
+    id: &str,
+    before_seq: Option<i64>,
+    limit: Option<usize>,
+    roots: &[String],
+) -> anyhow::Result<Vec<armada_core::TimelineItem>> {
+    let Some(limit) = limit else {
+        return Ok(view::project_items(&core.items(id)?, roots));
+    };
+    let limit = limit.clamp(1, 1000);
+    let mut before = before_seq;
+    let mut out: Vec<armada_core::TimelineItem> = Vec::new();
+    for _ in 0..20 {
+        let raw = core.items_page(id, before, limit)?;
+        let Some(oldest) = raw.iter().map(|i| i.seq).min() else {
+            break;
+        };
+        before = Some(oldest);
+        let mut page = view::project_items(&raw, roots);
+        page.append(&mut out);
+        out = page;
+        if out.len() >= limit || raw.len() < limit {
+            break;
+        }
+    }
+    if out.len() > limit {
+        out = out.split_off(out.len() - limit);
+    }
+    Ok(out)
 }
 
 #[derive(Deserialize)]
@@ -1433,6 +1985,10 @@ async fn permissions(
     headers: HeaderMap,
 ) -> Result<Json<Vec<armada_core::TimelineItem>>, ApiError> {
     let scope = c.auth(&peer, &headers)?;
+    // Viewers never see approval requests (they hold raw commands and paths).
+    if scope != Scope::Owner {
+        return Ok(Json(Vec::new()));
+    }
     let core = c.remote.core();
     let pending = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
         let mut out = Vec::new();
@@ -1647,6 +2203,43 @@ async fn ship(
     Ok(Json(serde_json::to_value(result).unwrap_or_default()))
 }
 
+/// Viewers may fetch an image only if it is inside the agent's project and the
+/// conversation they are shown mentions it.
+fn check_viewer_image(core: &Core, id: &str, path: &str) -> anyhow::Result<()> {
+    let denied = || anyhow::anyhow!("not found: that image isn't part of what this link shows");
+    let agent = core.agent(id)?;
+    let input = path.trim();
+    if input.is_empty() || input.starts_with("file:") {
+        return Err(denied());
+    }
+    let requested = std::path::PathBuf::from(input);
+    let full = if requested.is_absolute() {
+        requested
+    } else {
+        std::path::PathBuf::from(&agent.cwd).join(requested)
+    };
+    let real = full.canonicalize().map_err(|_| denied())?;
+    let mut relative = None;
+    let mut inside = false;
+    for root in [&agent.cwd, &agent.project_path] {
+        if let Ok(root) = std::path::Path::new(root).canonicalize() {
+            if let Ok(rel) = real.strip_prefix(&root) {
+                inside = true;
+                relative.get_or_insert_with(|| rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    if !inside {
+        return Err(denied());
+    }
+    let visible = view::project_items(&core.items(id)?, &agent_roots(&agent));
+    if view::mentions_path(&visible, input, relative.as_deref()) {
+        Ok(())
+    } else {
+        Err(denied())
+    }
+}
+
 #[derive(Deserialize)]
 struct ImageQuery {
     path: String,
@@ -1661,12 +2254,18 @@ async fn image(
     Path(id): Path<String>,
     Query(q): Query<ImageQuery>,
 ) -> Result<Json<Attachment>, ApiError> {
-    // Viewers too: screenshots are part of the agent's conversation they follow.
-    visible(&c.auth(&peer, &headers)?, &id)?;
+    let scope = c.auth(&peer, &headers)?;
+    visible(&scope, &id)?;
     let core = c.remote.core();
-    let image = tokio::task::spawn_blocking(move || core.read_image(&id, &q.path))
-        .await
-        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))??;
+    let viewer = scope != Scope::Owner;
+    let image = tokio::task::spawn_blocking(move || {
+        if viewer {
+            check_viewer_image(&core, &id, &q.path)?;
+        }
+        core.read_image(&id, &q.path)
+    })
+    .await
+    .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))??;
     Ok(Json(image))
 }
 
@@ -1804,6 +2403,8 @@ struct Stream_ {
     epoch: u64,
     token: String,
     scope: Scope,
+    /// What a viewer sees paths relative to.
+    roots: Vec<String>,
 }
 
 impl Stream_ {
@@ -1836,10 +2437,15 @@ impl Stream_ {
                             PublishedKind::AgentUpdated => {
                                 let mut v: Value =
                                     serde_json::from_str(&event.json).unwrap_or_default();
-                                trim_agent(&mut v["agent"]);
+                                trim_agent(&mut v["agent"], &self.roots);
                                 return Some(v.to_string());
                             }
-                            PublishedKind::Other => return Some(event.json.clone()),
+                            // Messages and a tool outline only; no streamed text or output.
+                            PublishedKind::Other => {
+                                if let Some(msg) = view::project_event(&event.json, &self.roots) {
+                                    return Some(msg);
+                                }
+                            }
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => {
@@ -1869,15 +2475,33 @@ async fn events(
             "Too many open connections for this device or link.".into(),
         )
     })?;
+    let mut lifetime = STREAM_LIFETIME;
+    if let Scope::Viewer(_) = &scope {
+        // A share link's stream ends when the link expires.
+        if let Some(exp) = c.remote.share_expiry(&token) {
+            let left = u64::try_from(exp - now_ms()).unwrap_or(0);
+            lifetime = lifetime.min(Duration::from_millis(left));
+        }
+    }
+    let roots = match &scope {
+        Scope::Viewer(id) => c
+            .remote
+            .core()
+            .agent(id)
+            .map(|a| agent_roots(&a))
+            .unwrap_or_default(),
+        Scope::Owner => Vec::new(),
+    };
     let state = Stream_ {
         _slot: slot,
-        deadline: tokio::time::Instant::now() + STREAM_LIFETIME,
+        deadline: tokio::time::Instant::now() + lifetime,
         rx,
         generation,
         remote: c.remote.clone(),
         epoch: c.epoch,
         token,
         scope,
+        roots,
     };
     let stream = futures_util::stream::unfold(state, |mut s| async move {
         let msg = s.next().await?;
@@ -2064,11 +2688,50 @@ mod tests {
         let base = status.url.clone().unwrap();
         assert_eq!(base, format!("http://127.0.0.1:{port}"));
         assert!(status.qr_svg.as_deref().is_some_and(|s| s.contains("<svg")));
-        let owner = remote.tokens.lock().owner.clone();
-        assert_eq!(
-            status.pairing_url.unwrap(),
-            format!("{base}/#token={owner}")
+        // The QR/link holds a one-time code, never a long-lived token.
+        let pairing_url = status.pairing_url.clone().unwrap();
+        assert!(
+            pairing_url.starts_with(&format!("{base}/#pair=")),
+            "{pairing_url}"
         );
+        assert!(!pairing_url.contains("token"));
+        assert!(status.pairing_expires_at.is_some());
+        let pair_code = pairing_url.rsplit("#pair=").next().unwrap().to_string();
+        // Wrong codes are refused; the right one works once and yields a device token.
+        let (code, _) = call(
+            "POST",
+            format!("{base}/api/pair"),
+            None,
+            Some(json!({ "code": "not-the-code", "deviceName": "Pixel" })),
+        )
+        .await;
+        assert_eq!(code, 401);
+        let (code, body) = call(
+            "POST",
+            format!("{base}/api/pair"),
+            None,
+            Some(json!({ "code": pair_code, "deviceName": "Pixel 9" })),
+        )
+        .await;
+        assert_eq!(code, 200, "{body}");
+        let paired: Value = serde_json::from_str(&body).unwrap();
+        let owner = paired["token"].as_str().unwrap().to_string();
+        let (code, _) = call(
+            "POST",
+            format!("{base}/api/pair"),
+            None,
+            Some(json!({ "code": pair_code, "deviceName": "Again" })),
+        )
+        .await;
+        assert_eq!(code, 401, "a pairing code works once");
+        // The next status shows a fresh code and lists the device (by name, not token).
+        let status2 = remote.status();
+        assert_ne!(status2.pairing_url.as_deref(), Some(pairing_url.as_str()));
+        assert_eq!(status2.devices.len(), 1);
+        assert_eq!(status2.devices[0].name, "Pixel 9");
+        let saved = std::fs::read_to_string(dir.join("data").join("remote.json")).unwrap();
+        assert!(!saved.contains(&owner), "tokens are stored hashed");
+        assert!(saved.contains(&hash_token(&owner)));
 
         // Static app with strict headers.
         let res = tokio::task::spawn_blocking({
@@ -2307,11 +2970,23 @@ mod tests {
         );
 
         // Read-only share link: sees only its agent, can't act.
-        let share = remote.create_share(&agent.id).unwrap();
+        let share = remote.create_share(&agent.id, Some(1)).unwrap();
+        let share_token = share
+            .url
+            .as_deref()
+            .and_then(|u| u.rsplit("#token=").next())
+            .unwrap()
+            .to_string();
+        assert!(share.expires_at - share.created_at <= 3_600_000);
+        let saved = std::fs::read_to_string(dir.join("data").join("remote.json")).unwrap();
+        assert!(
+            !saved.contains(&share_token),
+            "share tokens are stored hashed"
+        );
         let (code, body) = call(
             "GET",
             format!("{base}/api/session"),
-            Some(share.token.clone()),
+            Some(share_token.clone()),
             None,
         )
         .await;
@@ -2320,7 +2995,7 @@ mod tests {
         let (_, body) = call(
             "GET",
             format!("{base}/api/state"),
-            Some(share.token.clone()),
+            Some(share_token.clone()),
             None,
         )
         .await;
@@ -2343,23 +3018,50 @@ mod tests {
             "viewers keep the custom agent id (for its name chip)"
         );
         assert!(state["agents"][0]["title"].is_string());
+        // Viewers get no approval requests, tool output or permission items.
+        let (code, body) = call(
+            "GET",
+            format!("{base}/api/permissions"),
+            Some(share_token.clone()),
+            None,
+        )
+        .await;
+        assert_eq!((code, body.trim()), (200, "[]"));
+        let (code, body) = call(
+            "GET",
+            format!("{base}/api/agents/{}/items", agent.id),
+            Some(share_token.clone()),
+            None,
+        )
+        .await;
+        assert_eq!(code, 200);
+        assert!(!body.contains(r#""kind":"permission""#), "{body}");
+        assert!(!body.contains(r#""kind":"thought""#), "{body}");
+        let (code, _) = call(
+            "GET",
+            format!("{base}/api/agents/{}/image?path=/etc/hostname", agent.id),
+            Some(share_token.clone()),
+            None,
+        )
+        .await;
+        assert_eq!(code, 404, "viewers can't fetch arbitrary files");
         // Tokens are only accepted in the Authorization header (never in URLs).
         for path in ["state", "events"] {
             let (code, _) = call(
                 "GET",
-                format!("{base}/api/{path}?token={}", share.token),
+                format!("{base}/api/{path}?token={}", share_token),
                 None,
                 None,
             )
             .await;
             assert_eq!(code, 401, "{path}");
         }
-        let mut viewer_stream = open_stream(format!("{base}/api/events"), &share.token);
+        let mut viewer_stream = open_stream(format!("{base}/api/events"), &share_token);
         tokio::time::sleep(Duration::from_millis(300)).await;
         let (code, _) = call(
             "POST",
             format!("{base}/api/agents/{}/prompt", agent.id),
-            Some(share.token.clone()),
+            Some(share_token.clone()),
             Some(json!({ "text": "hi" })),
         )
         .await;
@@ -2367,7 +3069,7 @@ mod tests {
         let (code, _) = call(
             "POST",
             format!("{base}/api/agents/{}/stop", agent.id),
-            Some(share.token.clone()),
+            Some(share_token.clone()),
             None,
         )
         .await;
@@ -2375,17 +3077,17 @@ mod tests {
         let (code, _) = call(
             "GET",
             format!("{base}/api/agents/someone-else/items"),
-            Some(share.token.clone()),
+            Some(share_token.clone()),
             None,
         )
         .await;
         assert_eq!(code, 404);
-        remote.revoke_share(&share.token);
+        remote.revoke_share(&share.id);
         assert_eq!(
             call(
                 "GET",
                 format!("{base}/api/session"),
-                Some(share.token),
+                Some(share_token.clone()),
                 None
             )
             .await
@@ -2407,7 +3109,51 @@ mod tests {
             403
         );
 
-        // Owner can prompt; rotating the token unpairs devices.
+        assert_eq!(
+            raw(port, format!("GET /api/session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://evil.example\r\nAuthorization: Bearer {owner}\r\nConnection: close\r\n\r\n")).await,
+            403
+        );
+        assert_eq!(
+            raw(port, format!("GET /api/session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nAuthorization: Bearer {owner}\r\nConnection: close\r\n\r\n")).await,
+            200
+        );
+
+        // Revoking one device ends its streams and leaves the others alone.
+        let second = remote.add_device("Second phone").unwrap();
+        let mut second_stream = open_stream(format!("{base}/api/events"), &second);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let second_id = remote
+            .status()
+            .devices
+            .iter()
+            .find(|d| d.name == "Second phone")
+            .unwrap()
+            .id
+            .clone();
+        remote.revoke_device(&second_id);
+        assert!(
+            stream_ends(&mut second_stream).await,
+            "revoking a device ends its live stream"
+        );
+        assert_eq!(
+            call("GET", format!("{base}/api/session"), Some(second), None)
+                .await
+                .0,
+            401
+        );
+        assert_eq!(
+            call(
+                "GET",
+                format!("{base}/api/session"),
+                Some(owner.clone()),
+                None
+            )
+            .await
+            .0,
+            200
+        );
+
+        // Owner can prompt; unpairing all devices ends their access.
         let (code, _) = call(
             "POST",
             format!("{base}/api/agents/{}/prompt", agent.id),
@@ -2427,7 +3173,7 @@ mod tests {
         assert_eq!(code, 202);
         let mut owner_stream = open_stream(format!("{base}/api/events"), &owner);
         tokio::time::sleep(Duration::from_millis(300)).await;
-        remote.rotate_owner_token();
+        remote.unpair_all();
         assert_eq!(
             call(
                 "GET",
@@ -2443,7 +3189,7 @@ mod tests {
             stream_ends(&mut owner_stream).await,
             "unpairing ends the live stream"
         );
-        let owner = remote.tokens.lock().owner.clone();
+        let owner = remote.add_device("After unpair").unwrap();
 
         // Brute force gets locked out, but never the real owner.
         let mut last = 0;
@@ -2601,10 +3347,17 @@ mod tests {
         let dir = temp_dir();
         let path = dir.join("remote.json");
 
-        // First run: new owner token.
-        let first = load_tokens(&path);
+        // First run: nothing paired yet.
+        let mut first = load_tokens(&path);
         assert!(first.persist && first.dirty && first.problem.is_none());
-        assert_eq!(first.tokens.owner.len(), 64);
+        assert!(first.tokens.devices.is_empty() && first.tokens.owner.is_empty());
+        first.tokens.devices.push(Device {
+            id: "d1".into(),
+            name: "Phone".into(),
+            token_hash: hash_token("tok"),
+            created_at: 1,
+            last_seen: 2,
+        });
 
         // Saved atomically, owner-only, no temp files left behind.
         let data = serde_json::to_vec(&first.tokens).unwrap();
@@ -2622,14 +3375,15 @@ mod tests {
             assert_eq!(mode & 0o777, 0o600);
         }
         let again = load_tokens(&path);
-        assert_eq!(again.tokens.owner, first.tokens.owner);
+        assert_eq!(again.tokens.devices.len(), 1);
+        assert_eq!(again.tokens.devices[0].token_hash, hash_token("tok"));
         assert!(again.problem.is_none());
 
         // Damaged: reset, but the old file is kept and the user told.
         std::fs::write(&path, b"{not json").unwrap();
         let damaged = load_tokens(&path);
         assert!(damaged.persist);
-        assert_ne!(damaged.tokens.owner, first.tokens.owner);
+        assert!(damaged.tokens.devices.is_empty());
         assert!(damaged.problem.as_deref().unwrap().contains("damaged"));
         assert!(std::fs::read_dir(&dir).unwrap().any(|e| e
             .unwrap()
@@ -2642,9 +3396,227 @@ mod tests {
         std::fs::create_dir_all(&unreadable).unwrap();
         let blocked = load_tokens(&unreadable);
         assert!(!blocked.persist && !blocked.dirty);
-        assert!(blocked.tokens.owner.is_empty());
+        assert!(blocked.tokens.devices.is_empty());
         assert!(blocked.problem.is_some());
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn legacy_plaintext_tokens_are_migrated_and_hashed() {
+        let dir = temp_dir();
+        let path = dir.join("remote.json");
+        let owner = new_token();
+        let share = new_token();
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "owner": owner,
+                "shares": [{ "token": share, "agentId": "a1", "createdAt": 5 }],
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let loaded = load_tokens(&path);
+        assert!(loaded.persist && loaded.dirty && loaded.problem.is_none());
+        let tokens = loaded.tokens;
+        assert!(tokens.owner.is_empty());
+        // The existing phone keeps working, as one legacy device.
+        assert_eq!(tokens.devices.len(), 1);
+        assert_eq!(tokens.devices[0].token_hash, hash_token(&owner));
+        assert_eq!(tokens.shares[0].token_hash, hash_token(&share));
+        assert!(tokens.shares[0].token.is_empty());
+        assert!(
+            tokens.shares[0].expires_at > now_ms(),
+            "legacy shares get an expiry"
+        );
+        // What is written back has no plaintext.
+        let written = serde_json::to_string(&tokens).unwrap();
+        assert!(!written.contains(&owner) && !written.contains(&share));
+        // Idempotent.
+        let mut again = serde_json::from_str::<Tokens>(&written).unwrap();
+        assert!(!again.migrate(now_ms()));
+        assert_eq!(again.devices.len(), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    struct NullSink;
+    impl EventSink for NullSink {
+        fn emit(&self, _event: ArmadaEvent) {}
+    }
+
+    fn test_remote(dir: &std::path::Path) -> (Arc<Remote>, Core) {
+        let core = Core::open(dir.join("core"), Arc::new(NullSink)).unwrap();
+        std::fs::create_dir_all(dir.join("data")).unwrap();
+        let remote = Remote::new(core.clone(), "0.0.0".into(), dir.join("data"));
+        (remote, core)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pairing_codes_are_single_use_and_expire() {
+        let dir = temp_dir();
+        let (remote, core) = test_remote(&dir);
+        let base = "http://127.0.0.1:4000";
+        let (url, qr, expires_at) = remote.pairing_for(base);
+        let code = url
+            .strip_prefix(&format!("{base}/#pair="))
+            .unwrap()
+            .to_string();
+        assert!(qr.is_some_and(|q| q.contains("<svg")));
+        assert!(code.len() >= 32, "high-entropy code");
+        assert!(expires_at > now_ms() && expires_at <= now_ms() + 5 * 60 * 1000 + 1000);
+        // Same code is shown until used.
+        assert_eq!(remote.pairing_for(base).0, url);
+        assert!(!remote.redeem_pairing("wrong"));
+        assert!(remote.redeem_pairing(&code));
+        assert!(!remote.redeem_pairing(&code), "single use");
+        let (next, _, _) = remote.pairing_for(base);
+        assert_ne!(next, url);
+        // A different server address gets a different code.
+        assert_ne!(remote.pairing_for("http://127.0.0.1:4001").0, next);
+
+        // Expired codes are refused.
+        let (url, _, _) = remote.pairing_for(base);
+        let code = url.rsplit("#pair=").next().unwrap().to_string();
+        remote.pairing.lock().as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1);
+        assert!(!remote.redeem_pairing(&code), "expired");
+        assert!(remote.pairing.lock().is_none());
+        core.shutdown().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn device_tokens_are_hashed_at_rest_and_survive_restart() {
+        let dir = temp_dir();
+        let (remote, core) = test_remote(&dir);
+        let token = remote.add_device("  Pixel \u{7}9  ").unwrap();
+        assert_eq!(remote.tokens.lock().devices[0].name, "Pixel 9");
+        assert_eq!(remote.token_scope(&token), Some(Scope::Owner));
+        assert_eq!(
+            remote.token_scope(&hash_token(&token)),
+            None,
+            "the hash is not a token"
+        );
+        let file = std::fs::read_to_string(dir.join("data").join("remote.json")).unwrap();
+        assert!(!file.contains(&token));
+        assert!(file.contains(&hash_token(&token)));
+        // A restart (re-reading the file) keeps the device.
+        let again = Remote::new(core.clone(), "0.0.0".into(), dir.join("data"));
+        assert_eq!(again.token_scope(&token), Some(Scope::Owner));
+        again.unpair_all();
+        assert_eq!(again.token_scope(&token), None);
+        assert!(again.status().devices.is_empty());
+        core.shutdown().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn share_links_expire() {
+        let dir = temp_dir();
+        let (remote, core) = test_remote(&dir);
+        let project = dir.join("p");
+        std::fs::create_dir_all(&project).unwrap();
+        let token = new_token();
+        {
+            let mut tokens = remote.tokens.lock();
+            for (i, expires_at) in [now_ms() + 60_000, now_ms() - 1].into_iter().enumerate() {
+                tokens.shares.push(Share {
+                    token: String::new(),
+                    token_hash: hash_token(&format!("{token}{i}")),
+                    agent_id: "a1".into(),
+                    created_at: 1,
+                    expires_at,
+                });
+            }
+        }
+        assert_eq!(
+            remote.token_scope(&format!("{token}0")),
+            Some(Scope::Viewer("a1".into()))
+        );
+        assert_eq!(remote.token_scope(&format!("{token}1")), None, "expired");
+        assert!(remote.share_expiry(&format!("{token}0")).is_some());
+        // Status forgets expired shares; archived or removed agents drop theirs.
+        assert_eq!(remote.status().shares.len(), 1);
+        remote.publish(&ArmadaEvent::AgentRemoved {
+            agent_id: "a1".into(),
+        });
+        assert!(remote.status().shares.is_empty());
+        assert_eq!(remote.token_scope(&format!("{token}0")), None);
+        // Unknown lifetimes fall back to the default; known ones are honored.
+        assert_eq!(SHARE_HOURS, [1, 24, 168]);
+        core.shutdown().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn private_addresses_only() {
+        let yes = [
+            "10.0.0.5",
+            "172.16.0.1",
+            "172.31.255.254",
+            "192.168.1.20",
+            "100.64.0.1",
+            "100.100.1.1",
+            "100.127.255.254",
+            "169.254.10.10",
+            "fd12:3456::1",
+            "fc00::1",
+            "fe80::1",
+            "::ffff:192.168.1.2",
+        ];
+        let no = [
+            "8.8.8.8",
+            "172.32.0.1",
+            "100.63.255.255",
+            "100.128.0.1",
+            "11.0.0.1",
+            "203.0.113.9",
+            "2606:4700::1111",
+            "::ffff:8.8.8.8",
+        ];
+        for ip in yes {
+            assert!(is_private_address(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in no {
+            assert!(!is_private_address(ip.parse().unwrap()), "{ip}");
+        }
+    }
+
+    #[test]
+    fn connection_limiter_caps_peers_and_reserves_slots() {
+        let limiter = Arc::new(ConnLimiter::new(10, 4, 2, 5));
+        let a: IpAddr = "192.168.1.10".parse().unwrap();
+        let b: IpAddr = "192.168.1.11".parse().unwrap();
+        let c: IpAddr = "192.168.1.12".parse().unwrap();
+        // One unauthenticated address can't take more than its share.
+        let g1 = limiter.admit(a).unwrap();
+        let _g2 = limiter.admit(a).unwrap();
+        assert!(limiter.admit(a).is_none(), "per-address cap");
+        drop(g1);
+        let _g3 = limiter.admit(a).expect("slot released on drop");
+        // Unauthenticated peers stop at max - reserved; authenticated ones keep going.
+        let mut held = Vec::new();
+        for ip in [b, b, c, c] {
+            held.push(limiter.admit(ip).unwrap());
+        }
+        assert_eq!(limiter.state.lock().total, 6);
+        let d: IpAddr = "192.168.1.13".parse().unwrap();
+        assert!(
+            limiter.admit(d).is_none(),
+            "reserved slots are not for strangers"
+        );
+        limiter.trust(d);
+        for _ in 0..4 {
+            held.push(limiter.admit(d).unwrap());
+        }
+        assert!(limiter.admit(d).is_none(), "total cap");
+        drop(held);
+        // Loopback only counts toward the total.
+        let lo: IpAddr = "127.0.0.1".parse().unwrap();
+        let many: Vec<_> = (0..3).map(|_| limiter.admit(lo).unwrap()).collect();
+        assert_eq!(many.len(), 3);
+        // IPv4-mapped addresses are the same peer.
+        let mapped: IpAddr = "::ffff:192.168.1.10".parse().unwrap();
+        assert!(limiter.admit(mapped).is_none(), "same peer as {a}");
     }
 }

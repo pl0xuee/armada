@@ -202,6 +202,23 @@ async fn output_capped(
         // Windows: paths past MAX_PATH (deep node_modules) instead of "Filename too long".
         // Unknown elsewhere, where git ignores it.
         cmd.args(["-c", "core.longpaths=true"]);
+        // The repository's own config (the agent can write it) must not run programs or
+        // redirect pushes; the user's global config keeps working.
+        let hardening = armada_core::hardening(cwd).await?;
+        match subcommand_of(args) {
+            "push" => {
+                if let Some(why) = &hardening.push_blocker {
+                    bail!("{why}");
+                }
+            }
+            "merge" => {
+                if let Some(why) = &hardening.merge_blocker {
+                    bail!("{why}");
+                }
+            }
+            _ => {}
+        }
+        cmd.args(&hardening.args);
     }
     cmd.args(args)
         .current_dir(cwd)
@@ -888,10 +905,13 @@ fn parse_numstat(out: &str) -> HashMap<String, (i64, i64)> {
 /// [`CommitSummary::left_uncommitted`], so the UI can say so).
 ///
 /// Fails with [`NothingToCommit`] when there's nothing to take.
-pub async fn commit(
+/// `exclude` (repository-relative paths) is left out of the commit; those files stay
+/// untracked in the worktree.
+pub async fn commit_excluding(
     agent: &Agent,
     message: &str,
     touched: &[String],
+    exclude: &[String],
 ) -> anyhow::Result<CommitSummary> {
     let cwd = agent_cwd(agent)?;
     let message = message.trim();
@@ -899,14 +919,74 @@ pub async fn commit(
         bail!("Commit message is empty");
     }
     if agent.worktree {
-        commit_all(cwd, message).await
+        commit_all(cwd, message, exclude).await
     } else {
-        commit_paths(cwd, message, touched).await
+        let touched: Vec<String> = touched
+            .iter()
+            .filter(|t| !exclude.contains(t))
+            .cloned()
+            .collect();
+        commit_paths(cwd, message, &touched).await
     }
 }
 
-async fn commit_all(cwd: &Path, message: &str) -> anyhow::Result<CommitSummary> {
-    git(cwd, &["add", "-A"]).await?;
+/// Whether a file name looks like it holds credentials or keys.
+pub fn looks_like_secret(path: &str) -> bool {
+    let name = path
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(path)
+        .to_lowercase();
+    // Templates people commit on purpose.
+    if [".example", ".sample", ".template", ".dist"]
+        .iter()
+        .any(|suffix| name.ends_with(suffix))
+    {
+        return false;
+    }
+    name == ".env"
+        || name.starts_with(".env.")
+        || name.ends_with(".pem")
+        || name.ends_with(".key")
+        || name.ends_with(".p12")
+        || name.ends_with(".pfx")
+        || name.starts_with("id_rsa")
+        || name.starts_with("id_ed25519")
+        || name.starts_with("credentials")
+        || matches!(
+            name.as_str(),
+            ".npmrc" | ".pypirc" | ".netrc" | ".git-credentials"
+        )
+}
+
+/// Untracked, not-ignored files that a commit of the agent's work would add and whose
+/// names look like secrets (see [`looks_like_secret`]). `touched` limits the search for
+/// an agent working in the user's own checkout; a worktree agent owns everything.
+pub async fn pending_secret_files(
+    agent: &Agent,
+    touched: &[String],
+) -> anyhow::Result<Vec<String>> {
+    let cwd = agent_cwd(agent)?;
+    let out = git(cwd, &["ls-files", "--others", "--exclude-standard", "-z"]).await?;
+    Ok(nul_split(&out)
+        .filter(|p| looks_like_secret(p))
+        .filter(|p| agent.worktree || touched.iter().any(|t| t == p))
+        .map(str::to_string)
+        .collect())
+}
+
+async fn commit_all(
+    cwd: &Path,
+    message: &str,
+    exclude: &[String],
+) -> anyhow::Result<CommitSummary> {
+    if exclude.is_empty() {
+        git(cwd, &["add", "-A"]).await?;
+    } else {
+        let mut specs = vec![".".to_string()];
+        specs.extend(exclude.iter().map(|p| format!(":(exclude,literal){p}")));
+        git_with_pathspecs(cwd, &["add", "-A"], &specs).await?;
+    }
     let files: Vec<String> = nul_split(
         &git(
             cwd,
@@ -1964,10 +2044,10 @@ mod tests {
         repo.write("a.txt", "a\n");
         repo.git(&["add", "-A"]);
         repo.git(&["commit", "-q", "-m", "init"]);
-        let err = commit_all(&repo.dir, "msg").await.unwrap_err();
+        let err = commit_all(&repo.dir, "msg", &[]).await.unwrap_err();
         assert!(err.is::<NothingToCommit>(), "{err:#}");
         repo.write("b.txt", "b\n");
-        let summary = commit_all(&repo.dir, "msg").await.unwrap();
+        let summary = commit_all(&repo.dir, "msg", &[]).await.unwrap();
         assert_eq!(summary.files, vec!["b.txt"]);
         assert_eq!(summary.left_uncommitted, 0);
         assert_eq!(
@@ -2064,12 +2144,15 @@ mod tests {
         repo.write("user.txt", "u\n");
         repo.git(&["add", "-A"]);
         repo.git(&["commit", "-q", "-m", "init"]);
-        repo.write(
-            "hooks-none/pre-commit",
+        // The repo's own `core.hooksPath` is ignored by Armada; `.git/hooks` is honored.
+        std::fs::create_dir_all(repo.dir.join(".git/hooks")).unwrap();
+        std::fs::write(
+            repo.dir.join(".git/hooks/pre-commit"),
             "#!/bin/sh\necho 'tests are red' >&2\nexit 1\n",
-        );
+        )
+        .unwrap();
         std::fs::set_permissions(
-            repo.dir.join("hooks-none/pre-commit"),
+            repo.dir.join(".git/hooks/pre-commit"),
             std::fs::Permissions::from_mode(0o755),
         )
         .unwrap();
@@ -2262,7 +2345,7 @@ mod tests {
         assert_eq!(repo.lines(&["rev-list", "--count", "HEAD"]), vec!["1"]);
 
         std::fs::write(wt.join("b.txt"), "b\n").unwrap();
-        commit_all(&wt, "agent commit").await.unwrap();
+        commit_all(&wt, "agent commit", &[]).await.unwrap();
         let msg = merge(&agent).await.unwrap();
         assert!(msg.starts_with("Merged agent-x"), "{msg}");
         assert!(msg.contains("1 file changed"), "{msg}");
@@ -2294,7 +2377,7 @@ mod tests {
         let (repo, wt, base) = worktree_setup();
         let agent = worktree_agent(&repo, &wt, "agent-x", &base);
         std::fs::write(wt.join("b.txt"), "b\n").unwrap();
-        commit_all(&wt, "agent commit").await.unwrap();
+        commit_all(&wt, "agent commit", &[]).await.unwrap();
 
         // Detached HEAD in the project.
         repo.git(&["checkout", "-q", "--detach"]);
@@ -2409,5 +2492,92 @@ mod tests {
         assert_eq!(m["n"], (1, 0));
         assert_eq!(m["img.png"], (0, 0));
         assert!(!m.contains_key("c"));
+    }
+
+    #[test]
+    fn secret_names_are_recognized() {
+        for p in [
+            ".env",
+            "app/.env.local",
+            "certs/server.PEM",
+            "a/b/id_rsa",
+            "id_ed25519.pub",
+            "deploy.key",
+            "credentials.json",
+            ".npmrc",
+            "x/.pypirc",
+            ".netrc",
+            "bundle.p12",
+            "bundle.pfx",
+            ".git-credentials",
+        ] {
+            assert!(looks_like_secret(p), "{p}");
+        }
+        for p in [
+            "src/main.rs",
+            "environment.ts",
+            ".env.example",
+            "keyboard.ts",
+            "README.md",
+        ] {
+            assert!(!looks_like_secret(p), "{p}");
+        }
+    }
+
+    #[tokio::test]
+    async fn commit_can_leave_secret_files_out() {
+        let repo = Repo::new();
+        repo.write("a.txt", "a");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        repo.write("b.txt", "b");
+        repo.write(".env", "TOKEN=1");
+        repo.write("sub/id_rsa", "key");
+        let agent = worktree_agent(&repo, &repo.dir, "main", "main");
+        let found = pending_secret_files(&agent, &[]).await.unwrap();
+        assert_eq!(found, vec![".env".to_string(), "sub/id_rsa".to_string()]);
+        let exclude = vec![".env".to_string(), "sub/id_rsa".to_string()];
+        let summary = commit_all(&repo.dir, "msg", &exclude).await.unwrap();
+        assert_eq!(summary.files, vec!["b.txt".to_string()]);
+        let status = repo.git(&["status", "--porcelain", "-uall"]);
+        assert!(
+            status.contains(".env") && status.contains("sub/id_rsa"),
+            "{status}"
+        );
+    }
+
+    #[tokio::test]
+    async fn pushes_are_refused_when_repo_config_rewrites_urls() {
+        let repo = Repo::new();
+        repo.write("a.txt", "a");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "a"]);
+        repo.git(&["remote", "add", "origin", "https://example.invalid/r.git"]);
+        repo.git(&[
+            "config",
+            "url.https://evil.invalid/.pushInsteadOf",
+            "https://example.invalid/",
+        ]);
+        let err = git(&repo.dir, &["push", "origin", "HEAD"])
+            .await
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("redirects pushes"), "{err:#}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn local_hooks_path_is_ignored_but_git_hooks_run() {
+        use std::os::unix::fs::PermissionsExt;
+        let repo = Repo::new();
+        let marker = repo.dir.join("hook-ran");
+        std::fs::create_dir_all(repo.dir.join("evil")).unwrap();
+        let hook = repo.dir.join("evil/pre-commit");
+        std::fs::write(&hook, format!("#!/bin/sh\ntouch {}\n", marker.display())).unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        repo.git(&["config", "core.hooksPath", "evil"]);
+        repo.write("a.txt", "a");
+        git(&repo.dir, &["add", "."]).await.unwrap();
+        git(&repo.dir, &["commit", "-q", "-m", "a"]).await.unwrap();
+        assert!(!marker.exists());
     }
 }
