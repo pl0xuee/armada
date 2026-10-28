@@ -3,7 +3,7 @@
 use crate::AppHandle;
 use armada_core::NavigateTarget;
 use tauri::Manager;
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
+use tauri_plugin_global_shortcut::{GlobalShortcut, Shortcut, ShortcutEvent, ShortcutState};
 use tracing::{info, warn};
 
 use crate::state::Shell;
@@ -44,7 +44,10 @@ pub fn apply(app: &AppHandle, hotkey: &str) -> Result<(), String> {
     if current.as_deref() == Some(hotkey) {
         return Ok(());
     }
-    let gs = app.global_shortcut();
+    // Not `global_shortcut()`: that panics if the plugin isn't registered (tests do not).
+    let Some(gs) = app.try_state::<GlobalShortcut<crate::Rt>>() else {
+        return Err("global shortcuts are unavailable".to_string());
+    };
     if let Some(old) = current.take() {
         if let Err(e) = gs.unregister(old.as_str()) {
             warn!(hotkey = %old, "could not unregister global hotkey: {e}");
