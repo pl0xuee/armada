@@ -33,7 +33,15 @@ export function ComposerVoiceButtons({
   className?: string;
 }) {
   return (
-    <div className={cn("flex shrink-0 items-center gap-1.5", className)}>
+    // One segmented control: on-device dictation | GPT voice.
+    <div
+      role="group"
+      aria-label="Voice input"
+      className={cn(
+        "inline-flex h-7 shrink-0 items-center gap-px rounded-lg border border-line-strong bg-raised/40 p-px",
+        className,
+      )}
+    >
       <DictateButton onText={onText} round />
       <VoiceAssistantComposerButton />
     </div>
@@ -46,12 +54,12 @@ function VoiceAssistantComposerButton() {
   const [help, setHelp] = useState(false);
 
   const cls = cn(
-    "relative inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+    "relative inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
     live
-      ? "border-accent/60 bg-accent/15 text-accent shadow-[0_0_12px_-2px_color-mix(in_srgb,var(--accent)_70%,transparent)]"
-      : "border-line-strong bg-raised/60 text-muted hover:bg-raised hover:text-fg",
+      ? "bg-accent/15 text-accent shadow-[0_0_12px_-2px_color-mix(in_srgb,var(--accent)_70%,transparent)]"
+      : "text-muted hover:bg-raised hover:text-fg",
   );
-  const icon = <AudioLines className={cn("h-4 w-4", live && "animate-pulse motion-reduce:animate-none")} aria-hidden />;
+  const icon = <AudioLines className={cn("h-3.5 w-3.5", live && "animate-pulse motion-reduce:animate-none")} aria-hidden />;
   const shortcut = [modKey, "⇧", "A"];
   const label = live ? "End voice assistant" : "Talk to Armada · GPT voice";
 

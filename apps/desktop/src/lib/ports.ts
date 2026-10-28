@@ -22,8 +22,8 @@ function toLoopback(host: string, port: number, path = ""): DetectedUrl | null {
   return { url: `http://${h}:${port}${p || "/"}`, port };
 }
 
-/** Loopback dev-server URLs mentioned in `text`, in order of appearance, one per port. */
-export function detectDevUrls(text: string): DetectedUrl[] {
+/** Every loopback mention in `text` with its position (ANSI stripped first). */
+function mentions(text: string): (DetectedUrl & { at: number })[] {
   const clean = text.replace(ANSI, "");
   const found: (DetectedUrl & { at: number })[] = [];
   for (const m of clean.matchAll(URL_RE)) {
@@ -41,12 +41,35 @@ export function detectDevUrls(text: string): DetectedUrl[] {
     if (d) found.push({ ...d, at: m.index });
   }
   found.sort((a, b) => a.at - b.at);
+  return found;
+}
+
+/** Loopback dev-server URLs mentioned in `text`, in order of appearance, one per port. */
+export function detectDevUrls(text: string): DetectedUrl[] {
+  const found = mentions(text);
   const byPort = new Map<number, DetectedUrl>();
   for (const f of found) {
     // A later mention of the same port wins only if it carries a path; otherwise keep the first.
     if (!byPort.has(f.port)) byPort.set(f.port, { url: f.url, port: f.port });
   }
   return [...byPort.values()];
+}
+
+/**
+ * Loopback servers mentioned in `text`, ranked by their most recent mention: the last element is the
+ * port mentioned last (what the agent said most recently wins over an older, e.g. "4321 was taken").
+ * One entry per port; its URL is the one from the latest mention that carried a path, else the latest.
+ */
+export function rankDevUrls(text: string): DetectedUrl[] {
+  const last = new Map<number, { at: number; url: string }>();
+  for (const m of mentions(text)) {
+    const prev = last.get(m.port);
+    const pathful = !m.url.endsWith(`:${m.port}/`);
+    // Keep an earlier URL with a path when the later mention is a bare host:port.
+    const url = !pathful && prev && !prev.url.endsWith(`:${m.port}/`) ? prev.url : m.url;
+    last.set(m.port, { at: m.at, url });
+  }
+  return [...last.entries()].sort((a, b) => a[1].at - b[1].at).map(([port, v]) => ({ url: v.url, port }));
 }
 
 /** Normalises user input to an http(s) loopback URL, or null if it isn't one. */
@@ -71,4 +94,20 @@ export function parseLoopbackUrl(input: string): string | null {
 export function urlPort(url: string): number {
   const u = new URL(url);
   return u.port ? Number(u.port) : u.protocol === "https:" ? 443 : 80;
+}
+
+/**
+ * The URL to actually load given which loopback families accept on its port. A dev server bound only
+ * to ::1 (Node's "localhost") refuses 127.0.0.1, and WebKitGTK rejects `[::1]` in CSP frame-src, so
+ * anything but a v4 host with a v4 listener loads as `localhost`, which the engine resolves to
+ * whichever family answers. Returns null when nothing listens.
+ */
+export function effectiveLoopbackUrl(url: string, fam: { v4: boolean; v6: boolean }): string | null {
+  if (!fam.v4 && !fam.v6) return null;
+  const u = new URL(url);
+  const host = u.hostname.toLowerCase();
+  if (host === "127.0.0.1" && fam.v4) return url;
+  if (host === "localhost") return url;
+  u.hostname = "localhost";
+  return u.href;
 }

@@ -1040,6 +1040,10 @@ export function seedItems(): Record<string, TimelineItem[]> {
       command: null,
     },
     {
+      kind: "agent_message",
+      text: "The dev server for this branch is running at http://127.0.0.1:4723 (4721 was already taken by another worktree). Open the Preview to see the refresh flow.",
+    },
+    {
       kind: "tool_call",
       toolCallId: "tc-5",
       title: "Run npm test -- auth",

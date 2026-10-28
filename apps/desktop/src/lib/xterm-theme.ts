@@ -1,13 +1,21 @@
 import type { ILinkHandler, ITheme } from "@xterm/xterm";
-import { openExternal } from "./external";
+import { openLink, resolveAgentId } from "./external";
 
 /**
  * OSC 8 hyperlinks from terminal output. xterm's default would confirm() and window.open any
  * scheme; instead only http(s)/mailto go to the OS opener (lib/external.ts allowlist).
  */
+export function xtermLinkHandler(agentId: string | null = null): ILinkHandler {
+  return {
+    allowNonHttpProtocols: false,
+    // Loopback URLs open the agent's Preview (Ctrl/Cmd/Shift-click: browser); the rest go external.
+    activate: (event, uri) => void openLink(uri, event, agentId ?? resolveAgentId(null)),
+  };
+}
+
 export const XTERM_LINK_HANDLER: ILinkHandler = {
   allowNonHttpProtocols: false,
-  activate: (_event, uri) => void openExternal(uri),
+  activate: (event, uri) => void openLink(uri, event, null),
 };
 
 export const XTERM_FONT = '"JetBrains Mono Variable", ui-monospace, Menlo, monospace';

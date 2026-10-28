@@ -308,7 +308,7 @@ export function Timeline({
   }, [showThinking, turnEnd, scrollToBottom]);
 
   return (
-    <div className="@container relative flex min-h-0 flex-1 flex-col">
+    <div data-agent-id={agent.id} className="@container relative flex min-h-0 flex-1 flex-col">
       <LiveAnnouncer agent={agent} items={items} />
       {olderLoading && (
         <div

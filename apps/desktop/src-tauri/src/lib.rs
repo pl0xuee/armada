@@ -127,6 +127,7 @@ macro_rules! handler {
             workspace::workspace_terminal_open,
             workspace::workspace_scripts,
             workspace::probe_ports,
+            workspace::probe_loopback,
             commands::update_settings,
             commands::set_interface_zoom,
             commands::preview_sound,

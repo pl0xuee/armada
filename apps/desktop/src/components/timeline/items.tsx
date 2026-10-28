@@ -27,6 +27,7 @@ import { m, AnimatePresence } from "motion/react";
 import { memo, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { respondPermission } from "@/lib/actions";
 import { api } from "@/lib/api";
+import { PREVIEW_LINK_HINT, splitLoopbackUrls } from "@/lib/external";
 import type { Agent, Attachment, PermissionOption, TimelineItem, ToolKind } from "@/lib/types";
 import { cn, errorMessage } from "@/lib/utils";
 import { toast } from "sonner";
@@ -233,6 +234,25 @@ export function cleanTerminalOutput(raw: string): { text: string; hidden: number
   return { text, hidden };
 }
 
+/** Plain text with loopback URLs (dev servers) as links; the navigation guard opens them in Preview. */
+const LinkifiedText = memo(function LinkifiedText({ text }: { text: string }) {
+  const parts = useMemo(() => splitLoopbackUrls(text), [text]);
+  if (parts.length === 1 && typeof parts[0] === "string") return <>{text}</>;
+  return (
+    <>
+      {parts.map((p, i) =>
+        typeof p === "string" ? (
+          p
+        ) : (
+          <a key={i} href={p.url} title={PREVIEW_LINK_HINT} className="underline decoration-accent/50 underline-offset-2 hover:text-accent">
+            {p.url}
+          </a>
+        ),
+      )}
+    </>
+  );
+});
+
 export function TerminalOutput({
   command,
   output,
@@ -277,7 +297,7 @@ export function TerminalOutput({
         {hidden > 0 && (
           <div className="mb-1 select-none text-steel">… {hidden.toLocaleString()} earlier characters not shown</div>
         )}
-        {text}
+        <LinkifiedText text={text} />
         {live && <span className="caret" />}
         {!text && !live && !command && <span className="text-steel">No output</span>}
       </pre>

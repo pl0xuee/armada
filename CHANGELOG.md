@@ -9,6 +9,8 @@ docs/RELEASING.md).
 
 ### New
 
+- **Preview is now a pane beside the chat.** Web previews open on the right of the conversation (resizable, with a maximize button and device sizes) instead of squeezed under it. A Preview button appears in the agent header once a dev server is up, and Preview is also in the command palette and on Ctrl/⌘+Shift+P. It now picks the server the agent mentioned last, and loads servers that listen only on IPv6.
+- **Localhost links open in Preview.** Clicking a `localhost` / `127.0.0.1` link in an agent's message, tool output or terminal now opens it in that agent's in-app Preview instead of your browser. Ctrl/⌘-click, Shift-click or middle-click still opens the browser.
 - **Voice is one click from the composer.** A mic button starts on-device dictation and a
   waveform button talks to Armada (GPT voice); if either isn't set up yet, it points you to the
   right Settings page.
@@ -23,6 +25,9 @@ docs/RELEASING.md).
   ends itself at the recording limit.
 - **"Waiting on N sub-agents" stays put** instead of jittering or disappearing while background
   sub-agents run, and their activity no longer reshuffles the conversation.
+- **A tidier composer.** The status row says "Working…" or "Waiting for approval" without a
+  double Esc hint crowding it out (press Esc twice still stops), dictation and voice are one
+  compact control, and Send/Queue stay greyed out until there's something to send.
 - **Agent view keeps room for the conversation.** The header is one fixed-height row, the queue
   folds to a one-line summary, the usage-limit card is a single card, and toasts, the voice panel
   and "Jump to latest" no longer cover the composer or text.

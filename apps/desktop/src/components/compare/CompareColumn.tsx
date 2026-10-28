@@ -66,6 +66,7 @@ export function CompareColumn({
 
   return (
     <section
+      data-agent-id={agent.id}
       aria-label={`${identity.name} result`}
       className={cn(
         "flex min-h-0 min-w-[320px] flex-1 basis-0 flex-col overflow-hidden rounded-xl border bg-card edge",

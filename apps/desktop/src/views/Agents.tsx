@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import * as D from "@radix-ui/react-dialog";
 import { AnimatePresence } from "motion/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentHeader } from "@/components/agent/AgentHeader";
 import { AgentList } from "@/components/agent/AgentList";
 import { Composer } from "@/components/agent/Composer";
@@ -21,6 +21,7 @@ import { HomeComposer } from "@/components/home/HomeComposer";
 import { RelTime } from "@/components/RelTime";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { Timeline } from "@/components/timeline/Timeline";
+import { PreviewTab } from "@/components/workspace/PreviewTab";
 import { CONVERSATION_MIN, WorkspacePanel, workspaceMaxHeight } from "@/components/workspace/WorkspacePanel";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -34,7 +35,17 @@ import type { Agent } from "@/lib/types";
 import { basename, modKey } from "@/lib/utils";
 import { useAgentListLayout } from "@/hooks/useAgentListLayout";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { INSPECTOR_DOCK_QUERY } from "@/lib/layout";
+import { useElementWidth } from "@/hooks/useElementWidth";
+import {
+  clampPreviewWidth,
+  INSPECTOR_DOCK_QUERY,
+  INSPECTOR_WIDTH,
+  PREVIEW_DEFAULT_WIDTH,
+  PREVIEW_MIN_WIDTH,
+  previewLayout,
+} from "@/lib/layout";
+import { cn } from "@/lib/utils";
+import { previewOf, usePreview, usePreviewDetection } from "@/store/preview";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 
@@ -145,9 +156,25 @@ function AgentPane({ agentId }: { agentId: string }) {
   const inspectorPref = useUi((s) => s.inspectorOpen);
   const overlay = useUi((s) => s.inspectorOverlay);
   const wide = useMediaQuery(INSPECTOR_DOCK_QUERY);
-  const inspectorOpen = wide ? inspectorPref : overlay;
   const windowFocused = useUi((s) => s.windowFocused);
   const workspaceOpen = useUi((s) => s.workspaceOpen);
+  // Preview pane: right of the conversation. Detection runs whenever this agent is on screen so the
+  // header can offer the pane as soon as a server is up; it polls faster while the pane is open.
+  const pv = usePreview((s) => previewOf(s, agentId));
+  usePreviewDetection(agentId, pv.open);
+  const [rootRef, rootW] = useElementWidth<HTMLDivElement>();
+  const wantWidth = useUi((s) => s.previewWidth);
+  const setPreviewWidth = useUi((s) => s.setPreviewWidth);
+  const lay = pv.open ? previewLayout(rootW, wide && inspectorPref, wantWidth) : null;
+  // The inspector steps aside when the pane needs its room (its saved preference is untouched).
+  const inspectorOpen = wide ? inspectorPref && (lay ? lay.inspector : true) : overlay;
+  const full = lay !== null && (pv.maximized || lay.mode === "full");
+  const forced = lay !== null && lay.mode === "full" && !pv.maximized;
+  const room = rootW - (lay?.inspector ? INSPECTOR_WIDTH : 0);
+  const [drag, setDrag] = useState<number | null>(null);
+  const dragStart = useRef({ x: 0, w: 0 });
+  const clampW = useCallback((w: number) => clampPreviewWidth(w, room), [room]);
+  const shownW = drag ?? lay?.width ?? PREVIEW_DEFAULT_WIDTH;
   // The panel only takes what the conversation and composer can spare (tiling WMs go down to 600px tall).
   // Measures the header and composer (incl. queue) so the conversation always keeps its minimum.
   const sectionRef = useRef<HTMLElement>(null);
@@ -190,7 +217,7 @@ function AgentPane({ agentId }: { agentId: string }) {
   if (!agent) return null;
 
   return (
-    <div className="relative flex min-w-0 flex-1">
+    <div ref={rootRef} className="relative flex min-w-0 flex-1">
       <section ref={sectionRef} aria-label={agent.title} className="flex min-w-0 flex-1 flex-col bg-base">
         <div ref={headerRef} className="shrink-0">
           <AgentHeader agent={agent} />
@@ -219,6 +246,60 @@ function AgentPane({ agentId }: { agentId: string }) {
           <Composer agent={agent} />
         </div>
       </section>
+      {lay && (
+        // One element for split and full so the page isn't reloaded when maximizing.
+        <aside
+          aria-label="Preview"
+          className={cn(
+            "flex flex-col bg-base",
+            full ? "absolute inset-0 z-30" : "relative shrink-0 border-l border-line",
+          )}
+          style={full ? undefined : { width: shownW }}
+        >
+          {!full && (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize preview"
+              aria-valuemin={PREVIEW_MIN_WIDTH}
+              aria-valuemax={Math.max(PREVIEW_MIN_WIDTH, room - 360)}
+              aria-valuenow={shownW}
+              tabIndex={0}
+              className={cn(
+                "absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize touch-none outline-none transition-colors hover:bg-accent/30 focus-visible:bg-accent/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/70",
+                drag !== null && "bg-accent/40",
+              )}
+              onPointerDown={(e) => {
+                e.currentTarget.setPointerCapture(e.pointerId);
+                dragStart.current = { x: e.clientX, w: shownW };
+                setDrag(shownW);
+              }}
+              onPointerMove={(e) => {
+                if (drag !== null) setDrag(clampW(dragStart.current.w + dragStart.current.x - e.clientX));
+              }}
+              onPointerUp={() => {
+                if (drag !== null) setPreviewWidth(drag);
+                setDrag(null);
+              }}
+              onPointerCancel={() => setDrag(null)}
+              onDoubleClick={() => setPreviewWidth(PREVIEW_DEFAULT_WIDTH)}
+              onKeyDown={(e) => {
+                const step = e.shiftKey ? 96 : 24;
+                if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                  e.preventDefault();
+                  setPreviewWidth(clampW(shownW + (e.key === "ArrowLeft" ? step : -step)));
+                } else if (e.key === "Home") {
+                  e.preventDefault();
+                  setPreviewWidth(PREVIEW_DEFAULT_WIDTH);
+                }
+              }}
+            />
+          )}
+          <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", drag !== null && "pointer-events-none")}>
+            <PreviewTab agent={agent} full={full} forced={forced} />
+          </div>
+        </aside>
+      )}
       <AnimatePresence initial={false}>
         {inspectorOpen && (
           <InspectorPane

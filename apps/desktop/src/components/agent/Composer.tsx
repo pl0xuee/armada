@@ -515,18 +515,9 @@ function ComposerImpl({ agent }: { agent: Agent }) {
                       />
                       <span className={cn("relative h-2 w-2 rounded-full", blocked ? "bg-warn" : "bg-accent")} />
                     </span>
-                    <span className={cn("whitespace-nowrap", width < 900 && "sr-only")}>
+                    <span className={cn("whitespace-nowrap", width > 0 && width < 600 && "sr-only")}>
                       {blocked ? "Waiting for approval" : "Working…"}
                     </span>
-                    {roomy && (
-                      <Tooltip content="Press Esc twice to stop">
-                        <span className="flex shrink-0 items-center gap-1 whitespace-nowrap">
-                          <Kbd>Esc</Kbd>
-                          <Kbd>Esc</Kbd>
-                          {width >= 900 && " to stop"}
-                        </span>
-                      </Tooltip>
-                    )}
                   </>
                 ) : (
                   <span className="hidden items-center gap-1 xl:flex">
@@ -555,7 +546,8 @@ function ComposerImpl({ agent }: { agent: Agent }) {
                   <Tooltip content="Queue message: runs right after the current turn" shortcut={["⏎"]}>
                     <Button
                       size={tight ? "icon-sm" : "sm"}
-                      variant="primary"
+                      // Flat until there's something to queue, so it doesn't read as clickable.
+                      variant={canSend ? "primary" : "secondary"}
                       disabled={!canSend}
                       onClick={() => void send()}
                       aria-label="Queue message (runs after the current turn)"
@@ -572,7 +564,7 @@ function ComposerImpl({ agent }: { agent: Agent }) {
                   >
                     <Button
                       size="icon-sm"
-                      variant="primary"
+                      variant={canSend ? "primary" : "secondary"}
                       disabled={!canSend}
                       onClick={() => void send()}
                       aria-label={agent.queuePaused && agent.queue.length > 0 ? "Send and resume queue" : "Send"}
