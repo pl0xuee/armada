@@ -273,6 +273,22 @@ pub async fn set_focus(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn chime_watched(attention: State<'_, Arc<Attention>>) -> CmdResult<()> {
+    attention.chime_watched();
+    Ok(())
+}
+
+/// Sets the main window's title (taskbar, alt-tab, tiling-WM bars).
+#[tauri::command]
+pub async fn set_window_title(app: tauri::AppHandle, title: String) -> CmdResult<()> {
+    let title: String = title.chars().take(200).collect();
+    if let Some(w) = crate::window::main_window(&app) {
+        w.set_title(&title).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 // ---- review / git ------------------------------------------------------------
 
 #[tauri::command]

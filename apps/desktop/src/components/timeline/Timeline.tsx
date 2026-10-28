@@ -14,7 +14,8 @@ import { ActivityGroup } from "./ActivityGroup";
 import { groupActivity } from "./activityGroups";
 import { SubagentCard } from "./SubagentCard";
 import { ThinkingIndicator } from "./ThinkingIndicator";
-import { shouldShowThinking, turnStart } from "./thinking";
+import { shouldShowThinking, turnEndOf, turnStart } from "./thinking";
+import { TurnEndLine } from "./TurnEndLine";
 import { TurnSummaryCard, TurnSummaryLine } from "./TurnSummaryCard";
 import { latestPending, usePermissionKeys } from "./usePermissionKeys";
 
@@ -271,14 +272,15 @@ export function Timeline({
   const showThinking =
     !(loading && !items) &&
     shouldShowThinking(agent.status, lastRowItem, !!lastRowItem && groupItems.has(lastRowItem.id), messageSettled);
+  const turnEnd = !loading && !showThinking ? turnEndOf(agent.status, list, lastRowItem, agent.lastActivityAt) : null;
   const fallbackStart = useRef(Date.now());
   useLayoutEffect(() => {
     if (!showThinking) fallbackStart.current = Date.now();
   }, [showThinking]);
   // Keep it in view when it appears while following the stream.
   useLayoutEffect(() => {
-    if (showThinking && stick.current) scrollToBottom();
-  }, [showThinking, scrollToBottom]);
+    if ((showThinking || turnEnd) && stick.current) scrollToBottom();
+  }, [showThinking, turnEnd, scrollToBottom]);
 
   return (
     <div className="@container relative min-h-0 flex-1">
@@ -360,6 +362,7 @@ export function Timeline({
             </div>
           )}
           {showThinking && <ThinkingIndicator agent={agent} since={turnStart(list, fallbackStart.current)} />}
+          {turnEnd && <TurnEndLine end={turnEnd} lastActivityAt={agent.lastActivityAt} />}
           {footer}
         </div>
       </div>

@@ -1,9 +1,34 @@
+import { Check } from "lucide-react";
 import type { AgentStatus } from "@/lib/types";
-import { STATUS } from "@/lib/providers";
+import { DONE_META, STATUS } from "@/lib/providers";
 import { cn } from "@/lib/utils";
 
-export function StatusDot({ status, size = 8, className }: { status: AgentStatus; size?: number; className?: string }) {
-  const meta = STATUS[status];
+export function StatusDot({
+  status,
+  size = 8,
+  className,
+  done = false,
+}: {
+  status: AgentStatus;
+  size?: number;
+  className?: string;
+  /** Idle after a completed turn: a green check instead of the grey dot. */
+  done?: boolean;
+}) {
+  done = done && status === "idle";
+  const meta = done ? DONE_META : STATUS[status];
+  if (done) {
+    return (
+      <span
+        role="img"
+        aria-label={meta.label}
+        className={cn("inline-flex shrink-0 items-center justify-center rounded-full bg-ok/20 text-ok", className)}
+        style={{ width: size + 4, height: size + 4 }}
+      >
+        <Check strokeWidth={3.5} style={{ width: size, height: size }} />
+      </span>
+    );
+  }
   const pulse = status === "working" || status === "needs_permission" || status === "starting";
   return (
     <span
@@ -33,8 +58,17 @@ export function StatusDot({ status, size = 8, className }: { status: AgentStatus
   );
 }
 
-export function StatusPill({ status, className }: { status: AgentStatus; className?: string }) {
-  const meta = STATUS[status];
+export function StatusPill({
+  status,
+  className,
+  done = false,
+}: {
+  status: AgentStatus;
+  className?: string;
+  done?: boolean;
+}) {
+  done = done && status === "idle";
+  const meta = done ? DONE_META : STATUS[status];
   return (
     <span
       className={cn(
@@ -47,7 +81,7 @@ export function StatusPill({ status, className }: { status: AgentStatus; classNa
         background: `color-mix(in srgb, ${meta.colorVar} 9%, transparent)`,
       }}
     >
-      <StatusDot status={status} size={6} />
+      <StatusDot status={status} size={6} done={done} />
       {meta.label}
     </span>
   );

@@ -66,6 +66,27 @@ impl Attention {
 
     pub fn set_window_focused(&self, focused: bool) {
         self.window_focused.store(focused, Ordering::Relaxed);
+        if focused {
+            // The user is back: drop the taskbar flash / urgency hint.
+            if let Some(w) = window::main_window(&self.app) {
+                let _ = w.request_user_attention(None);
+            }
+        }
+    }
+
+    /// A soft chime for a long task that finished in front of the user (the UI decides
+    /// that and calls this). Honors the sound master switch, the setting and quiet hours.
+    pub fn chime_watched(&self) {
+        let settings = self.settings();
+        if !settings.sounds.enabled
+            || !settings.sounds.chime_when_watching
+            || quiet_hours_active(&settings.quiet_hours, local_now())
+            || !self.window_focused.load(Ordering::Relaxed)
+        {
+            return;
+        }
+        self.audio
+            .play_scaled(AttentionReason::Done, &settings.sounds, 0.45);
     }
 
     /// Called (on a blocking thread) for every `ArmadaEvent::Attention`.

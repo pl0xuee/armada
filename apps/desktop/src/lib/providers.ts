@@ -71,6 +71,9 @@ export interface StatusMeta {
   live: boolean;
 }
 
+/** Presentation for an idle agent whose last turn just completed. */
+export const DONE_META: StatusMeta = { label: "Done", colorVar: "var(--ok)", live: false };
+
 export const STATUS: Record<AgentStatus, StatusMeta> = {
   starting: { label: "Starting", colorVar: "var(--accent)", live: true },
   working: { label: "Working", colorVar: "var(--accent)", live: true },

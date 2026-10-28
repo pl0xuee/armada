@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { findOption, respondPermission } from "@/lib/actions";
 import { RelTime } from "@/components/RelTime";
 import { formatCost, formatTokens } from "@/lib/format";
-import { STATUS } from "@/lib/providers";
+import { DONE_META, STATUS } from "@/lib/providers";
+import { useIsDone } from "@/store/completion";
 import type { Account, Agent, PermissionOption, TimelineItem } from "@/lib/types";
 import type { TileSummary } from "./useTileSummaries";
 import { basename, cn } from "@/lib/utils";
@@ -44,7 +45,8 @@ export const AgentTile = memo(function AgentTile({
   onOpen: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const meta = STATUS[agent.status];
+  const done = useIsDone(agent);
+  const meta = done ? DONE_META : STATUS[agent.status];
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const live = meta.live;
   const working = agent.status === "working" || agent.status === "starting";
@@ -111,12 +113,12 @@ export const AgentTile = memo(function AgentTile({
         <span
           className="flex h-5 shrink-0 items-center gap-1.5 rounded-full border px-1.5 text-[10.5px] font-medium"
           style={{
-            color: agent.status === "idle" || agent.status === "stopped" ? "var(--text-2)" : color,
+            color: !done && (agent.status === "idle" || agent.status === "stopped") ? "var(--text-2)" : color,
             borderColor: `color-mix(in srgb, ${color} 30%, var(--border))`,
             background: `color-mix(in srgb, ${color} 8%, transparent)`,
           }}
         >
-          <StatusDot status={agent.status} size={6} />
+          <StatusDot status={agent.status} size={6} done={done} />
           {meta.label}
         </span>
         {agent.rateLimited && (

@@ -22,7 +22,8 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { archiveAgent, exportConversation, renameAgent, resumeAgent, stopAgent } from "@/lib/actions";
 import { groupAgents, orderedAgents, type AgentGroupId } from "@/lib/agents";
 import { relativeTime, relativeTimeLong } from "@/lib/format";
-import { STATUS } from "@/lib/providers";
+import { DONE_META, STATUS } from "@/lib/providers";
+import { useIsDone } from "@/store/completion";
 import type { Account, Agent } from "@/lib/types";
 import { basename, cn, modKey } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
@@ -302,7 +303,8 @@ const AgentRow = memo(function AgentRow({
   const setDeleteAgent = useUi((s) => s.setDeleteAgent);
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(agent.title);
-  const status = STATUS[agent.status];
+  const done = useIsDone(agent);
+  const status = done ? DONE_META : STATUS[agent.status];
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const resumable = agent.status === "interrupted" || agent.status === "stopped";
   const live = agent.status === "working" || agent.status === "needs_permission" || agent.status === "starting";
@@ -437,10 +439,13 @@ const AgentRow = memo(function AgentRow({
                 </span>
               </div>
               <div className="mt-0.5 flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[11.5px] text-steel">
-                <StatusDot status={agent.status} size={6} />
+                <StatusDot status={agent.status} size={6} done={done} />
                 <span
                   className="shrink-0"
-                  style={{ color: agent.status === "idle" || agent.status === "stopped" ? undefined : status.colorVar }}
+                  style={{
+                    color:
+                      !done && (agent.status === "idle" || agent.status === "stopped") ? undefined : status.colorVar,
+                  }}
                 >
                   {status.label}
                 </span>

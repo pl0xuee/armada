@@ -9,6 +9,12 @@ docs/RELEASING.md).
 
 ### New
 
+- **You can tell when an agent is done.** The thinking indicator now turns into a "Done" line with
+  the turn's time (or "Stopped" / "Stopped with an error"), the status pill shows a green "Done"
+  until your next message, the window title shows what the selected agent is doing, the taskbar
+  highlights when an agent finishes or needs approval while you're away, and the message box
+  invites a reply. A soft chime plays when the agent you're watching finishes a task longer than 30
+  seconds (Settings, Notifications).
 - **Checkpoints.** Every message you send saves a snapshot of the agent's files first. "Restore
   to here" on any of your messages puts the files back the way they were (with a preview of what
   changes), and "Restore and edit prompt" lets you try again differently. Restores can be undone.

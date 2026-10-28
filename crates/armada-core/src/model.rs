@@ -684,6 +684,9 @@ pub struct SoundSettings {
     pub custom_done: Option<String>,
     #[serde(default)]
     pub custom_error: Option<String>,
+    /// A soft chime when the agent you're watching finishes a long task (smart mute
+    /// otherwise keeps that silent).
+    pub chime_when_watching: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -879,6 +882,7 @@ impl Default for SoundSettings {
             custom_permission: None,
             custom_done: None,
             custom_error: None,
+            chime_when_watching: true,
         }
     }
 }

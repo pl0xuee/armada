@@ -126,6 +126,10 @@ const tauriApi = {
   sendQueuedNow: (agentId: string, queuedId: string) => invoke<void>("send_queued_now", { agentId, queuedId }),
   /** Tell the backend what the user is looking at (for smart-mute). */
   setFocus: (agentId: string | null) => invoke<void>("set_focus", { agentId }),
+  /** Soft "the agent you're watching finished a long task" chime (backend applies sound settings). */
+  chimeWatched: () => invoke<void>("chime_watched"),
+  /** Window title for taskbars / WM bars / alt-tab. */
+  setWindowTitle: (title: string) => invoke<void>("set_window_title", { title }),
 
   // review / git
   getDiff: (agentId: string) => invoke<AgentDiff>("get_diff", { agentId }),

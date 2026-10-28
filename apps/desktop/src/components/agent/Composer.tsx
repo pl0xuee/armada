@@ -17,6 +17,7 @@ import { DictateButton } from "../DictateButton";
 import { AttachmentStrip } from "../AttachmentStrip";
 import { TemplatePicker } from "../TemplatePicker";
 import { Button } from "../ui/button";
+import { useIsDone } from "@/store/completion";
 import { Kbd } from "../ui/kbd";
 import { Tooltip } from "../ui/tooltip";
 import { ConfigOverflowMenu, ConfigSelect } from "./ConfigSelect";
@@ -374,13 +375,16 @@ export function Composer({ agent }: { agent: Agent }) {
   };
 
   const name = useIdentity(agent.provider, agent.customAgentId).short;
+  const justDone = useIsDone(agent);
   const placeholder = blocked
     ? `Waiting for your approval above. Queue a message to run after this turn…`
     : working
       ? `${name} is working. Queue a follow-up message…`
-      : agent.availableCommands.length > 0
-        ? `Message ${name}…  / for commands, @ for files`
-        : `Message ${name}…  @ to mention files`;
+      : justDone
+        ? `Done. Reply, or start something new…`
+        : agent.availableCommands.length > 0
+          ? `Message ${name}…  / for commands, @ for files`
+          : `Message ${name}…  @ to mention files`;
 
   return (
     <div ref={wrapRef} className={cn("shrink-0 pb-4 pt-1", tight ? "px-3" : "px-6")}>

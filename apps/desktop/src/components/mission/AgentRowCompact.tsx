@@ -8,7 +8,8 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { useIdentity } from "@/hooks/useIdentity";
 import { findOption, respondPermission } from "@/lib/actions";
 import { formatCost } from "@/lib/format";
-import { STATUS } from "@/lib/providers";
+import { DONE_META, STATUS } from "@/lib/providers";
+import { useIsDone } from "@/store/completion";
 import type { Account, Agent, PermissionOption, TimelineItem } from "@/lib/types";
 import { basename, cn } from "@/lib/utils";
 import type { TileSummary } from "./useTileSummaries";
@@ -30,7 +31,8 @@ export const AgentRowCompact = memo(function AgentRowCompact({
   onOpen: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const meta = STATUS[agent.status];
+  const done = useIsDone(agent);
+  const meta = done ? DONE_META : STATUS[agent.status];
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const working = agent.status === "working" || agent.status === "starting";
   const allowOpt = pending ? (findOption(pending, ["allow_once"]) ?? findOption(pending, ["allow_always"])) : undefined;
@@ -74,7 +76,7 @@ export const AgentRowCompact = memo(function AgentRowCompact({
         <span aria-hidden className="absolute inset-y-0 left-0 w-[2px] bg-accent shadow-[0_0_8px_var(--accent)]" />
       )}
       <div className="flex items-center gap-2">
-        <StatusDot status={agent.status} size={7} />
+        <StatusDot status={agent.status} size={7} done={done} />
         <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="sm" />
       </div>
 

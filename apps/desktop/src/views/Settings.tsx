@@ -506,6 +506,18 @@ function Notifications({ settings }: { settings: Settings }) {
               onCheckedChange={(v) => void save({ notifications: { ...n, smartMute: v } })}
             />
           </SettingRow>
+          <SettingRow
+            title="Chime when the agent I'm watching finishes a long task"
+            description="A soft sound for turns longer than 30 seconds, even with smart mute on. Needs sounds enabled."
+            htmlFor="ntf-chime"
+          >
+            <Switch
+              id="ntf-chime"
+              checked={settings.sounds.chimeWhenWatching}
+              disabled={!settings.sounds.enabled}
+              onCheckedChange={(v) => void save({ sounds: { ...settings.sounds, chimeWhenWatching: v } })}
+            />
+          </SettingRow>
         </SettingGroup>
 
         <SettingGroup title="Quiet hours" description="Notifications and sounds are held during this window.">

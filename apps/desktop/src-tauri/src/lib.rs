@@ -109,6 +109,8 @@ pub fn run() {
             commands::set_agent_config,
             commands::handoff_agent,
             commands::set_focus,
+            commands::chime_watched,
+            commands::set_window_title,
             commands::get_diff,
             commands::list_checkpoints,
             commands::preview_checkpoint,
