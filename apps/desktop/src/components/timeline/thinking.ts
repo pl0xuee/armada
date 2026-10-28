@@ -53,3 +53,8 @@ export function formatElapsed(ms: number): string {
   if (s < 60) return `${s}s`;
   return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 }
+
+/** Indicator label while the agent waits on running sub-agents instead of cycling verbs. */
+export function waitingLabel(subagents: number): string {
+  return `Waiting on ${subagents} sub-agent${subagents === 1 ? "" : "s"}`;
+}

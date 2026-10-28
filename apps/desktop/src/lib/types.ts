@@ -127,6 +127,10 @@ export interface SubagentInfo {
   kind?: string | null;
   description?: string | null;
   prompt?: string | null;
+  /** Launched in the background: the call completes at launch, the sub-agent keeps running. */
+  background?: boolean;
+  /** A management call (Codex wait/close/send), not a sub-agent of its own: never counted. */
+  control?: boolean;
 }
 
 export interface SlashCommand {

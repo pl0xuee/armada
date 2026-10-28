@@ -1,5 +1,6 @@
 import { useRef } from "react";
-import { lastAction, liveTail, runningSubagents } from "@/lib/agents";
+import { isBusy, lastAction, liveTail } from "@/lib/agents";
+import { agentDerived } from "../agent/derived";
 import type { TimelineItem } from "@/lib/types";
 import { useApp } from "@/store/app";
 
@@ -24,7 +25,7 @@ export const EMPTY_SUMMARY: TileSummary = {
   subagents: 0,
 };
 
-function summarize(items: TimelineItem[] | undefined): TileSummary {
+function summarize(items: TimelineItem[] | undefined, subagents: number): TileSummary {
   if (!items) return EMPTY_SUMMARY;
   let message: string | null = null;
   let messageIsTail = false;
@@ -42,7 +43,7 @@ function summarize(items: TimelineItem[] | undefined): TileSummary {
     message,
     messageIsTail,
     tail: liveTail(items),
-    subagents: runningSubagents(items),
+    subagents,
   };
 }
 
@@ -65,17 +66,22 @@ export function useTileSummaries(): ReadonlyMap<string, TileSummary> {
   const cache = useRef({
     map: new Map<string, TileSummary>(),
     seen: new Map<string, TimelineItem[] | undefined>(),
+    busy: new Map<string, boolean>(),
   });
   return useApp((s) => {
-    const { map: prev, seen } = cache.current;
+    const { map: prev, seen, busy: seenBusy } = cache.current;
     let next: Map<string, TileSummary> | null = null;
     const ids = Object.keys(s.agents);
     for (const id of ids) {
       const items = s.items[id];
       const old = prev.get(id);
-      if (old && seen.get(id) === items) continue;
+      const busy = isBusy(s.agents[id]);
+      if (old && seen.get(id) === items && seenBusy.get(id) === busy) continue;
       seen.set(id, items);
-      const fresh = summarize(items && items.length > SCAN_LIMIT ? items.slice(-SCAN_LIMIT) : items);
+      seenBusy.set(id, busy);
+      // Cached per agent by structure, and not subject to the scan cap (a sub-agent can run a long time).
+      const subagents = agentDerived(id, items, busy).runningSubagents;
+      const fresh = summarize(items && items.length > SCAN_LIMIT ? items.slice(-SCAN_LIMIT) : items, subagents);
       if (old && same(old, fresh)) continue;
       next ??= new Map(prev);
       next.set(id, fresh);
@@ -86,11 +92,12 @@ export function useTileSummaries(): ReadonlyMap<string, TileSummary> {
         if (!(id in s.agents)) {
           next.delete(id);
           seen.delete(id);
+          seenBusy.delete(id);
         }
       }
     }
     if (!next) return prev;
-    cache.current = { map: next, seen };
+    cache.current = { map: next, seen, busy: seenBusy };
     return next;
   });
 }

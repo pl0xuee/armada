@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import type { Agent } from "@/lib/types";
 import { useIdentity } from "@/hooks/useIdentity";
 import { ProviderGlyph } from "../ProviderGlyph";
-import { formatElapsed, THINKING_VERBS } from "./thinking";
+import { useRunningSubagentCount } from "../agent/useSubagents";
+import { formatElapsed, THINKING_VERBS, waitingLabel } from "./thinking";
 
 const VERB_MS = 3000;
 
 /** Compact "the agent is busy" row, in the agent's voice. Sits below the conversation. */
 export function ThinkingIndicator({ agent, since }: { agent: Agent; since: number }) {
   const name = useIdentity(agent.provider, agent.customAgentId).short;
+  const subagents = useRunningSubagentCount(agent.id);
   const starting = agent.status === "starting";
   const [verb, setVerb] = useState(0);
   const [now, setNow] = useState(() => Date.now());
@@ -23,7 +25,11 @@ export function ThinkingIndicator({ agent, since }: { agent: Agent; since: numbe
     };
   }, []);
 
-  const label = starting ? `Starting ${name}` : THINKING_VERBS[(verb + offset.current) % THINKING_VERBS.length];
+  const label = starting
+    ? `Starting ${name}`
+    : subagents > 0
+      ? waitingLabel(subagents)
+      : THINKING_VERBS[(verb + offset.current) % THINKING_VERBS.length];
   const elapsed = now - since;
 
   return (

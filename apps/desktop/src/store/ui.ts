@@ -69,9 +69,14 @@ interface UiStore {
   workspaceHeight: number;
   /** Bumps to ask the composer to focus itself. */
   composerFocusTick: number;
+  /** A timeline item to scroll into view once its agent's timeline is showing (see `revealItem`). */
+  revealTarget: { agentId: string; itemId: string; tick: number } | null;
 
   setView: (v: View) => void;
   openAgent: (id: string) => void;
+  /** Open an agent and scroll its timeline to one item (e.g. a sub-agent's card). */
+  revealItem: (agentId: string, itemId: string) => void;
+  clearRevealTarget: () => void;
   openCompare: (groupId: string | null) => void;
   openSettings: (section?: SettingsSection) => void;
   setInspectorOpen: (open: boolean) => void;
@@ -180,11 +185,19 @@ export const useUi = create<UiStore>((set) => ({
   terminal: null,
   windowFocused: typeof document !== "undefined" ? document.hasFocus() : true,
   composerFocusTick: 0,
+  revealTarget: null,
   workspaceOpen: readWorkspace().open,
   workspaceHeight: readWorkspace().height,
 
   setView: (view) => set({ view }),
   openAgent: (id) => set({ view: "agents", selectedAgentId: id }),
+  revealItem: (agentId, itemId) =>
+    set((s) => ({
+      view: "agents",
+      selectedAgentId: agentId,
+      revealTarget: { agentId, itemId, tick: (s.revealTarget?.tick ?? 0) + 1 },
+    })),
+  clearRevealTarget: () => set({ revealTarget: null }),
   openCompare: (compareGroupId) => set({ view: "compare", compareGroupId }),
   openSettings: (section) => set((s) => ({ view: "settings", settingsSection: section ?? s.settingsSection })),
   setInspectorOpen: (inspectorOpen) => {

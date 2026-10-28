@@ -34,7 +34,7 @@ import {
   resumeAgent,
   stopAgent,
 } from "@/lib/actions";
-import { liveTail } from "@/lib/agents";
+import { isBusy, liveTail, type SubagentRun } from "@/lib/agents";
 import { agentDerived } from "./derived";
 import { canCompact, compactContext, contextRatio } from "./compact";
 import { api } from "@/lib/api";
@@ -63,8 +63,9 @@ import {
   DropdownMenuTrigger,
 } from "../ui/menu";
 import { Tooltip } from "../ui/tooltip";
-import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { PrChip } from "./PrChip";
+import { SubagentList } from "./SubagentList";
 import { UsageMeters, pctTextTone, windowLabel } from "../UsageMeter";
 import { relativeTimeLong } from "@/lib/format";
 
@@ -92,7 +93,6 @@ export function AgentHeader({ agent }: { agent: Agent }) {
   const live = agent.status === "working" || agent.status === "starting";
   // Primitive selectors: only re-render when the derived value changes, not on every delta.
   const tail = useApp((s) => (live ? liveTail(s.items[agent.id]) : null));
-  const subagents = useApp((s) => agentDerived(agent.id, s.items[agent.id]).runningSubagents);
   const changed = useApp((s) => (agent.worktree ? agentDerived(agent.id, s.items[agent.id]).changedCount : 0));
   const [confirmShutdown, setConfirmShutdown] = useState(false);
 
@@ -252,14 +252,7 @@ export function AgentHeader({ agent }: { agent: Agent }) {
         )}
       >
         <StatusPill status={agent.status} />
-        {subagents > 0 && (
-          <Tooltip content="Sub-agents working in parallel inside this turn">
-            <Chip className="border-accent/30 bg-accent/[0.08] text-accent">
-              <Workflow className="h-3 w-3" />
-              <span className="tabular">{subagents}</span> sub-agent{subagents === 1 ? "" : "s"} running
-            </Chip>
-          </Tooltip>
-        )}
+        <SubagentsChip agent={agent} />
         {agent.rateLimited && (
           <Chip className="border-warn/35 bg-warn/10 text-warn">
             <Gauge className="h-3 w-3" />
@@ -418,6 +411,43 @@ function UsageChip({ account, compact }: { account: Account; compact: boolean })
     </Popover>
   );
 }
+
+/** "N sub-agents running" chip; opens the list of this agent's sub-agents. Hidden when it has none. */
+function SubagentsChip({ agent }: { agent: Agent }) {
+  const live = isBusy(agent);
+  const runs = useApp((s) => (live ? agentDerived(agent.id, s.items[agent.id], true).subagents : NO_RUNS));
+  const running = runs.filter((r) => r.state === "running").length;
+  if (running === 0) return null;
+  return (
+    <Popover>
+      <Tooltip content="Sub-agents working in parallel inside this turn">
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border border-accent/30 bg-accent/[0.08] px-2 text-[11.5px] text-accent transition-colors hover:border-accent/50 hover:bg-accent/15"
+          >
+            <Workflow className="h-3 w-3" />
+            <span className="tabular">{running}</span> sub-agent{running === 1 ? "" : "s"} running
+          </button>
+        </PopoverTrigger>
+      </Tooltip>
+      <PopoverContent align="start" className="w-[340px] p-1.5">
+        <div className="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel">
+          Sub-agents
+        </div>
+        <div className="max-h-[360px] overflow-y-auto">
+          <PopoverClose asChild>
+            <div>
+              <SubagentList runs={runs} onSelect={(r) => useUi.getState().revealItem(agent.id, r.itemId)} />
+            </div>
+          </PopoverClose>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+const NO_RUNS: SubagentRun[] = [];
 
 function Chip({ children, className }: { children: React.ReactNode; className?: string }) {
   return (

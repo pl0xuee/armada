@@ -861,6 +861,10 @@ fn apply_tool_fields(b: &mut ItemBody, u: &Value) {
         if let Some(p) = input["prompt"].as_str() {
             sa.prompt = Some(p.to_string());
         }
+        // The adapter completes a background launch at once; the sub-agent runs on.
+        if input["run_in_background"].as_bool() == Some(true) {
+            sa.background = true;
+        }
         *tool_kind = ToolKind::Think;
     }
     if let Some(t) = u["title"].as_str() {
@@ -1066,5 +1070,84 @@ mod rate_limit_tests {
             parse_claude_rate_limit(&json!({"status":"allowed","rateLimitType":"five_hour"}))
                 .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod subagent_tests {
+    use super::*;
+
+    fn blank_tool() -> ItemBody {
+        ItemBody::ToolCall {
+            tool_call_id: "toolu_1".into(),
+            title: String::new(),
+            tool_kind: ToolKind::Other,
+            status: ToolStatus::Pending,
+            locations: Vec::new(),
+            diffs: Vec::new(),
+            output: String::new(),
+            command: None,
+            images: Vec::new(),
+            subagent: None,
+            parent_tool_call_id: None,
+        }
+    }
+
+    fn sub(b: &ItemBody) -> Option<&SubAgent> {
+        match b {
+            ItemBody::ToolCall { subagent, .. } => subagent.as_ref(),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn background_launch_is_flagged_and_stays_flagged_after_completion() {
+        let mut b = blank_tool();
+        apply_tool_fields(
+            &mut b,
+            &json!({
+                "sessionUpdate": "tool_call", "toolCallId": "toolu_1", "title": "Agent",
+                "status": "in_progress", "kind": "think",
+                "rawInput": {"description": "Scan repo", "subagent_type": "Explore",
+                              "prompt": "look around", "run_in_background": true},
+                "_meta": {"claudeCode": {"toolName": "Agent"}}
+            }),
+        );
+        let s = sub(&b).unwrap();
+        assert!(s.background);
+        assert_eq!(s.kind.as_deref(), Some("Explore"));
+        // The completion carries no rawInput (as the adapter sends it): flag survives.
+        apply_tool_fields(
+            &mut b,
+            &json!({
+                "sessionUpdate": "tool_call_update", "toolCallId": "toolu_1", "status": "completed",
+                "content": [{"type": "content", "content": {"type": "text",
+                    "text": "Async agent launched successfully."}}],
+                "_meta": {"claudeCode": {"toolName": "Agent"}}
+            }),
+        );
+        let s = sub(&b).unwrap();
+        assert!(s.background);
+        assert!(matches!(
+            &b,
+            ItemBody::ToolCall {
+                status: ToolStatus::Completed,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn foreground_launch_is_not_background() {
+        let mut b = blank_tool();
+        apply_tool_fields(
+            &mut b,
+            &json!({
+                "sessionUpdate": "tool_call", "toolCallId": "toolu_1", "status": "in_progress",
+                "rawInput": {"description": "x", "subagent_type": "general-purpose", "prompt": "p"},
+                "_meta": {"claudeCode": {"toolName": "Task"}}
+            }),
+        );
+        assert!(!sub(&b).unwrap().background);
     }
 }

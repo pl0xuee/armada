@@ -549,6 +549,45 @@ function startLiveActivity() {
           "Find recent (2025+) public benchmarks for Qdrant filtered vector search between 1M and 10M vectors. Summarize p50/p95 latency, hardware, and recall settings. Cite sources.",
       },
     });
+    // Two background sub-agents (Claude's run_in_background): their calls complete at launch, yet
+    // they keep working until the turn ends.
+    const bgRuns = [
+      ["gk-bg1", "Explore", "Survey Turbopuffer namespace limits and pricing", 'Search "turbopuffer namespace limits"'],
+      [
+        "gk-bg2",
+        "general-purpose",
+        "Price out pgvector on RDS for 4M vectors",
+        "Fetch aws.amazon.com/rds/instance-types",
+      ],
+    ] as const;
+    const bgChildren: string[] = [];
+    for (const [tcId, kind, description, step] of bgRuns) {
+      addItem("a-research", {
+        kind: "tool_call",
+        toolCallId: tcId,
+        title: description,
+        toolKind: "other",
+        status: "completed",
+        locations: [],
+        diffs: [],
+        output: "Async agent launched successfully.",
+        command: null,
+        subagent: { kind, description, prompt: description, background: true },
+      });
+      const c = addItem("a-research", {
+        kind: "tool_call",
+        toolCallId: newId("gk-bc"),
+        title: step,
+        toolKind: "fetch",
+        status: "in_progress",
+        locations: [],
+        diffs: [],
+        output: "",
+        command: null,
+        parentToolCallId: tcId,
+      });
+      bgChildren.push(c.id);
+    }
     const childTitles = [
       ['Search "qdrant filtered search benchmark 2025"', "search"],
       ["Fetch qdrant.tech/benchmarks/filtered", "fetch"],
@@ -594,6 +633,7 @@ function startLiveActivity() {
       bumpUsage("a-research", 9000);
       patchAgent("a-research", { lastMessage: title.replace(/^Fetch /, "Reading ") });
     }
+    for (const id of bgChildren) updateItem("a-research", id, { status: "completed" });
     await pause(1500, turn);
     const msg = addItem("a-research", { kind: "agent_message", text: "" });
     const text =

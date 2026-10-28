@@ -1,4 +1,4 @@
-import { Minus, RotateCw, Search, Square, Unplug, Users, X } from "lucide-react";
+import { Minus, RotateCw, Search, Square, Unplug, Users, Workflow, X } from "lucide-react";
 import { PROVIDERS } from "@/lib/providers";
 import type { Account } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,9 @@ import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "./ui/popo
 import { Tooltip } from "./ui/tooltip";
 import { UsageMeters } from "./UsageMeter";
 import { UpdatePill } from "./UpdatePill";
+import { ProviderGlyph } from "./ProviderGlyph";
+import { SubagentList } from "./agent/SubagentList";
+import { useSubagentOverview } from "./agent/useSubagents";
 
 const VIEW_LABEL: Record<View, string> = {
   agents: "Agents",
@@ -97,6 +100,7 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
         </div>
 
         <div data-tauri-drag-region className="flex h-full shrink-0 items-center gap-3">
+          {!minimal && <SubagentsIndicator compact={compact} />}
           {!minimal && <UpdatePill />}
           {!minimal && accounts.length > 0 && <AccountSwitcher accounts={accounts} stacked={compact} />}
           {!mac && <WindowControls />}
@@ -104,6 +108,47 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
       </header>
       {connectionLost !== null && <ConnectionLostBanner error={connectionLost} />}
     </>
+  );
+}
+
+/** "N sub-agents" across all agents; opens a list grouped by agent. Hidden when none are running. */
+function SubagentsIndicator({ compact }: { compact: boolean }) {
+  const { total, agents } = useSubagentOverview();
+  if (total === 0) return null;
+  const label = `${total} sub-agent${total === 1 ? "" : "s"} running`;
+  return (
+    <Popover>
+      <Tooltip content={label} side="bottom">
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-label={label}
+            className="flex h-6 items-center gap-1.5 rounded-full border border-accent/30 bg-accent/[0.08] px-2 text-[11.5px] text-accent transition-colors hover:border-accent/50 hover:bg-accent/15"
+          >
+            <Workflow className="h-3 w-3" />
+            <span className="tabular">{total}</span>
+            {!compact && <span>sub-agent{total === 1 ? "" : "s"}</span>}
+          </button>
+        </PopoverTrigger>
+      </Tooltip>
+      <PopoverContent align="end" className="w-[360px] p-1.5">
+        <div className="max-h-[420px] overflow-y-auto">
+          {agents.map(({ agent, runs }) => (
+            <section key={agent.id} className="pb-1.5 last:pb-0">
+              <div className="flex items-center gap-1.5 px-2 pb-0.5 pt-1.5">
+                <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="xs" />
+                <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-muted">{agent.title}</span>
+              </div>
+              <PopoverClose asChild>
+                <div>
+                  <SubagentList runs={runs} onSelect={(r) => useUi.getState().revealItem(agent.id, r.itemId)} />
+                </div>
+              </PopoverClose>
+            </section>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 

@@ -19,6 +19,10 @@ docs/RELEASING.md).
 - **Live preview.** When an agent (or one of your terminals) starts a dev server, it appears in the
   workspace panel's Preview tab, next to the conversation. Switch device widths, reload, or open it
   in your browser. Only servers on your own computer are shown.
+- **See every running sub-agent.** The title bar shows how many sub-agents are running across all
+  agents, agent list rows show their own count, and the agent header lists each one with its task,
+  current step and running time; click one to jump to it. Background sub-agents (started in
+  parallel) now count as running until they finish, instead of disappearing right away.
 - **You can see when the agent is thinking.** From the moment you send a message until the agent
   replies, an animated indicator with elapsed time shows it's working, including pauses between
   steps.
