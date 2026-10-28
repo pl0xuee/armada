@@ -11,7 +11,7 @@ export type Phase =
   /** Paired but the server can't be reached / refuses us for now. */
   | "blocked";
 
-export type UnpairedReason = null | "revoked" | "invalid_link";
+export type UnpairedReason = null | "revoked" | "invalid_link" | "share_expired";
 
 /** "unavailable" = the server answered 503 (remote access off): retried automatically. */
 export type BlockedReason = "unreachable" | "unavailable" | "misdirected" | "rate_limited" | "error";

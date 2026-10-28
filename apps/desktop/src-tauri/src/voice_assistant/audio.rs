@@ -456,13 +456,19 @@ fn start_speaker(buf: Arc<SpeakerBuffer>, stop: Arc<AtomicBool>) -> Result<(), S
 #[cfg(test)]
 pub struct NullAudio {
     pub speaker: Arc<SpeakerBuffer>,
+    /// Feed extra microphone chunks to the session.
+    pub mic_tx: UnboundedSender<Vec<i16>>,
+    mic_rx: Option<UnboundedReceiver<Vec<i16>>>,
 }
 
 #[cfg(test)]
 impl NullAudio {
     pub fn new() -> Self {
+        let (mic_tx, mic_rx) = unbounded_channel();
         NullAudio {
             speaker: SpeakerBuffer::new(),
+            mic_tx,
+            mic_rx: Some(mic_rx),
         }
     }
 }
@@ -470,13 +476,13 @@ impl NullAudio {
 #[cfg(test)]
 impl AudioDevices for NullAudio {
     fn open(&mut self) -> Result<AudioIo, String> {
-        let (tx, rx) = unbounded_channel();
-        // One chunk of silence, then the channel stays open (the guard owns the sender).
-        let _ = tx.send(vec![0i16; CHUNK_SAMPLES]);
+        let rx = self.mic_rx.take().ok_or("already open")?;
+        // One chunk of silence, then the channel stays open (the guard owns a sender).
+        let _ = self.mic_tx.send(vec![0i16; CHUNK_SAMPLES]);
         Ok(AudioIo {
             mic: rx,
             speaker: self.speaker.clone(),
-            _guard: Box::new(tx),
+            _guard: Box::new(self.mic_tx.clone()),
         })
     }
 }

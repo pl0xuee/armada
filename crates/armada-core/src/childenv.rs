@@ -22,10 +22,22 @@ const APPIMAGE_VARS: &[&str] = &[
 ];
 
 /// Variable name prefixes set by AppRun for bundled GTK/GLib.
-const APPIMAGE_PREFIXES: &[&str] = &["GIO_", "GDK_PIXBUF_", "GTK_"];
+const APPIMAGE_PREFIXES: &[&str] = &["GIO_", "GDK_PIXBUF_", "GTK_", "GST_"];
+
+/// Pre-launch values saved by some AppImage runtimes as `APPIMAGE_ORIGINAL_<NAME>`.
+const ORIGINAL_PREFIX: &str = "APPIMAGE_ORIGINAL_";
+
+/// Where the AppImage runtime mounts the image.
+const MOUNT_PREFIX: &str = "/tmp/.mount_";
 
 /// Path-list variables whose `$APPDIR` entries are removed (the rest is kept).
-const PATH_LISTS: &[&str] = &["PATH", "LD_LIBRARY_PATH", "XDG_DATA_DIRS"];
+const PATH_LISTS: &[&str] = &[
+    "PATH",
+    "LD_LIBRARY_PATH",
+    "XDG_DATA_DIRS",
+    "PERL5LIB",
+    "XDG_CONFIG_DIRS",
+];
 
 /// What to change in a child's environment: `(name, None)` removes the variable,
 /// `(name, Some(value))` sets it. Pure, for testing.
@@ -34,15 +46,31 @@ pub fn appimage_env_changes(
 ) -> Vec<(OsString, Option<OsString>)> {
     let vars: Vec<(OsString, OsString)> = vars.into_iter().collect();
     let get = |name: &str| vars.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
-    if get("APPIMAGE").is_none() {
+    if get("APPIMAGE").is_none() && get("APPDIR").is_none() {
         return Vec::new();
     }
     let appdir = get("APPDIR")
         .map(|d| d.to_string_lossy().trim_end_matches('/').to_string())
         .filter(|d| !d.is_empty());
     let mut changes = Vec::new();
+    // Values from before the AppImage launched win over any filtering.
+    let mut restored: Vec<String> = Vec::new();
     for (name, value) in &vars {
         let key = name.to_string_lossy();
+        if let Some(orig) = key.strip_prefix(ORIGINAL_PREFIX) {
+            restored.push(orig.to_string());
+            changes.push((name.clone(), None));
+            changes.push((
+                OsString::from(orig),
+                (!value.is_empty()).then(|| value.clone()),
+            ));
+        }
+    }
+    for (name, value) in &vars {
+        let key = name.to_string_lossy();
+        if key.starts_with(ORIGINAL_PREFIX) || restored.iter().any(|r| r == key.as_ref()) {
+            continue;
+        }
         if APPIMAGE_VARS.contains(&key.as_ref())
             || APPIMAGE_PREFIXES.iter().any(|p| key.starts_with(p))
         {
@@ -52,12 +80,12 @@ pub fn appimage_env_changes(
         if !PATH_LISTS.contains(&key.as_ref()) {
             continue;
         }
-        let Some(appdir) = &appdir else {
-            continue;
-        };
         let inside = |p: &std::path::Path| {
             let s = p.to_string_lossy();
-            s == appdir.as_str() || s.starts_with(&format!("{appdir}/"))
+            s.starts_with(MOUNT_PREFIX)
+                || appdir.as_ref().is_some_and(|appdir| {
+                    s == appdir.as_str() || s.starts_with(&format!("{appdir}/"))
+                })
         };
         let entries: Vec<std::path::PathBuf> = std::env::split_paths(value).collect();
         let kept: Vec<&std::path::PathBuf> = entries.iter().filter(|p| !inside(p)).collect();
@@ -180,8 +208,34 @@ mod tests {
 
     #[test]
     fn no_op_outside_an_appimage() {
-        let v = vars(&[("PATH", "/tmp/.mount_x/usr/bin:/usr/bin"), ("APPDIR", "/x")]);
+        let v = vars(&[("PATH", "/tmp/.mount_x/usr/bin:/usr/bin")]);
         assert!(appimage_env_changes(v).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keeps_system_library_path_entries() {
+        let v = vars(&[
+            ("APPDIR", "/tmp/.mount_ArmadaX"),
+            ("LD_LIBRARY_PATH", "/tmp/.mount_ArmadaX/usr/lib:/opt/lib"),
+            ("GST_PLUGIN_PATH", "/tmp/.mount_ArmadaX/gst"),
+        ]);
+        let c = appimage_env_changes(v);
+        assert!(c.contains(&("LD_LIBRARY_PATH".into(), Some("/opt/lib".into()))));
+        assert!(c.contains(&("GST_PLUGIN_PATH".into(), None)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restores_original_values() {
+        let v = vars(&[
+            ("APPIMAGE", "/x.AppImage"),
+            ("LD_LIBRARY_PATH", "/tmp/.mount_a/usr/lib"),
+            ("APPIMAGE_ORIGINAL_LD_LIBRARY_PATH", "/opt/orig"),
+        ]);
+        let c = appimage_env_changes(v);
+        assert!(c.contains(&("LD_LIBRARY_PATH".into(), Some("/opt/orig".into()))));
+        assert!(c.contains(&("APPIMAGE_ORIGINAL_LD_LIBRARY_PATH".into(), None)));
     }
 
     #[cfg(unix)]

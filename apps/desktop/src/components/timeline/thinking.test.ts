@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineItem } from "@/lib/types";
-import { formatElapsed, shouldShowThinking, turnEndOf, turnStart } from "./thinking";
+import { formatElapsed, shouldShowThinking, turnEndOf, turnStart, waitingStatus } from "./thinking";
 
 const b = { id: "x", agentId: "a", seq: 0, ts: 100 };
 const user = { ...b, kind: "user_message", text: "hi" } as TimelineItem;
@@ -73,5 +73,13 @@ describe("turnEndOf", () => {
   it("ignores an unknown or negative duration", () => {
     const early = { ...m, ts: 500 } as TimelineItem;
     expect(turnEndOf("idle", [u, early], early)?.elapsedMs).toBeNull();
+  });
+});
+
+describe("waitingStatus", () => {
+  it("shows the waiting line while working or idle, hides it when blocked or ended", () => {
+    for (const s of ["working", "starting", "idle"] as const) expect(waitingStatus(s)).toBe(true);
+    for (const s of ["needs_permission", "stopped", "error", "interrupted"] as const)
+      expect(waitingStatus(s)).toBe(false);
   });
 });

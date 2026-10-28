@@ -4,7 +4,7 @@
  * owner/viewer split, so the real code paths are exercised.
  */
 import { ApiError, type Backend, type HttpMethod, type RequestOptions, type StreamHandlers } from "@/lib/api";
-import type { Agent, Attachment, AttentionReason, CreateAgentRequest, RemoteEvent, Session, TimelineItem, ViewerTrimmedField } from "@/lib/types";
+import type { Agent, Attachment, AttentionReason, CreateAgentRequest, RemoteEvent, Session, TimelineItem } from "@/lib/types";
 import { CHECKOUT_PNG, ORDERS_PNG } from "./images";
 import { mockDiff } from "./diff";
 import { streamChunk, stressAgent, stressTimeline } from "./stress";
@@ -46,25 +46,34 @@ type Listener = (e: RemoteEvent) => void;
 
 const VIEWER_AGENT = "a3";
 
-/** Exactly what the real server strips from agents behind a share link. */
-const VIEWER_TRIMMED: readonly ViewerTrimmedField[] = [
-  "projectPath",
-  "cwd",
-  "accountId",
-  "sessionId",
-  "branch",
-  "baseBranch",
-  "baseCommit",
-  "scheduleId",
-  "groupId",
-  "configOptions",
-  "availableCommands",
-];
+/** Exactly the agent fields the real server keeps behind a share link (remote.rs VIEWER_FIELDS). */
+const VIEWER_FIELDS = new Set([
+  "id", "title", "provider", "customAgentId", "status", "running", "worktree", "createdAt", "updatedAt",
+  "lastActivityAt", "costUsd", "tokensUsed", "contextUsed", "contextSize", "archived", "lastMessage",
+  "pendingPermissions", "rateLimited",
+]);
 
 function trimForViewer(agent: Agent): Agent {
-  const copy: Record<string, unknown> = structuredClone(agent);
-  for (const k of VIEWER_TRIMMED) delete copy[k];
-  return copy as Agent;
+  const copy: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(structuredClone(agent))) if (VIEWER_FIELDS.has(k)) copy[k] = v;
+  return copy as unknown as Agent;
+}
+
+/** Viewer's version of an item (remote/view.rs project_item); null = hidden from viewers. */
+function projectItem(item: TimelineItem): TimelineItem | null {
+  const i = structuredClone(item);
+  switch (i.kind) {
+    case "user_message":
+      return { ...i, attachments: [] };
+    case "agent_message":
+      return i;
+    case "tool_call":
+      return { ...i, locations: [], diffs: [], output: "", command: null, images: [], subagent: undefined };
+    case "turn_summary":
+      return { ...i, files: [] };
+    default:
+      return null; // thought, permission, plan, notice
+  }
 }
 
 export class MockBackend implements Backend {
@@ -157,6 +166,14 @@ export class MockBackend implements Backend {
       const id = e.type === "agent_updated" ? e.agent.id : e.type === "item_upserted" ? e.item.agentId : "agentId" in e ? e.agentId : null;
       if (id !== VIEWER_AGENT) return;
     }
+    if (this.s.scope === "viewer") {
+      if (e.type === "text_delta") return; // never forwarded; the full item follows
+      if (e.type === "item_upserted") {
+        const item = projectItem(e.item);
+        if (!item) return;
+        e = { ...e, item };
+      }
+    }
     for (const l of this.listeners) l(e);
   }
 
@@ -242,6 +259,7 @@ export class MockBackend implements Backend {
       const limit = Math.min(1000, Number(q.get("limit")) || 0);
       const before = q.has("beforeSeq") ? Number(q.get("beforeSeq")) : Infinity;
       let list = (this.items.get(id) ?? []).filter((i) => i.seq < before);
+      if (this.s.scope === "viewer") list = list.map(projectItem).filter((i): i is TimelineItem => i !== null);
       if (limit) list = list.slice(-limit);
       return structuredClone(list);
     }

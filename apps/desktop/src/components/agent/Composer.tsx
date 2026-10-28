@@ -13,7 +13,7 @@ import { useAttachments } from "@/hooks/useAttachments";
 import { useUi } from "@/store/ui";
 import { getDraft, onDraftInsert, setDraft } from "./drafts";
 import { AttachButton, DropOverlay } from "../AttachControls";
-import { DictateButton } from "../DictateButton";
+import { ComposerVoiceButtons } from "../voice/ComposerVoiceButtons";
 import { AttachmentStrip } from "../AttachmentStrip";
 import { TemplatePicker } from "../TemplatePicker";
 import { Button } from "../ui/button";
@@ -65,6 +65,22 @@ function ComposerImpl({ agent }: { agent: Agent }) {
   const [files, setFiles] = useState<{ query: string; list: string[] }>({ query: "", list: [] });
   const attach = useAttachments([], agent.id);
   const [wrapRef, width] = useElementWidth<HTMLDivElement>();
+  // Floating things anchored bottom-right (toasts, the voice assistant panel) sit above the
+  // composer via --composer-clear, so they never cover Send / Queue / Stop.
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const set = () =>
+      root.style.setProperty("--composer-clear", `${Math.ceil(el.getBoundingClientRect().height) + 8}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      root.style.removeProperty("--composer-clear");
+    };
+  }, [wrapRef]);
   // Toolbar tiers by available width: labels → icons → extra options in a "+" menu.
   const roomy = width === 0 || width >= 700;
   const tight = width > 0 && width < 520;
@@ -309,7 +325,9 @@ function ComposerImpl({ agent }: { agent: Agent }) {
     if (autoSendRef.current === null) return;
     const want = autoSendRef.current;
     autoSendRef.current = null;
-    if (text.trim() === want) void send();
+    if (text.trim() !== want) return;
+    if (canSend) void send();
+    else toast.info("Dictation inserted, but the message can't be sent right now");
   });
 
   const send = async () => {
@@ -469,7 +487,6 @@ function ComposerImpl({ agent }: { agent: Agent }) {
                 ))}
                 {tight && <ConfigOverflowMenu agent={agent} options={agent.configOptions.slice(1)} />}
                 <AttachButton onClick={attach.openPicker} count={attach.attachments.length} iconOnly={!roomy} />
-                <DictateButton onText={insertDictation} iconOnly={!roomy} />
                 <TemplatePicker
                   onInsert={insertTemplate}
                   trigger={
@@ -486,7 +503,7 @@ function ComposerImpl({ agent }: { agent: Agent }) {
                 />
                 <span className={cn("mx-1.5 h-4 w-px bg-line", !busy && "hidden xl:block")} aria-hidden />
               </div>
-              <div className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-steel">
+              <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[11.5px] text-steel">
                 {busy ? (
                   <>
                     <span className="relative flex h-2 w-2 shrink-0">
@@ -498,14 +515,17 @@ function ComposerImpl({ agent }: { agent: Agent }) {
                       />
                       <span className={cn("relative h-2 w-2 rounded-full", blocked ? "bg-warn" : "bg-accent")} />
                     </span>
-                    <span className={cn("truncate whitespace-nowrap", tight && "sr-only")}>
-                      {blocked ? "Waiting for approval" : `${name} is working…`}
+                    <span className={cn("whitespace-nowrap", width < 900 && "sr-only")}>
+                      {blocked ? "Waiting for approval" : "Working…"}
                     </span>
-                    {width >= 900 && (
-                      <span className="flex shrink-0 items-center gap-1 whitespace-nowrap">
-                        <Kbd>Esc</Kbd>
-                        <Kbd>Esc</Kbd> to stop
-                      </span>
+                    {roomy && (
+                      <Tooltip content="Press Esc twice to stop">
+                        <span className="flex shrink-0 items-center gap-1 whitespace-nowrap">
+                          <Kbd>Esc</Kbd>
+                          <Kbd>Esc</Kbd>
+                          {width >= 900 && " to stop"}
+                        </span>
+                      </Tooltip>
                     )}
                   </>
                 ) : (
@@ -515,12 +535,13 @@ function ComposerImpl({ agent }: { agent: Agent }) {
                   </span>
                 )}
               </div>
-              <div className="ml-auto flex items-center gap-1.5">
+              <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                <ComposerVoiceButtons onText={insertDictation} />
                 {busy && (
                   <Tooltip content="Stop this turn" shortcut={["Esc ×2"]}>
                     <Button
                       size="sm"
-                      variant="secondary"
+                      variant={blocked ? "ghost" : "secondary"}
                       onClick={() => void cancelTurn(agent)}
                       aria-label="Stop this turn"
                       className="gap-1.5"

@@ -302,6 +302,19 @@ impl AcpDriver {
                     break;
                 }
                 me.ctx.checkpoint_before_turn().await;
+                // Cancelled while the checkpoint ran: the prompt is never sent.
+                if me.ctx.cancel_was_requested() && me.ctx.is_current(me.generation) {
+                    match me
+                        .ctx
+                        .turn_finished_by(me.generation, TurnOutcome::Cancelled)
+                    {
+                        Some(next) => {
+                            prompt = next;
+                            continue;
+                        }
+                        None => break,
+                    }
+                }
                 me.peer.mark_turn();
                 let mark = me.peer.stderr_mark();
                 let preamble = me.ctx.take_preamble();
@@ -734,6 +747,7 @@ fn mcp_json(servers: &[McpServer], caps: &Value) -> Value {
     let http_ok = caps["mcpCapabilities"]["http"].as_bool().unwrap_or(false);
     let kv = |list: &[KeyValue]| -> Vec<Value> {
         list.iter()
+            .filter(|e| !crate::secrets::is_unresolved(&e.value))
             .map(|e| json!({ "name": e.name, "value": e.value }))
             .collect()
     };

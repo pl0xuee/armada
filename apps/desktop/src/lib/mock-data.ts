@@ -250,6 +250,7 @@ export function seedSettings(onboarded: boolean): Settings {
       model: "gpt-realtime",
       maxSessionMins: 10,
       silenceTimeoutSecs: 60,
+      headphones: false,
     },
     customAgents: [
       {

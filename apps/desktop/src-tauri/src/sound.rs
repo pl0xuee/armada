@@ -221,7 +221,10 @@ impl AudioPlayer {
                         output = None;
                     }
                     if output.is_none() {
-                        match Output::open() {
+                        let opened =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(Output::open))
+                                .unwrap_or_else(|_| Err("the audio host panicked".into()));
+                        match opened {
                             Ok(o) => output = Some(o),
                             Err(e) => {
                                 warn!("audio output unavailable: {e}");

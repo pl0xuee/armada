@@ -9,7 +9,7 @@ import { pickFolder } from "@/lib/window";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { AccountAvatar } from "../AccountAvatar";
-import { DictateButton } from "../DictateButton";
+import { ComposerVoiceButtons } from "../voice/ComposerVoiceButtons";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { Button } from "../ui/button";
 import {
@@ -151,7 +151,7 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
         </Tooltip>
         {!compact && <PermissionModeChip value={mode} onChange={setMode} className="h-7 rounded-lg" />}
         <div className="ml-auto flex items-center gap-2">
-          <DictateButton onText={insertDictation} iconOnly />
+          <ComposerVoiceButtons onText={insertDictation} />
           {missing && prompt.trim() && <span className="text-[11.5px] text-warn">{missing}</span>}
           <Tooltip content="Start agent" shortcut={[modKey, "⏎"]}>
             <Button

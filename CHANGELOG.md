@@ -5,15 +5,57 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
-## Unreleased
-
 ## v0.1.4 — 2026-10-28
+
+### New
+
+- **Voice is one click from the composer.** A mic button starts on-device dictation and a
+  waveform button talks to Armada (GPT voice); if either isn't set up yet, it points you to the
+  right Settings page.
+- **Commit & merge says the merge is local** and offers a "Push to origin" button, with a
+  copyable command.
 
 ### Fixed
 
 - **Voice dictation starts.** Pressing the mic in 0.1.3 failed with "Couldn't start dictation:
-  state not managed for field `core`". Dictation, its model downloads and its settings now start
-  normally. A new check keeps this kind of mistake from reaching a release again.
+  state not managed for field `core`". A new check keeps this kind of mistake from reaching a
+  release again. Dictation also no longer leaves the microphone open when stopped mid-start, and
+  ends itself at the recording limit.
+- **"Waiting on N sub-agents" stays put** instead of jittering or disappearing while background
+  sub-agents run, and their activity no longer reshuffles the conversation.
+- **Agent view keeps room for the conversation.** The header is one fixed-height row, the queue
+  folds to a one-line summary, the usage-limit card is a single card, and toasts, the voice panel
+  and "Jump to latest" no longer cover the composer or text.
+- **Voice assistant asks before acting.** Starting an agent or sending a message needs your
+  on-screen Confirm (Enter) or Cancel (Esc), and assistant-started agents always ask before
+  acting. The mic is muted while it talks unless you turn on the headphones setting, usage is
+  saved as you go, and a temporary error no longer hides a session that is still running.
+- **Safer by default.** The Run button on code blocks asks first for anything beyond plain build,
+  test and read-only commands; GitHub CLI calls get the same git hardening as Armada's own git
+  commands; more credentials are redacted (URL passwords, auth headers, JWTs, GitLab, npm, Stripe,
+  Google and Hugging Face tokens); desktop Approve buttons only appear for short commands with no
+  hidden characters; local model servers no longer follow redirects.
+- **Secrets survive a locked keychain.** A locked or failing OS keychain no longer wipes saved MCP
+  and agent secrets, and unresolved secrets are no longer passed to agents as `keychain:` text.
+- **Checkpoints are more reliable.** No stale snapshot after a branch switch, reset or pull; more
+  credential files are kept out of snapshots; deleting an agent with unsaved work keeps its
+  checkpoints; Restore is disabled while the agent works.
+- **Cancel means cancel.** Cancelling while the pre-message checkpoint runs now stops the turn
+  instead of sending the message anyway.
+- **Undo after deleting an agent** keeps its terminals and composer draft.
+- **Accurate turn summaries.** The "files changed" card counts files changed by shell commands,
+  and fast-exiting terminals show as exited.
+- **Linux fixes.** Agents, tools and terminals no longer inherit the AppImage's library paths
+  (fixes curl/git symbol errors); Armada starts without a tray library; on Wayland, Settings
+  explains how to bind `armada --new-agent`, which now also works on a cold start.
+- **The remote server recovers by itself** after a network drop. Launching at login no longer
+  flashes the window, and quitting via log-off still shuts agents down cleanly.
+- **Less battery use.** Preview detection pauses while the window is hidden or unfocused.
+- **Phone.** Local-model agents can be started, pairing messages are accurate, "Try again" reuses
+  the same code, expired share links say so, shared agents load full history, and a "Can't reach
+  Armada" page shows if the app can't load.
+- Makefile variable assignments no longer show up as run targets, and usage meters drop windows
+  that already reset.
 
 ## v0.1.3 — 2026-10-28
 

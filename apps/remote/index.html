@@ -20,9 +20,22 @@
     <link rel="icon" type="image/png" href="/icon.png" />
     <link rel="apple-touch-icon" href="/icon.png" />
     <title>Armada</title>
+    <style>
+      #static-fallback { font: 16px/1.5 -apple-system, system-ui, sans-serif; color: #e6eaef; background: #0b0d10; min-height: 100vh; padding: 48px 24px; text-align: center; }
+      #static-fallback[hidden] { display: none; }
+      #static-fallback h1 { font-size: 22px; margin: 0 0 8px; }
+      #static-fallback p { color: #9aa4b2; margin: 0 0 20px; }
+      #static-fallback button { font: inherit; color: #e6eaef; background: #1a1f26; border: 1px solid #2a313b; border-radius: 12px; padding: 10px 20px; }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="static-fallback" hidden>
+        <h1>Can't reach Armada</h1>
+        <p>Check that the desktop app is running and you're on the same network.</p>
+        <button id="static-fallback-retry" type="button">Try again</button>
+      </div>
+    </div>
     <noscript>Armada Remote needs JavaScript enabled.</noscript>
     <script>
       // Browsers older than the build target (iOS < 16.4, …) can't run the app: say so instead of a blank page.

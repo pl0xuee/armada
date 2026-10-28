@@ -1,11 +1,9 @@
 import { ArrowDown } from "lucide-react";
-import { m, AnimatePresence } from "motion/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Agent, TimelineItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
-import { isBusy } from "@/lib/agents";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { Spinner } from "../ui/misc";
@@ -14,8 +12,10 @@ import { AgentMessage, NoticeBanner, PermissionCard, PlanCard, ThoughtBlock, Too
 import { ActivityGroup } from "./ActivityGroup";
 import { groupActivity } from "./activityGroups";
 import { SubagentCard } from "./SubagentCard";
+import { useRunningSubagentCount, useSubagentRuns } from "../agent/useSubagents";
+import { useHeld, WAITING_HOLD_MS } from "@/hooks/useHeld";
 import { ThinkingIndicator } from "./ThinkingIndicator";
-import { shouldShowThinking, turnEndOf, turnStart } from "./thinking";
+import { shouldShowThinking, turnEndOf, turnStart, waitingStatus } from "./thinking";
 import { TurnEndLine } from "./TurnEndLine";
 import { TurnSummaryCard, TurnSummaryLine } from "./TurnSummaryCard";
 import { latestPending, usePermissionKeys } from "./usePermissionKeys";
@@ -76,9 +76,20 @@ export function Timeline({
   const list = items ?? NO_ITEMS;
   // The view (which items are top-level rows, sub-agent nesting) only depends on structure,
   // so it's recomputed when items are added/removed, not on every streamed delta.
-  const structureKey = `${list.length}:${list[0]?.id ?? ""}:${list[list.length - 1]?.id ?? ""}`;
+  // Attribution counts too: the adapter often streams a sub-agent's call before it knows the
+  // parent, then names it in a later update; the call must move into its card right away.
+  let attributed = 0;
+  for (const it of list) if (it.kind === "tool_call" && it.parentToolCallId) attributed++;
+  // Only waiting on sub-agents: stray calls fold into one quiet row under a fixed waiting line.
+  // Not while an approval is pending: the approval card is the call to action then.
+  // Sticky: the count can dip to 0 for a moment between a background sub-agent's turns; the line
+  // stays for WAITING_HOLD_MS after the last counted one, and shows while the agent itself is idle.
+  const runningSubagents = useHeld(useRunningSubagentCount(agent.id), 0, WAITING_HOLD_MS);
+  const waiting = runningSubagents > 0 && waitingStatus(agent.status);
+  const bgRunningIds = useBackgroundRunning(agent.id);
+  const structureKey = `${list.length}:${list[0]?.id ?? ""}:${list[list.length - 1]?.id ?? ""}:${attributed}:${waiting}`;
   // Keyed on structure on purpose: it reads the current list, but deltas never change the structure.
-  const view = useMemo(() => buildView(list), [structureKey]);
+  const view = useMemo(() => buildView(list, waiting), [structureKey]);
   const rows = view.top;
   const childrenOf = useResolvedLists(view.children, list, isToolItem);
   const groupItems = useResolvedLists(view.groups, list);
@@ -204,6 +215,18 @@ export function Timeline({
     // Runs when older items were prepended (structure changed).
   }, [structureKey]);
 
+  // An older-page load that finishes without prepending (empty page or error) leaves a stale anchor.
+  const wasLoadingOlder = useRef(false);
+  useEffect(() => {
+    if (wasLoadingOlder.current && !olderLoading) {
+      // Let the prepend's layout effect run first (it consumes the anchor); otherwise drop it.
+      const t = setTimeout(() => (anchor.current = null), 0);
+      wasLoadingOlder.current = olderLoading;
+      return () => clearTimeout(t);
+    }
+    wasLoadingOlder.current = olderLoading;
+  }, [olderLoading]);
+
   // Scroll-ups only unstick when the user caused them (the virtualizer also nudges scrollTop
   // when rows measure smaller than estimated; that must not stop following the stream).
   const userIntentAt = useRef(0);
@@ -272,7 +295,8 @@ export function Timeline({
   );
   const showThinking =
     !(loading && !items) &&
-    shouldShowThinking(agent.status, lastRowItem, !!lastRowItem && groupItems.has(lastRowItem.id), messageSettled);
+    (waiting ||
+      shouldShowThinking(agent.status, lastRowItem, !!lastRowItem && groupItems.has(lastRowItem.id), messageSettled));
   const turnEnd = !loading && !showThinking ? turnEndOf(agent.status, list, lastRowItem, agent.lastActivityAt) : null;
   const fallbackStart = useRef(Date.now());
   useLayoutEffect(() => {
@@ -284,7 +308,7 @@ export function Timeline({
   }, [showThinking, turnEnd, scrollToBottom]);
 
   return (
-    <div className="@container relative min-h-0 flex-1">
+    <div className="@container relative flex min-h-0 flex-1 flex-col">
       <LiveAnnouncer agent={agent} items={items} />
       {olderLoading && (
         <div
@@ -301,7 +325,7 @@ export function Timeline({
         onTouchMove={markIntent}
         onPointerDown={markIntent}
         onKeyDown={onKeyDownScroll}
-        className="h-full overflow-y-auto [overflow-anchor:none]"
+        className="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]"
         aria-busy={live}
       >
         <div className="mx-auto w-full max-w-[860px] px-3 pb-6 @lg:px-6 @[1280px]:max-w-[1000px]">
@@ -339,7 +363,7 @@ export function Timeline({
                         groupId={it.id}
                         items={group}
                         agent={stableAgent}
-                        live={live && group[group.length - 1].id === lastId}
+                        live={live && !waiting && group[group.length - 1].id === lastId}
                         agentLive={stableAgent.running && stableAgent.status !== "interrupted"}
                         open={openGroups.has(it.id)}
                         onToggle={toggleGroup}
@@ -351,6 +375,7 @@ export function Timeline({
                         liveTail: live && it.id === lastId,
                         view,
                         childrenOf,
+                        bgRunningIds,
                         lastPrompt: lastPrompt?.kind === "user_message" ? lastPrompt : null,
                         pendingId,
                         reasonFor,
@@ -367,28 +392,25 @@ export function Timeline({
           {footer}
         </div>
       </div>
-      <AnimatePresence>
-        {!atBottom && (
-          <m.button
+      {/* Its own strip below the conversation (not floating over it), so it never covers text. */}
+      {!atBottom && (
+        <div className="flex h-11 shrink-0 items-center justify-center border-t border-line/60 bg-base">
+          <button
             type="button"
-            initial={{ opacity: 0, y: 8, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.96 }}
-            transition={{ duration: 0.15 }}
             onClick={() => {
               stick.current = true;
               setHasNew(false);
               setAtBottom(true);
               scrollToBottom();
             }}
-            className="glass absolute bottom-3 left-1/2 z-10 flex h-8 -translate-x-1/2 items-center gap-1.5 rounded-full border border-line-strong px-3 text-[12px] font-medium text-fg shadow-lg shadow-black/40 edge transition-colors hover:border-accent/50"
+            className="flex h-8 items-center gap-1.5 rounded-full border border-line-strong bg-card px-3 text-[12px] font-medium text-fg shadow-md shadow-black/30 edge transition-colors hover:border-accent/50"
           >
             {hasNew && <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]" />}
             {hasNew ? "New activity" : "Jump to latest"}
             <ArrowDown className="h-3.5 w-3.5" />
-          </m.button>
-        )}
-      </AnimatePresence>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -457,7 +479,7 @@ interface TimelineView {
 
 const NO_ITEMS: TimelineItem[] = [];
 
-function buildView(items: TimelineItem[]): TimelineView {
+function buildView(items: TimelineItem[], waiting = false): TimelineView {
   const parents = new Set<string>();
   const parentIdx = new Map<string, number>();
   items.forEach((it, i) => {
@@ -487,7 +509,7 @@ function buildView(items: TimelineItem[]): TimelineView {
     }
     top.push(i);
   });
-  const grouped = groupActivity(items, top);
+  const grouped = groupActivity(items, top, { foldTail: waiting });
   const groups = new Map<string, number[]>();
   for (const [first, idxs] of grouped.groups) groups.set(items[first].id, idxs);
   return { top: grouped.rows, groups, children, parentIdx, lastSummaryId, lastErrorId, lastPromptIdx };
@@ -536,6 +558,15 @@ function useResolvedLists<T extends TimelineItem = TimelineItem>(
   return prev.current;
 }
 
+/** toolCallIds of background sub-agents currently counted as running (same rule as the counts). */
+function useBackgroundRunning(agentId: string): ReadonlySet<string> {
+  const runs = useSubagentRuns(agentId);
+  return useMemo(
+    () => new Set(runs.filter((r) => r.state === "running" && r.background).map((r) => r.toolCallId)),
+    [runs],
+  );
+}
+
 function renderItem(
   it: TimelineItem,
   ctx: {
@@ -544,6 +575,7 @@ function renderItem(
     liveTail: boolean;
     view: TimelineView;
     childrenOf: Map<string, ToolItem[]>;
+    bgRunningIds: ReadonlySet<string>;
     lastPrompt: UserItem | null;
     pendingId: string | null;
     reasonFor: string | null;
@@ -563,14 +595,9 @@ function renderItem(
       return <ThoughtBlock item={it} live={liveTail} agentId={agent.id} />;
     case "tool_call":
       if (it.subagent) {
-        // Same rule as subagentRuns: a background sub-agent's call completes at launch but it keeps
-        // running while the agent is busy and the call belongs to the current turn.
-        const bgRunning =
-          !!it.subagent.background &&
-          it.status === "completed" &&
-          isBusy(agent) &&
-          !!ctx.lastPrompt &&
-          it.ts >= ctx.lastPrompt.ts;
+        // Same rule as the sub-agent counts: a background sub-agent's call completes at launch but
+        // it keeps running while subagentRuns counts it.
+        const bgRunning = !!it.subagent.background && it.status === "completed" && ctx.bgRunningIds.has(it.toolCallId);
         return (
           <SubagentCard
             item={it}

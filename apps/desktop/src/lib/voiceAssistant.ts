@@ -18,6 +18,13 @@ export interface VaAction {
   ok: boolean;
 }
 
+/** A side effect the assistant wants to do; it runs only after the user confirms. */
+export interface VaConfirm {
+  id: string;
+  kind: string;
+  summary: string;
+}
+
 export type VaEvent =
   | { type: "state"; state: Exclude<VaPhase, "off">; message: string | null }
   | { type: "level"; input: number; output: number }
@@ -25,6 +32,9 @@ export type VaEvent =
   | ({ type: "action" } & VaAction)
   | { type: "usage"; elapsedSecs: number; costUsd: number }
   | { type: "navigate"; view: string; agentId: string | null }
+  | ({ type: "confirm_action" } & VaConfirm)
+  | { type: "confirm_done"; id: string; status: "confirmed" | "cancelled" | "expired" }
+  | { type: "notice"; message: string | null }
   | { type: "ended"; reason: string; error: boolean };
 
 export interface VaState {
@@ -37,6 +47,10 @@ export interface VaState {
   elapsedSecs: number;
   costUsd: number;
   muted: boolean;
+  /** A non-fatal message beside a live session (a transient API error, "Reconnected"). */
+  notice: string | null;
+  /** Actions waiting for the user's Confirm / Cancel. */
+  confirms: VaConfirm[];
   /** Why the last session ended (shown until the panel is dismissed). */
   endedReason: string | null;
 }
@@ -54,6 +68,8 @@ export const initialVa: VaState = {
   elapsedSecs: 0,
   costUsd: 0,
   muted: false,
+  notice: null,
+  confirms: [],
   endedReason: null,
 };
 
@@ -86,9 +102,21 @@ export function reduceVa(s: VaState, e: VaEvent): VaState {
       return { ...s, elapsedSecs: e.elapsedSecs, costUsd: e.costUsd };
     case "navigate":
       return s;
+    case "confirm_action": {
+      if (!isLive(s)) return s;
+      const { type: _t, ...c } = e;
+      void _t;
+      return s.confirms.some((x) => x.id === c.id) ? s : { ...s, confirms: [...s.confirms, c] };
+    }
+    case "confirm_done":
+      return { ...s, confirms: s.confirms.filter((c) => c.id !== e.id) };
+    case "notice":
+      return isLive(s) ? { ...s, notice: e.message } : s;
     case "ended":
       return {
         ...s,
+        notice: null,
+        confirms: [],
         phase: e.error ? "error" : "off",
         message: e.error ? e.reason : null,
         endedReason: e.reason,
@@ -98,7 +126,8 @@ export function reduceVa(s: VaState, e: VaEvent): VaState {
   }
 }
 
-/** True while a session exists (connecting through speaking). */
+/** True while a session exists (connecting through speaking). A transient error is a
+ * `notice` on a live phase, never the "error" phase, which only follows a real end. */
 export function isLive(s: Pick<VaState, "phase">): boolean {
   return s.phase !== "off" && s.phase !== "error";
 }

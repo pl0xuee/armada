@@ -140,14 +140,39 @@ export interface SubagentRun {
 
 const unfinished = (s: ToolItem["status"]) => s === "in_progress" || s === "pending";
 
+/** A background sub-agent counts as running while a child call is unfinished or active this recently. */
+export const SUBAGENT_ACTIVE_WINDOW_MS = 90_000;
+/** A just-launched background sub-agent counts as running this long, to produce its first child call. */
+export const SUBAGENT_LAUNCH_GRACE_MS = 60_000;
+/** An unfinished child call older than this is stale (idle agent), not a sign of life. */
+const SUBAGENT_STALE_CHILD_MS = 30 * 60_000;
+/** Resolution of the shared sub-agent clock; derived data is cached per bucket. */
+export const SUBAGENT_TICK_MS = 5_000;
+
+/** The wall clock and liveness an agent's background sub-agents are judged by. */
+export interface SubagentClock {
+  now: number;
+  /** The agent can still be waiting on them: not stopped, errored or interrupted. */
+  live: boolean;
+}
+
+/** Whether an agent's status allows background sub-agents to still be running. */
+export function isSubagentLive(status: Agent["status"]): boolean {
+  return status !== "stopped" && status !== "error" && status !== "interrupted";
+}
+
 /**
  * Sub-agents that are running, plus those that finished during the current turn (newest last).
  * `busy`: the agent is working. A sub-agent whose call is still open only counts while the agent
- * is busy (an idle agent's leftover open call is stale). A background sub-agent's call completes
- * at launch, yet it keeps running: Claude's adapter holds the turn open until they finish, so it
- * counts as running while the agent is busy and the call is from the current turn.
+ * is busy (an idle agent's leftover open call is stale).
+ *
+ * A background sub-agent's call completes at launch, yet it keeps running and Claude's adapter
+ * gives no finish signal; its results arrive as new automatic turns, with idle gaps between. With
+ * a `clock` it counts as running when the agent is live and ANY of: (a) busy and the call is after
+ * the last user message; (b) a child call is unfinished or the latest child activity is within
+ * SUBAGENT_ACTIVE_WINDOW_MS; (c) it launched within SUBAGENT_LAUNCH_GRACE_MS. Without a clock only (a) applies.
  */
-export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean): SubagentRun[] {
+export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, clock?: SubagentClock): SubagentRun[] {
   if (!items) return [];
   let turnStartIdx = 0;
   for (let i = items.length - 1; i >= 0; i--) {
@@ -157,9 +182,16 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean): 
     }
   }
   const lastChild = new Map<string, ToolItem>();
+  const lastChildTs = new Map<string, number>();
+  const openChildTs = new Map<string, number>();
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
-    if (it.kind === "tool_call" && it.parentToolCallId) lastChild.set(it.parentToolCallId, it);
+    if (it.kind === "tool_call" && it.parentToolCallId) {
+      lastChild.set(it.parentToolCallId, it);
+      lastChildTs.set(it.parentToolCallId, Math.max(it.ts, lastChildTs.get(it.parentToolCallId) ?? 0));
+      if (unfinished(it.status))
+        openChildTs.set(it.parentToolCallId, Math.max(it.ts, openChildTs.get(it.parentToolCallId) ?? 0));
+    }
   }
   const runs: SubagentRun[] = [];
   for (let i = 0; i < items.length; i++) {
@@ -167,7 +199,17 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean): 
     if (it.kind !== "tool_call" || !it.subagent || it.subagent.control) continue;
     const bg = !!it.subagent.background;
     const open = unfinished(it.status) || (bg && it.status === "completed" && i > turnStartIdx);
-    const running = open && busy;
+    let running = open && busy;
+    if (bg && clock && it.status === "completed") {
+      const lastTs = lastChildTs.get(it.toolCallId);
+      const openTs = openChildTs.get(it.toolCallId);
+      running =
+        clock.live &&
+        (running ||
+          (openTs !== undefined && (busy || clock.now - openTs < SUBAGENT_STALE_CHILD_MS)) ||
+          (lastTs !== undefined && clock.now - lastTs < SUBAGENT_ACTIVE_WINDOW_MS) ||
+          clock.now - it.ts < SUBAGENT_LAUNCH_GRACE_MS);
+    }
     if (!running && i <= turnStartIdx) continue;
     if (!running && unfinished(it.status)) continue; // stale: open call of an idle agent
     const child = lastChild.get(it.toolCallId);

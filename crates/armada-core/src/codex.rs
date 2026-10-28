@@ -377,6 +377,14 @@ impl CodexDriver {
             return None;
         }
         self.ctx.checkpoint_before_turn().await;
+        // Cancelled while the checkpoint ran: the prompt is never sent.
+        if self.ctx.cancel_was_requested() && self.ctx.is_current(self.generation) {
+            self.cancel_requested
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+            return self
+                .ctx
+                .turn_finished_by(self.generation, TurnOutcome::Cancelled);
+        }
         self.peer.mark_turn();
         let mark = self.peer.stderr_mark();
         let preamble = self.ctx.take_preamble();
@@ -1289,6 +1297,7 @@ fn codex_config(servers: &[McpServer]) -> Value {
         let kv = |list: &[KeyValue]| -> Value {
             Value::Object(
                 list.iter()
+                    .filter(|e| !crate::secrets::is_unresolved(&e.value))
                     .map(|e| (e.name.clone(), Value::String(e.value.clone())))
                     .collect(),
             )

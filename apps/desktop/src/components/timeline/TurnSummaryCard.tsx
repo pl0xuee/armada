@@ -15,13 +15,14 @@ import { memo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { attempt } from "@/lib/actions";
-import { conflictPrompt, gitBusyReason, shipOutcome, toastCommit } from "@/lib/gitResults";
+import { conflictPrompt, gitBusyReason, mergeToast, shipOutcome, toastCommit } from "@/lib/gitResults";
 import { findFileSlice, slicePatch } from "@/lib/patchSlices";
 import { formatCost, formatTokens, pluralize } from "@/lib/format";
-import type { Agent, TimelineItem } from "@/lib/types";
+import type { Agent, BaseBranchStatus, TimelineItem } from "@/lib/types";
 import { basename, cn, errorMessage } from "@/lib/utils";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
+import { PushBaseNotice } from "../git/PushBaseNotice";
 import { ConfirmDialog } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Input, Label } from "../ui/input";
@@ -54,7 +55,8 @@ export const TurnSummaryLine = memo(function TurnSummaryLine({ item }: { item: S
 });
 
 /** Ship state per summary this session (survives virtualized remounts). */
-type ShipState = { kind: "shipped" } | { kind: "not_merged"; error: string; conflict: boolean };
+type ShipState =
+  { kind: "shipped"; baseStatus: BaseBranchStatus | null } | { kind: "not_merged"; error: string; conflict: boolean };
 const shipStates = new Map<string, ShipState>();
 
 /** Ready-to-ship card after a turn that used tools: what changed, and what to do next. */
@@ -102,9 +104,13 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
       } else {
         const o = shipOutcome(await api.shipAgent(agent.id, message));
         const next: ShipState =
-          o.kind === "shipped" ? { kind: "shipped" } : { kind: "not_merged", error: o.error, conflict: o.conflict };
+          o.kind === "shipped"
+            ? { kind: "shipped", baseStatus: o.baseStatus }
+            : { kind: "not_merged", error: o.error, conflict: o.conflict };
         if (o.kind === "shipped")
-          toast.success("Committed & merged", { description: `Merged into ${agent.baseBranch ?? "main"}.` });
+          toast.success("Committed & merged locally", {
+            description: mergeToast(agent.branch ?? "Branch", agent.baseBranch ?? "main", o.baseStatus),
+          });
         else toast.warning("Committed, but not merged", { description: o.error, duration: 10000 });
         shipStates.set(item.id, next);
         setShipState(next);
@@ -132,7 +138,7 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
             <CircleCheckBig className="h-3.5 w-3.5" />
           </span>
           {shipped
-            ? "Shipped ✓"
+            ? "Merged locally ✓"
             : shipState?.kind === "not_merged"
               ? "Committed, not merged"
               : hasFiles
@@ -193,6 +199,11 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
         </div>
       )}
 
+      {shipState?.kind === "shipped" && (
+        <div className="border-t border-ok/25 bg-ok/[0.05] px-4 py-2">
+          <PushBaseNotice agentId={agent.id} initial={shipState.baseStatus} />
+        </div>
+      )}
       {shipState?.kind === "not_merged" && (
         <div
           role="status"

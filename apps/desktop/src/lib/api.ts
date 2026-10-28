@@ -37,6 +37,7 @@ import type {
   Settings,
   ShareLink,
   ShipResult,
+  BaseBranchStatus,
   TimelineItem,
   UpdateInfo,
   VoiceAssistantUsage,
@@ -162,6 +163,8 @@ const tauriApi = {
   /** Commits anything uncommitted (message defaults to the title), then merges into the base branch. */
   shipAgent: (agentId: string, message: string, exclude?: string[]) =>
     invoke<ShipResult>("ship_agent", { agentId, message, exclude }),
+  baseBranchStatus: (agentId: string) => invoke<BaseBranchStatus>("base_branch_status", { agentId }),
+  pushBaseBranch: (agentId: string) => invoke<BaseBranchStatus>("push_base_branch", { agentId }),
   createPr: (agentId: string, title: string, body: string) => invoke<string>("create_pr", { agentId, title, body }),
   /** PR + CI status of the agent's branch (cached; never rejects for gh/auth/network problems). */
   prStatus: (agentId: string, force = false) => invoke<PrStatus>("pr_status", { agentId, force }),
@@ -276,6 +279,7 @@ const tauriApi = {
   vaStart: () => invoke<void>("va_start"),
   vaStop: () => invoke<void>("va_stop"),
   vaSetMuted: (muted: boolean) => invoke<void>("va_set_muted", { muted }),
+  vaConfirm: (id: string, accept: boolean) => invoke<void>("va_confirm", { id, accept }),
   vaActive: () => invoke<boolean>("va_active"),
   vaUsage: () => invoke<VoiceAssistantUsage>("va_usage"),
   vaVoices: () => invoke<string[]>("va_voices"),

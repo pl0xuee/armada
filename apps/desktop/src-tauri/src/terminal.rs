@@ -352,6 +352,11 @@ impl Terminals {
             .context("opening a pseudo-terminal")?;
 
         let mut cmd = command_for(&spec)?;
+        // Drop the AppImage's libraries/paths so system tools in the shell still work.
+        apply_env_changes(
+            &mut cmd,
+            armada_core::childenv::appimage_env_changes(std::env::vars_os()),
+        );
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         for k in &spec.env_remove {
@@ -786,6 +791,19 @@ fn abandon(mut child: Box<dyn Child + Send + Sync>, proc: &Proc) {
     proc.exited.store(true, Ordering::SeqCst);
 }
 
+/// Applies `childenv` changes (`None` removes the variable) to a PTY command.
+fn apply_env_changes(
+    cmd: &mut CommandBuilder,
+    changes: Vec<(std::ffi::OsString, Option<std::ffi::OsString>)>,
+) {
+    for (name, value) in changes {
+        match value {
+            Some(v) => cmd.env(name, v),
+            None => cmd.env_remove(name),
+        }
+    }
+}
+
 /// The command to run `spec` in a PTY.
 fn command_for(spec: &SpawnSpec) -> anyhow::Result<CommandBuilder> {
     #[cfg(windows)]
@@ -925,6 +943,38 @@ pub fn decode_utf8_chunk(pending: &mut Vec<u8>) -> String {
 // Most PTY tests drive /bin/sh, so their helpers are unused elsewhere.
 #[cfg_attr(not(unix), allow(dead_code, unused_imports))]
 mod tests {
+    #[test]
+    #[cfg(unix)]
+    fn pty_env_drops_appimage_entries() {
+        use std::ffi::OsString;
+        let vars = vec![
+            (
+                OsString::from("APPIMAGE"),
+                OsString::from("/x/Armada.AppImage"),
+            ),
+            (
+                OsString::from("APPDIR"),
+                OsString::from("/tmp/.mount_Armada1"),
+            ),
+            (
+                OsString::from("LD_LIBRARY_PATH"),
+                OsString::from("/tmp/.mount_Armada1/usr/lib"),
+            ),
+            (
+                OsString::from("PATH"),
+                OsString::from("/tmp/.mount_Armada1/usr/bin:/usr/bin"),
+            ),
+        ];
+        let mut cmd = CommandBuilder::new("env");
+        cmd.env("LD_LIBRARY_PATH", "/tmp/.mount_Armada1/usr/lib");
+        cmd.env("PATH", "/tmp/.mount_Armada1/usr/bin:/usr/bin");
+        cmd.env("APPDIR", "/tmp/.mount_Armada1");
+        apply_env_changes(&mut cmd, armada_core::childenv::appimage_env_changes(vars));
+        assert!(cmd.get_env("LD_LIBRARY_PATH").is_none());
+        assert!(cmd.get_env("APPDIR").is_none());
+        assert_eq!(cmd.get_env("PATH").unwrap(), "/usr/bin");
+    }
+
     use super::*;
     use armada_core::EventSink;
 

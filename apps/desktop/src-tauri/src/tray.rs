@@ -3,11 +3,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::AppHandle;
 use armada_core::{Core, NavigateTarget};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager};
+use tauri::Manager;
 use tokio::sync::Notify;
 
 use crate::window;
@@ -15,8 +16,8 @@ use crate::window;
 const TRAY_ID: &str = "armada-tray";
 
 pub struct TrayState {
-    tray: TrayIcon,
-    inbox: MenuItem<tauri::Wry>,
+    tray: TrayIcon<crate::Rt>,
+    inbox: MenuItem<crate::Rt>,
     dirty: Arc<Notify>,
 }
 

@@ -11,16 +11,54 @@ permissions:
   contents: read
 
 jobs:
-  # Nothing is built or signed unless the tag matches the version and the tests pass.
+  # Nothing is built or signed unless the tag matches the version and CI passed on the
+  # tagged commit. Tests are not re-run here: the CI gate covers them.
   verify:
     name: Verify
     runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read # the CI gate below reads the tagged commit's check runs
     outputs:
       notes: ${{ steps.notes.outputs.body }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # The tag must point at a commit CI already passed on after it landed on main (the
+      # push run includes the release build and bundle smoke that PR runs skip), so a
+      # release is never the first full build of that code. Names must match ci.yml.
+      - name: CI passed for this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --paginate \
+            "repos/${{ github.repository }}/commits/${{ github.sha }}/check-runs?per_page=100" \
+            --jq '.check_runs[] | [.name, .status, (.conclusion // "none")] | @tsv' > check-runs.tsv
+          echo "Check runs on ${GITHUB_SHA}:"
+          cat check-runs.tsv
+          required=(
+            "checks (linux)"
+            "macOS"
+            "Windows"
+            "release build (linux)"
+            "deb bundle smoke (linux)"
+          )
+          failed=()
+          for job in "${required[@]}"; do
+            # Several runs may share a name (re-runs, PR + push): any success counts.
+            if awk -F'\t' -v j="$job" '$1 == j && $3 == "success" { ok = 1 } END { exit !ok }' check-runs.tsv; then
+              continue
+            fi
+            state=$(awk -F'\t' -v j="$job" '$1 == j { s = ($2 == "completed" ? $3 : $2) } END { print s }' check-runs.tsv)
+            failed+=("${job} (${state:-not found})")
+          done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::CI has not passed for ${GITHUB_SHA}. Missing or unsuccessful jobs: $(IFS=';'; echo "${failed[*]}"). Push the commit to main and let CI finish before tagging."
+            exit 1
+          fi
 
       - name: Tag matches the app version
         run: |
@@ -52,38 +90,6 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Install Linux system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential pkg-config \
-            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
-            libxdo-dev libssl-dev libasound2-dev libdbus-1-dev libclang-dev patchelf
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-
-      - name: Test mobile companion
-        working-directory: apps/remote
-        run: |
-          npm ci
-          npm run build
-          npm test
-
-      - name: Type-check desktop UI
-        working-directory: apps/desktop
-        run: |
-          npm ci
-          npx tsc --noEmit
-
-      - name: Test
-        run: cargo test --workspace --locked
-
   release:
     name: ${{ matrix.name }}
     needs: verify
@@ -109,6 +115,7 @@ jobs:
             rust-targets: ""
             args: "-- --locked"
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -306,7 +306,7 @@ impl<'a> Git<'a> {
         let (mut count, mut total) = (0usize, 0u64);
         for raw in untracked
             .split(|b| *b == 0)
-            .filter(|p| !p.is_empty() && !is_secret_path(p))
+            .filter(|p| !p.is_empty() && !is_secret_bytes(p))
         {
             count += 1;
             if count > MAX_UNTRACKED_FILES {
@@ -355,6 +355,25 @@ impl<'a> Git<'a> {
             .ok()?;
         let now = std::time::SystemTime::now();
         let mut fp = out.clone();
+        // A clean branch switch, reset or pull changes neither `status` nor any
+        // listed file, so HEAD and the index file's stat data are part of the print.
+        fp.extend_from_slice(b"\0HEAD:");
+        if let Some(h) = self.head().await {
+            fp.extend_from_slice(h.as_bytes());
+        }
+        if let Ok(idx) = self
+            .text(&["rev-parse", "--path-format=absolute", "--git-path", "index"])
+            .await
+        {
+            if let Ok(m) = std::fs::metadata(self.cwd.join(idx)) {
+                let since = m
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map_or(0, |d| d.as_nanos());
+                fp.extend_from_slice(format!("\0IDX:{}:{since}", m.len()).as_bytes());
+            }
+        }
         for rec in out.split(|b| *b == 0).filter(|r| !r.is_empty()) {
             let path = match rec[0] {
                 b'u' => return None,
@@ -399,17 +418,22 @@ impl<'a> Git<'a> {
         let env: [(&str, &OsStr); 1] = [("GIT_INDEX_FILE", index.0.as_os_str())];
         // Untracked files that look like credentials never enter a snapshot (tracked
         // ones are already in the repository's history, so they stay).
-        let mut args: Vec<String> = vec!["add".into(), "-A".into(), "--".into(), ".".into()];
+        // Pathspecs go through stdin (NUL-separated) so non-UTF-8 names work too.
+        let mut specs: Vec<u8> = b".\0".to_vec();
         for raw in untracked
             .split(|b| *b == 0)
-            .filter(|p| !p.is_empty() && is_secret_path(p))
+            .filter(|p| !p.is_empty() && is_secret_bytes(p))
         {
-            if let Ok(p) = std::str::from_utf8(raw) {
-                args.push(format!(":(exclude,literal){p}"));
-            }
+            specs.extend_from_slice(b":(exclude,literal)");
+            specs.extend_from_slice(raw);
+            specs.push(0);
         }
-        let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        self.run(&args, None, &env).await?;
+        self.run(
+            &["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
+            Some(specs),
+            &env,
+        )
+        .await?;
         let tree = self.run(&["write-tree"], None, &env).await?;
         let tree = String::from_utf8_lossy(&tree).trim().to_string();
         // The fingerprint was taken before the files were read, so a change made in
@@ -446,10 +470,21 @@ impl<'a> Git<'a> {
 
 /// Does this repository-relative path name a file that usually holds credentials?
 /// Sample/template env files are not secrets.
-fn is_secret_path(raw: &[u8]) -> bool {
+pub fn is_secret_path(path: &str) -> bool {
+    is_secret_bytes(path.as_bytes())
+}
+
+/// Byte-path form of [`is_secret_path`]; names that aren't UTF-8 count as secret
+/// (they can't be inspected safely, so they are kept out of snapshots).
+fn is_secret_bytes(raw: &[u8]) -> bool {
     let name = raw.rsplit(|b| *b == b'/').next().unwrap_or(raw);
-    let name = String::from_utf8_lossy(name).to_lowercase();
-    if name == ".env" {
+    let Ok(name) = std::str::from_utf8(name) else {
+        return true;
+    };
+    let name = name.to_lowercase();
+    // Also tolerate Windows separators.
+    let name = name.rsplit('\\').next().unwrap_or(&name).to_string();
+    if name == ".env" || name == ".envrc" {
         return true;
     }
     if let Some(rest) = name.strip_prefix(".env.") {
@@ -458,12 +493,32 @@ fn is_secret_path(raw: &[u8]) -> bool {
             "example" | "sample" | "template" | "dist" | "defaults"
         );
     }
-    const EXACT: [&str; 4] = [".npmrc", ".pypirc", ".netrc", ".git-credentials"];
-    const PREFIX: [&str; 4] = ["id_rsa", "id_ed25519", "id_ecdsa", "credentials"];
-    const SUFFIX: [&str; 5] = [".pem", ".key", ".p12", ".pfx", ".keystore"];
+    const EXACT: [&str; 6] = [
+        ".npmrc",
+        ".pypirc",
+        ".netrc",
+        ".git-credentials",
+        ".pgpass",
+        ".htpasswd",
+    ];
+    const PREFIX: [&str; 5] = ["id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "credentials"];
+    const SUFFIX: [&str; 10] = [
+        ".pem",
+        ".key",
+        ".p12",
+        ".pfx",
+        ".keystore",
+        ".jks",
+        ".tfstate",
+        ".tfvars",
+        ".p8",
+        ".ppk",
+    ];
     EXACT.contains(&name.as_str())
         || PREFIX.iter().any(|p| name.starts_with(p))
         || SUFFIX.iter().any(|s| name.ends_with(s))
+        || name.contains(".tfstate.")
+        || (name.starts_with("service-account") && name.ends_with(".json"))
 }
 
 fn stderr_of(out: &std::process::Output) -> String {
@@ -611,14 +666,53 @@ async fn take_locked(
 }
 
 /// Deletes the agent's checkpoint refs (the database rows go with the agent).
+/// Absolute paths of the files whose content differs between `tree` and the folder
+/// as it is now. None when git can't tell (not a repository, too large...).
+pub(crate) async fn changed_since(agent: &Agent, tree: &str) -> Option<Vec<String>> {
+    let cwd = agent_dir(agent)?;
+    let git = Git::new(cwd).await.ok()?;
+    if !git.available().await {
+        return None;
+    }
+    let work = async {
+        let _guard = lock_agent(&agent.id).await;
+        let now = git.snapshot_tree(None).await?;
+        git.run(
+            &[
+                "diff-tree",
+                "-r",
+                "--name-only",
+                "--no-renames",
+                "-z",
+                tree,
+                &now,
+            ],
+            None,
+            &[],
+        )
+        .await
+    };
+    let out = tokio::time::timeout(TURN_BUDGET, work).await.ok()?.ok()?;
+    Some(
+        out.split(|b| *b == 0)
+            .filter(|p| !p.is_empty())
+            .filter_map(rel_path)
+            .map(|p| cwd.join(p).to_string_lossy().into_owned())
+            .collect(),
+    )
+}
+
 pub(crate) async fn forget_agent(agent: &Agent) {
-    let Some(cwd) = agent_dir(agent) else {
+    SNAPSHOTS.lock().remove(Path::new(&agent.cwd));
+    // A removed worktree is gone; the refs live in the shared repository, so the
+    // project folder reaches them just as well.
+    let project = Path::new(&agent.project_path);
+    let Some(cwd) = agent_dir(agent).or_else(|| project.is_dir().then_some(project)) else {
         return;
     };
     let Ok(git) = Git::new(cwd).await else {
         return;
     };
-    SNAPSHOTS.lock().remove(cwd);
     let _guard = lock_agent(&agent.id).await;
     let prefix = ref_prefix(&agent.id);
     let Ok(refs) = git
@@ -1182,8 +1276,19 @@ mod tests {
             "credentials.json",
             "a.keystore",
             ".git-credentials",
+            ".envrc",
+            "infra/terraform.tfstate",
+            "terraform.tfstate.backup",
+            "prod.tfvars",
+            ".pgpass",
+            "id_dsa",
+            "a.jks",
+            ".htpasswd",
+            "service-account-prod.json",
+            "AuthKey.p8",
+            "putty.ppk",
         ] {
-            assert!(is_secret_path(n.as_bytes()), "{n}");
+            assert!(is_secret_path(n), "{n}");
         }
         for n in [
             ".env.example",
@@ -1193,8 +1298,52 @@ mod tests {
             "env",
             "keys.rs",
         ] {
-            assert!(!is_secret_path(n.as_bytes()), "{n}");
+            assert!(!is_secret_path(n), "{n}");
         }
+    }
+
+    #[test]
+    fn non_utf8_names_count_as_secret() {
+        assert!(is_secret_bytes(b"dir/\xff\xfe.txt"));
+    }
+
+    #[tokio::test]
+    async fn changed_since_sees_files_written_without_edit_calls() {
+        let r = Repo::new();
+        let c = take_for_turn(&r.db, &r.agent, None).await.unwrap().unwrap();
+        // What `sed -i` / a script / a formatter does: no edit tool call involved.
+        r.write("a.txt", "rewritten\n");
+        r.write("tests/run.sh", "echo hi\n");
+        r.write("packages/x.txt", "pkg\n");
+        let files = changed_since(&r.agent, &c.tree).await.unwrap();
+        let names: Vec<String> = files
+            .iter()
+            .map(|f| {
+                Path::new(f)
+                    .strip_prefix(&r.dir)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        assert_eq!(names, ["a.txt", "packages/x.txt", "tests/run.sh"]);
+    }
+
+    #[tokio::test]
+    async fn clean_branch_switch_is_not_reused() {
+        let r = Repo::new();
+        let base = r.git(&["rev-parse", "--abbrev-ref", "HEAD"]);
+        r.git(&["checkout", "-q", "-b", "other"]);
+        r.write("b.txt", "other\n");
+        r.git(&["add", "-A"]);
+        r.git(&["commit", "-q", "-m", "b"]);
+        r.git(&["checkout", "-q", base.trim()]);
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        let a = take_for_turn(&r.db, &r.agent, None).await.unwrap().unwrap();
+        r.git(&["checkout", "-q", "other"]);
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        let b = take_for_turn(&r.db, &r.agent, None).await.unwrap().unwrap();
+        assert_ne!(a.tree, b.tree);
     }
 
     #[tokio::test]

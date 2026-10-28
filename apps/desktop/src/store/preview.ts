@@ -84,11 +84,11 @@ function candidates(agentId: string): string[] {
   return urls;
 }
 
-let busy = false;
+const scanning = new Set<string>();
 
 async function scan(agentId: string) {
-  if (busy) return;
-  busy = true;
+  if (scanning.has(agentId)) return;
+  scanning.add(agentId);
   try {
     const cand = candidates(agentId);
     const ports = [...new Set(cand.map(urlPort))].slice(-16);
@@ -101,15 +101,52 @@ async function scan(agentId: string) {
   } catch {
     /* probing is best effort */
   } finally {
-    busy = false;
+    scanning.delete(agentId);
   }
 }
 
-/** Polls for dev servers of `agentId` while the workspace panel is open. */
+const FAST_MS = 2500;
+const SLOW_MS = 10_000;
+/** After this long without a server, poll at SLOW_MS. */
+const IDLE_AFTER_MS = 30_000;
+
+const active = () => document.visibilityState === "visible" && document.hasFocus();
+
+/**
+ * Polls for dev servers of `agentId` while the workspace panel is open, the window is visible and
+ * focused. Backs off when no server has been seen for a while; scans at once on focus.
+ */
 export function usePreviewDetection(agentId: string) {
   useEffect(() => {
-    void scan(agentId);
-    const t = setInterval(() => void scan(agentId), 2500);
-    return () => clearInterval(t);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let lastSeen = Date.now();
+    let stopped = false;
+    let running = false;
+    const tick = async () => {
+      timer = undefined;
+      if (stopped || running || !active()) return; // resumes on focus / visibility
+      running = true;
+      await scan(agentId);
+      running = false;
+      if (stopped) return;
+      if (previewOf(usePreview.getState(), agentId).live.length) lastSeen = Date.now();
+      const idle = Date.now() - lastSeen > IDLE_AFTER_MS;
+      timer = setTimeout(() => void tick(), idle ? SLOW_MS : FAST_MS);
+    };
+    const wake = () => {
+      if (!active()) return;
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      void tick();
+    };
+    wake();
+    window.addEventListener("focus", wake);
+    document.addEventListener("visibilitychange", wake);
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("focus", wake);
+      document.removeEventListener("visibilitychange", wake);
+    };
   }, [agentId]);
 }

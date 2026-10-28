@@ -747,7 +747,14 @@ export const NoticeBanner = memo(function NoticeBanner({
 }) {
   const Icon = item.level === "error" ? CircleX : item.level === "warn" ? TriangleAlert : Info;
   const [retrying, setRetrying] = useState(false);
-  const recover = item.level === "error" && agent && isLatest;
+  // A usage-limit failure is handled by the single limit card above the composer.
+  const limitCard =
+    item.level === "error" &&
+    !!agent?.rateLimited &&
+    agent.status !== "interrupted" &&
+    agent.status !== "stopped" &&
+    !!isLatest;
+  const recover = item.level === "error" && agent && isLatest && !limitCard;
   const retry = async () => {
     if (!agent || !lastPrompt || retrying) return;
     setRetrying(true);
@@ -761,6 +768,7 @@ export const NoticeBanner = memo(function NoticeBanner({
       setRetrying(false);
     }
   };
+  if (limitCard) return null;
   return (
     <div
       role={item.level === "error" ? "alert" : "status"}
@@ -778,10 +786,10 @@ export const NoticeBanner = memo(function NoticeBanner({
       </div>
       {recover && (
         <div className="flex flex-wrap items-center gap-1.5 border-t border-err/20 px-2 py-1.5">
-          {lastPrompt && (
+          {lastPrompt && agent.running && (
             <Button size="xs" variant="ghost" className="text-fg" disabled={retrying} onClick={() => void retry()}>
               {retrying ? <Spinner className="h-3 w-3" /> : <RotateCcw className="!h-3 !w-3" />}
-              {agent.running ? "Retry last message" : "Resume & retry"}
+              Retry last message
             </Button>
           )}
           {agent.provider !== "custom" && !agent.rateLimited && (

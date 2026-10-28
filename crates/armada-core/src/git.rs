@@ -34,6 +34,8 @@ pub struct Hardening {
     /// Set when pushing would go somewhere the repo's own config chose (URL rewrites,
     /// custom transports). The message is user-facing.
     pub push_blocker: Option<String>,
+    /// Set when the repo rewrites fetch URLs (`url.*.insteadOf`), which `-c` can't undo.
+    pub fetch_blocker: Option<String>,
     /// Set when the repo defines a custom merge driver (which can't be disabled by `-c`).
     pub merge_blocker: Option<String>,
 }
@@ -41,6 +43,29 @@ pub struct Hardening {
 /// The message shown when a repo's config rewrites push URLs.
 pub const PUSH_REDIRECT_ERROR: &str =
     "The repository's git config redirects pushes; review .git/config";
+
+/// The message shown when a repo's config rewrites fetch URLs.
+pub const FETCH_REDIRECT_ERROR: &str =
+    "The repository's git config rewrites remote URLs; review .git/config";
+
+impl Hardening {
+    /// The `-c key=value` args as `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`
+    /// environment variables, for programs (like `gh`) that spawn git themselves.
+    pub fn git_config_env(&self) -> Vec<(String, String)> {
+        let pairs: Vec<(&str, &str)> = self
+            .args
+            .iter()
+            .filter(|a| a.as_str() != "-c")
+            .filter_map(|a| a.split_once('='))
+            .collect();
+        let mut env = vec![("GIT_CONFIG_COUNT".to_string(), pairs.len().to_string())];
+        for (i, (k, v)) in pairs.into_iter().enumerate() {
+            env.push((format!("GIT_CONFIG_KEY_{i}"), k.to_string()));
+            env.push((format!("GIT_CONFIG_VALUE_{i}"), v.to_string()));
+        }
+        env
+    }
+}
 
 #[derive(Debug)]
 struct ConfigEntry {
@@ -122,6 +147,11 @@ fn neutral_for(key: &str) -> Option<Neutral> {
         }
         ("filter", false, "required") => Neutral::Single("false"),
         ("credential", _, "helper") => Neutral::Multi,
+        ("remote", false, "uploadpack") => Neutral::Fixed("git-upload-pack"),
+        ("remote", false, "receivepack") => Neutral::Fixed("git-receive-pack"),
+        ("http", _, "sslverify") => Neutral::Single("true"),
+        ("http", _, "sslcainfo") | ("http", _, "proxy") => Neutral::Single(""),
+        ("http", _, "extraheader") => Neutral::Multi,
         _ => return None,
     })
 }
@@ -144,6 +174,9 @@ pub fn plan_hardening(config: &str, default_hooks: Option<&str>) -> anyhow::Resu
             || (section == "remote" && matches!(name, "receivepack" | "uploadpack" | "vcs"))
         {
             plan.push_blocker = Some(PUSH_REDIRECT_ERROR.to_string());
+        }
+        if section == "url" && name == "insteadof" {
+            plan.fetch_blocker = Some(FETCH_REDIRECT_ERROR.to_string());
         }
         if section == "merge" && name == "driver" && !sub.is_empty() {
             plan.merge_blocker = Some(
@@ -174,9 +207,19 @@ pub fn plan_hardening(config: &str, default_hooks: Option<&str>) -> anyhow::Resu
             Neutral::Single(default) => set(user.last().copied().unwrap_or(default)),
             Neutral::Fixed(v) => set(v),
             Neutral::Multi => {
-                set("");
-                for v in user {
-                    set(v);
+                // An empty value resets everything accumulated so far, whatever URL
+                // subsection set it, so every user-level value must be re-added.
+                let (_, _, this) = split_key(key);
+                plan.args.push("-c".into());
+                plan.args.push(format!("{section}.{this}="));
+                for u in entries.iter().filter(|u| {
+                    u.user_level() && !u.key.contains('=') && {
+                        let (s2, _, n2) = split_key(&u.key);
+                        s2 == section && n2 == this
+                    }
+                }) {
+                    plan.args.push("-c".into());
+                    plan.args.push(format!("{}={}", u.key, u.value));
                 }
             }
             Neutral::Hooks => match user.last().copied().or(default_hooks) {
@@ -789,6 +832,52 @@ mod tests {
         assert!(plan_hardening(&raw, None).unwrap().merge_blocker.is_some());
         let raw = cfg(&[("local", "filter.a=b.clean", "evil")]);
         assert!(plan_hardening(&raw, None).is_err());
+    }
+
+    #[test]
+    fn plan_neutralizes_transport_overrides() {
+        let raw = cfg(&[
+            ("global", "credential.https://github.com.helper", "store"),
+            ("global", "credential.helper", "cache"),
+            ("global", "http.sslverify", "true"),
+            ("local", "credential.helper", "!evil"),
+            ("local", "remote.origin.uploadpack", "evil"),
+            ("local", "remote.origin.receivepack", "evil"),
+            ("local", "http.sslverify", "false"),
+            ("local", "http.sslcainfo", "/tmp/evil.pem"),
+            ("local", "http.proxy", "http://evil:8080"),
+            ("local", "http.extraheader", "X-Evil: 1"),
+            (
+                "local",
+                "url.https://evil/.insteadof",
+                "https://github.com/",
+            ),
+        ]);
+        let plan = plan_hardening(&raw, None).unwrap();
+        let args = plan.args.join(" ");
+        assert!(
+            args.contains("remote.origin.uploadpack=git-upload-pack"),
+            "{args}"
+        );
+        assert!(
+            args.contains("remote.origin.receivepack=git-receive-pack"),
+            "{args}"
+        );
+        assert!(args.contains("http.sslverify=true"), "{args}");
+        assert!(args.contains("http.sslcainfo="), "{args}");
+        assert!(args.contains("http.proxy="), "{args}");
+        assert!(args.contains("http.extraheader="), "{args}");
+        assert!(!args.contains("evil"), "{args}");
+        assert!(args.contains("credential.helper= -c credential.https://github.com.helper=store -c credential.helper=cache"), "{args}");
+        assert_eq!(plan.fetch_blocker.as_deref(), Some(FETCH_REDIRECT_ERROR));
+        assert!(plan.push_blocker.is_some());
+        // The same plan as environment for programs that spawn git themselves.
+        let env = plan.git_config_env();
+        assert_eq!(env[0].0, "GIT_CONFIG_COUNT");
+        let n: usize = env[0].1.parse().unwrap();
+        assert_eq!(env.len(), 1 + 2 * n);
+        assert!(env.contains(&("GIT_CONFIG_KEY_0".into(), "core.fsmonitor".into())));
+        assert!(env.contains(&("GIT_CONFIG_VALUE_0".into(), "false".into())));
     }
 
     /// A repository whose local config tries every way to run `marker`.

@@ -21,7 +21,7 @@ import { HomeComposer } from "@/components/home/HomeComposer";
 import { RelTime } from "@/components/RelTime";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { Timeline } from "@/components/timeline/Timeline";
-import { WorkspacePanel, workspaceMaxHeight } from "@/components/workspace/WorkspacePanel";
+import { CONVERSATION_MIN, WorkspacePanel, workspaceMaxHeight } from "@/components/workspace/WorkspacePanel";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useReturnFocus } from "@/components/ui/returnFocus";
@@ -158,11 +158,14 @@ function AgentPane({ agentId }: { agentId: string }) {
   useEffect(() => {
     const section = sectionRef.current;
     if (!section) return;
+    // The conversation keeps at least 40% of the pane (and never less than CONVERSATION_MIN).
     const measure = () =>
       setWorkspaceMax(
         workspaceMaxHeight(
           section.clientHeight,
-          (headerRef.current?.offsetHeight ?? 0) + (composerRef.current?.offsetHeight ?? 0),
+          (headerRef.current?.offsetHeight ?? 0) +
+            (composerRef.current?.offsetHeight ?? 0) +
+            Math.max(0, Math.round(section.clientHeight * 0.4) - CONVERSATION_MIN),
         ),
       );
     const ro = new ResizeObserver(measure);

@@ -7,7 +7,7 @@
 //! `spawn_blocking`.
 
 use std::io::BufRead;
-use std::net::{IpAddr, Ipv6Addr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -109,6 +109,20 @@ fn is_blocked_ip(ip: IpAddr) -> bool {
             if let Some(v4) = v6.to_ipv4_mapped() {
                 return is_blocked_ip(IpAddr::V4(v4));
             }
+            let seg = v6.segments();
+            let embedded = Ipv4Addr::new(
+                (seg[6] >> 8) as u8,
+                seg[6] as u8,
+                (seg[7] >> 8) as u8,
+                seg[7] as u8,
+            );
+            // NAT64 (64:ff9b::/96) and the deprecated IPv4-compatible form (::a.b.c.d)
+            // carry an IPv4 address that must pass the same checks.
+            let nat64 = seg[..6] == [0x64, 0xff9b, 0, 0, 0, 0];
+            let compat = seg[..6] == [0; 6];
+            if (nat64 || compat) && is_blocked_ip(IpAddr::V4(embedded)) {
+                return true;
+            }
             v6.is_unspecified()
                 || v6.is_multicast()
                 || (v6.segments()[0] & 0xffc0) == 0xfe80
@@ -153,7 +167,11 @@ pub fn check_target(base_url: &str, local_only: bool) -> anyhow::Result<()> {
         .unwrap_or(if https { 443 } else { 80 });
     let ips: Vec<IpAddr> = match host.parse::<IpAddr>() {
         Ok(ip) => vec![ip],
-        Err(_) if host == "localhost" || host.ends_with(".localhost") => vec![],
+        // `*.localhost` may be answered by a resolver with a non-loopback address.
+        Err(_) if host == "localhost" || host.ends_with(".localhost") => (host.as_str(), port)
+            .to_socket_addrs()
+            .map(|a| a.map(|s| s.ip()).collect())
+            .unwrap_or_default(),
         Err(_) => (host.as_str(), port)
             .to_socket_addrs()
             .map(|a| a.map(|s| s.ip()).collect())
@@ -225,11 +243,16 @@ pub fn codex_override_args(
     args
 }
 
+/// A pull that sends nothing for this long is treated as stalled.
+const PULL_IDLE: Duration = Duration::from_secs(300);
+
 fn agent(read: Duration) -> ureq::Agent {
     ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
             // Local and LAN servers are reached directly, never through a proxy.
             .proxy(None)
+            // A redirect could send the request (and API key) somewhere check_target never vetted.
+            .max_redirects(0)
             .http_status_as_error(true)
             .timeout_connect(Some(PROBE_CONNECT))
             .timeout_recv_response(Some(read))
@@ -528,6 +551,7 @@ pub fn pull_ollama(
     let http = ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
             .proxy(None)
+            .max_redirects(0)
             .http_status_as_error(false)
             .timeout_connect(Some(PROBE_CONNECT))
             .timeout_recv_response(Some(Duration::from_secs(60)))
@@ -538,12 +562,33 @@ pub fn pull_ollama(
         .header("Content-Type", "application/json")
         .send(serde_json::json!({ "model": model, "stream": true }).to_string())
         .map_err(|e| anyhow!("{}", unreachable_hint(LocalKind::Ollama, &e.to_string())))?;
-    let reader = std::io::BufReader::new(resp.body_mut().as_reader());
-    for line in reader.lines() {
+    // Read on a helper thread so a stalled stream can still be cancelled (or time out).
+    let (tx, rx) = std::sync::mpsc::channel::<std::io::Result<String>>();
+    std::thread::spawn(move || {
+        let reader = std::io::BufReader::new(resp.body_mut().as_reader());
+        for line in reader.lines() {
+            let failed = line.is_err();
+            if tx.send(line).is_err() || failed {
+                return;
+            }
+        }
+    });
+    let mut last_data = std::time::Instant::now();
+    loop {
         if cancel.load(Ordering::SeqCst) {
             bail!("Cancelled");
         }
-        let line = line.context("the download stream broke")?;
+        let line = match rx.recv_timeout(Duration::from_millis(500)) {
+            Ok(line) => line.context("the download stream broke")?,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if last_data.elapsed() > PULL_IDLE {
+                    bail!("Ollama stopped sending download progress");
+                }
+                continue;
+            }
+            Err(_) => break,
+        };
+        last_data = std::time::Instant::now();
         if let Some(p) = parse_pull_line(&line) {
             let finished = p.done;
             let failed = p.error.clone();
@@ -672,6 +717,8 @@ mod tests {
             "http://[fd00:ec2::254]",
             "http://0.0.0.0:11434",
             "http://[::ffff:169.254.169.254]",
+            "http://[64:ff9b::a9fe:a9fe]",
+            "http://[::a9fe:a9fe]",
         ] {
             assert!(check_target(u, false).is_err(), "{u}");
         }

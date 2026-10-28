@@ -4,8 +4,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::AppHandle;
 use armada_core::{ArmadaEvent, DeltaField, EventSink};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{Emitter, Manager};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tracing::warn;
 

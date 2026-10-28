@@ -113,8 +113,12 @@ fn push_image(out: &mut ClipboardImages, mime: &str, bytes: Vec<u8>) {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn wayland(out: &mut ClipboardImages, paths: &mut Vec<ClipPath>) {
-    use std::process::Command;
-    let Ok(list) = Command::new("wl-paste").arg("--list-types").output() else {
+    fn wl_paste() -> std::process::Command {
+        let mut cmd = std::process::Command::new("wl-paste");
+        armada_core::childenv::sanitize_std_command(&mut cmd);
+        cmd
+    }
+    let Ok(list) = wl_paste().arg("--list-types").output() else {
         return;
     };
     if !list.status.success() {
@@ -126,10 +130,7 @@ fn wayland(out: &mut ClipboardImages, paths: &mut Vec<ClipPath>) {
         .into_iter()
         .find(|m| has(m))
     {
-        if let Ok(o) = Command::new("wl-paste")
-            .args(["--no-newline", "--type", mime])
-            .output()
-        {
+        if let Ok(o) = wl_paste().args(["--no-newline", "--type", mime]).output() {
             if o.status.success() && !o.stdout.is_empty() {
                 push_image(out, mime, o.stdout);
                 return;
@@ -143,10 +144,7 @@ fn wayland(out: &mut ClipboardImages, paths: &mut Vec<ClipPath>) {
         ("text/plain", true),
     ] {
         if has(t) {
-            if let Ok(o) = Command::new("wl-paste")
-                .args(["--no-newline", "--type", t])
-                .output()
-            {
+            if let Ok(o) = wl_paste().args(["--no-newline", "--type", t]).output() {
                 if o.status.success() {
                     paths.extend(clip_paths(&String::from_utf8_lossy(&o.stdout), from_text));
                     if !paths.is_empty() {

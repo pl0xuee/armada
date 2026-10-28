@@ -26,7 +26,7 @@ Every release has notes, written in [`CHANGELOG.md`](../CHANGELOG.md). Add user-
    git tag v0.2.0
    git push origin v0.2.0
    ```
-4. The **Release** workflow first checks that the tag matches the version, that `CHANGELOG.md` has notes for it, and that the tests pass. It then builds macOS (universal), Windows and Linux installers, signs the update bundles and uploads everything plus `latest.json` to a **draft** release with the notes as its body.
+4. The **Release** workflow first checks that the tag matches the version, that `CHANGELOG.md` has notes for it, and that CI passed on the tagged commit (it does not re-run tests). CI only runs the release-profile build and deb bundle smoke on pushes to `main`, so tag a commit that has been merged to `main` and wait for its CI run to finish. It then builds macOS (universal), Windows and Linux installers, signs the update bundles and uploads everything plus `latest.json` to a **draft** release with the notes as its body.
 5. Review the draft on GitHub and press **Publish**. Edits to the draft's notes change the GitHub page only: the in-app updater reads the copy already baked into `latest.json`, so fix notes in `CHANGELOG.md` before tagging. Only published releases are visible to the updater, so this is the moment the update rolls out.
 
 ## Signing key
