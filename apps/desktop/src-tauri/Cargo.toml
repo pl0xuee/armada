@@ -40,7 +40,7 @@ tauri-plugin-autostart = "2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-rodio = { version = "0.21", default-features = false, features = ["playback", "wav", "vorbis", "mp3", "flac"] }
+rodio = { version = "0.23", default-features = false, features = ["playback", "wav", "vorbis", "mp3", "flac"] }
 portable-pty = "0.9"
 ureq = "3"
 tauri-plugin-single-instance = "2"
