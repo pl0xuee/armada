@@ -1032,8 +1032,13 @@ impl Core {
         };
         let driver = match started {
             Ok(d) => d,
-            // Killed by Stop/quit/delete mid-handshake: not a failure.
-            Err(_) if self.is_shutting_down() || self.agent(agent_id).is_err() => {
+            // Killed by Stop/cancel/"send now"/quit/delete mid-handshake: not a
+            // failure; whoever cancelled it settles the turn.
+            Err(_)
+                if ctx.latest_start_cancelled()
+                    || self.is_shutting_down()
+                    || self.agent(agent_id).is_err() =>
+            {
                 return Err(StartCancelled.into())
             }
             Err(e) => return Err(e),

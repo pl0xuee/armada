@@ -737,6 +737,13 @@ impl AgentCtx {
         self.st.lock().cancelled_start == Some(generation)
     }
 
+    /// Whether the most recent start was abandoned. For a handshake that failed
+    /// (its process was killed by the cancel) before a driver existed.
+    pub fn latest_start_cancelled(&self) -> bool {
+        let st = self.st.lock();
+        st.cancelled_start == Some(st.generation)
+    }
+
     /// Kills the process that is still in its handshake (after
     /// `request_cancel_start`), so the pending request fails at once instead of
     /// waiting out its timeout. Returns whether there was one.
@@ -1318,7 +1325,7 @@ impl AgentCtx {
 
     /// The adapter process for `generation` went away.
     pub fn process_exited(&self, generation: u64, detail: String) {
-        let (current, intent, busy, starting) = {
+        let (current, intent, busy, starting, cancelled) = {
             let mut st = self.st.lock();
             if st.replaying == Some(generation) {
                 st.replaying = None;
@@ -1328,7 +1335,8 @@ impl AgentCtx {
             if starting {
                 st.starting = false;
             }
-            (current, st.exit_intent, st.turn_active, starting)
+            let cancelled = st.cancelled_start == Some(generation);
+            (current, st.exit_intent, st.turn_active, starting, cancelled)
         };
         if let Some(core) = self.core.upgrade() {
             core.driver_exited(&self.agent_id);
@@ -1338,8 +1346,11 @@ impl AgentCtx {
             return;
         }
         self.update_agent(|a| a.running = false);
-        if starting {
-            // The starter sees the failed handshake and reports it.
+        // Starting: the starter sees the failed handshake and reports it.
+        // Cancelled mid-start (Stop, cancel, "send now"): killing it was the point;
+        // whoever cancelled settles the turn (the exit can land after the starter
+        // has already given up, so `starting` alone doesn't cover it).
+        if starting || cancelled {
             return;
         }
         match intent {
