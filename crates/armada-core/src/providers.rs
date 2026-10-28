@@ -410,6 +410,8 @@ pub async fn detect(data_dir: &Path) -> Vec<ProviderInfo> {
 mod tests {
     use super::*;
 
+    // The login-shell PATH lookup is Unix-only (and uses ':' separators).
+    #[cfg(unix)]
     #[test]
     fn login_shell_entries_come_first() {
         let login = parse_shell_path(b"motd noise\n__ARMADA_PATH__/opt/homebrew/bin::/usr/bin\n");

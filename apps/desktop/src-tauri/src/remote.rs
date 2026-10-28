@@ -1887,6 +1887,8 @@ async fn events(
 }
 
 #[cfg(test)]
+// The end-to-end test (and its helpers) needs Unix mock agents.
+#[cfg_attr(not(unix), allow(dead_code, unused_imports))]
 mod tests {
     use super::*;
     use armada_core::{CreateAgentRequest, EventSink, ItemBody, Provider};

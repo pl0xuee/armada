@@ -137,6 +137,15 @@ impl Proc {
             }
         }
     }
+
+    /// Whether anything is still running in the exited child's process group.
+    #[cfg(unix)]
+    fn leftover_group_alive(&self) -> bool {
+        self.pid
+            .and_then(|p| libc::pid_t::try_from(p).ok())
+            // SAFETY: signal 0 only checks for existence.
+            .is_some_and(|pid| unsafe { libc::kill(-pid, 0) } == 0)
+    }
 }
 
 /// Runs an `on_exit` hook exactly once, whichever path (job finished, job killed)
@@ -731,10 +740,18 @@ fn finish_io(
 ) {
     #[cfg(unix)]
     {
-        if done_rx.recv_timeout(Duration::from_secs(2)).is_err() && code != Some(0) {
+        let closed = done_rx.recv_timeout(Duration::from_secs(2)).is_ok();
+        // macOS hangs up the terminal when its session leader exits, so the reader
+        // can see EOF while leftovers that ignore SIGHUP still run: check the group
+        // itself, not just whether the terminal closed.
+        if code != Some(0) && (!closed || proc.leftover_group_alive()) {
             for signal in [libc::SIGHUP, libc::SIGTERM, libc::SIGKILL] {
                 proc.signal_leftover_group(signal);
-                if done_rx.recv_timeout(Duration::from_millis(500)).is_ok() {
+                let deadline = Instant::now() + Duration::from_millis(500);
+                while proc.leftover_group_alive() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                if !proc.leftover_group_alive() {
                     break;
                 }
             }
@@ -905,6 +922,8 @@ pub fn decode_utf8_chunk(pending: &mut Vec<u8>) -> String {
 }
 
 #[cfg(test)]
+// Most PTY tests drive /bin/sh, so their helpers are unused elsewhere.
+#[cfg_attr(not(unix), allow(dead_code, unused_imports))]
 mod tests {
     use super::*;
     use armada_core::EventSink;

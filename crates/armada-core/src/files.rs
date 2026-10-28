@@ -1,6 +1,6 @@
 //! Project file listing + fuzzy matching for @-mentions in the composer.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::model::Attachment;
 
@@ -290,12 +290,17 @@ pub fn discover_projects(home: &Path, limit: usize) -> Vec<String> {
         }
         false
     };
+    let mut roots_seen: Vec<PathBuf> = Vec::new();
     for root in ROOTS {
-        let root = if root.is_empty() {
-            home.to_path_buf()
-        } else {
-            home.join(root)
+        // Case-insensitive file systems (macOS, Windows) match "Code" and "code"
+        // to the same folder: use its real name, and visit it once.
+        let Some(root) = actual_path(home, root) else {
+            continue;
         };
+        if roots_seen.contains(&root) {
+            continue;
+        }
+        roots_seen.push(root.clone());
         let Ok(entries) = std::fs::read_dir(&root) else {
             continue;
         };
@@ -325,6 +330,35 @@ pub fn discover_projects(home: &Path, limit: usize) -> Vec<String> {
     }
     found.sort_by_key(|f| std::cmp::Reverse(f.0));
     found.into_iter().take(limit).map(|(_, p)| p).collect()
+}
+
+/// `base/rel` with each component spelled as it is on disk (None if missing).
+fn actual_path(base: &Path, rel: &str) -> Option<PathBuf> {
+    let mut path = base.to_path_buf();
+    for part in rel.split('/').filter(|p| !p.is_empty()) {
+        let exact = path.join(part);
+        let real = std::fs::read_dir(&path)
+            .ok()?
+            .flatten()
+            .map(|e| e.file_name())
+            .find(|n| n.to_string_lossy() == part)
+            .or_else(|| {
+                std::fs::read_dir(&path)
+                    .ok()?
+                    .flatten()
+                    .map(|e| e.file_name())
+                    .find(|n| n.to_string_lossy().eq_ignore_ascii_case(part))
+            });
+        path = match real {
+            Some(name) => path.join(name),
+            None if exact.is_dir() => exact,
+            None => return None,
+        };
+        if !path.is_dir() {
+            return None;
+        }
+    }
+    Some(path)
 }
 
 /// Ranks paths against `query`: exact file name > file-name substring > path

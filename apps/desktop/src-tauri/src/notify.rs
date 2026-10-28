@@ -13,6 +13,8 @@ use tracing::{info, warn};
 
 use crate::window;
 
+// The ids drive the notification actions, which only Linux (D-Bus) has.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub struct Toast {
     /// The agent the notification is about (enables the actions).
     pub agent_id: Option<String>,
