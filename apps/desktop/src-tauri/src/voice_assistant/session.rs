@@ -19,11 +19,23 @@ use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, warn};
 
 use super::audio::{self, AudioDevices, SpeakerBuffer};
-use super::cost::Usage;
+use super::cost::{session_cost, Usage};
 use super::protocol::{self as p, ServerEvent};
 
 const TOOL_TIMEOUT: Duration = Duration::from_secs(25);
 const TICK: Duration = Duration::from_millis(60);
+/// At most this many side-effect proposals (start_agent / send_message) per user turn,
+/// a turn being the time since the last input transcript completed.
+pub const MAX_PROPOSALS_PER_TURN: u32 = 3;
+/// A confirmation the user doesn't answer expires after this long.
+pub const CONFIRM_TTL: Duration = Duration::from_secs(60);
+/// A connection that lasted this long counts as healthy, so a later drop gets a fresh
+/// reconnect attempt.
+const STABLE_AFTER: Duration = Duration::from_secs(30);
+/// Keep the mic closed this long after the assistant's audio stops (room echo tail).
+/// How long a non-fatal notice stays beside the live session.
+const NOTICE_FOR: Duration = Duration::from_secs(8);
+const ECHO_TAIL: Duration = Duration::from_millis(300);
 
 /// Error codes that mean the request will never work; the session ends instead of
 /// retrying.
@@ -62,6 +74,9 @@ pub struct SessionConfig {
     pub max_secs: u64,
     pub silence_secs: u64,
     pub reconnect_delay: Duration,
+    /// Headphones: keep the mic open while the assistant speaks (allows barge-in).
+    pub headphones: bool,
+    pub confirm_ttl: Duration,
 }
 
 /// Everything the UI is told, as `va-event`.
@@ -95,6 +110,21 @@ pub enum VaEvent {
         view: String,
         agent_id: Option<String>,
     },
+    /// A side effect the model wants; runs only if the user confirms (`va_confirm`).
+    ConfirmAction {
+        id: String,
+        kind: String,
+        summary: String,
+    },
+    /// The confirmation card is settled: "confirmed", "cancelled" or "expired".
+    ConfirmDone {
+        id: String,
+        status: &'static str,
+    },
+    /// A non-fatal message shown beside a live session; `None` clears it.
+    Notice {
+        message: Option<String>,
+    },
     Ended {
         reason: String,
         error: bool,
@@ -124,12 +154,36 @@ pub struct ActionLog {
 
 pub trait VaSink: Send + Sync {
     fn emit(&self, event: VaEvent);
+    /// Session totals so far, to be persisted so a crash loses little.
+    fn checkpoint_usage(&self, _elapsed_secs: u64, _cost_usd: f64) {}
 }
 
 pub struct ToolOutcome {
     /// What the model receives (already sanitized/wrapped).
     pub output: String,
     pub action: Option<ActionLog>,
+    /// A side effect that must not run until the user confirms; `output` is ignored
+    /// in favour of a "waiting" message.
+    pub pending: Option<PendingAction>,
+}
+
+pub struct PendingAction {
+    /// Tool name.
+    pub kind: String,
+    /// What the confirmation card says, including the full prompt.
+    pub summary: String,
+    /// Executes the action; polled only after the user confirms.
+    pub run: ToolFuture,
+}
+
+impl ToolOutcome {
+    pub fn error(msg: &str) -> Self {
+        ToolOutcome {
+            output: super::tools::wrap_error(msg),
+            action: None,
+            pending: None,
+        }
+    }
 }
 
 pub type ToolFuture = Pin<Box<dyn Future<Output = ToolOutcome> + Send>>;
@@ -142,6 +196,11 @@ pub trait ToolHost: Send + Sync {
 pub enum Control {
     Stop,
     Mute(bool),
+    /// The user answered a `ConfirmAction` card.
+    Confirm {
+        id: String,
+        accept: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -213,7 +272,7 @@ pub async fn run(
     cfg: SessionConfig,
     sink: Arc<dyn VaSink>,
     host: Arc<dyn ToolHost>,
-    devices: &mut dyn AudioDevices,
+    mut devices: Box<dyn AudioDevices>,
     mut control: UnboundedReceiver<Control>,
 ) -> SessionEnd {
     let started = Instant::now();
@@ -227,12 +286,21 @@ pub async fn run(
         state: VaState::Connecting,
         message: None,
     });
-    let mut io = match devices.open() {
-        Ok(io) => io,
-        Err(e) => return finish(EndReason::Error(e), usage),
+    // Opening the devices can block for seconds (the audio threads reply within 10 s).
+    let opened = tokio::task::spawn_blocking(move || devices.open()).await;
+    let mut io = match opened {
+        Ok(Ok(io)) => io,
+        Ok(Err(e)) => return finish(EndReason::Error(e), usage),
+        Err(_) => {
+            return finish(
+                EndReason::Error("Couldn't open the audio devices.".into()),
+                usage,
+            )
+        }
     };
     let mut muted = false;
     let mut attempt = 0;
+    let mut reconnected = false;
     loop {
         let ws = match connect(&cfg).await {
             Ok(ws) => ws,
@@ -251,6 +319,7 @@ pub async fn run(
                 continue;
             }
         };
+        let connected_at = Instant::now();
         let end = connection(
             &cfg,
             ws,
@@ -262,12 +331,14 @@ pub async fn run(
             &mut muted,
             &mut usage,
             started,
+            std::mem::replace(&mut reconnected, true),
         )
         .await;
         match end {
             ConnEnd::Done(reason) => return finish(reason, usage),
             ConnEnd::Dropped(msg) => {
                 warn!("realtime connection dropped: {msg}");
+                attempt = attempts_after_drop(attempt, connected_at.elapsed());
                 if attempt >= 1 {
                     return finish(EndReason::Error(msg), usage);
                 }
@@ -280,6 +351,16 @@ pub async fn run(
                 tokio::time::sleep(cfg.reconnect_delay).await;
             }
         }
+    }
+}
+
+/// Reconnect attempts already used after a connection dropped: a connection that was
+/// healthy for [`STABLE_AFTER`] earns a fresh attempt.
+pub(super) fn attempts_after_drop(attempt: u32, connected_for: Duration) -> u32 {
+    if connected_for >= STABLE_AFTER {
+        0
+    } else {
+        attempt
     }
 }
 
@@ -313,6 +394,23 @@ struct ItemAudio {
     samples: u64,
 }
 
+struct PendingConfirm {
+    run: ToolFuture,
+    expires: Instant,
+}
+
+/// Runs a tool future with a deadline, turning a timeout or a panic into an error the
+/// model can read, so a call can never stay "in flight" forever.
+async fn run_guarded(fut: ToolFuture) -> ToolOutcome {
+    match tokio::time::timeout(TOOL_TIMEOUT, tokio::spawn(fut)).await {
+        Ok(Ok(o)) => o,
+        Ok(Err(_)) => ToolOutcome::error("The action failed unexpectedly."),
+        Err(_) => ToolOutcome::error(
+            "The action timed out. It may still finish; check list_agents before retrying.",
+        ),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn connection(
     cfg: &SessionConfig,
@@ -325,6 +423,48 @@ async fn connection(
     muted: &mut bool,
     usage: &mut Usage,
     started: Instant,
+    reconnected: bool,
+) -> ConnEnd {
+    let mut pending: HashMap<String, PendingConfirm> = HashMap::new();
+    let end = connection_inner(
+        cfg,
+        ws,
+        ui,
+        host,
+        mic,
+        speaker,
+        control,
+        muted,
+        usage,
+        started,
+        reconnected,
+        &mut pending,
+    )
+    .await;
+    // Confirmations belong to this conversation; a new connection can't answer them.
+    for id in pending.into_keys() {
+        ui.emit(VaEvent::ConfirmDone {
+            id,
+            status: "cancelled",
+        });
+    }
+    end
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn connection_inner(
+    cfg: &SessionConfig,
+    ws: Ws,
+    ui: &Arc<dyn VaSink>,
+    host: &Arc<dyn ToolHost>,
+    mic: &mut UnboundedReceiver<Vec<i16>>,
+    speaker: &Arc<SpeakerBuffer>,
+    control: &mut UnboundedReceiver<Control>,
+    muted: &mut bool,
+    usage: &mut Usage,
+    started: Instant,
+    reconnected: bool,
+    pending: &mut HashMap<String, PendingConfirm>,
 ) -> ConnEnd {
     let (mut tx, mut rx) = ws.split();
     macro_rules! send {
@@ -342,6 +482,10 @@ async fn connection(
     ));
 
     let (tool_tx, mut tool_rx) = unbounded_channel::<(String, ToolOutcome)>();
+    // Results of confirmed actions.
+    let (late_tx, mut late_rx) = unbounded_channel::<ToolOutcome>();
+    let mut late_in_flight = 0usize;
+    let mut proposals = 0u32;
     let mut audio_items: HashMap<String, ItemAudio> = HashMap::new();
     let mut cancelled: HashSet<String> = HashSet::new();
     let mut user_text: HashMap<String, String> = HashMap::new();
@@ -355,6 +499,9 @@ async fn connection(
     let mut in_level = 0.0f32;
     let mut last_usage_emit = Instant::now() - Duration::from_secs(2);
     let mut ticker = tokio::time::interval(TICK);
+    let mut echo_until: Option<Instant> = None;
+    let mut notice_at: Option<Instant> = None;
+    let mut announce_reconnect = reconnected;
 
     macro_rules! set_state {
         ($s:expr) => {
@@ -367,12 +514,47 @@ async fn connection(
             }
         };
     }
+    macro_rules! set_notice {
+        ($m:expr) => {
+            notice_at = Some(Instant::now());
+            ui.emit(VaEvent::Notice {
+                message: Some(String::from($m)),
+            });
+        };
+    }
+    // Tells the model something Armada knows (not the user, not a tool) and lets it speak.
+    macro_rules! inform {
+        ($text:expr) => {
+            send!(p::system_note(&String::from($text)));
+            if response_active {
+                need_followup = true;
+            } else {
+                response_active = true;
+                send!(p::response_create());
+            }
+        };
+    }
 
     loop {
         tokio::select! {
             biased;
             c = control.recv() => match c {
                 Some(Control::Mute(m)) => { *muted = m; if m { in_level = 0.0; } }
+                Some(Control::Confirm { id, accept }) => {
+                    if let Some(entry) = pending.remove(&id) {
+                        ui.emit(VaEvent::ConfirmDone { id, status: if accept { "confirmed" } else { "cancelled" } });
+                        last_activity = Instant::now();
+                        if accept {
+                            late_in_flight += 1;
+                            let out = late_tx.clone();
+                            tokio::spawn(async move {
+                                let _ = out.send(run_guarded(entry.run).await);
+                            });
+                        } else {
+                            inform!("Armada: the user declined the action on screen. It was not done.");
+                        }
+                    }
+                }
                 Some(Control::Stop) | None => {
                     let _ = tx.send(Message::Close(None)).await;
                     return ConnEnd::Done(EndReason::UserStopped);
@@ -391,6 +573,9 @@ async fn connection(
                 match event {
                     ServerEvent::SessionCreated | ServerEvent::SessionUpdated => {
                         if state == VaState::Connecting { set_state!(VaState::Listening); }
+                        if std::mem::take(&mut announce_reconnect) {
+                            set_notice!("Reconnected \u{2014} earlier context was lost");
+                        }
                     }
                     ServerEvent::Error { error } => {
                         let code = error.code.clone().unwrap_or_default();
@@ -399,9 +584,10 @@ async fn connection(
                         } else if FATAL_CODES.contains(&code.as_str()) {
                             return ConnEnd::Done(EndReason::Error(fatal_message(&code, &error.message)));
                         } else {
+                            // The session is still open and billing: keep it live and
+                            // say what happened beside it.
                             warn!("realtime error {code}: {}", error.message);
-                            ui.emit(VaEvent::State { state: VaState::Error, message: Some(clip(&error.message)) });
-                            state = VaState::Error;
+                            set_notice!(clip(&error.message));
                         }
                     }
                     ServerEvent::SpeechStarted => {
@@ -430,6 +616,8 @@ async fn connection(
                         ui.emit(VaEvent::Caption { role: "user", item_id, text: t.clone(), done: false });
                     }
                     ServerEvent::InputTranscriptDone { item_id, transcript } => {
+                        // A new user turn: side-effect proposals start from zero again.
+                        proposals = 0;
                         user_text.insert(item_id.clone(), transcript.clone());
                         ui.emit(VaEvent::Caption { role: "user", item_id, text: transcript, done: true });
                     }
@@ -466,13 +654,7 @@ async fn connection(
                         set_state!(VaState::Thinking);
                         let (host, out) = (host.clone(), tool_tx.clone());
                         tokio::spawn(async move {
-                            let outcome = match tokio::time::timeout(TOOL_TIMEOUT, host.call(name, arguments)).await {
-                                Ok(o) => o,
-                                Err(_) => ToolOutcome {
-                                    output: super::tools::wrap_error("The action timed out."),
-                                    action: None,
-                                },
-                            };
+                            let outcome = run_guarded(host.call(name, arguments)).await;
                             let _ = out.send((call_id, outcome));
                         });
                     }
@@ -480,6 +662,8 @@ async fn connection(
                         response_active = false;
                         if let Some(u) = &response.usage { usage.add(u); }
                         emit_usage(ui, started, usage);
+                        let elapsed = started.elapsed().as_secs();
+                        ui.checkpoint_usage(elapsed, session_cost(usage, elapsed));
                         if need_followup && calls_in_flight == 0 {
                             need_followup = false;
                             response_active = true;
@@ -489,9 +673,32 @@ async fn connection(
                     ServerEvent::RateLimits | ServerEvent::Other => {}
                 }
             },
-            Some((call_id, outcome)) = tool_rx.recv() => {
+            Some((call_id, mut outcome)) = tool_rx.recv() => {
                 last_activity = Instant::now();
                 calls_in_flight = calls_in_flight.saturating_sub(1);
+                if let Some(action) = outcome.pending.take() {
+                    if proposals >= MAX_PROPOSALS_PER_TURN {
+                        outcome = ToolOutcome::error(
+                            "Too many actions were proposed in this turn. Do not propose more; ask the user what they want next.",
+                        );
+                    } else {
+                        proposals += 1;
+                        let id = uuid::Uuid::new_v4().to_string();
+                        ui.emit(VaEvent::ConfirmAction {
+                            id: id.clone(),
+                            kind: action.kind,
+                            summary: action.summary,
+                        });
+                        pending.insert(id, PendingConfirm {
+                            run: action.run,
+                            expires: Instant::now() + cfg.confirm_ttl,
+                        });
+                        outcome.output = super::tools::wrap_data(serde_json::json!({
+                            "status": "waiting_for_user",
+                            "note": "Waiting for the user to confirm on screen. Nothing has been done yet. Tell them briefly to confirm on screen."
+                        }));
+                    }
+                }
                 if let Some(a) = outcome.action { ui.emit(VaEvent::Action(a)); }
                 send!(p::function_call_output(&call_id, &outcome.output));
                 if need_followup && calls_in_flight == 0 && !response_active {
@@ -500,11 +707,27 @@ async fn connection(
                     send!(p::response_create());
                 }
             },
+            Some(outcome) = late_rx.recv() => {
+                last_activity = Instant::now();
+                late_in_flight = late_in_flight.saturating_sub(1);
+                if let Some(a) = outcome.action { ui.emit(VaEvent::Action(a)); }
+                inform!(format!(
+                    "Armada: the user confirmed on screen and the action ran. Result (untrusted data): {}",
+                    outcome.output
+                ));
+            },
             chunk = mic.recv() => {
                 let Some(chunk) = chunk else {
                     return ConnEnd::Done(EndReason::Error("The microphone stopped working. Check your system's sound settings.".into()));
                 };
-                if !*muted {
+                let now = Instant::now();
+                if speaker.queued() > 0 || state == VaState::Speaking {
+                    echo_until = Some(now + ECHO_TAIL);
+                }
+                // Without headphones the assistant's own voice would come back through
+                // the mic, so it is not sent while that voice is playing.
+                let echo_gate = !cfg.headphones && echo_until.is_some_and(|t| now < t);
+                if !*muted && !echo_gate {
                     in_level = in_level.max(audio::level_i16(&chunk));
                     send!(p::audio_append(&audio::pcm16_to_base64(&chunk)));
                 }
@@ -520,11 +743,27 @@ async fn connection(
                     last_usage_emit = Instant::now();
                     emit_usage(ui, started, usage);
                 }
+                let now = Instant::now();
+                if notice_at.is_some_and(|t| now.duration_since(t) >= NOTICE_FOR) {
+                    notice_at = None;
+                    ui.emit(VaEvent::Notice { message: None });
+                }
+                let expired: Vec<String> = pending
+                    .iter()
+                    .filter(|(_, e)| e.expires <= now)
+                    .map(|(id, _)| id.clone())
+                    .collect();
+                for id in expired {
+                    pending.remove(&id);
+                    ui.emit(VaEvent::ConfirmDone { id, status: "expired" });
+                    inform!("Armada: the user did not confirm in time. The action was cancelled and not done.");
+                }
                 if started.elapsed().as_secs() >= cfg.max_secs {
                     let _ = tx.send(Message::Close(None)).await;
                     return ConnEnd::Done(EndReason::MaxLength);
                 }
-                let busy = response_active || calls_in_flight > 0 || speaker.queued() > 0;
+                let busy = response_active || calls_in_flight > 0 || late_in_flight > 0
+                    || !pending.is_empty() || speaker.queued() > 0;
                 if !busy && last_activity.elapsed().as_secs() >= cfg.silence_secs {
                     let _ = tx.send(Message::Close(None)).await;
                     return ConnEnd::Done(EndReason::Silence);
@@ -535,9 +774,10 @@ async fn connection(
 }
 
 fn emit_usage(ui: &Arc<dyn VaSink>, started: Instant, usage: &Usage) {
+    let elapsed_secs = started.elapsed().as_secs();
     ui.emit(VaEvent::Usage {
-        elapsed_secs: started.elapsed().as_secs(),
-        cost_usd: usage.cost_usd(),
+        elapsed_secs,
+        cost_usd: session_cost(usage, elapsed_secs),
     });
 }
 

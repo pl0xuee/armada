@@ -39,5 +39,20 @@ fn main() {
             std::fs::write(&out, PLACEHOLDER).expect("writing remote.html");
         }
     }
-    tauri_build::build();
+    // tauri-build links its Windows manifest (Common Controls v6) into the app binary
+    // only; test binaries using `tauri::test` then die at load with
+    // STATUS_ENTRYPOINT_NOT_FOUND. Have the linker embed the same manifest everywhere.
+    let msvc = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc");
+    if msvc {
+        let manifest = manifest_dir.join("windows-app-manifest.xml");
+        println!("cargo:rerun-if-changed={}", manifest.display());
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
+        let windows = tauri_build::WindowsAttributes::new_without_app_manifest();
+        tauri_build::try_build(tauri_build::Attributes::new().windows_attributes(windows))
+            .expect("tauri build");
+    } else {
+        tauri_build::build();
+    }
 }

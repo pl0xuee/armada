@@ -72,3 +72,23 @@ describe("groupActivity", () => {
     expect(g.rows).toEqual([0, 1, 2]);
   });
 });
+
+describe("waiting on sub-agents", () => {
+  it("folds even a single trailing call so it doesn't pop in and out", () => {
+    const items = [user(), tool({ subagent: { kind: "Explore" } }), tool()];
+    const top = items.map((_, i) => i);
+    expect(groupActivity(items, top).groups.size).toBe(0);
+    const folded = groupActivity(items, top, { foldTail: true });
+    expect(folded.rows).toEqual([0, 1, 2]);
+    expect(folded.groups.get(2)).toEqual([2]);
+  });
+  it("leaves earlier single calls alone", () => {
+    const items = [user(), tool(), tool({ subagent: { kind: "Explore" } })];
+    const folded = groupActivity(
+      items,
+      items.map((_, i) => i),
+      { foldTail: true },
+    );
+    expect(folded.groups.size).toBe(0);
+  });
+});

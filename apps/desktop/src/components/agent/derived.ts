@@ -3,7 +3,15 @@
 // depend on tool calls' locations/diffs/kind/status/subagent. We keep a per-agent
 // signature of those fields and reuse the cached result while it matches: no scans that
 // allocate, no sorting, and stable references (so selectors don't re-render) per frame.
-import { filesTouched, latestPlan, runningCount, subagentRuns, type SubagentRun } from "@/lib/agents";
+import {
+  filesTouched,
+  latestPlan,
+  runningCount,
+  SUBAGENT_TICK_MS,
+  subagentRuns,
+  type SubagentClock,
+  type SubagentRun,
+} from "@/lib/agents";
 import type { TimelineItem } from "@/lib/types";
 
 type Tool = Extract<TimelineItem, { kind: "tool_call" }>;
@@ -22,6 +30,11 @@ interface Entry {
   /** In item order: tool calls as [TOOL, locations, diffs, toolKind, status, subagent, title, parent, toolCallId]; plans as [PLAN, item]; user messages as [USER]. */
   sig: unknown[];
   busy: boolean;
+  live: boolean;
+  /** floor(now / SUBAGENT_TICK_MS) the sub-agent runs were computed at. */
+  bucket: number;
+  /** Any background sub-agent: only then does the clock matter. */
+  hasBg: boolean;
   value: AgentDerived;
 }
 
@@ -82,24 +95,48 @@ function signature(items: TimelineItem[]): unknown[] {
   return sig;
 }
 
-/** `busy`: the agent is working (open sub-agent calls only count then); see `subagentRuns`. */
-export function agentDerived(agentId: string, items: TimelineItem[] | undefined, busy = true): AgentDerived {
+const hasBackground = (items: TimelineItem[]) =>
+  items.some((it) => it.kind === "tool_call" && it.subagent?.background && !it.subagent.control);
+
+/**
+ * `busy`: the agent is working (open sub-agent calls only count then); see `subagentRuns`.
+ * `clock`: omit for structure-only data (files, plan); the sub-agent fields are then whatever was last computed with a clock. Time-based rules for background sub-agents. Results are cached on tool-call structure +
+ * busy + liveness + a coarse time bucket, so streamed deltas never recompute them.
+ */
+export function agentDerived(
+  agentId: string,
+  items: TimelineItem[] | undefined,
+  busy = true,
+  clock?: SubagentClock,
+): AgentDerived {
   if (!items || items.length === 0) return EMPTY;
+  const live = clock?.live ?? true;
+  const bucket = clock ? Math.floor(clock.now / SUBAGENT_TICK_MS) : 0;
   const e = cache.get(agentId);
+  // Without a clock the caller wants structure data only (files, plan); leave the runs as cached.
+  if (e && !clock && (e.list === items || matches(items, e.sig))) {
+    e.list = items;
+    return e.value;
+  }
   if (e) {
-    if (e.list === items && e.busy === busy) return e.value;
+    const timeStale = e.hasBg && e.bucket !== bucket;
+    if (e.list === items && e.busy === busy && e.live === live && !timeStale) return e.value;
     if (matches(items, e.sig)) {
       e.list = items;
-      if (e.busy !== busy) {
-        const subagents = subagentRuns(items, busy);
+      if (e.busy !== busy || e.live !== live || timeStale) {
+        const subagents = subagentRuns(items, busy, clock);
         e.busy = busy;
-        e.value = { ...e.value, subagents, runningSubagents: runningCount(subagents) };
+        e.live = live;
+        e.bucket = bucket;
+        const n = runningCount(subagents);
+        // Keep references stable when a tick changed nothing.
+        if (!sameRuns(e.value.subagents, subagents)) e.value = { ...e.value, subagents, runningSubagents: n };
       }
       return e.value;
     }
   }
   const files = filesTouched(items);
-  const subagents = subagentRuns(items, busy);
+  const subagents = subagentRuns(items, busy, clock);
   const value: AgentDerived = {
     files,
     changedCount: files.filter((f) => f.edited).length,
@@ -107,8 +144,15 @@ export function agentDerived(agentId: string, items: TimelineItem[] | undefined,
     subagents,
     plan: latestPlan(items),
   };
-  cache.set(agentId, { list: items, sig: signature(items), busy, value });
+  cache.set(agentId, { list: items, sig: signature(items), busy, live, bucket, hasBg: hasBackground(items), value });
   return value;
+}
+
+function sameRuns(a: SubagentRun[], b: SubagentRun[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((x, i) => x.itemId === b[i].itemId && x.state === b[i].state && x.step === b[i].step)
+  );
 }
 
 /** Forget an agent's cache entry (e.g. when its items are evicted). */

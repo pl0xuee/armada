@@ -117,21 +117,54 @@ pub async fn probe_ports(ports: Vec<u16>) -> Vec<u16> {
 }
 
 fn port_is_listening(port: u16) -> bool {
+    let f = port_families(port);
+    f.v4 || f.v6
+}
+
+/// Which loopback address families accept a connection on one port.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct PortFamilies {
+    pub port: u16,
+    /// 127.0.0.1 accepts.
+    pub v4: bool,
+    /// [::1] accepts.
+    pub v6: bool,
+}
+
+fn port_families(port: u16) -> PortFamilies {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
     use std::time::Duration;
-    [
-        IpAddr::V4(Ipv4Addr::LOCALHOST),
-        IpAddr::V6(Ipv6Addr::LOCALHOST),
-    ]
-    .into_iter()
-    .any(|ip| {
+    let up = |ip: IpAddr| {
         TcpStream::connect_timeout(&SocketAddr::new(ip, port), Duration::from_millis(250)).is_ok()
+    };
+    PortFamilies {
+        port,
+        v4: up(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+        v6: up(IpAddr::V6(Ipv6Addr::LOCALHOST)),
+    }
+}
+
+/// Like `probe_ports`, but says which loopback families accept, for every port given that has at
+/// least one. Dev servers often bind only `::1` (Node's "localhost") or only `127.0.0.1`, and a
+/// preview must load the family that is actually listening. At most 32 ports per call.
+#[tauri::command]
+pub async fn probe_loopback(ports: Vec<u16>) -> Vec<PortFamilies> {
+    tauri::async_runtime::spawn_blocking(move || {
+        ports
+            .into_iter()
+            .take(32)
+            .filter(|&p| p != 0)
+            .map(port_families)
+            .filter(|f| f.v4 || f.v6)
+            .collect()
     })
+    .await
+    .unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::port_is_listening;
+    use super::{port_families, port_is_listening};
 
     #[test]
     fn probe_sees_a_listener_and_a_closed_port() {
@@ -142,5 +175,20 @@ mod tests {
         // Not the freed port: tests running in parallel may bind it again at once.
         // Port 1 is outside the ephemeral range and nothing listens there.
         assert!(!port_is_listening(1));
+    }
+
+    #[test]
+    fn families_tell_v4_from_v6_only_listeners() {
+        let l4 = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let p4 = l4.local_addr().unwrap().port();
+        let f = port_families(p4);
+        assert!(f.v4);
+        // The v6 side is only checked when ::1 exists here and the port is free on it.
+        if let Ok(l6) = std::net::TcpListener::bind("[::1]:0") {
+            let p6 = l6.local_addr().unwrap().port();
+            let f6 = port_families(p6);
+            assert!(f6.v6);
+            assert!(!f6.v4 || std::net::TcpListener::bind(("127.0.0.1", p6)).is_err());
+        }
     }
 }

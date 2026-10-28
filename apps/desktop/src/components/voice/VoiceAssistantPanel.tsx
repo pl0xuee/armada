@@ -4,7 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { formatCost, formatElapsed, isLive, PHASE_LABEL } from "@/lib/voiceAssistant";
 import { cn, isEditableTarget } from "@/lib/utils";
-import { connectVoiceAssistant, setVaMuted, stopVoiceAssistant, useVa } from "@/store/voiceAssistant";
+import {
+  answerVaConfirm,
+  connectVoiceAssistant,
+  escapeVoiceAssistant,
+  setVaMuted,
+  stopVoiceAssistant,
+  useVa,
+} from "@/store/voiceAssistant";
 import { useUi } from "@/store/ui";
 import { VoiceOrb } from "./VoiceOrb";
 
@@ -27,24 +34,41 @@ function PanelBody() {
   const elapsed = useVa((s) => s.elapsedSecs);
   const cost = useVa((s) => s.costUsd);
   const muted = useVa((s) => s.muted);
+  const notice = useVa((s) => s.notice);
+  const confirms = useVa((s) => s.confirms);
   const dismiss = useVa((s) => s.dismiss);
   const openAgent = useUi((s) => s.openAgent);
   const live = isLive({ phase });
   const level = phase === "speaking" ? outputLevel : inputLevel;
   const logRef = useRef<HTMLDivElement>(null);
 
-  // Esc ends the session (unless something else, like the composer, wants the key).
+  const firstConfirm = confirms[0]?.id ?? null;
+
+  // Enter confirms and Esc cancels the pending action; otherwise Esc ends the session
+  // (unless something else, like the composer, wants the key).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented || isEditableTarget(e.target)) return;
+      if (e.defaultPrevented) return;
+      if (e.key !== "Escape" && e.key !== "Enter") return;
+      // Typing somewhere keeps its keys, except in an empty field where they'd do nothing.
+      const t = e.target;
+      const emptyField = (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) && t.value === "";
+      if (isEditableTarget(t) && !(firstConfirm && emptyField)) return;
       if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return;
+      if (e.key === "Enter") {
+        // A focused button or link handles Enter itself.
+        if (!firstConfirm || (e.target instanceof Element && e.target.closest("button, a, [role='button']"))) return;
+        e.preventDefault();
+        answerVaConfirm(firstConfirm, true);
+        return;
+      }
       e.preventDefault();
-      if (live) void stopVoiceAssistant();
-      else dismiss();
+      if (firstConfirm) answerVaConfirm(firstConfirm, false);
+      else void escapeVoiceAssistant();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [live, dismiss]);
+  }, [firstConfirm]);
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
@@ -54,7 +78,7 @@ function PanelBody() {
     <section
       role="region"
       aria-label="Voice assistant"
-      className="view-enter texture edge fixed bottom-4 right-4 z-40 flex w-[340px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-line-strong bg-panel shadow-[0_18px_50px_-12px_rgba(0,0,0,0.6)]"
+      className="view-enter texture edge fixed bottom-[var(--composer-clear,1rem)] right-4 z-40 flex w-[340px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-line-strong bg-panel shadow-[0_18px_50px_-12px_rgba(0,0,0,0.6)]"
     >
       <div className="flex items-center gap-3.5 px-4 pb-3 pt-4">
         <VoiceOrb phase={phase} level={level} muted={muted} />
@@ -111,6 +135,30 @@ function PanelBody() {
         )}
       </div>
 
+      {notice && live && (
+        <p role="status" className="border-t border-line px-4 py-2 text-[12px] text-warn">
+          {notice}
+        </p>
+      )}
+      {live && confirms.length > 0 && (
+        <div className="space-y-2 border-t border-line px-4 py-3" role="group" aria-label="Confirm action">
+          {confirms.map((c, i) => (
+            <div key={c.id} className="rounded-lg border border-accent/40 bg-accent/5 p-2.5">
+              <p className="max-h-[120px] overflow-y-auto whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-fg">
+                {c.summary}
+              </p>
+              <div className="mt-2 flex items-center justify-end gap-2">
+                <Button variant="ghost" size="sm" onClick={() => answerVaConfirm(c.id, false)}>
+                  Cancel{i === 0 && <span className="ml-1 text-[10.5px] text-steel">Esc</span>}
+                </Button>
+                <Button size="sm" onClick={() => answerVaConfirm(c.id, true)}>
+                  Confirm{i === 0 && <span className="ml-1 text-[10.5px] opacity-70">Enter</span>}
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {(captions.length > 0 || actions.length > 0) && (
         <div ref={logRef} className="max-h-[220px] space-y-2 overflow-y-auto border-t border-line px-4 py-3">
           {captions.map((c) => (

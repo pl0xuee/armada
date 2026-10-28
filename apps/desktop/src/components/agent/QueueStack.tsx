@@ -8,8 +8,6 @@ import { ConfirmDialog } from "../ui/alert-dialog";
 import { Spinner } from "../ui/misc";
 import { Tooltip } from "../ui/tooltip";
 
-const VISIBLE = 3;
-
 /**
  * Messages sent while the agent was busy. They aren't in the timeline until they run,
  * so they live here, above the composer, with Edit / Send now / remove.
@@ -45,7 +43,6 @@ export function QueueStack({
   // resumes it" would be misleading; the queue runs once the agent is resumed.
   const needsResume = agent.status === "interrupted" || agent.status === "stopped" || !agent.running;
   const paused = agent.queuePaused || needsResume;
-  const shown = expanded ? queue : queue.slice(0, VISIBLE);
 
   const hide = (id: string, on: boolean) =>
     setHidden((h) => {
@@ -107,33 +104,43 @@ export function QueueStack({
     <section
       aria-label="Queued messages"
       className={cn(
-        "mb-2 overflow-hidden rounded-xl border bg-card/70 edge",
+        "mb-2 shrink-0 overflow-hidden rounded-xl border bg-card/70 edge",
         paused ? "border-warn/35" : "border-line-strong",
       )}
     >
       <div
         className={cn(
-          "flex items-center gap-2 border-b px-3 py-1.5 text-[11.5px]",
+          "flex h-8 items-center gap-2 px-3 text-[11.5px]",
+          expanded && "border-b",
           paused ? "border-warn/20 bg-warn/[0.07] text-warn" : "border-line text-muted",
         )}
       >
-        {paused ? <Pause className="h-3.5 w-3.5 shrink-0" /> : <ListOrdered className="h-3.5 w-3.5 shrink-0" />}
-        <span className="min-w-0 truncate font-medium">
-          {needsResume && !agent.queuePaused ? (
-            "Resume to run queued messages"
-          ) : paused ? (
-            needsResume ? (
-              "Queue paused"
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          aria-label={expanded ? "Collapse queued messages" : "Expand queued messages"}
+          className="-mx-1 flex min-w-0 items-center gap-2 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-raised/60"
+        >
+          {paused ? <Pause className="h-3.5 w-3.5 shrink-0" /> : <ListOrdered className="h-3.5 w-3.5 shrink-0" />}
+          <span className="min-w-0 truncate font-medium">
+            {needsResume && !agent.queuePaused ? (
+              "Resume to run queued messages"
+            ) : paused ? (
+              needsResume ? (
+                "Queue paused"
+              ) : (
+                "Queue paused — sending (or Resume queue) runs it"
+              )
             ) : (
-              "Queue paused — sending (or Resume queue) runs it"
-            )
-          ) : (
-            <>
-              <span className="tabular text-fg">{queue.length}</span> queued
-              <span className="text-steel"> · {busy ? "runs after the current turn" : "runs next"}</span>
-            </>
-          )}
-        </span>
+              <>
+                <span className="tabular text-fg">{queue.length}</span> queued
+                <span className="text-steel"> · {busy ? "runs after the current turn" : "runs next"}</span>
+              </>
+            )}
+          </span>
+          <ChevronDown className={cn("h-3 w-3 shrink-0 text-steel transition-transform", !expanded && "-rotate-90")} />
+        </button>
         <span className="ml-auto flex shrink-0 items-center gap-1">
           {agent.queuePaused && (
             <button
@@ -155,35 +162,23 @@ export function QueueStack({
               Clear all
             </button>
           )}
-          {queue.length > VISIBLE && (
-            <button
-              type="button"
-              onClick={() => setExpanded((v) => !v)}
-              aria-expanded={expanded}
-              className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-steel transition-colors hover:bg-raised hover:text-fg"
-            >
-              {expanded ? "Show fewer" : `Show all ${queue.length}`}
-              <ChevronDown className={cn("h-3 w-3 transition-transform", expanded && "rotate-180")} />
-            </button>
-          )}
         </span>
       </div>
-      <ol className="max-h-[min(220px,22vh)] divide-y divide-line overflow-y-auto">
-        {shown.map((q, i) => (
-          <QueueRow
-            key={q.id}
-            index={i + 1}
-            item={q}
-            busy={busy}
-            canSendNow={canSendNow}
-            onEdit={() => void remove(q, true)}
-            onRemove={() => void remove(q, false)}
-            onSendNow={() => sendNow(q)}
-          />
-        ))}
-      </ol>
-      {!expanded && queue.length > VISIBLE && (
-        <div className="border-t border-line px-3 py-1 text-[11px] text-steel">+{queue.length - VISIBLE} more</div>
+      {expanded && (
+        <ol className="max-h-[min(150px,18vh)] divide-y divide-line overflow-y-auto">
+          {queue.map((q, i) => (
+            <QueueRow
+              key={q.id}
+              index={i + 1}
+              item={q}
+              busy={busy}
+              canSendNow={canSendNow}
+              onEdit={() => void remove(q, true)}
+              onRemove={() => void remove(q, false)}
+              onSendNow={() => sendNow(q)}
+            />
+          ))}
+        </ol>
       )}
       <ConfirmDialog
         open={confirmClear}

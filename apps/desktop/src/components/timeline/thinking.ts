@@ -105,3 +105,8 @@ export function turnEndOf(
 
 /** Turns longer than this get the soft "you were watching" chime. */
 export const LONG_TURN_MS = 30_000;
+
+/** Statuses in which the "waiting on sub-agents" line may show (idle: the agent is just waiting too). */
+export function waitingStatus(status: AgentStatus): boolean {
+  return status === "working" || status === "starting" || status === "idle";
+}

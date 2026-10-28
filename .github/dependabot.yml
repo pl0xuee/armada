@@ -3,15 +3,17 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 3
     groups:
-      github-actions:
+      github-actions-minor-patch:
         patterns: ["*"]
 
   - package-ecosystem: cargo
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 3
     groups:
       cargo-minor-patch:
         update-types: [minor, patch]
@@ -19,7 +21,8 @@ updates:
   - package-ecosystem: npm
     directory: /apps/desktop
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 3
     groups:
       desktop-minor-patch:
         update-types: [minor, patch]
@@ -27,7 +30,8 @@ updates:
   - package-ecosystem: npm
     directory: /apps/remote
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 3
     groups:
       remote-minor-patch:
         update-types: [minor, patch]

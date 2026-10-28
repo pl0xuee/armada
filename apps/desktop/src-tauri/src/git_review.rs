@@ -216,9 +216,25 @@ async fn output_capped(
                     bail!("{why}");
                 }
             }
+            "fetch" | "pull" | "clone" => {
+                if let Some(why) = &hardening.fetch_blocker {
+                    bail!("{why}");
+                }
+            }
             _ => {}
         }
         cmd.args(&hardening.args);
+    } else if program == "gh" {
+        // gh spawns git itself: hand it the same hardening through the environment.
+        let hardening = armada_core::hardening(cwd).await?;
+        if let Some(why) = hardening
+            .push_blocker
+            .as_ref()
+            .or(hardening.fetch_blocker.as_ref())
+        {
+            bail!("{why}");
+        }
+        cmd.envs(hardening.git_config_env());
     }
     cmd.args(args)
         .current_dir(cwd)
@@ -930,33 +946,10 @@ pub async fn commit_excluding(
     }
 }
 
-/// Whether a file name looks like it holds credentials or keys.
+/// Whether a file name looks like it holds credentials or keys (the list shared with
+/// checkpoint snapshots).
 pub fn looks_like_secret(path: &str) -> bool {
-    let name = path
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(path)
-        .to_lowercase();
-    // Templates people commit on purpose.
-    if [".example", ".sample", ".template", ".dist"]
-        .iter()
-        .any(|suffix| name.ends_with(suffix))
-    {
-        return false;
-    }
-    name == ".env"
-        || name.starts_with(".env.")
-        || name.ends_with(".pem")
-        || name.ends_with(".key")
-        || name.ends_with(".p12")
-        || name.ends_with(".pfx")
-        || name.starts_with("id_rsa")
-        || name.starts_with("id_ed25519")
-        || name.starts_with("credentials")
-        || matches!(
-            name.as_str(),
-            ".npmrc" | ".pypirc" | ".netrc" | ".git-credentials"
-        )
+    armada_core::checkpoints::is_secret_path(path)
 }
 
 /// Untracked, not-ignored files that a commit of the agent's work would add and whose
@@ -1520,6 +1513,136 @@ pub async fn merge(agent: &Agent) -> anyhow::Result<String> {
     } else {
         format!("Merged {branch} into {base}: {stat}")
     })
+}
+
+/// Where the base branch stands against its upstream, as last fetched. "Commit &
+/// merge" only updates the local base branch; this says what a push would send.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BaseBranchStatus {
+    pub branch: String,
+    /// Short name of the upstream ("origin/master"); `None` when the base has none.
+    pub upstream: Option<String>,
+    /// Local commits the upstream doesn't have.
+    pub ahead: u32,
+    /// Upstream commits (as last fetched) the local branch doesn't have.
+    pub behind: u32,
+}
+
+fn base_of(agent: &Agent) -> anyhow::Result<(&str, &Path)> {
+    let Some(base) = agent.base_branch.as_deref() else {
+        bail!("Only agents running in their own worktree branch have a base branch");
+    };
+    let project = Path::new(&agent.project_path);
+    if !project.is_dir() {
+        bail!(
+            "The project folder no longer exists: {}",
+            agent.project_path
+        );
+    }
+    Ok((base, project))
+}
+
+/// Upstream and ahead/behind of the agent's base branch (no network).
+pub async fn base_branch_status(agent: &Agent) -> anyhow::Result<BaseBranchStatus> {
+    let (base, project) = base_of(agent)?;
+    let none = BaseBranchStatus {
+        branch: base.to_string(),
+        upstream: None,
+        ahead: 0,
+        behind: 0,
+    };
+    let spec = format!("{base}@{{upstream}}");
+    let up = output(
+        "git",
+        project,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", &spec],
+        Opts::default(),
+    )
+    .await?;
+    if !up.status.success() {
+        return Ok(none);
+    }
+    let upstream = String::from_utf8_lossy(&up.stdout).trim().to_string();
+    if upstream.is_empty() {
+        return Ok(none);
+    }
+    let range = format!("{base}...{spec}");
+    let counts = output(
+        "git",
+        project,
+        &["rev-list", "--left-right", "--count", &range, "--"],
+        Opts::default(),
+    )
+    .await?;
+    if !counts.status.success() {
+        // Upstream configured but never fetched / deleted: nothing to compare against.
+        return Ok(BaseBranchStatus {
+            upstream: Some(upstream),
+            ..none
+        });
+    }
+    let text = String::from_utf8_lossy(&counts.stdout).into_owned();
+    let mut nums = text.split_whitespace().map(|n| n.parse().unwrap_or(0));
+    Ok(BaseBranchStatus {
+        upstream: Some(upstream),
+        ahead: nums.next().unwrap_or(0),
+        behind: nums.next().unwrap_or(0),
+        ..none
+    })
+}
+
+/// Pushes the base branch to its upstream (never forced) and returns the new status.
+pub async fn push_base_branch(agent: &Agent) -> anyhow::Result<BaseBranchStatus> {
+    let (base, project) = base_of(agent)?;
+    let status = base_branch_status(agent).await?;
+    let Some(upstream) = status.upstream.as_deref() else {
+        bail!(
+            "{base} has no upstream branch; push it from a terminal with git push -u origin {base}"
+        );
+    };
+    let config = |key: &str| {
+        let key = format!("branch.{base}.{key}");
+        async move {
+            let out = output("git", project, &["config", "--get", &key], Opts::default()).await?;
+            anyhow::Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        }
+    };
+    let remote = config("remote").await?;
+    let merge_ref = config("merge").await?;
+    if remote.is_empty()
+        || remote == "."
+        || remote.starts_with('-')
+        || remote.contains(char::is_whitespace)
+    {
+        bail!("{base} tracks `{upstream}`, which isn't on a remote Armada can push to; push it from a terminal.");
+    }
+    if !merge_ref.starts_with("refs/heads/") {
+        bail!("{base}'s upstream `{upstream}` isn't a branch; push it from a terminal.");
+    }
+    let refspec = format!("refs/heads/{base}:{merge_ref}");
+    let pushed = run_opts(
+        "git",
+        project,
+        &["push", &remote, &refspec],
+        Opts {
+            timeout: Some(PUSH_TIMEOUT),
+            ..Opts::default()
+        },
+    )
+    .await;
+    if let Err(e) = pushed {
+        let text = format!("{e:#}");
+        if text.contains("non-fast-forward")
+            || text.contains("fetch first")
+            || text.contains("[rejected]")
+            || text.contains("tip of your current branch is behind")
+        {
+            bail!("{upstream} has new commits; pull first");
+        }
+        return Err(e.context(format!("pushing {base} to {upstream}")));
+    }
+    base_branch_status(agent).await
 }
 
 /// Pushes the agent's branch and opens a pull request into its base branch. Returns
@@ -2370,6 +2493,97 @@ mod tests {
             wt.to_str().unwrap(),
         ]);
         (repo, wt, base)
+    }
+
+    /// `worktree_setup` plus a bare "origin" the base branch tracks.
+    fn with_origin() -> (Repo, PathBuf, String, PathBuf) {
+        let (repo, wt, base) = worktree_setup();
+        let origin = repo.dir.join("hooks-none").join("origin.git");
+        repo.git(&["init", "-q", "--bare", origin.to_str().unwrap()]);
+        repo.git(&["remote", "add", "origin", origin.to_str().unwrap()]);
+        repo.git(&["push", "-q", "-u", "origin", &base]);
+        (repo, wt, base, origin)
+    }
+
+    #[tokio::test]
+    async fn merge_is_local_until_base_is_pushed() {
+        let (repo, wt, base, origin) = with_origin();
+        let agent = worktree_agent(&repo, &wt, "agent-x", &base);
+        std::fs::write(wt.join("b.txt"), "b\n").unwrap();
+        commit_all(&wt, "agent commit", &[]).await.unwrap();
+        merge(&agent).await.unwrap();
+
+        let st = base_branch_status(&agent).await.unwrap();
+        assert_eq!(
+            st.upstream.as_deref(),
+            Some(format!("origin/{base}").as_str())
+        );
+        assert_eq!((st.ahead, st.behind), (2, 0), "{st:?}");
+
+        let st = push_base_branch(&agent).await.unwrap();
+        assert_eq!((st.ahead, st.behind), (0, 0), "{st:?}");
+        let remote_head = std::process::Command::new("git")
+            .args(["rev-list", "--count", &base])
+            .current_dir(&origin)
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&remote_head.stdout).trim(), "3");
+    }
+
+    #[tokio::test]
+    async fn pushing_a_base_without_upstream_explains() {
+        let (repo, wt, base) = worktree_setup();
+        let agent = worktree_agent(&repo, &wt, "agent-x", &base);
+        let st = base_branch_status(&agent).await.unwrap();
+        assert_eq!(st.upstream, None);
+        let err = push_base_branch(&agent).await.unwrap_err();
+        assert!(
+            format!("{err:#}").contains(&format!("{base} has no upstream branch; push it from a terminal with git push -u origin {base}")),
+            "{err:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn pushing_a_diverged_base_is_rejected() {
+        let (repo, wt, base, origin) = with_origin();
+        let agent = worktree_agent(&repo, &wt, "agent-x", &base);
+        // Someone else pushes to origin from a second clone.
+        let other = repo.dir.join("hooks-none").join("other");
+        repo.git(&[
+            "clone",
+            "-q",
+            origin.to_str().unwrap(),
+            other.to_str().unwrap(),
+        ]);
+        let in_other = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&other)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        in_other(&["config", "user.name", "O"]);
+        in_other(&["config", "user.email", "o@armada.invalid"]);
+        in_other(&["config", "commit.gpgsign", "false"]);
+        std::fs::write(other.join("o.txt"), "o\n").unwrap();
+        in_other(&["add", "-A"]);
+        in_other(&["commit", "-q", "-m", "other"]);
+        in_other(&["push", "-q", "origin", &base]);
+        // A local commit on the base, so the histories diverge.
+        std::fs::write(wt.join("b.txt"), "b\n").unwrap();
+        commit_all(&wt, "agent commit", &[]).await.unwrap();
+        merge(&agent).await.unwrap();
+
+        let err = push_base_branch(&agent).await.unwrap_err();
+        assert_eq!(
+            format!("{err:#}"),
+            format!("origin/{base} has new commits; pull first")
+        );
     }
 
     #[tokio::test]

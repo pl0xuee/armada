@@ -1,6 +1,7 @@
-import { ArrowRightLeft, ChevronDown, Gauge, Play, Settings2, UserPlus } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, Gauge, Play, RotateCcw, Settings2, UserPlus } from "lucide-react";
 import { useMemo, useState } from "react";
-import { switchAccount } from "@/lib/actions";
+import { attempt, switchAccount } from "@/lib/actions";
+import { api } from "@/lib/api";
 import { PROVIDERS } from "@/lib/providers";
 import type { Account, Agent } from "@/lib/types";
 import { useApp } from "@/store/app";
@@ -32,6 +33,26 @@ export function RateLimitBanner({ agent }: { agent: Agent }) {
   const accounts = useApp((s) => s.accounts);
   const failover = useApp((s) => s.settings?.failover ?? "ask");
   const [busy, setBusy] = useState(false);
+  // The provider's own wording ("resets at 5pm"), from the newest error notice and the last prompt to re-send.
+  const notice = useApp((s) => {
+    const list = s.items[agent.id];
+    for (let i = (list?.length ?? 0) - 1; i >= 0; i--) {
+      const it = list![i];
+      if (it.kind === "notice" && it.level === "error") return it.text;
+      if (it.kind === "user_message") return null;
+    }
+    return null;
+  });
+  const lastPrompt = useApp((s) => s.items[agent.id]?.findLast((i) => i.kind === "user_message"));
+  const retry = async () => {
+    if (lastPrompt?.kind !== "user_message") return;
+    setBusy(true);
+    await attempt("Couldn't retry", async () => {
+      if (!agent.running) await api.resumeAgent(agent.id, false);
+      await api.sendPrompt(agent.id, lastPrompt.text, lastPrompt.attachments ?? []);
+    });
+    setBusy(false);
+  };
   const current = accounts.find((a) => a.id === agent.accountId);
   const candidates = useMemo(
     () => accounts.filter((a) => a.provider === agent.provider && a.id !== agent.accountId && a.status?.loggedIn),
@@ -60,10 +81,10 @@ export function RateLimitBanner({ agent }: { agent: Agent }) {
         </span>
         <div className="min-w-[200px] flex-1">
           <div className="text-[13px] font-semibold">This account hit its usage limit</div>
-          <div className="text-[12px] leading-snug text-muted [@media(max-height:700px)]:line-clamp-1">
-            {current ? `${provider} · ${current.name}` : provider}.{" "}
+          <div className="line-clamp-2 text-[12px] leading-snug text-muted [@media(max-height:700px)]:line-clamp-1">
+            {current ? `${provider} · ${current.name}` : provider}. {notice ? `${notice} ` : ""}
             {first
-              ? "Move to another account to keep going. The session and its history come along."
+              ? "Switch accounts to keep going; the session and history come along."
               : `No other signed-in ${provider} accounts. Add one to keep going now.`}
           </div>
         </div>
@@ -76,10 +97,18 @@ export function RateLimitBanner({ agent }: { agent: Agent }) {
                   Switch to {first.name} & continue
                 </Button>
               </Tooltip>
+              {lastPrompt?.kind === "user_message" && (
+                <Tooltip content="Try again on this account (works once the limit resets)">
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => void retry()}>
+                    <RotateCcw className="!h-3.5 !w-3.5" />
+                    {agent.running ? "Retry" : "Resume & retry"}
+                  </Button>
+                </Tooltip>
+              )}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button size="sm" variant="secondary" disabled={busy} aria-label="Switch to another account">
-                    Switch to…
+                    <span className="max-sm:hidden">Switch to…</span>
                     <ChevronDown className="!h-3.5 !w-3.5" />
                   </Button>
                 </DropdownMenuTrigger>

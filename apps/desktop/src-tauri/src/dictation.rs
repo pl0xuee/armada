@@ -6,12 +6,13 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::AppHandle;
 use armada_core::voice::{self, ModelInfo};
 use armada_core::Core;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use parking_lot::Mutex;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{Emitter, State};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::commands::CmdResult;
@@ -33,6 +34,62 @@ struct Recording {
     thread: std::thread::JoinHandle<Result<Captured, String>>,
 }
 
+/// The recording slot. `Starting` is reserved before the (async) microphone open so a
+/// second start is refused and a stop/cancel in that window is not lost.
+#[derive(Default)]
+enum Slot<T> {
+    #[default]
+    Idle,
+    Starting(Arc<AtomicBool>),
+    Active(T),
+}
+
+impl<T> Slot<T> {
+    fn reserve(&mut self, stop: &Arc<AtomicBool>) -> Result<(), &'static str> {
+        if matches!(self, Slot::Idle) {
+            *self = Slot::Starting(stop.clone());
+            Ok(())
+        } else {
+            Err("Already recording")
+        }
+    }
+
+    /// Opening finished: becomes active unless it was cancelled meanwhile.
+    fn activate(&mut self, stop: &Arc<AtomicBool>, rec: T) -> Result<(), T> {
+        match self {
+            Slot::Starting(s) if Arc::ptr_eq(s, stop) => {
+                *self = Slot::Active(rec);
+                Ok(())
+            }
+            _ => Err(rec),
+        }
+    }
+
+    /// Opening failed: release our reservation (if still ours).
+    fn release(&mut self, stop: &Arc<AtomicBool>) {
+        if matches!(self, Slot::Starting(s) if Arc::ptr_eq(s, stop)) {
+            *self = Slot::Idle;
+        }
+    }
+
+    /// Stop/cancel: an in-flight open is told to stop; an active recording is returned.
+    fn take(&mut self) -> Option<T> {
+        match std::mem::replace(self, Slot::Idle) {
+            Slot::Active(r) => Some(r),
+            Slot::Starting(stop) => {
+                stop.store(true, Ordering::Relaxed);
+                None
+            }
+            Slot::Idle => None,
+        }
+    }
+
+    #[cfg(test)]
+    fn is_idle(&self) -> bool {
+        matches!(self, Slot::Idle)
+    }
+}
+
 struct Captured {
     mono: Vec<f32>,
     sample_rate: u32,
@@ -40,7 +97,7 @@ struct Captured {
 
 #[derive(Default)]
 pub struct Dictation {
-    recording: Mutex<Option<Recording>>,
+    recording: Mutex<Slot<Recording>>,
     model: Arc<Mutex<Option<Loaded>>>,
     download: Mutex<Option<(String, Arc<AtomicBool>)>>,
     transcribing: Arc<AtomicBool>,
@@ -90,7 +147,7 @@ struct DownloadEvent {
 
 #[tauri::command]
 pub fn voice_status(
-    core: State<'_, Arc<Core>>,
+    core: State<'_, Core>,
     shell: State<'_, Shell>,
     dict: State<'_, Dictation>,
 ) -> CmdResult<VoiceStatus> {
@@ -395,7 +452,6 @@ fn run_capture(
     };
 
     let started = Instant::now();
-    let mut limit_sent = false;
     while !stop.load(Ordering::Relaxed) {
         std::thread::sleep(Duration::from_millis(60));
         let lvl = f32::from_bits(level.swap(0, Ordering::Relaxed));
@@ -406,9 +462,10 @@ fn run_capture(
                 elapsed_ms: started.elapsed().as_millis() as u64,
             },
         );
-        if !limit_sent && buf.lock().len() >= cap {
-            limit_sent = true;
+        if buf.lock().len() >= cap {
+            // Hit the maximum: tell the UI and end the capture ourselves.
             let _ = app.emit("voice-limit", ());
+            break;
         }
     }
     drop(stream);
@@ -425,7 +482,7 @@ fn run_capture(
 #[tauri::command]
 pub async fn voice_start(
     app: AppHandle,
-    core: State<'_, Arc<Core>>,
+    core: State<'_, Core>,
     dict: State<'_, Dictation>,
 ) -> CmdResult<()> {
     let device = core
@@ -433,20 +490,21 @@ pub async fn voice_start(
         .map_err(|e| format!("{e:#}"))?
         .voice
         .input_device;
-    if dict.recording.lock().is_some() {
-        return Err("Already recording".into());
-    }
     if dict.transcribing.load(Ordering::Relaxed) {
         return Err("Still transcribing the previous recording".into());
     }
     let stop = Arc::new(AtomicBool::new(false));
+    dict.recording.lock().reserve(&stop)?;
     let (tx, rx) = std::sync::mpsc::channel();
     let thread = {
-        let stop = stop.clone();
+        let thread_stop = stop.clone();
         std::thread::Builder::new()
             .name("armada-dictation-capture".into())
-            .spawn(move || run_capture(app, device, stop, tx))
-            .map_err(|e| e.to_string())?
+            .spawn(move || run_capture(app, device, thread_stop, tx))
+            .map_err(|e| {
+                dict.recording.lock().release(&stop);
+                e.to_string()
+            })?
     };
     // Wait for the microphone to open so permission/device errors surface right away.
     let opened = tauri::async_runtime::spawn_blocking(move || {
@@ -454,19 +512,39 @@ pub async fn voice_start(
             .unwrap_or_else(|_| Err("Timed out opening the microphone".into()))
     })
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string());
+    let opened = match opened {
+        Ok(o) => o,
+        Err(e) => {
+            dict.recording.lock().release(&stop);
+            stop.store(true, Ordering::Relaxed);
+            return Err(e);
+        }
+    };
     if let Err(e) = opened {
+        dict.recording.lock().release(&stop);
         stop.store(true, Ordering::Relaxed);
         let _ = thread.join();
         return Err(e);
     }
-    *dict.recording.lock() = Some(Recording { stop, thread });
+    let rec = Recording {
+        stop: stop.clone(),
+        thread,
+    };
+    let activated = dict.recording.lock().activate(&stop, rec);
+    if let Err(rec) = activated {
+        // Stopped or cancelled while the microphone was opening.
+        rec.stop.store(true, Ordering::Relaxed);
+        let _ = rec.thread.join();
+        return Err("Recording cancelled".into());
+    }
     Ok(())
 }
 
 /// Stops a recording and returns what was captured (or the capture error).
 async fn finish_recording(dict: &Dictation) -> CmdResult<Option<Captured>> {
-    let Some(rec) = dict.recording.lock().take() else {
+    let taken = dict.recording.lock().take();
+    let Some(rec) = taken else {
         return Ok(None);
     };
     rec.stop.store(true, Ordering::Relaxed);
@@ -563,7 +641,7 @@ pub struct Transcript {
 
 #[tauri::command]
 pub async fn voice_stop(
-    core: State<'_, Arc<Core>>,
+    core: State<'_, Core>,
     shell: State<'_, Shell>,
     dict: State<'_, Dictation>,
 ) -> CmdResult<Transcript> {
@@ -644,6 +722,35 @@ pub async fn voice_stop(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn slot_state_machine() {
+        let stop = || Arc::new(AtomicBool::new(false));
+        let mut slot: Slot<u8> = Slot::Idle;
+        let a = stop();
+        assert!(slot.reserve(&a).is_ok());
+        // A second start while opening is refused.
+        assert!(slot.reserve(&stop()).is_err());
+        // Stop during Starting cancels the open and frees the slot.
+        assert!(slot.take().is_none());
+        assert!(a.load(Ordering::Relaxed));
+        assert!(slot.is_idle());
+        // The cancelled open finishing late must not claim the slot.
+        assert_eq!(slot.activate(&a, 1), Err(1));
+        // A new start is not hijacked by the old one either.
+        let b = stop();
+        slot.reserve(&b).unwrap();
+        assert_eq!(slot.activate(&a, 2), Err(2));
+        assert!(slot.activate(&b, 3).is_ok());
+        assert_eq!(slot.take(), Some(3));
+        // Failed open releases only its own reservation.
+        let c = stop();
+        slot.reserve(&c).unwrap();
+        slot.release(&b);
+        assert!(!slot.is_idle());
+        slot.release(&c);
+        assert!(slot.is_idle());
+    }
+
     use super::*;
 
     #[test]

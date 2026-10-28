@@ -6,6 +6,7 @@ import {
   Bell,
   BellOff,
   GitCompare,
+  Globe,
   Keyboard,
   Minimize2,
   Moon,
@@ -63,6 +64,7 @@ import { toast } from "sonner";
 import { useDebounced } from "@/hooks/useDebounced";
 import { useApp, usePendingPermissions } from "@/store/app";
 import { useUi, type SettingsSection } from "@/store/ui";
+import { previewOf, togglePreview, usePreview } from "@/store/preview";
 import { openTerminal } from "@/store/workspace";
 import { openShortcutHelp } from "./shell/ShortcutHelp";
 import { ProviderGlyph } from "./ProviderGlyph";
@@ -161,6 +163,7 @@ function Palette({ onClose }: { onClose: () => void }) {
   const archived = useMemo(() => Object.values(agentsMap).filter((a) => a.archived), [agentsMap]);
   const pending = usePendingPermissions();
   const current = ui.view === "agents" && ui.selectedAgentId ? agentsMap[ui.selectedAgentId] : undefined;
+  const previewOpen = usePreview((s) => (current ? previewOf(s, current.id).open : false));
 
   useEffect(() => {
     const q = debounced.trim();
@@ -362,6 +365,13 @@ function Palette({ onClose }: { onClose: () => void }) {
                   shortcut={[modKey, "`"]}
                   keywords={["terminal", "scripts", "shell", "console"]}
                   onSelect={() => run(() => ui.setWorkspaceOpen(!useUi.getState().workspaceOpen))}
+                />
+                <PaletteAction
+                  icon={<Globe />}
+                  label={previewOpen ? "Close preview" : "Open preview"}
+                  shortcut={[modKey, "⇧", "P"]}
+                  keywords={["preview", "browser", "localhost", "web", "site", "dev server"]}
+                  onSelect={() => run(() => togglePreview(current.id))}
                 />
                 <PaletteAction
                   icon={<SquareTerminal />}

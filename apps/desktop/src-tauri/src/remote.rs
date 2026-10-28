@@ -409,6 +409,9 @@ pub struct Remote {
     events: broadcast::Sender<Arc<Published>>,
     tokens: Mutex<Tokens>,
     running: Mutex<Option<Running>>,
+    /// The settings the user wants running (enabled), kept so a server that stopped on a
+    /// network drop can come back; `None` when disabled by the user.
+    wanted: Mutex<Option<RemoteSettings>>,
     /// Bumped whenever credentials change or the server stops/starts; live event
     /// streams re-check their token and server epoch when it moves.
     generation: watch::Sender<u64>,
@@ -476,6 +479,23 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
+/// What `refresh_lan` should (re)start, if anything: a running LAN server whose address
+/// went stale, or (after a network drop stopped it) the wanted LAN settings once a
+/// private address is back. A server the user turned off (`wanted` is `None`) stays off.
+fn lan_refresh_target(
+    running: Option<(RemoteSettings, IpAddr)>,
+    wanted: Option<RemoteSettings>,
+    current: Option<IpAddr>,
+) -> Option<RemoteSettings> {
+    match running {
+        Some((s, addr)) => (s.lan && current != Some(addr)).then_some(s),
+        None => {
+            let w = wanted?;
+            (w.enabled && w.lan && current.is_some_and(is_private_address)).then_some(w)
+        }
+    }
+}
+
 /// The machine's primary LAN address (no packets are sent).
 fn lan_ip() -> Option<IpAddr> {
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
@@ -537,6 +557,7 @@ impl Remote {
             events,
             tokens: Mutex::new(loaded.tokens),
             running: Mutex::new(None),
+            wanted: Mutex::new(None),
             generation,
             epoch: Mutex::new(0),
             apply_lock: tokio::sync::Mutex::new(()),
@@ -910,6 +931,7 @@ impl Remote {
         if self.is_shutting_down() {
             return;
         }
+        *self.wanted.lock() = settings.enabled.then(|| settings.clone());
         let unchanged =
             self.running.lock().as_ref().is_some_and(|r| {
                 r.settings.lan == settings.lan && r.settings.port == settings.port
@@ -957,24 +979,27 @@ impl Remote {
     /// The LAN address can change (new Wi-Fi, DHCP); when it did, listen on the new
     /// one so the shown URL/QR code works. Called when the UI reads the status.
     pub async fn refresh_lan(self: &Arc<Self>) {
-        let settings = match self.running.lock().as_ref() {
-            Some(r) if r.settings.lan && lan_ip() != Some(r.addr.ip()) => r.settings.clone(),
-            _ => return,
+        let check = |this: &Self| {
+            let running = this
+                .running
+                .lock()
+                .as_ref()
+                .map(|r| (r.settings.clone(), r.addr.ip()));
+            let wanted = this.wanted.lock().clone();
+            lan_refresh_target(running, wanted, lan_ip())
+        };
+        let Some(settings) = check(self) else {
+            return;
         };
         let _serialized = self.apply_lock.lock().await;
         if self.is_shutting_down() {
             return;
         }
         // Re-check under the lock: another apply may have handled it.
-        let still_stale = self
-            .running
-            .lock()
-            .as_ref()
-            .is_some_and(|r| r.settings.lan && lan_ip() != Some(r.addr.ip()));
-        if !still_stale {
+        if check(self).is_none() {
             return;
         }
-        info!("LAN address changed; restarting the remote server");
+        info!("LAN address changed or returned; (re)starting the remote server");
         let was_running = self.stop_and_wait().await;
         self.start_reporting(&settings, was_running).await;
     }
@@ -2514,6 +2539,31 @@ async fn events(
 // The end-to-end test (and its helpers) needs Unix mock agents.
 #[cfg_attr(not(unix), allow(dead_code, unused_imports))]
 mod tests {
+    #[test]
+    fn lan_refresh_decisions() {
+        let rs = |enabled, lan| RemoteSettings {
+            enabled,
+            lan,
+            port: 7000,
+        };
+        let a: IpAddr = "192.168.1.5".parse().unwrap();
+        let b: IpAddr = "192.168.1.9".parse().unwrap();
+        let public: IpAddr = "8.8.8.8".parse().unwrap();
+        // Running, address unchanged / changed / network gone.
+        assert!(lan_refresh_target(Some((rs(true, true), a)), None, Some(a)).is_none());
+        assert!(lan_refresh_target(Some((rs(true, true), a)), None, Some(b)).is_some());
+        assert!(lan_refresh_target(Some((rs(true, true), a)), None, None).is_some());
+        assert!(lan_refresh_target(Some((rs(true, false), a)), None, Some(b)).is_none());
+        // Stopped by a network drop: recover once a private address is back.
+        assert!(lan_refresh_target(None, Some(rs(true, true)), Some(b)).is_some());
+        assert!(lan_refresh_target(None, Some(rs(true, true)), None).is_none());
+        assert!(lan_refresh_target(None, Some(rs(true, true)), Some(public)).is_none());
+        // Stopped by the user, or loopback-only: never auto-started.
+        assert!(lan_refresh_target(None, None, Some(b)).is_none());
+        assert!(lan_refresh_target(None, Some(rs(false, true)), Some(b)).is_none());
+        assert!(lan_refresh_target(None, Some(rs(true, false)), Some(b)).is_none());
+    }
+
     use super::*;
     use armada_core::{CreateAgentRequest, EventSink, ItemBody, Provider};
     use std::io::BufRead;

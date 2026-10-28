@@ -147,6 +147,15 @@ export function Pairing() {
           Settings to reconnect.
         </Callout>
       )}
+      {reason === "share_expired" && (
+        <Callout
+          tone="warn"
+          icon="unlink"
+          title="This share link is no longer valid"
+        >
+          This share link has expired or was turned off. Ask for a new link.
+        </Callout>
+      )}
       {reason === "invalid_link" && (
         <Callout
           tone="err"

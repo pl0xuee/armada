@@ -14,7 +14,7 @@ export interface AgentChoice {
   accounts: RemoteAccount[];
 }
 
-const BUILT_IN: Provider[] = ["claude", "codex", "grok"];
+const BUILT_IN: Provider[] = ["claude", "codex", "grok", "local"];
 
 /**
  * Built-in providers and each *enabled* custom agent, but only those that

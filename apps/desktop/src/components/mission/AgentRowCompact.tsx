@@ -56,6 +56,7 @@ export const AgentRowCompact = memo(function AgentRowCompact({
 
   return (
     <div
+      data-agent-id={agent.id}
       role="listitem"
       tabIndex={0}
       aria-label={`${agent.title}, ${meta.label}`}

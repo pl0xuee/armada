@@ -310,7 +310,9 @@ export function NewAgent() {
                 className="block h-12 w-full rounded-xl border border-line-strong bg-card px-3.5 font-mono text-[16px] text-fg outline-none placeholder:font-sans placeholder:text-steel focus:border-accent/60"
               />
               <p className="mt-1.5 px-1 text-[12.5px] leading-snug text-steel">
-                A model id this agent understands (they differ per provider). You can also change the model after it starts.
+                {choices.find((c) => c.key === form.choiceKey)?.provider === "local"
+                  ? "The name of a model your local server has loaded."
+                  : "A model id this agent understands (they differ per provider). You can also change the model after it starts."}
               </p>
             </div>
           )}

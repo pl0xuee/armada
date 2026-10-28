@@ -17,9 +17,10 @@ mod tools;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::AppHandle;
 use armada_core::{accounts, AuthKind, Core, Provider};
 use parking_lot::Mutex;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{Emitter, State};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tracing::warn;
 
@@ -33,11 +34,86 @@ pub struct VoiceAssistant {
     control: Mutex<Option<UnboundedSender<Control>>>,
 }
 
-struct TauriSink(AppHandle);
+impl VoiceAssistant {
+    /// Takes the single session slot; check and set happen under one lock.
+    fn claim(&self, tx: &UnboundedSender<Control>) -> Result<(), String> {
+        let mut slot = self.control.lock();
+        if slot.is_some() {
+            return Err("The voice assistant is already running.".into());
+        }
+        *slot = Some(tx.clone());
+        Ok(())
+    }
+
+    /// Frees the slot, but only if `tx` is the session that holds it.
+    fn release(&self, tx: &UnboundedSender<Control>) {
+        let mut slot = self.control.lock();
+        if slot.as_ref().is_some_and(|t| t.same_channel(tx)) {
+            *slot = None;
+        }
+    }
+
+    fn send(&self, c: Control) {
+        if let Some(tx) = self.control.lock().as_ref() {
+            let _ = tx.send(c);
+        }
+    }
+
+    fn active(&self) -> bool {
+        self.control.lock().is_some()
+    }
+}
+
+/// Owns the session slot for the lifetime of the session task. If the task panics, the
+/// drop frees the slot and tells the UI, so the assistant can't stay "running" forever.
+struct SessionGuard {
+    app: AppHandle,
+    tx: UnboundedSender<Control>,
+    sink: Arc<dyn VaSink>,
+    finished: bool,
+}
+
+impl SessionGuard {
+    fn release(&self) {
+        if let Some(va) = tauri::Manager::try_state::<VoiceAssistant>(&self.app) {
+            va.release(&self.tx);
+        }
+    }
+
+    /// Frees the slot first, so a start right after `Ended` is accepted.
+    fn finish(mut self, reason: String, error: bool) {
+        self.release();
+        self.finished = true;
+        self.sink.emit(VaEvent::Ended { reason, error });
+    }
+}
+
+impl Drop for SessionGuard {
+    fn drop(&mut self) {
+        self.release();
+        if !self.finished {
+            self.sink.emit(VaEvent::Ended {
+                reason: "The voice assistant stopped unexpectedly.".into(),
+                error: true,
+            });
+        }
+    }
+}
+
+struct TauriSink {
+    app: AppHandle,
+    ledger: Mutex<cost::SessionLedger>,
+}
 
 impl VaSink for TauriSink {
     fn emit(&self, event: VaEvent) {
-        let _ = self.0.emit(EVENT, event);
+        let _ = self.app.emit(EVENT, event);
+    }
+
+    fn checkpoint_usage(&self, elapsed_secs: u64, cost_usd: f64) {
+        if let Err(e) = self.ledger.lock().checkpoint(elapsed_secs, cost_usd) {
+            warn!("could not record voice assistant usage: {e}");
+        }
     }
 }
 
@@ -91,6 +167,8 @@ fn build_config(core: &Core) -> Result<SessionConfig, String> {
         max_secs: u64::from(s.max_session_mins.clamp(1, 60)) * 60,
         silence_secs: u64::from(s.silence_timeout_secs.clamp(10, 600)),
         reconnect_delay: Duration::from_millis(1200),
+        headphones: s.headphones,
+        confirm_ttl: session::CONFIRM_TTL,
     })
 }
 
@@ -100,32 +178,33 @@ pub async fn va_start(
     core: State<'_, Core>,
     va: State<'_, VoiceAssistant>,
 ) -> CmdResult<()> {
-    if va.control.lock().is_some() {
-        return Err("The voice assistant is already running.".into());
-    }
     let cfg = build_config(&core)?;
     let input_device = core.settings().ok().and_then(|s| s.voice.input_device);
     let (ctl_tx, ctl_rx) = unbounded_channel();
-    *va.control.lock() = Some(ctl_tx);
+    va.claim(&ctl_tx)?;
 
     let core = (*core).clone();
-    let data_dir = core.data_dir().to_path_buf();
-    let sink: Arc<dyn VaSink> = Arc::new(TauriSink(app.clone()));
-    let host = Arc::new(host::ArmadaTools {
+    let sink: Arc<dyn VaSink> = Arc::new(TauriSink {
         app: app.clone(),
-        core,
-        sink: sink.clone(),
+        ledger: Mutex::new(cost::SessionLedger::new(core.data_dir())),
     });
+    let guard = SessionGuard {
+        app: app.clone(),
+        tx: ctl_tx,
+        sink: sink.clone(),
+        finished: false,
+    };
+    let host = Arc::new(host::ArmadaTools::new(app.clone(), core, sink.clone()));
     tauri::async_runtime::spawn(async move {
-        let mut devices = audio::SystemAudio { input_device };
-        let end = session::run(cfg, sink.clone(), host, &mut devices, ctl_rx).await;
-        let cost = end.usage.cost_usd();
+        let devices = Box::new(audio::SystemAudio { input_device });
+        let end = session::run(cfg, sink.clone(), host, devices, ctl_rx).await;
+        // The ledger already holds what earlier `response.done`s reported; this adds
+        // the remainder.
         if end.elapsed_secs > 0 {
-            if let Err(e) =
-                cost::record_session(&data_dir, &cost::current_month(), end.elapsed_secs, cost)
-            {
-                warn!("could not record voice assistant usage: {e}");
-            }
+            sink.checkpoint_usage(
+                end.elapsed_secs,
+                cost::session_cost(&end.usage, end.elapsed_secs),
+            );
         }
         let error = matches!(end.reason, EndReason::Error(_));
         if error {
@@ -134,34 +213,48 @@ pub async fn va_start(
                 message: Some(end.reason.label()),
             });
         }
-        sink.emit(VaEvent::Ended {
-            reason: end.reason.label(),
-            error,
-        });
-        if let Some(va) = tauri::Manager::try_state::<VoiceAssistant>(&app) {
-            *va.control.lock() = None;
-        }
+        guard.finish(end.reason.label(), error);
     });
     Ok(())
 }
 
 #[tauri::command]
 pub fn va_stop(va: State<'_, VoiceAssistant>) {
-    if let Some(tx) = va.control.lock().as_ref() {
-        let _ = tx.send(Control::Stop);
-    }
+    va.send(Control::Stop);
 }
 
 #[tauri::command]
 pub fn va_set_muted(va: State<'_, VoiceAssistant>, muted: bool) {
-    if let Some(tx) = va.control.lock().as_ref() {
-        let _ = tx.send(Control::Mute(muted));
-    }
+    va.send(Control::Mute(muted));
+}
+
+/// The user's answer to a confirmation card.
+#[tauri::command]
+pub fn va_confirm(va: State<'_, VoiceAssistant>, id: String, accept: bool) {
+    va.send(Control::Confirm { id, accept });
 }
 
 #[tauri::command]
 pub fn va_active(va: State<'_, VoiceAssistant>) -> bool {
-    va.control.lock().is_some()
+    va.active()
+}
+
+/// Ends an active session and waits (at most 2 s) for its usage to be recorded.
+pub async fn shutdown(app: &AppHandle) {
+    let Some(va) = tauri::Manager::try_state::<VoiceAssistant>(app) else {
+        return;
+    };
+    if !va.active() {
+        return;
+    }
+    va.send(Control::Stop);
+    for _ in 0..40 {
+        if !va.active() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    warn!("voice assistant did not stop within 2 s of shutdown");
 }
 
 #[tauri::command]
@@ -172,4 +265,24 @@ pub fn va_usage(core: State<'_, Core>) -> cost::MonthUsage {
 #[tauri::command]
 pub fn va_voices() -> Vec<&'static str> {
     protocol::VOICES.to_vec()
+}
+
+#[cfg(test)]
+mod slot_tests {
+    use super::*;
+
+    #[test]
+    fn only_one_session_holds_the_slot_and_it_can_be_retaken() {
+        let va = VoiceAssistant::default();
+        let (a, _ra) = unbounded_channel();
+        let (b, _rb) = unbounded_channel();
+        va.claim(&a).unwrap();
+        assert!(va.claim(&b).is_err());
+        // A stale holder can't free a newer session's slot.
+        va.release(&b);
+        assert!(va.active());
+        va.release(&a);
+        assert!(!va.active());
+        va.claim(&b).unwrap();
+    }
 }

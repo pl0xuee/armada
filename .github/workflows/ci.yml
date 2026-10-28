@@ -1,10 +1,30 @@
 name: CI
 
+# Cost model: one cheap Linux job runs everything frontend/lint related and gates the
+# slower macOS/Windows jobs, which only run clippy + cargo test (the cfg(target_os) code
+# paths). Installers are built by release.yml; the debug bundle and release-profile builds
+# run on pushes to main only. Dependency audit lives in audit.yml.
 on:
   push:
     branches: [main]
   pull_request:
+    # Docs-only PRs skip CI. Not applied to pushes to main: release.yml requires CI runs
+    # on the tagged commit, so every commit on main must have them.
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".github/dependabot.yml"
+      - "**/*.png"
+      - "**/*.jpg"
+      - "**/*.gif"
   workflow_dispatch:
+    inputs:
+      only:
+        description: "Run just one platform's job (skips the Linux checks), e.g. to retry a Windows fix"
+        type: choice
+        options: [all, windows, macos]
+        default: all
 
 permissions:
   contents: read
@@ -15,15 +35,15 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
-  build:
-    name: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+  checks:
+    name: checks (linux)
+    if: github.event_name != 'workflow_dispatch' || inputs.only == 'all'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -32,11 +52,13 @@ jobs:
       # Bumping the version needs a CHANGELOG.md section for it (the release notes);
       # catch a missing one here instead of when the tag is pushed.
       - name: Release notes for this version
-        if: runner.os == 'Linux'
         run: python3 scripts/release_notes.py --check
 
+      # api.ts invoke() calls vs the #[tauri::command] signatures vs the mock.
+      - name: UI and Rust command contract
+        run: python3 scripts/check_contract.py
+
       - name: Install Linux system dependencies
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -60,74 +82,198 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: ". -> target"
-
-      - name: Build frontend
-        working-directory: apps/desktop
-        run: |
-          npm ci
-          npm run build
-
-      - name: Test frontend
-        if: runner.os == 'Linux'
-        working-directory: apps/desktop
-        run: npm run test --if-present
-
-      # Embedded into the desktop binary by src-tauri/build.rs.
-      - name: Build mobile companion
-        working-directory: apps/remote
-        run: |
-          npm ci
-          npm run build
-
-      - name: Test mobile companion
-        if: runner.os == 'Linux'
-        working-directory: apps/remote
-        run: npm test
+          shared-key: ci-linux
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Formatting
-        if: runner.os == 'Linux'
         run: cargo fmt --all --check
 
-      # On every OS: there are cfg(windows)/cfg(unix)/cfg(target_os) code paths.
+      - name: Test mobile companion
+        working-directory: apps/remote
+        run: |
+          npm ci
+          npm run build
+          npm test
+
+      - name: Test and build desktop UI
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run test --if-present
+          npm run build
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
         run: cargo test --workspace --locked
 
-      # Catches bundler misconfiguration (targets, deb dependencies, icons, CSP) before a
-      # release does. Updater artifacts need the signing key, which CI doesn't have.
-      - name: Bundle (deb, debug)
-        if: runner.os == 'Linux'
-        working-directory: apps/desktop
-        run: npm run tauri build -- --ci --debug --bundles deb --config '{"bundle":{"createUpdaterArtifacts":false}}'
+  # cfg(target_os) code paths only: no frontend tests, no bundles.
+  native:
+    name: ${{ matrix.name }}
+    needs: checks
+    # After checks pass, or straight away for a single-platform manual run.
+    if: ${{ !cancelled() && (needs.checks.result == 'success' || (needs.checks.result == 'skipped' && inputs.only != 'all')) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.only == 'windows' && '[{"name":"Windows","os":"windows-latest"}]' || inputs.only == 'macos' && '[{"name":"macOS","os":"macos-latest"}]' || '[{"name":"macOS","os":"macos-latest"},{"name":"Windows","os":"windows-latest"}]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Full history only where the x86_64 gate below diffs against the PR base.
+          # (`cond && 0 || 1` would always give 1: 0 is falsy in expressions.)
+          fetch-depth: ${{ (matrix.os != 'macos-latest' || github.event_name != 'pull_request') && 1 || 0 }}
 
-      # The same check for the macOS app bundle and the Windows installer, which are
-      # otherwise first built on a release tag.
-      - name: Bundle (app, debug)
+      # The macOS release is a universal binary (arm64 + x86_64) but this runner is arm64;
+      # type-check the Intel half too, but only when Rust/dependency code could have changed.
+      - name: Decide on x86_64 check
+        id: x86
         if: runner.os == 'macOS'
-        working-directory: apps/desktop
-        run: npm run tauri build -- --ci --debug --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
-
-      - name: Bundle (nsis, debug)
-        if: runner.os == 'Windows'
-        working-directory: apps/desktop
         shell: bash
-        run: npm run tauri build -- --ci --debug --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          run=false
+          if [ "$EVENT" != "pull_request" ]; then
+            run=true
+          else
+            # Captured first so a failed diff fails the job instead of skipping the check.
+            changed=$(git diff --name-only "$BASE_SHA" HEAD)
+            if grep -Eq '^(Cargo\.lock|apps/desktop/src-tauri/)|(^|/)Cargo\.toml$' <<< "$changed"; then
+              run=true
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "x86_64 check: $run"
 
-  # Known-vulnerability check of Cargo.lock against the RustSec advisory database.
-  # Fails on vulnerabilities only; unmaintained/yanked notices are warnings.
-  audit:
-    name: cargo audit
+      # tauri::generate_context! needs frontendDist (apps/desktop/dist) to exist, and
+      # build.rs falls back to a placeholder for the mobile app in debug builds. Neither
+      # needs real content to compile or test the Rust code, so skip npm entirely.
+      - name: Stub frontend dist
+        shell: bash
+        run: |
+          mkdir -p apps/desktop/dist
+          echo '<!doctype html><title>Armada</title>' > apps/desktop/dist/index.html
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: clippy
+          targets: ${{ steps.x86.outputs.run == 'true' && 'x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: ". -> target"
+          shared-key: ci-${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Check (x86_64-apple-darwin)
+        if: runner.os == 'macOS' && steps.x86.outputs.run == 'true'
+        run: cargo check -p armada-desktop --target x86_64-apple-darwin --locked
+
+  # Catches bundler misconfiguration (targets, deb dependencies, icons, CSP) before a
+  # release does. Main only: release.yml builds the real installers on every OS.
+  # Updater artifacts need the signing key, which CI doesn't have.
+  bundle-smoke:
+    name: deb bundle smoke (linux)
+    if: github.event_name == 'push'
+    needs: checks
     runs-on: ubuntu-22.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
-        with:
-          tool: cargo-audit
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev libasound2-dev libdbus-1-dev libclang-dev patchelf
 
-      - name: Audit
-        run: cargo audit
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            apps/desktop/package-lock.json
+            apps/remote/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: ". -> target"
+          shared-key: ci-linux-bundle
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install frontend dependencies
+        run: |
+          (cd apps/desktop && npm ci)
+          (cd apps/remote && npm ci)
+
+      - name: Bundle (deb, debug)
+        working-directory: apps/desktop
+        run: npm run tauri build -- --ci --debug --bundles deb --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+  # The release profile (LTO, codegen settings, no debug assertions) compiles differently
+  # from the debug builds above; build it before a tag does. Main only.
+  release-build:
+    name: release build (linux)
+    if: github.event_name == 'push'
+    needs: checks
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev libasound2-dev libdbus-1-dev libclang-dev patchelf
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            apps/desktop/package-lock.json
+            apps/remote/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: ". -> target"
+          shared-key: ci-linux-release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build frontends
+        run: |
+          (cd apps/desktop && npm ci && npm run build)
+          (cd apps/remote && npm ci && npm run build)
+
+      - name: Build (release profile)
+        run: cargo build --release -p armada-desktop --locked

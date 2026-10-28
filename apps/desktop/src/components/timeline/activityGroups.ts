@@ -13,9 +13,15 @@ export const MIN_GROUP = 2;
 /**
  * Collapse runs of consecutive "activity" rows (plain tool calls, thoughts, and agent messages
  * that aren't the final answer of their turn) into single group rows. Depends only on structure.
- * `top` are the top-level row indices, in order.
+ * `top` are the top-level row indices, in order. `foldTail`: the agent is only waiting on
+ * sub-agents, so the trailing run collapses even when it's a single row (calls that arrive
+ * before the adapter attributes them to a sub-agent would otherwise pop in and out).
  */
-export function groupActivity(items: TimelineItem[], top: number[]): ActivityGrouping {
+export function groupActivity(
+  items: TimelineItem[],
+  top: number[],
+  { foldTail = false }: { foldTail?: boolean } = {},
+): ActivityGrouping {
   // Last agent_message of each turn (turns are delimited by user messages).
   const answers = new Set<number>();
   let lastMsg = -1;
@@ -39,8 +45,8 @@ export function groupActivity(items: TimelineItem[], top: number[]): ActivityGro
   const rows: number[] = [];
   const groups = new Map<number, number[]>();
   let run: number[] = [];
-  const flush = () => {
-    if (run.length >= MIN_GROUP) {
+  const flush = (min = MIN_GROUP) => {
+    if (run.length >= min) {
       rows.push(run[0]);
       groups.set(run[0], run);
     } else rows.push(...run);
@@ -53,6 +59,6 @@ export function groupActivity(items: TimelineItem[], top: number[]): ActivityGro
       rows.push(i);
     }
   }
-  flush();
+  flush(foldTail ? 1 : MIN_GROUP);
   return { rows, groups };
 }

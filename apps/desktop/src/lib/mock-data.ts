@@ -250,6 +250,7 @@ export function seedSettings(onboarded: boolean): Settings {
       model: "gpt-realtime",
       maxSessionMins: 10,
       silenceTimeoutSecs: 60,
+      headphones: false,
     },
     customAgents: [
       {
@@ -1037,6 +1038,10 @@ export function seedItems(): Record<string, TimelineItem[]> {
       diffs: [{ path: "test/auth.test.ts", oldText: null, newText: null, unified: AUTH_TEST_UNIFIED }],
       output: "",
       command: null,
+    },
+    {
+      kind: "agent_message",
+      text: "The dev server for this branch is running at http://127.0.0.1:4723 (4721 was already taken by another worktree). Open the Preview to see the refresh flow.",
     },
     {
       kind: "tool_call",

@@ -13,7 +13,7 @@ import {
 } from "@/lib/dictation";
 import { formatBytes } from "@/lib/format";
 import type { VoiceModel } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, isMac, modKey } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { Dialog, DialogBody, DialogContent, DialogFooter } from "./ui/dialog";
 import { Tooltip } from "./ui/tooltip";
@@ -32,10 +32,13 @@ function clock(ms: number) {
 export function DictateButton({
   onText,
   iconOnly,
+  round,
   className,
 }: {
   onText: (text: string, autoSend: boolean) => void;
   iconOnly?: boolean;
+  /** Round 28px composer-side button (icon only; the recording state widens into a pill). */
+  round?: boolean;
   className?: string;
 }) {
   const id = useId();
@@ -55,15 +58,25 @@ export function DictateButton({
   return (
     <span ref={anchor} className="contents">
       {active ? (
-        <ActiveDictate id={id} phase={phase} className={className} />
+        <ActiveDictate id={id} phase={phase} round={round} className={className} />
       ) : (
-        <IdleDictate id={id} phase={phase} iconOnly={iconOnly} className={className} />
+        <IdleDictate id={id} phase={phase} iconOnly={iconOnly} round={round} className={className} />
       )}
     </span>
   );
 }
 
-function ActiveDictate({ id, phase, className }: { id: string; phase: DictationPhase; className?: string }) {
+function ActiveDictate({
+  id,
+  phase,
+  round,
+  className,
+}: {
+  id: string;
+  phase: DictationPhase;
+  round?: boolean;
+  className?: string;
+}) {
   const level = useDictation((s) => s.level);
   const elapsedMs = useDictation((s) => s.elapsedMs);
   const maxMs = useDictation((s) => s.maxMs);
@@ -71,11 +84,16 @@ function ActiveDictate({ id, phase, className }: { id: string; phase: DictationP
   if (phase === "transcribing") {
     return (
       <span
-        className={cn("inline-flex h-6 items-center gap-1.5 px-1.5 text-[11.5px] text-muted", className)}
+        className={cn(
+          "inline-flex items-center gap-1.5 text-[11.5px] text-muted",
+          round ? "h-6 w-6 shrink-0 justify-center rounded-md" : "h-6 px-1.5",
+          className,
+        )}
         role="status"
+        title="Transcribing…"
       >
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        Transcribing…
+        <span className={round ? "sr-only" : undefined}>Transcribing…</span>
       </span>
     );
   }
@@ -89,11 +107,12 @@ function ActiveDictate({ id, phase, className }: { id: string; phase: DictationP
           onClick={() => void toggleDictation(id)}
           aria-label="Stop dictation and transcribe"
           className={cn(
-            "inline-flex h-6 items-center gap-1.5 rounded-md border border-err/30 bg-err/12 pl-1.5 pr-2 text-[11.5px] text-err transition-colors hover:bg-err/20",
+            "inline-flex shrink-0 items-center gap-1.5 border border-err/30 bg-err/12 text-[11.5px] text-err transition-colors hover:bg-err/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-err",
+            round ? "h-6 rounded-md pl-2 pr-2.5" : "h-6 rounded-md pl-1.5 pr-2",
             className,
           )}
         >
-          <Square className="h-2.5 w-2.5 fill-current" />
+          <Square className={cn("h-2.5 w-2.5 fill-current", round && "animate-pulse motion-reduce:animate-none")} />
           <span className="flex h-3.5 items-center gap-[2px]" aria-hidden>
             {BAR_GAIN.map((g, i) => (
               <span
@@ -116,28 +135,37 @@ function IdleDictate({
   id,
   phase,
   iconOnly,
+  round,
   className,
 }: {
   id: string;
   phase: DictationPhase;
   iconOnly?: boolean;
+  round?: boolean;
   className?: string;
 }) {
   return (
     <>
-      <Tooltip content="Dictate (speech to text, on this device)" shortcut={DICTATION_KEYS}>
+      <Tooltip
+        content={round ? "Dictate · on-device" : "Dictate (speech to text, on this device)"}
+        shortcut={round ? [modKey, "⇧", "D"] : DICTATION_KEYS}
+      >
         <button
           type="button"
           onClick={() => void toggleDictation(id)}
           disabled={phase !== "idle"}
-          aria-label="Dictate a message"
+          aria-label={round ? `Dictate, on-device (${modKey}+Shift+D)` : "Dictate a message"}
+          aria-keyshortcuts={isMac ? "Meta+Shift+D" : "Control+Shift+D"}
           className={cn(
-            "inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11.5px] text-muted transition-colors hover:bg-raised hover:text-fg disabled:opacity-40",
+            "inline-flex items-center gap-1 text-[11.5px] text-muted transition-colors hover:bg-raised hover:text-fg disabled:opacity-40",
+            round
+              ? "h-6 w-6 shrink-0 justify-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              : "h-6 rounded-md px-1.5",
             className,
           )}
         >
           <Mic className="h-3.5 w-3.5" />
-          {!iconOnly && <span>Dictate</span>}
+          {!iconOnly && !round && <span>Dictate</span>}
         </button>
       </Tooltip>
     </>

@@ -63,6 +63,7 @@ export const InboxCard = memo(
     return (
       <div
         ref={ref}
+        data-agent-id={agent.id}
         role="listitem"
         aria-current={selected ? "true" : undefined}
         aria-label={`${item.title} · ${agent.title}`}

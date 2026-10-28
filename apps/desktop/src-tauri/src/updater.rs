@@ -9,10 +9,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use crate::AppHandle;
 use anyhow::{anyhow, Context};
 use armada_core::{ArmadaEvent, Core, UpdateInfo};
 use parking_lot::Mutex;
-use tauri::{AppHandle, Manager};
+use tauri::Manager;
 use tauri_plugin_updater::UpdaterExt;
 use tracing::{error, info, warn};
 

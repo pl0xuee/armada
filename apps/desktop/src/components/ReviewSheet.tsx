@@ -21,11 +21,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { archiveAgent } from "@/lib/actions";
 import { api } from "@/lib/api";
-import { conflictPrompt, gitBusyReason, shipOutcome, toastCommit, toastPr } from "@/lib/gitResults";
+import { conflictPrompt, gitBusyReason, mergeToast, shipOutcome, toastCommit, toastPr } from "@/lib/gitResults";
+import { PushBaseNotice } from "./git/PushBaseNotice";
 import { parseUnified } from "@/lib/diff";
 import { pluralize } from "@/lib/format";
 import { findFileSlice, hunkPatch, slicePatch } from "@/lib/patchSlices";
-import type { Agent, AgentDiff, ChangedFile } from "@/lib/types";
+import type { Agent, AgentDiff, BaseBranchStatus, ChangedFile } from "@/lib/types";
 import { basename, cn, errorMessage } from "@/lib/utils";
 import { useApp } from "@/store/app";
 import { refreshPrSoon } from "@/store/pr";
@@ -110,7 +111,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   const [revertError, setRevertError] = useState<string | null>(null);
   /** After a merge: next steps, or conflict help. */
   const [afterMerge, setAfterMerge] = useState<
-    | { kind: "merged"; message: string }
+    | { kind: "merged"; message: string; baseStatus: BaseBranchStatus | null }
     | { kind: "conflict"; message: string }
     // Commit landed but the merge failed for another reason.
     | { kind: "not_merged"; message: string }
@@ -234,10 +235,10 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         setCommitMsg("");
         const o = shipOutcome(result);
         if (o.kind === "shipped") {
-          toast.success("Committed & merged", {
-            description: `${agent.branch ?? "Branch"} is in ${agent.baseBranch ?? "the base branch"}${o.merged ? ` (${o.merged.slice(0, 7)})` : ""}.`,
+          toast.success("Committed & merged locally", {
+            description: mergeToast(agent.branch ?? "Branch", agent.baseBranch ?? "the base branch", o.baseStatus),
           });
-          setAfterMerge({ kind: "merged", message: "" });
+          setAfterMerge({ kind: "merged", message: "", baseStatus: o.baseStatus });
         } else {
           // The commit landed; only the merge failed. A warning, not a success.
           toast.warning("Committed, but not merged", { description: o.error, duration: 10000 });
@@ -253,8 +254,8 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
       "merge",
       () => api.mergeAgent(agent.id),
       (msg) => {
-        toast.success("Merged", { description: msg });
-        setAfterMerge({ kind: "merged", message: msg });
+        toast.success("Merged locally", { description: `${msg} Not pushed to the remote.` });
+        setAfterMerge({ kind: "merged", message: msg, baseStatus: null });
       },
     );
 
@@ -689,10 +690,10 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
           {afterMerge.kind === "merged" ? (
             <>
               <GitMerge className="h-4 w-4 shrink-0 text-ok" />
-              <span className="min-w-0 flex-1">
-                <span className="font-medium text-fg">Merged.</span>{" "}
-                <span className="text-muted">Clean up the worktree, or archive the agent if it's done.</span>
-              </span>
+              <div className="min-w-0 flex-1 space-y-1">
+                <PushBaseNotice agentId={agent.id} initial={afterMerge.baseStatus} />
+                <span className="block text-muted">Clean up the worktree, or archive the agent if it's done.</span>
+              </div>
               <Button size="sm" variant="ghost" onClick={() => setConfirmDiscard(true)} disabled={!agent.worktree}>
                 <Trash2 /> Discard worktree
               </Button>

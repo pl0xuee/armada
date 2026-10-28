@@ -2,7 +2,7 @@ import { Cpu, FilePen, FileSearch, FolderOpen, GitBranch, Hash, ListChecks, Shri
 import { m } from "motion/react";
 import { useState, type ReactNode } from "react";
 import { agentDerived } from "./derived";
-import { isBusy } from "@/lib/agents";
+import { useRunningSubagentCount } from "./useSubagents";
 import { canCompact, COMPACT_SUGGEST_RATIO, compactContext, contextRatio } from "./compact";
 import { attempt } from "@/lib/actions";
 import { api } from "@/lib/api";
@@ -50,7 +50,8 @@ export function Inspector({
   className?: string;
 }) {
   // Cached on tool-call structure: streaming text doesn't recompute (or re-sort) these.
-  const { files, runningSubagents: subagents, plan } = agentDerived(agent.id, items, isBusy(agent));
+  const { files, plan } = agentDerived(agent.id, items);
+  const subagents = useRunningSubagentCount(agent.id);
   const done = plan?.entries.filter((e) => e.status === "completed").length ?? 0;
 
   return (

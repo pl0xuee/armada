@@ -394,6 +394,8 @@ export interface VoiceAssistantSettings {
   model: string;
   maxSessionMins: number;
   silenceTimeoutSecs: number;
+  /** Headphones on: keep the mic open while the assistant talks (allows interrupting). */
+  headphones: boolean;
 }
 
 export interface VoiceAssistantUsage {
@@ -676,6 +678,17 @@ export interface ShipResult {
   committed: string | null;
   merged: string | null;
   error: string | null;
+  /** Base branch vs its upstream after a successful merge (the merge itself is local-only). */
+  baseStatus: BaseBranchStatus | null;
+}
+
+/** Where an agent's base branch stands against its upstream (as last fetched). */
+export interface BaseBranchStatus {
+  branch: string;
+  /** e.g. "origin/master"; null when the base branch has no upstream. */
+  upstream: string | null;
+  ahead: number;
+  behind: number;
 }
 
 /** A runnable project command detected in an agent's folder. */

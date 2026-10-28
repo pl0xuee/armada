@@ -125,31 +125,146 @@ const META = /[|;&$`<>(){}\\!\n\r]/;
 /** Options that make otherwise read-only tools write files or run other programs. */
 const DANGEROUS_OPT = /(^|\s)--(output|pre|exec|upload-pack|receive-pack|ext-diff|open-files-in-pager|textconv)\b/;
 const NODE_PM = new Set(["npm", "pnpm", "yarn", "bun"]);
-const NODE_SUB = new Set(["run", "test", "ci", "install", "i", "t"]);
+
+/** A relative path or name that stays inside the project: no absolute/home/drive/URL/`..`/quotes. */
+function safeRel(a: string): boolean {
+  if (a === "" || a.startsWith("-") || /["']/.test(a)) return false;
+  if (/^[/~]/.test(a) || /^[A-Za-z]:/.test(a) || a.includes("://")) return false;
+  return !a.split("/").includes("..");
+}
+
+/** A search pattern or relative path for grep/rg: quotes are fine, escaping the project is not. */
+function safePatternOrRel(a: string): boolean {
+  const u = a.replace(/^["']+/, "");
+  if (a.startsWith("-") || /^[/~]/.test(u) || /^[A-Za-z]:[\\/]/.test(u) || u.includes("://")) return false;
+  return !u.split("/").includes("..");
+}
+
+interface ArgRules {
+  /** Flags that take no value. */
+  flags?: RegExp;
+  /** Flags whose next token must satisfy `val`. */
+  valued?: Set<string>;
+  val?: (v: string) => boolean;
+  /** Validator for non-flag tokens (default: none allowed). */
+  pos?: (a: string) => boolean;
+}
+
+/** Every token must be an allowed flag, an allowed flag value, or an allowed positional. */
+function argsOk(tokens: string[], r: ArgRules): boolean {
+  for (let i = 0; i < tokens.length; i++) {
+    const a = tokens[i];
+    if (a.startsWith("-")) {
+      if (r.valued?.has(a)) {
+        const v = tokens[++i];
+        if (v === undefined || !(r.val ?? safeRel)(v)) return false;
+      } else if (!r.flags?.test(a)) return false;
+    } else if (!r.pos?.(a)) return false;
+  }
+  return true;
+}
+
+const SHORT = /^-[A-Za-z0-9]+$/;
+const SCRIPT = /^[A-Za-z0-9][A-Za-z0-9:_-]*$/;
+const CRATE = /^[A-Za-z0-9_-]+$/;
+const GIT_LONG =
+  /^--(stat|oneline|name-only|name-status|graph|all|cached|staged|shortstat|numstat|no-color|color|short|porcelain|branch|decorate|patch|summary|abbrev-commit|no-merges|merges|first-parent|reverse|max-count=\d+|format=[\w%:.,-]+|pretty=[\w%:.,-]+|author=[\w.@-]+|since=[\w.-]+|until=[\w.-]+)$/;
+const GREP_LONG =
+  /^--(ignore-case|line-number|no-heading|hidden|count|fixed-strings|word-regexp|files-with-matches|invert-match|recursive|color=(never|always|auto)|no-ignore|smart-case|context=\d+)$/;
+
+function nodePmOk(t: string[]): boolean {
+  const sub = t[1];
+  const rest = t.slice(2);
+  const quiet = /^--(silent|if-present|ignore-scripts|frozen-lockfile|prefer-offline|offline)$|^-s$/;
+  if (["test", "t", "install", "i", "ci"].includes(sub)) return argsOk(rest, { flags: quiet });
+  if (sub === "run") return rest.length >= 1 && SCRIPT.test(rest[0]) && argsOk(rest.slice(1), { flags: quiet });
+  return false;
+}
+
+function cargoOk(t: string[]): boolean {
+  const sub = t[1];
+  if (!["build", "check", "test", "fmt", "clippy"].includes(sub)) return false;
+  const dd = t.indexOf("--");
+  const head = dd === -1 ? t.slice(2) : t.slice(2, dd);
+  const tail = dd === -1 ? [] : t.slice(dd + 1);
+  const ok = argsOk(head, {
+    flags: /^--(release|workspace|all|all-targets|all-features|locked|frozen|offline|quiet|check|lib|bins|tests|examples|benches|no-fail-fast|no-run)$|^-q$/,
+    valued: new Set(["-p", "--package"]),
+    val: (v) => CRATE.test(v),
+    pos: sub === "test" ? (a) => /^[A-Za-z0-9_:]+$/.test(a) : undefined,
+  });
+  if (!ok) return false;
+  if (tail.length === 0) return dd === -1;
+  if (sub === "clippy") {
+    for (let i = 0; i < tail.length; i += 2) {
+      if (!/^-[DWAF]$/.test(tail[i]) || !/^[a-z_:]+$/.test(tail[i + 1] ?? "")) return false;
+    }
+    return true;
+  }
+  if (sub === "test") return tail.every((a) => /^--(nocapture|ignored|show-output|test-threads=\d+)$/.test(a));
+  return false;
+}
+
+function goOk(t: string[]): boolean {
+  if (!["build", "test", "vet"].includes(t[1])) return false;
+  return argsOk(t.slice(2), {
+    flags: /^-(v|race|short|count=\d+|run=[\w.*^]+)$/,
+    pos: (a) => /^\.\/[\w./-]*$/.test(a) && !a.split("/").includes(".."),
+  });
+}
+
+function gitOk(t: string[]): boolean {
+  const sub = t[1];
+  const rest = t.slice(2);
+  const rev = (a: string) =>
+    /^[\w@.^~:/+-]+$/.test(a) && !/^[/~]/.test(a) && !a.includes("://") && !a.split("/").includes("..");
+  switch (sub) {
+    case "status": case "diff": case "log": case "show":
+      return argsOk(rest, { flags: new RegExp(`${SHORT.source}|${GIT_LONG.source}`), pos: rev });
+    case "branch":
+      return argsOk(rest, { flags: /^-(a|r|v|vv)$|^--(all|remotes|list|show-current|verbose)$/ });
+    case "fetch":
+      return argsOk(rest, { flags: /^--(all|prune)$|^-p$/, pos: (a) => /^[A-Za-z0-9_-]+$/.test(a) });
+    default:
+      return false;
+  }
+}
 
 function isSimpleLine(line: string): boolean {
   if (META.test(line) || DANGEROUS_OPT.test(line)) return false;
   const t = line.trim().split(/\s+/);
   const [head, sub] = t;
+  const rest = t.slice(1);
   switch (head) {
-    case "ls": case "pwd": case "cat": case "head": case "tail": case "wc": case "grep": case "rg":
-    case "cd": case "echo": case "make": case "pytest":
-      return true;
-    case "git":
-      if (sub === "branch") {
-        return !t.slice(2).some((a) => /^-[a-zA-Z]*[dDmMcCfuU]/.test(a) || /^--(delete|move|copy|force|set-upstream|unset-upstream|edit-description)/.test(a));
-      }
-      return ["status", "diff", "log", "show", "fetch"].includes(sub);
-    case "npx":
-      return sub === "tsc";
-    case "cargo":
-      return ["build", "check", "test", "run", "fmt", "clippy"].includes(sub);
-    case "go":
-      return ["build", "test", "vet"].includes(sub);
+    case "pwd":
+      return argsOk(rest, { flags: SHORT });
+    case "ls": case "cat": case "head": case "tail": case "wc":
+      return argsOk(rest, { flags: SHORT, pos: safeRel });
+    case "cd":
+      return argsOk(rest, { pos: safeRel });
+    case "echo":
+      return !rest.some((a) => /^[/~]/.test(a));
+    case "grep": case "rg":
+      return argsOk(rest, {
+        flags: new RegExp(`${SHORT.source}|${GREP_LONG.source}`),
+        pos: safePatternOrRel,
+      }) && !rest.some((a) => /^-[A-Za-z0-9]*[fz]/.test(a));
+    case "make":
+      return argsOk(rest, { flags: /^-j\d*$/, pos: (a) => /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(a) });
+    case "pytest":
+      return argsOk(rest, { flags: /^-(q|qq|v|vv|x|s)$|^--tb=\w+$/, pos: safeRel });
     case "python": case "python3":
-      return sub === "-m" && t[2] === "pytest";
+      return sub === "-m" && t[2] === "pytest" && isSimpleLine(["pytest", ...t.slice(3)].join(" "));
+    case "git":
+      return gitOk(t);
+    case "npx":
+      return sub === "tsc" && argsOk(t.slice(2), { flags: /^--(noEmit|pretty)$|^-b$/, valued: new Set(["-p"]) });
+    case "cargo":
+      return cargoOk(t);
+    case "go":
+      return goOk(t);
     default:
-      return NODE_PM.has(head) && NODE_SUB.has(sub);
+      return NODE_PM.has(head) && nodePmOk(t);
   }
 } // prettier-ignore
 

@@ -27,6 +27,7 @@ import { m, AnimatePresence } from "motion/react";
 import { memo, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { respondPermission } from "@/lib/actions";
 import { api } from "@/lib/api";
+import { PREVIEW_LINK_HINT, splitLoopbackUrls } from "@/lib/external";
 import type { Agent, Attachment, PermissionOption, TimelineItem, ToolKind } from "@/lib/types";
 import { cn, errorMessage } from "@/lib/utils";
 import { toast } from "sonner";
@@ -233,6 +234,25 @@ export function cleanTerminalOutput(raw: string): { text: string; hidden: number
   return { text, hidden };
 }
 
+/** Plain text with loopback URLs (dev servers) as links; the navigation guard opens them in Preview. */
+const LinkifiedText = memo(function LinkifiedText({ text }: { text: string }) {
+  const parts = useMemo(() => splitLoopbackUrls(text), [text]);
+  if (parts.length === 1 && typeof parts[0] === "string") return <>{text}</>;
+  return (
+    <>
+      {parts.map((p, i) =>
+        typeof p === "string" ? (
+          p
+        ) : (
+          <a key={i} href={p.url} title={PREVIEW_LINK_HINT} className="underline decoration-accent/50 underline-offset-2 hover:text-accent">
+            {p.url}
+          </a>
+        ),
+      )}
+    </>
+  );
+});
+
 export function TerminalOutput({
   command,
   output,
@@ -277,7 +297,7 @@ export function TerminalOutput({
         {hidden > 0 && (
           <div className="mb-1 select-none text-steel">… {hidden.toLocaleString()} earlier characters not shown</div>
         )}
-        {text}
+        <LinkifiedText text={text} />
         {live && <span className="caret" />}
         {!text && !live && !command && <span className="text-steel">No output</span>}
       </pre>
@@ -747,7 +767,14 @@ export const NoticeBanner = memo(function NoticeBanner({
 }) {
   const Icon = item.level === "error" ? CircleX : item.level === "warn" ? TriangleAlert : Info;
   const [retrying, setRetrying] = useState(false);
-  const recover = item.level === "error" && agent && isLatest;
+  // A usage-limit failure is handled by the single limit card above the composer.
+  const limitCard =
+    item.level === "error" &&
+    !!agent?.rateLimited &&
+    agent.status !== "interrupted" &&
+    agent.status !== "stopped" &&
+    !!isLatest;
+  const recover = item.level === "error" && agent && isLatest && !limitCard;
   const retry = async () => {
     if (!agent || !lastPrompt || retrying) return;
     setRetrying(true);
@@ -761,6 +788,7 @@ export const NoticeBanner = memo(function NoticeBanner({
       setRetrying(false);
     }
   };
+  if (limitCard) return null;
   return (
     <div
       role={item.level === "error" ? "alert" : "status"}
@@ -778,10 +806,10 @@ export const NoticeBanner = memo(function NoticeBanner({
       </div>
       {recover && (
         <div className="flex flex-wrap items-center gap-1.5 border-t border-err/20 px-2 py-1.5">
-          {lastPrompt && (
+          {lastPrompt && agent.running && (
             <Button size="xs" variant="ghost" className="text-fg" disabled={retrying} onClick={() => void retry()}>
               {retrying ? <Spinner className="h-3 w-3" /> : <RotateCcw className="!h-3 !w-3" />}
-              {agent.running ? "Retry last message" : "Resume & retry"}
+              Retry last message
             </Button>
           )}
           {agent.provider !== "custom" && !agent.rateLimited && (

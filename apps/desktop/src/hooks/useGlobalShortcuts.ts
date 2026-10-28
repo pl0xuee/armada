@@ -7,6 +7,7 @@ import { isEditableTarget, isMac } from "@/lib/utils";
 import { openShortcutHelp, toggleShortcutHelp } from "@/components/shell/ShortcutHelp";
 import { stepInterfaceScale } from "@/lib/zoom";
 import { useApp } from "@/store/app";
+import { togglePreview } from "@/store/preview";
 import { useUi } from "@/store/ui";
 import { toggleVoiceAssistant } from "@/store/voiceAssistant";
 
@@ -81,6 +82,13 @@ export function useGlobalShortcuts(enabled: boolean) {
         if (ui.view !== "agents" || !ui.selectedAgentId) return;
         e.preventDefault();
         ui.setWorkspaceOpen(!ui.workspaceOpen);
+        return;
+      }
+      if (key === "p" && e.shiftKey) {
+        // Preview pane (right of the conversation) of the open agent.
+        if (ui.view !== "agents" || !ui.selectedAgentId) return;
+        e.preventDefault();
+        togglePreview(ui.selectedAgentId);
         return;
       }
       if (key === "j" && !e.shiftKey) {
