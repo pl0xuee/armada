@@ -1,7 +1,10 @@
 //! Main-window helpers shared by the tray, notifications, hotkey and commands.
 
+use crate::{AppHandle, Rt};
 use armada_core::{ArmadaEvent, Core, NavigateTarget};
-use tauri::{AppHandle, Manager, WebviewWindow, Window, WindowEvent};
+use tauri::{Manager, WindowEvent};
+type WebviewWindow = tauri::WebviewWindow<Rt>;
+type Window = tauri::Window<Rt>;
 
 use crate::attention::Attention;
 
@@ -25,6 +28,8 @@ pub fn create_main(app: &AppHandle) -> tauri::Result<()> {
         .cloned()
         .ok_or_else(|| tauri::Error::WindowNotFound)?;
     tauri::WebviewWindowBuilder::from_config(app, &config)?
+        // Login launches start in the tray; building hidden avoids a visible flash.
+        .visible(!crate::autostart_launch())
         .on_new_window(|_url, _features| tauri::webview::NewWindowResponse::Deny)
         .build()?;
     Ok(())

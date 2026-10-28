@@ -81,6 +81,10 @@ let current: TokenRef | null = null;
 /** The token being tried (for "Try again" on the blocked screen). */
 let attempting: TokenRef | null = null;
 
+/** A pairing code that hasn't been traded yet (kept so "Try again" can reuse it). */
+let pendingPair: { code: string; readAt: number } | null = null;
+const PAIR_CODE_TTL_MS = 5 * 60_000;
+
 // ---------------------------------------------------------------------------
 // Boot / pairing
 
@@ -169,6 +173,7 @@ function deviceName(): string {
  * then connect with that token like any other (it is only stored once the session accepts it).
  */
 export async function pairWithCode(code: string) {
+  if (pendingPair?.code !== code) pendingPair = { code, readAt: Date.now() };
   const gen = ++generation;
   connection?.stop();
   connection = null;
@@ -176,6 +181,7 @@ export async function pairWithCode(code: string) {
   try {
     const { token } = await pairDevice(code, deviceName());
     if (gen !== generation) return;
+    pendingPair = null;
     await connect({ token, source: "candidate" });
   } catch (e) {
     if (gen !== generation) return;
@@ -185,10 +191,32 @@ export async function pairWithCode(code: string) {
         blockedReason: "rate_limited",
         blockedMessage: e.message,
       });
+    } else if (e instanceof ApiError && e.status === 409) {
+      // Too many paired devices: the server says so; the code is still good once one is removed.
+      const fallback = storedToken();
+      if (fallback) {
+        pendingPair = null;
+        pushToast({
+          tone: "warn",
+          title: "Couldn't pair this device",
+          body: e.message,
+          agentId: null,
+          reason: null,
+          duration: 9_000,
+        });
+        void connect(fallback);
+      } else {
+        setState({
+          phase: "blocked",
+          blockedReason: "error",
+          blockedMessage: e.message,
+        });
+      }
     } else if (
       e instanceof ApiError &&
-      (e.isUnauthorized || e.status === 403 || e.status === 409)
+      (e.isUnauthorized || e.status === 403)
     ) {
+      pendingPair = null;
       const fallback = storedToken();
       if (fallback) {
         invalidLinkToast();
@@ -217,6 +245,13 @@ export async function pairWithToken(token: string) {
 
 /** Retry from the "can't reach Armada" / rate-limited screens (stays on that screen until it works). */
 export async function retryConnect() {
+  if (
+    pendingPair &&
+    Date.now() - pendingPair.readAt < PAIR_CODE_TTL_MS &&
+    !current
+  )
+    return pairWithCode(pendingPair.code);
+  pendingPair = null;
   const ref = attempting ?? current;
   if (ref) await connect(ref, true);
   else setState({ phase: "unpaired" });
@@ -325,7 +360,12 @@ function tokenRejected(ref: TokenRef) {
   resetData();
   setState({
     phase: "unpaired",
-    unpairedReason: ref.source === "candidate" ? "invalid_link" : "revoked",
+    unpairedReason:
+      ref.source === "candidate"
+        ? "invalid_link"
+        : ref.source === "shared"
+          ? "share_expired"
+          : "revoked",
   });
   navigate({ name: "fleet" }, { replace: true });
 }
@@ -340,6 +380,7 @@ export function unpair() {
   }
   current = null;
   attempting = null;
+  pendingPair = null;
   // A tab-only share link sits on top of the pairing: leaving it returns to the pairing.
   const fallback = storedToken();
   navigate({ name: "fleet" }, { replace: true });
@@ -785,7 +826,10 @@ export async function loadTimeline(agentId: string) {
     const items = older.length ? [...older, ...merged.items] : merged.items;
     const hasMore = older.length
       ? (prev?.hasMore ?? false)
-      : raw.length >= PAGE_SIZE;
+      : raw.length >= PAGE_SIZE ||
+        (getState().session?.scope === "viewer" &&
+          snapshot.length > 0 &&
+          snapshot[0].seq > 1);
     setTimeline(agentId, {
       status: "ready",
       items,
@@ -863,7 +907,12 @@ export async function loadOlder(agentId: string) {
       ...cur,
       items,
       loadingOlder: false,
-      hasMore: raw.length >= PAGE_SIZE && page.length > 0,
+      // Viewer pages skip hidden items (thoughts, permissions…), so a short page isn't the end:
+      // only seq 1 (or an empty page) is.
+      hasMore:
+        page.length > 0 &&
+        (raw.length >= PAGE_SIZE ||
+          (getState().session?.scope === "viewer" && page[0].seq > 1)),
     });
   } catch (e) {
     if (gen !== generation || handleAuthError(e)) return;

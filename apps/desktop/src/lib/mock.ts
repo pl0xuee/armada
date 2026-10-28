@@ -23,6 +23,7 @@ import type {
   Checkpoint,
   RestorePreview,
   ShipResult,
+  BaseBranchStatus,
   PrStatus,
   PrInfo,
   PrCheck,
@@ -900,6 +901,11 @@ function mockProbe(kind: LocalKind, baseUrl: string): LocalProbe {
   };
 }
 
+const mockBase: Record<string, BaseBranchStatus> = {};
+
+/** Port the mock agent "a-token" says its dev server runs on. */
+const MOCK_DEV_PORT = 4723;
+
 export const mockApi: ArmadaApi = {
   async getState(): Promise<AppState> {
     setTimeout(startLiveActivity, 600);
@@ -1510,6 +1516,7 @@ export const mockApi: ArmadaApi = {
         committed: "3f9a1c2",
         merged: null,
         error: `Committed 3f9a1c2 on ${a.branch}, but the merge failed: CONFLICT (content): Merge conflict in prisma/schema.prisma`,
+        baseStatus: null,
       };
     }
     addItem(agentId, {
@@ -1517,7 +1524,25 @@ export const mockApi: ArmadaApi = {
       level: "info",
       text: `Committed “${msg}” and merged ${a.branch ?? "branch"} into ${a.baseBranch ?? "main"}.`,
     });
-    return { committed: "3f9a1c2", merged: "8b04de1", error: null };
+    const base = a.baseBranch ?? "main";
+    mockBase[agentId] = { branch: base, upstream: agentId === "a-e2e" ? null : `origin/${base}`, ahead: 2, behind: 0 };
+    return { committed: "3f9a1c2", merged: "8b04de1", error: null, baseStatus: mockBase[agentId] };
+  },
+
+  async baseBranchStatus(agentId): Promise<BaseBranchStatus> {
+    const a = getAgent(agentId);
+    const base = a.baseBranch ?? "main";
+    return mockBase[agentId] ?? { branch: base, upstream: `origin/${base}`, ahead: 0, behind: 0 };
+  },
+
+  async pushBaseBranch(agentId): Promise<BaseBranchStatus> {
+    await sleep(800);
+    const cur = await mockApi.baseBranchStatus(agentId);
+    if (!cur.upstream)
+      throw new Error(
+        `${cur.branch} has no upstream branch; push it from a terminal with git push -u origin ${cur.branch}`,
+      );
+    return (mockBase[agentId] = { ...cur, ahead: 0 });
   },
 
   async mergeAgent(agentId) {
@@ -1851,8 +1876,32 @@ export const mockApi: ArmadaApi = {
     return delay(t.id, 60);
   },
 
+  async probeLoopback(ports) {
+    const up = await mockApi.probePorts(ports);
+    // The mock's fictional server is IPv4-only, like a plain `python -m http.server`.
+    return up.map((port) => ({ port, v4: true, v6: false }));
+  },
+
   async probePorts(ports) {
-    return delay(ports, 40);
+    // The fictional dev server (4723) is always up; any other port is probed for real, which works in
+    // a plain browser because a no-cors fetch to loopback settles only when something is listening.
+    const up = await Promise.all(
+      ports.map(async (p) => {
+        if (p === MOCK_DEV_PORT) return true;
+        if (typeof fetch !== "function" || typeof AbortController === "undefined") return false;
+        const ctl = new AbortController();
+        const t = setTimeout(() => ctl.abort(), 700);
+        try {
+          await fetch(`http://127.0.0.1:${p}/`, { mode: "no-cors", signal: ctl.signal });
+          return true;
+        } catch {
+          return false;
+        } finally {
+          clearTimeout(t);
+        }
+      }),
+    );
+    return ports.filter((_, i) => up[i]);
   },
 
   async workspaceScripts() {
@@ -2147,7 +2196,6 @@ export const mockApi: ArmadaApi = {
       mockVa.phase = p;
       bus({ type: "state", state: p, message: null });
     };
-    const first = db.agents[0];
     at(1800, () =>
       bus({ type: "caption", role: "user", itemId: "u1", text: "Start an agent in storefront", done: false }),
     );
@@ -2161,25 +2209,18 @@ export const mockApi: ArmadaApi = {
       }),
     );
     at(2700, () => phase("thinking"));
+    // The assistant only proposes; the user confirms on screen (see vaConfirm).
     at(3600, () => {
       bus({
-        type: "action",
-        id: "act1",
+        type: "confirm_action",
+        id: "confirm1",
         kind: "start_agent",
-        ok: true,
-        agentId: first?.id ?? null,
-        summary: "Started Claude agent 'Fix flaky checkout test' in storefront",
+        summary: "Start Claude agent in storefront: Fix the flaky checkout test.",
       });
-      phase("speaking");
-      bus({
-        type: "caption",
-        role: "assistant",
-        itemId: "a1",
-        text: "Done. I started a Claude agent in storefront.",
-        done: true,
-      });
+      phase("listening");
     });
-    at(7000, () => phase("listening"));
+    at(5000, () => bus({ type: "notice", message: "Reconnected \u2014 earlier context was lost" }));
+    at(13000, () => bus({ type: "notice", message: null }));
   },
 
   async vaStop() {
@@ -2193,6 +2234,31 @@ export const mockApi: ArmadaApi = {
   },
 
   async vaSetMuted() {},
+  async vaConfirm(id, accept) {
+    const bus = (e: unknown) => emitVoiceBus("va-event", e);
+    bus({ type: "confirm_done", id, status: accept ? "confirmed" : "cancelled" });
+    if (!accept) return;
+    const first = db.agents[0];
+    window.setTimeout(() => {
+      bus({
+        type: "action",
+        id: "act1",
+        kind: "start_agent",
+        ok: true,
+        agentId: first?.id ?? null,
+        summary: "Started Claude agent 'Fix flaky checkout test' in storefront",
+      });
+      mockVa.phase = "speaking";
+      bus({ type: "state", state: "speaking", message: null });
+      bus({
+        type: "caption",
+        role: "assistant",
+        itemId: "a1",
+        text: "Done. I started a Claude agent in storefront.",
+        done: true,
+      });
+    }, 300);
+  },
   async vaActive() {
     return mockVa.timers.length > 0;
   },

@@ -1,6 +1,6 @@
 // Per-agent composer drafts (text only). Kept in memory for instant switching and
 // persisted to localStorage (debounced) so they survive restarts. Bounded and pruned.
-import { useApp } from "@/store/app";
+import { isSuppressed, useApp } from "@/store/app";
 
 const KEY = "armada.drafts";
 const MAX_DRAFTS = 50;
@@ -28,7 +28,7 @@ function persist() {
     // Drop drafts of agents that no longer exist (once agents are loaded).
     const agents = useApp.getState().agents;
     if (Object.keys(agents).length > 0) {
-      for (const id of [...drafts.keys()]) if (!agents[id]) drafts.delete(id);
+      for (const id of [...drafts.keys()]) if (!agents[id] && !isSuppressed(id)) drafts.delete(id);
     }
     // Keep the most recently written drafts (Map preserves insertion order).
     while (drafts.size > MAX_DRAFTS) {

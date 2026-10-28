@@ -174,7 +174,7 @@ export function App() {
           <Toaster
             theme={theme === "titanium" ? "light" : "dark"}
             position="bottom-right"
-            offset={16}
+            offset={{ right: 16, bottom: "var(--composer-clear, 16px)" }}
             gap={8}
             visibleToasts={4}
             toastOptions={{

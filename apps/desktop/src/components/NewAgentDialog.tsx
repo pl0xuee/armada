@@ -22,7 +22,7 @@ import { LocalModelPicker } from "./local/LocalModelPicker";
 import { TemplatePicker } from "./TemplatePicker";
 import { Button } from "./ui/button";
 import { Dialog, DialogBody, DialogContent, DialogFooter } from "./ui/dialog";
-import { DictateButton } from "./DictateButton";
+import { ComposerVoiceButtons } from "./voice/ComposerVoiceButtons";
 import { Input, Label, Textarea } from "./ui/input";
 import { Kbd } from "./ui/kbd";
 import { Spinner } from "./ui/misc";
@@ -527,7 +527,6 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
               {!compare && <span className="ml-1.5 font-normal text-steel">optional</span>}
             </Label>
             <div className="flex items-center gap-1">
-              <DictateButton onText={insertDictation} iconOnly />
               <AttachButton onClick={attach.openPicker} count={attach.attachments.length} />
               <TemplatePicker
                 side="bottom"
@@ -537,6 +536,8 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                   requestAnimationFrame(() => promptRef.current?.focus());
                 }}
               />
+              <span className="mx-1 h-4 w-px bg-line" aria-hidden />
+              <ComposerVoiceButtons onText={insertDictation} />
             </div>
           </div>
           <input {...attach.inputProps} />

@@ -85,22 +85,39 @@ export const useDictation = create<DictationState>((set) => ({
 }));
 
 const targets: DictationTarget[] = [];
-let listening = false;
+let generation = 0;
+
+let keyBound = false;
+let levelOff = false;
+let limitOff = false;
 
 function ensureListeners() {
-  if (listening) return;
-  listening = true;
-  void onVoiceLevel((e) => {
-    if (useDictation.getState().phase === "recording")
-      useDictation.setState({ level: e.level, elapsedMs: e.elapsedMs });
-  });
-  void onVoiceLimit(() => {
-    if (useDictation.getState().phase === "recording") {
-      toast.info("Reached the 5 minute limit; transcribing what was recorded");
-      void stopDictation();
-    }
-  });
-  window.addEventListener("keydown", onKey, true);
+  if (!keyBound) {
+    keyBound = true;
+    window.addEventListener("keydown", onKey, true);
+  }
+  // Listener setup can fail (bridge not ready): leave the flag unset so the next registration retries.
+  if (!levelOff) {
+    levelOff = true;
+    onVoiceLevel((e) => {
+      if (useDictation.getState().phase === "recording")
+        useDictation.setState({ level: e.level, elapsedMs: e.elapsedMs });
+    }).catch(() => {
+      levelOff = false;
+    });
+  }
+  if (!limitOff) {
+    limitOff = true;
+    onVoiceLimit(() => {
+      if (useDictation.getState().phase === "recording") {
+        const mins = Math.max(1, Math.round(useDictation.getState().maxMs / 60_000));
+        toast.info(`Reached the ${mins} minute limit; transcribing what was recorded`);
+        void stopDictation();
+      }
+    }).catch(() => {
+      limitOff = false;
+    });
+  }
 }
 
 function onKey(e: KeyboardEvent) {
@@ -132,7 +149,7 @@ export function registerDictationTarget(target: DictationTarget): () => void {
     const i = targets.indexOf(target);
     if (i >= 0) targets.splice(i, 1);
     const s = useDictation.getState();
-    if (s.owner === target.id && s.phase === "recording") void cancelDictation();
+    if (s.owner === target.id && (s.phase === "recording" || s.phase === "starting")) void cancelDictation();
   };
 }
 
@@ -145,9 +162,11 @@ export async function toggleDictation(targetId?: string): Promise<void> {
     if (!targetId) toast.info("Click a message box to dictate into it");
     return;
   }
+  const gen = ++generation;
   useDictation.setState({ phase: "starting", owner: target.id, level: 0, elapsedMs: 0 });
   try {
     const status = await api.voiceStatus();
+    if (gen !== generation) return;
     if (!status.ready) {
       useDictation.setState({ phase: "idle", owner: null, setupOpen: true });
       return;
@@ -155,12 +174,18 @@ export async function toggleDictation(targetId?: string): Promise<void> {
     useDictation.setState({ maxMs: status.maxRecordingSecs * 1000 });
     await api.voiceStart();
     // Cancelled (Esc, composer closed) while the recorder was starting: stop it again.
-    if (useDictation.getState().owner !== target.id || useDictation.getState().phase !== "starting") {
-      await api.voiceCancel().catch(() => {});
+    if (
+      gen !== generation ||
+      useDictation.getState().owner !== target.id ||
+      useDictation.getState().phase !== "starting"
+    ) {
+      // Only stop the recorder if no newer start owns it.
+      if (gen === generation || useDictation.getState().phase === "idle") await api.voiceCancel().catch(() => {});
       return;
     }
     useDictation.setState({ phase: "recording" });
   } catch (e) {
+    if (gen !== generation) return;
     useDictation.setState({ phase: "idle", owner: null });
     toast.error("Couldn't start dictation", { description: errorMessage(e) });
   }
@@ -190,6 +215,7 @@ export async function stopDictation(): Promise<void> {
 export async function cancelDictation(): Promise<void> {
   const { phase } = useDictation.getState();
   if (phase !== "recording" && phase !== "starting") return;
+  generation++;
   useDictation.setState({ phase: "idle", owner: null, level: 0 });
   try {
     await api.voiceCancel();

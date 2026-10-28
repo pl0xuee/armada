@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { isBusy, lastAction, liveTail } from "@/lib/agents";
+import { isBusy, isSubagentLive, lastAction, liveTail } from "@/lib/agents";
 import { agentDerived } from "../agent/derived";
 import type { TimelineItem } from "@/lib/types";
 import { useApp } from "@/store/app";
@@ -80,7 +80,10 @@ export function useTileSummaries(): ReadonlyMap<string, TileSummary> {
       seen.set(id, items);
       seenBusy.set(id, busy);
       // Cached per agent by structure, and not subject to the scan cap (a sub-agent can run a long time).
-      const subagents = agentDerived(id, items, busy).runningSubagents;
+      const subagents = agentDerived(id, items, busy, {
+        now: Date.now(),
+        live: isSubagentLive(s.agents[id].status),
+      }).runningSubagents;
       const fresh = summarize(items && items.length > SCAN_LIMIT ? items.slice(-SCAN_LIMIT) : items, subagents);
       if (old && same(old, fresh)) continue;
       next ??= new Map(prev);

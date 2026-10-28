@@ -6,7 +6,10 @@
 //! (`ghp_`, `gho_`, `ghs_`, `ghu_`, `ghr_`, `github_pat_`), AWS access key ids
 //! (`AKIA…`/`ASIA…`), Slack tokens (`xoxa-`, `xoxb-`, `xoxp-`, `xoxr-`), PEM private
 //! key blocks, and `password=…` / `token: "…"` style assignments (including
-//! `*_API_KEY`, `*_SECRET` and similar names).
+//! `*_API_KEY`, `*_SECRET` and similar names), URL credentials (`scheme://user:pass@host`),
+//! `curl -u`, `Authorization:`/`Cookie:` header values, `--password x` flags, Google API
+//! keys, GitLab/npm/Stripe/Hugging Face tokens, JWTs and PGP private key blocks. Invisible
+//! formatting characters are removed first so they can't split a token.
 
 use std::borrow::Cow;
 
@@ -18,12 +21,31 @@ const REDACTED_KEY: &str = "[REDACTED PRIVATE KEY]";
 /// nothing needed to change.
 pub fn redact_secrets(input: &str) -> Cow<'_, str> {
     let mut text: Cow<str> = Cow::Borrowed(input);
-    for pass in [private_keys, assignments, tokens] {
+    if input.chars().any(is_invisible) {
+        text = Cow::Owned(input.chars().filter(|c| !is_invisible(*c)).collect());
+    }
+    for pass in [
+        private_keys,
+        headers,
+        url_credentials,
+        curl_user,
+        secret_flags,
+        assignments,
+        tokens,
+    ] {
         if let Some(changed) = pass(&text) {
             text = Cow::Owned(changed);
         }
     }
     text
+}
+
+/// Zero-width, bidi and other invisible format (Cf) characters that could split a token.
+fn is_invisible(c: char) -> bool {
+    matches!(c,
+        '\u{AD}' | '\u{61C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
+        | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{206F}' | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}'
+        | '\u{E0000}'..='\u{E007F}')
 }
 
 fn is_word(b: u8) -> bool {
@@ -56,7 +78,8 @@ fn private_keys(s: &str) -> Option<String> {
             break;
         };
         let header = &after[..header_len];
-        let is_private = header.ends_with("PRIVATE KEY") && !header.contains('\n');
+        let is_private = (header.ends_with("PRIVATE KEY") || header.ends_with("PRIVATE KEY BLOCK"))
+            && !header.contains('\n');
         if !is_private {
             out.push_str(&rest[..start + BEGIN.len()]);
             rest = after;
@@ -114,6 +137,52 @@ fn match_token(b: &[u8], i: usize) -> Option<(usize, usize)> {
             }
         }
     }
+    // Google API key: AIza + 35.
+    if starts("AIza")
+        && run(b, i + 4, |c| {
+            c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-')
+        }) >= 35
+    {
+        return Some((i, i + 39));
+    }
+    if starts("glpat-") {
+        let n = key_chars(i + 6);
+        if n >= 20 {
+            return Some((i, i + 6 + n));
+        }
+    }
+    if starts("npm_") {
+        let n = run(b, i + 4, |c| c.is_ascii_alphanumeric());
+        if n >= 36 {
+            return Some((i, i + 4 + n));
+        }
+    }
+    for prefix in ["sk_live_", "rk_live_"] {
+        if starts(prefix) {
+            let n = run(b, i + 8, |c| c.is_ascii_alphanumeric());
+            if n >= 16 {
+                return Some((i, i + 8 + n));
+            }
+        }
+    }
+    if starts("hf_") {
+        let n = run(b, i + 3, |c| c.is_ascii_alphanumeric());
+        if n >= 30 {
+            return Some((i, i + 3 + n));
+        }
+    }
+    // JWT: eyJ<header>.eyJ<payload>.<signature>
+    if starts("eyJ") {
+        let seg = |c: u8| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-');
+        let a = run(b, i, seg);
+        if a >= 8 && b.get(i + a) == Some(&b'.') && b[i + a + 1..].starts_with(b"eyJ") {
+            let p = run(b, i + a + 1, seg);
+            if p >= 8 && b.get(i + a + 1 + p) == Some(&b'.') {
+                let sig = run(b, i + a + p + 2, seg);
+                return Some((i, i + a + p + 2 + sig));
+            }
+        }
+    }
     if starts("github_pat_") {
         let n = key_chars(i + 11);
         if n >= 20 {
@@ -157,7 +226,8 @@ fn tokens(s: &str) -> Option<String> {
     let mut copied = 0;
     let mut i = 0;
     while i < b.len() {
-        let boundary = i == 0 || !is_word(b[i - 1]);
+        // `KEY_ghp_…` still counts: only a preceding letter or digit glues it to a word.
+        let boundary = i == 0 || !b[i - 1].is_ascii_alphanumeric();
         if boundary && s.is_char_boundary(i) {
             if let Some((from, to)) = match_token(b, i) {
                 out.push_str(&s[copied..from]);
@@ -174,6 +244,219 @@ fn tokens(s: &str) -> Option<String> {
     }
     out.push_str(&s[copied..]);
     Some(out)
+}
+
+// ---- Headers, URLs, flags ---------------------------------------------------------------
+
+/// Pushes `[a, b)` of `s` replaced by the marker into the rewrite state.
+struct Rewrite<'a> {
+    s: &'a str,
+    out: String,
+    copied: usize,
+}
+
+impl<'a> Rewrite<'a> {
+    fn new(s: &'a str) -> Self {
+        Rewrite {
+            s,
+            out: String::new(),
+            copied: 0,
+        }
+    }
+    fn replace(&mut self, from: usize, to: usize) {
+        if from < self.copied || !self.s.is_char_boundary(from) || !self.s.is_char_boundary(to) {
+            return;
+        }
+        self.out.push_str(&self.s[self.copied..from]);
+        self.out.push_str(REDACTED);
+        self.copied = to;
+    }
+    fn finish(mut self) -> Option<String> {
+        if self.copied == 0 {
+            return None;
+        }
+        self.out.push_str(&self.s[self.copied..]);
+        Some(self.out)
+    }
+}
+
+/// Is the value an environment reference, template or already-redacted marker?
+fn is_reference(v: &[u8]) -> bool {
+    matches!(v.first(), None | Some(b'$' | b'{' | b'<' | b'%')) || v.starts_with(b"[REDACTED")
+}
+
+/// `Authorization:`, `Proxy-Authorization:`, `Cookie:` and `Set-Cookie:` header values
+/// (also as quoted JSON keys). The auth scheme word is kept.
+fn headers(s: &str) -> Option<String> {
+    let lower = s.to_ascii_lowercase();
+    let b = s.as_bytes();
+    let mut rw = Rewrite::new(s);
+    for (name, is_auth) in [("authorization", true), ("cookie", false)] {
+        let mut from = 0;
+        while let Some(p) = lower[from..].find(name) {
+            let at = from + p;
+            from = at + name.len();
+            // `Set-Cookie`, `Proxy-Authorization`: any word-ish prefix is fine; a letter
+            // directly before ("xcookie") is not a header.
+            if at > 0 && b[at - 1].is_ascii_alphanumeric() {
+                continue;
+            }
+            let mut j = from;
+            if matches!(b.get(j), Some(b'"' | b'\'')) {
+                j += 1;
+            }
+            j += run(b, j, |c| c == b' ' || c == b'\t');
+            if b.get(j) != Some(&b':') {
+                continue;
+            }
+            j += 1;
+            j += run(b, j, |c| c == b' ' || c == b'\t');
+            if matches!(b.get(j), Some(b'"' | b'\'')) {
+                j += 1;
+            }
+            let end = j + run(b, j, |c| !matches!(c, b'\n' | b'\r' | b'"' | b'\''));
+            let mut start = j;
+            if is_auth {
+                // Keep the scheme (Basic, Bearer, …) when a credential follows it.
+                let word = run(b, start, |c| c.is_ascii_alphabetic());
+                let after = start + word + run(b, start + word, |c| c == b' ' || c == b'\t');
+                if word > 0 && after > start + word && after < end {
+                    start = after;
+                }
+                if end - start < 8 {
+                    continue;
+                }
+            } else if end - start < 8 || !s[start..end].contains('=') {
+                continue;
+            }
+            if is_reference(&b[start..end]) {
+                continue;
+            }
+            rw.replace(start, end);
+            from = end;
+        }
+    }
+    rw.finish()
+}
+
+/// `scheme://user:password@host` -> keeps the user, drops the password.
+fn url_credentials(s: &str) -> Option<String> {
+    if !s.contains("://") {
+        return None;
+    }
+    let b = s.as_bytes();
+    let mut rw = Rewrite::new(s);
+    let mut from = 0;
+    while let Some(p) = s[from..].find("://") {
+        let auth = from + p + 3;
+        from = auth;
+        let len = run(b, auth, |c| {
+            !c.is_ascii_whitespace()
+                && !matches!(c, b'/' | b'?' | b'#' | b'"' | b'\'' | b'<' | b'>')
+        });
+        let authority = &s[auth..auth + len];
+        let Some(at) = authority.rfind('@') else {
+            continue;
+        };
+        let Some(colon) = authority[..at].find(':') else {
+            continue;
+        };
+        let (pw_from, pw_to) = (auth + colon + 1, auth + at);
+        if pw_to > pw_from && !is_reference(&b[pw_from..pw_to]) {
+            rw.replace(pw_from, pw_to);
+        }
+    }
+    rw.finish()
+}
+
+/// `curl -u user:password` / `curl --user user:password`.
+fn curl_user(s: &str) -> Option<String> {
+    if !s.contains("curl") {
+        return None;
+    }
+    let b = s.as_bytes();
+    let mut rw = Rewrite::new(s);
+    let mut line_start = 0;
+    for line in s.split_inclusive('\n') {
+        if line.contains("curl") {
+            for flag in [" -u ", " --user ", " -u=", " --user="] {
+                let mut from = 0;
+                while let Some(p) = line[from..].find(flag) {
+                    let mut v = line_start + from + p + flag.len();
+                    from += p + flag.len();
+                    v += run(b, v, |c| c == b' ');
+                    if matches!(b.get(v), Some(b'"' | b'\'')) {
+                        v += 1;
+                    }
+                    let len = run(b, v, |c| {
+                        !c.is_ascii_whitespace() && !matches!(c, b'"' | b'\'')
+                    });
+                    let Some(colon) = s[v..v + len].find(':') else {
+                        continue;
+                    };
+                    let (f, t) = (v + colon + 1, v + len);
+                    if t > f && !is_reference(&b[f..t]) {
+                        rw.replace(f, t);
+                    }
+                }
+            }
+        }
+        line_start += line.len();
+    }
+    rw.finish()
+}
+
+/// `--password hunter2` (the `--password=x` form is handled as an assignment).
+fn secret_flags(s: &str) -> Option<String> {
+    if !s.contains("--") {
+        return None;
+    }
+    const FLAGS: &[&str] = &[
+        "--password",
+        "--passwd",
+        "--token",
+        "--api-key",
+        "--apikey",
+        "--secret",
+        "--client-secret",
+        "--access-token",
+        "--auth-token",
+    ];
+    let b = s.as_bytes();
+    let mut rw = Rewrite::new(s);
+    let mut i = 0;
+    while let Some(p) = s[i..].find("--") {
+        let at = i + p;
+        i = at + 2;
+        if at > 0 && !b[at - 1].is_ascii_whitespace() {
+            continue;
+        }
+        let Some(flag) = FLAGS.iter().find(|f| {
+            s[at..].starts_with(**f) && matches!(b.get(at + f.len()), Some(b' ' | b'\t'))
+        }) else {
+            continue;
+        };
+        let mut v = at + flag.len();
+        v += run(b, v, |c| c == b' ' || c == b'\t');
+        let quoted = matches!(b.get(v), Some(b'"' | b'\''));
+        let (f, t) = if quoted {
+            let q = b[v];
+            (v + 1, v + 1 + run(b, v + 1, |c| c != q && c != b'\n'))
+        } else {
+            (
+                v,
+                v + run(b, v, |c| {
+                    !c.is_ascii_whitespace() && !matches!(c, b'"' | b'\'' | b';' | b'&' | b')')
+                }),
+            )
+        };
+        let val = &s[f..t];
+        let plausible = quoted || val.len() >= 8 || val.bytes().any(|c| !c.is_ascii_alphabetic());
+        if t > f && !val.starts_with('-') && plausible && !is_reference(val.as_bytes()) {
+            rw.replace(f, t);
+        }
+    }
+    rw.finish()
 }
 
 // ---- Assignments ---------------------------------------------------------------------
@@ -417,6 +700,100 @@ mod tests {
         );
         // Idempotent.
         assert_eq!(r(&r("PASSWORD=hunter2")), "PASSWORD=[REDACTED]");
+    }
+
+    #[test]
+    fn url_userinfo_and_curl_user() {
+        assert_eq!(
+            r("git clone https://bob:hunter22@example.com/r.git"),
+            "git clone https://bob:[REDACTED]@example.com/r.git"
+        );
+        assert_eq!(
+            r("postgres://app:p@ss@db:5432/x"),
+            "postgres://app:[REDACTED]@db:5432/x"
+        );
+        assert_eq!(
+            r("https://example.com:8080/a@b"),
+            "https://example.com:8080/a@b"
+        );
+        assert_eq!(r("ssh://git@github.com/x/y"), "ssh://git@github.com/x/y");
+        assert_eq!(
+            r("curl -u alice:s3cretpw https://x.test"),
+            "curl -u alice:[REDACTED] https://x.test"
+        );
+        assert_eq!(r("git push -u origin:main"), "git push -u origin:main");
+    }
+
+    #[test]
+    fn auth_and_cookie_headers() {
+        assert_eq!(
+            r("Authorization: Basic dXNlcjpwYXNzd29yZA=="),
+            "Authorization: Basic [REDACTED]"
+        );
+        assert_eq!(
+            r(r#"-H "authorization: token abcdef123456""#),
+            r#"-H "authorization: token [REDACTED]""#
+        );
+        assert_eq!(
+            r("Cookie: sid=abc123def456; theme=dark\nHost: x"),
+            "Cookie: [REDACTED]\nHost: x"
+        );
+        assert_eq!(
+            r("Set-Cookie: session=abcdef123456; HttpOnly"),
+            "Set-Cookie: [REDACTED]"
+        );
+        assert_eq!(r("cookie: yes please"), "cookie: yes please");
+        assert_eq!(r("Authorization: n/a"), "Authorization: n/a");
+    }
+
+    #[test]
+    fn password_flags() {
+        assert_eq!(
+            r("mytool --password hunter2 --verbose"),
+            "mytool --password [REDACTED] --verbose"
+        );
+        assert_eq!(
+            r("mytool --password=hunter2"),
+            "mytool --password=[REDACTED]"
+        );
+        assert_eq!(
+            r("the --password option is required"),
+            "the --password option is required"
+        );
+    }
+
+    #[test]
+    fn more_provider_tokens() {
+        let cases = [
+            k(&["AI", "zaSyA-abcdefghijklmnopqrstuvwxyz01234"]),
+            k(&["gl", "pat-abcdefghijklmnopqrst"]),
+            k(&["np", "m_abcdefghijklmnopqrstuvwxyz0123456789"]),
+            k(&["sk", "_live_abcdefghijklmnop1234"]),
+            k(&["rk", "_live_abcdefghijklmnop1234"]),
+            k(&["h", "f_abcdefghijklmnopqrstuvwxyz01234567"]),
+            k(&["ey", "Jhbgcio.ey", "Jzdwiioxx.sigsigsig_-"]),
+        ];
+        for c in cases {
+            assert_eq!(r(&format!("tok {c} end")), "tok [REDACTED] end", "{c}");
+        }
+        let ghp = k(&["gh", "p_abcdefghijklmnopqrstuvwxyz0123456789"]);
+        assert_eq!(r(&format!("MY_KEY_{ghp}")), "MY_KEY_[REDACTED]");
+        assert_eq!(
+            r("npm_config_cache and hf_short and eyJabc.def"),
+            "npm_config_cache and hf_short and eyJabc.def"
+        );
+    }
+
+    #[test]
+    fn pgp_blocks_and_invisible_chars() {
+        let pgp = k(&[
+            "-----BEGIN PGP PRIV",
+            "ATE KEY BLOCK-----\nlQdGBF\n-----END PGP PRIV",
+            "ATE KEY BLOCK-----\nok",
+        ]);
+        assert_eq!(r(&pgp), "[REDACTED PRIVATE KEY]\nok");
+        let split = k(&["gh", "p_abcdefghij\u{200b}klmnopqrstuvwxyz01"]);
+        assert_eq!(r(&split), "[REDACTED]");
     }
 
     #[test]

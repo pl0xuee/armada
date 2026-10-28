@@ -827,6 +827,10 @@ pub struct VoiceAssistantSettings {
     pub max_session_mins: u32,
     /// End the session after this long without anyone speaking.
     pub silence_timeout_secs: u32,
+    /// The user wears headphones, so the microphone stays open while the assistant
+    /// talks and they can interrupt it. Off: the mic is muted during playback so the
+    /// speakers don't feed the assistant its own voice.
+    pub headphones: bool,
 }
 
 impl Default for VoiceAssistantSettings {
@@ -838,6 +842,7 @@ impl Default for VoiceAssistantSettings {
             model: "gpt-realtime".into(),
             max_session_mins: 10,
             silence_timeout_secs: 60,
+            headphones: false,
         }
     }
 }

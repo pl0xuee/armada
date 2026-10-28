@@ -18,6 +18,12 @@ pub const TEXT_OUT_PER_M: f64 = 16.0;
 /// Cached input (audio and text alike) is billed at this much per 1M tokens.
 pub const CACHED_IN_PER_M: f64 = 0.40;
 
+/// The session also transcribes the user's speech with `gpt-4o-mini-transcribe`
+/// (`protocol::session_update`), which is billed per audio minute, outside the
+/// `response.done` token counts. Published at about $0.003/min (2026-10; will drift).
+/// The estimate charges it for the whole session length, an upper bound on the mic time.
+pub const TRANSCRIBE_PER_MIN: f64 = 0.003;
+
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Usage {
     pub audio_in: u64,
@@ -57,6 +63,12 @@ impl Usage {
     }
 }
 
+/// Estimated cost of a session that has run `elapsed_secs`: the reported token usage
+/// plus the input-transcription model ([`TRANSCRIBE_PER_MIN`]).
+pub fn session_cost(usage: &Usage, elapsed_secs: u64) -> f64 {
+    usage.cost_usd() + elapsed_secs as f64 / 60.0 * TRANSCRIBE_PER_MIN
+}
+
 /// Usage for one calendar month.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
@@ -90,20 +102,70 @@ pub fn read_month(data_dir: &Path, month: &str) -> MonthUsage {
 }
 
 /// Adds one finished session to the month's totals.
+#[cfg(test)]
 pub fn record_session(
     data_dir: &Path,
     month: &str,
     seconds: u64,
     cost_usd: f64,
 ) -> std::io::Result<MonthUsage> {
+    add_usage(data_dir, month, seconds, cost_usd, true)
+}
+
+fn add_usage(
+    data_dir: &Path,
+    month: &str,
+    seconds: u64,
+    cost_usd: f64,
+    new_session: bool,
+) -> std::io::Result<MonthUsage> {
     let mut u = read_month(data_dir, month);
     u.seconds += seconds;
     u.cost_usd += cost_usd;
-    u.sessions += 1;
+    u.sessions += u32::from(new_session);
     let tmp = ledger_path(data_dir).with_extension("tmp");
     std::fs::write(&tmp, serde_json::to_vec(&u)?)?;
     std::fs::rename(&tmp, ledger_path(data_dir))?;
     Ok(u)
+}
+
+/// Writes one session's usage to the ledger incrementally: every checkpoint adds only
+/// what is new since the last, so a crash loses at most the time since the last
+/// `response.done`, and the session is counted once.
+pub struct SessionLedger {
+    data_dir: PathBuf,
+    month: String,
+    seconds: u64,
+    cost_usd: f64,
+    counted: bool,
+}
+
+impl SessionLedger {
+    pub fn new(data_dir: &Path) -> Self {
+        SessionLedger {
+            data_dir: data_dir.to_path_buf(),
+            month: current_month(),
+            seconds: 0,
+            cost_usd: 0.0,
+            counted: false,
+        }
+    }
+
+    /// `seconds` and `cost_usd` are the session totals so far.
+    pub fn checkpoint(&mut self, seconds: u64, cost_usd: f64) -> std::io::Result<()> {
+        let (ds, dc) = (
+            seconds.saturating_sub(self.seconds),
+            (cost_usd - self.cost_usd).max(0.0),
+        );
+        if self.counted && ds == 0 && dc == 0.0 {
+            return Ok(());
+        }
+        add_usage(&self.data_dir, &self.month, ds, dc, !self.counted)?;
+        self.counted = true;
+        self.seconds = self.seconds.max(seconds);
+        self.cost_usd = self.cost_usd.max(cost_usd);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -146,6 +208,26 @@ mod tests {
             output_token_details: OutputDetails::default(),
         });
         assert_eq!((u.audio_in, u.text_in, u.cached_in), (10, 60, 40));
+    }
+
+    #[test]
+    fn session_cost_includes_transcription() {
+        let u = Usage::default();
+        assert!((session_cost(&u, 600) - 0.03).abs() < 1e-9);
+    }
+
+    #[test]
+    fn checkpoints_add_only_the_delta_and_count_the_session_once() {
+        let dir = std::env::temp_dir().join(format!("armada-va-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut l = SessionLedger::new(&dir);
+        l.checkpoint(30, 0.10).unwrap();
+        l.checkpoint(30, 0.10).unwrap();
+        l.checkpoint(90, 0.40).unwrap();
+        let u = read_month(&dir, &current_month());
+        assert_eq!((u.seconds, u.sessions), (90, 1));
+        assert!((u.cost_usd - 0.40).abs() < 1e-9);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

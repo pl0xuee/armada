@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Agent } from "@/lib/types";
+import { useHeld, WAITING_HOLD_MS } from "@/hooks/useHeld";
 import { useIdentity } from "@/hooks/useIdentity";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { useRunningSubagentCount } from "../agent/useSubagents";
@@ -10,7 +11,7 @@ const VERB_MS = 3000;
 /** Compact "the agent is busy" row, in the agent's voice. Sits below the conversation. */
 export function ThinkingIndicator({ agent, since }: { agent: Agent; since: number }) {
   const name = useIdentity(agent.provider, agent.customAgentId).short;
-  const subagents = useRunningSubagentCount(agent.id);
+  const subagents = useHeld(useRunningSubagentCount(agent.id), 0, WAITING_HOLD_MS);
   const starting = agent.status === "starting";
   const [verb, setVerb] = useState(0);
   const [now, setNow] = useState(() => Date.now());

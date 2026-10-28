@@ -13,6 +13,7 @@ import type {
   UpdateInfo,
 } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
+import { forgetAgentDerived } from "@/components/agent/derived";
 import { useUi } from "./ui";
 
 export interface AppStore {
@@ -173,10 +174,25 @@ const removed = new Set<string>();
 
 export function markRemoved(id: string) {
   removed.add(id);
+  for (const fn of removedListeners) fn(id);
+}
+
+const removedListeners = new Set<(id: string) => void>();
+
+/** Called when an agent is deleted for real (not on a pending, undoable delete). */
+export function onAgentRemoved(fn: (id: string) => void): () => void {
+  removedListeners.add(fn);
+  return () => removedListeners.delete(fn);
+}
+
+/** True while an undoable delete is pending for the agent. */
+export function isSuppressed(id: string): boolean {
+  return suppressed.has(id);
 }
 
 /** Events that arrive while a timeline is (re)loading, replayed over the snapshot. */
 const buffered = new Map<string, ItemEvent[]>();
+const pendingRefetch = new Set<string>();
 const refetchTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /** Most-recently-opened agents first; timelines beyond MAX_CACHED are evicted. */
@@ -203,6 +219,7 @@ function evictTimelines(items: Record<string, TimelineItem[]>, agents: Record<st
     if (keep.has(id) || id === selected || (a && (LIVE.has(a.status) || a.pendingPermissions > 0))) continue;
     out ??= { ...items };
     delete out[id];
+    forgetAgentDerived(id);
     const i = recent.indexOf(id);
     if (i >= 0) recent.splice(i, 1);
   }
@@ -244,6 +261,8 @@ export const useApp = create<AppStore>((set, get) => ({
         const cur = live[a.id];
         agents[a.id] = cur && cur.updatedAt > a.updatedAt ? cur : a;
       }
+      // Agents created while getState was in flight aren't in the snapshot: keep them.
+      for (const [id, a] of Object.entries(live)) if (!(id in agents) && !removed.has(id)) agents[id] = a;
       set({
         booted: true,
         bootError: null,
@@ -267,7 +286,11 @@ export const useApp = create<AppStore>((set, get) => ({
   ensureItems: async (agentId, force = false) => {
     touch(agentId);
     const { items, itemsLoading } = get();
-    if (itemsLoading[agentId]) return;
+    if (itemsLoading[agentId]) {
+      // A refetch asked for mid-load would be dropped: run it once this load finishes.
+      if (force) pendingRefetch.add(agentId);
+      return;
+    }
     if (!force && items[agentId]) return;
     buffered.set(agentId, []);
     const errors = { ...get().itemsError };
@@ -310,6 +333,9 @@ export const useApp = create<AppStore>((set, get) => ({
       const loading = { ...get().itemsLoading };
       delete loading[agentId];
       set({ itemsLoading: loading });
+      if (pendingRefetch.delete(agentId) && get().agents[agentId] && !removed.has(agentId)) {
+        void get().ensureItems(agentId, true);
+      }
     }
   },
 
@@ -421,7 +447,9 @@ export const useApp = create<AppStore>((set, get) => ({
         }
         case "agent_removed": {
           removed.add(e.agentId);
+          for (const fn of removedListeners) fn(e.agentId);
           buffered.delete(e.agentId);
+          pendingRefetch.delete(e.agentId);
           const ri = recent.indexOf(e.agentId);
           if (ri >= 0) recent.splice(ri, 1);
           if (st.itemsLoading[e.agentId] !== undefined) {
@@ -442,6 +470,7 @@ export const useApp = create<AppStore>((set, get) => ({
           if (!changedAgents) agents = { ...agents };
           changedAgents = true;
           delete agents[e.agentId];
+          forgetAgentDerived(e.agentId);
           if (items[e.agentId]) {
             if (!changedItems) items = { ...items };
             changedItems = true;

@@ -6,7 +6,7 @@ import { create } from "zustand";
 import { api } from "@/lib/api";
 import { attachTerminal } from "@/lib/terminal-bus";
 import { errorMessage } from "@/lib/utils";
-import { useApp } from "@/store/app";
+import { onAgentRemoved, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 
 export interface WsTerm {
@@ -112,6 +112,15 @@ export async function openTerminal(
     }
     const rt: Runtime = { agentId, data: "", detach: () => {} };
     runtime.set(id, rt);
+    // Register the terminal before attaching: attach replays buffered output and a buffered exit,
+    // and setExit needs the term to exist.
+    const now = useWorkspace.getState().byAgent[agentId] ?? EMPTY;
+    const n = now.terms.length + 1;
+    patchAgent(agentId, {
+      tab: "terminal",
+      terms: [...now.terms, { id, title: opts.title ?? `Terminal ${n}` }],
+      active: id,
+    });
     rt.detach = attachTerminal(id, {
       write: (d) => {
         rt.data += d;
@@ -128,13 +137,6 @@ export async function openTerminal(
         rt.view?.write(line);
         setExit(agentId, id, code);
       },
-    });
-    const now = useWorkspace.getState().byAgent[agentId] ?? EMPTY;
-    const n = now.terms.length + 1;
-    patchAgent(agentId, {
-      tab: "terminal",
-      terms: [...now.terms, { id, title: opts.title ?? `Terminal ${n}` }],
-      active: id,
     });
     return id;
   } finally {
@@ -173,12 +175,8 @@ export function disposeAgentTerminals(agentId: string) {
   });
 }
 
-// Deleting an agent ends its terminals. Agents only ever disappear from the store when deleted.
-useApp.subscribe((state, prev) => {
-  for (const id of Object.keys(useWorkspace.getState().byAgent)) {
-    if (prev.agents[id] && !state.agents[id]) disposeAgentTerminals(id);
-  }
-});
+// Deleting an agent for real ends its terminals. A pending (undoable) delete only hides the agent.
+onAgentRemoved(disposeAgentTerminals);
 
 /**
  * "Run" on a code block in an agent message: opens a NEW terminal (a login shell in the agent's

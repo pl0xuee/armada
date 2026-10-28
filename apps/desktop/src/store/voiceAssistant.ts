@@ -51,6 +51,25 @@ export function connectVoiceAssistant(): () => void {
   };
 }
 
+/** The backend has a session the panel doesn't know about (e.g. after an error state): show it again. */
+function resyncLive() {
+  useVa.setState((s) => ({
+    ...s,
+    phase: isLive(s) ? s.phase : "listening",
+    message: null,
+    endedReason: null,
+    visible: true,
+  }));
+}
+
+async function backendActive(): Promise<boolean> {
+  try {
+    return await api.vaActive();
+  } catch {
+    return false;
+  }
+}
+
 export async function startVoiceAssistant(): Promise<void> {
   const ui = useUi.getState();
   if (!useApp.getState().settings?.voiceAssistant.enabled) {
@@ -58,10 +77,19 @@ export async function startVoiceAssistant(): Promise<void> {
     return;
   }
   if (isLive(useVa.getState())) return;
+  // The backend is the source of truth: a session can outlive what the panel believes.
+  if (await backendActive()) {
+    resyncLive();
+    return;
+  }
   useVa.setState({ ...beginVa(), visible: true });
   try {
     await api.vaStart();
   } catch (e) {
+    if (await backendActive()) {
+      resyncLive();
+      return;
+    }
     useVa.setState({ ...initialVa, visible: false });
     toast.error("Couldn't start the voice assistant", { description: errorMessage(e) });
   }
@@ -75,9 +103,24 @@ export async function stopVoiceAssistant(): Promise<void> {
   }
 }
 
+/** Title-bar / composer / shortcut toggle: stops a session that is active, starts one otherwise. */
 export function toggleVoiceAssistant(): void {
-  if (isLive(useVa.getState())) void stopVoiceAssistant();
-  else void startVoiceAssistant();
+  void (async () => {
+    if (isLive(useVa.getState()) || (await backendActive())) await stopVoiceAssistant();
+    else await startVoiceAssistant();
+  })();
+}
+
+/** Esc: end the session if one is active (even if the panel thinks it is over), else dismiss the panel. */
+export async function escapeVoiceAssistant(): Promise<void> {
+  if (isLive(useVa.getState()) || (await backendActive())) await stopVoiceAssistant();
+  else useVa.getState().dismiss();
+}
+
+/** Answer a confirmation card. The card goes away at once so it can't be answered twice. */
+export function answerVaConfirm(id: string, accept: boolean): void {
+  useVa.setState((s) => ({ confirms: s.confirms.filter((c) => c.id !== id) }));
+  void api.vaConfirm(id, accept).catch(() => {});
 }
 
 export function setVaMuted(muted: boolean): void {

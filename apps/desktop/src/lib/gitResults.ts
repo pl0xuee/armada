@@ -2,7 +2,8 @@
 // the turn-summary card, plus the "agent is busy" gate for git actions.
 import { toast } from "sonner";
 import { openExternal } from "./external";
-import type { Agent, CommitSummary, ShipResult } from "./types";
+import { pluralize } from "./format";
+import type { Agent, BaseBranchStatus, CommitSummary, ShipResult } from "./types";
 
 /** Why git actions are unavailable right now (null when they're allowed). */
 export function gitBusyReason(agent: Agent): string | null {
@@ -24,13 +25,13 @@ export function toastCommit(summary: CommitSummary) {
 }
 
 export type ShipOutcome =
-  | { kind: "shipped"; committed: string | null; merged: string | null }
+  | { kind: "shipped"; committed: string | null; merged: string | null; baseStatus: BaseBranchStatus | null }
   | { kind: "committed_not_merged"; committed: string | null; error: string; conflict: boolean };
 
 export function shipOutcome(r: ShipResult): ShipOutcome {
   if (r.error)
     return { kind: "committed_not_merged", committed: r.committed, error: r.error, conflict: isConflict(r.error) };
-  return { kind: "shipped", committed: r.committed, merged: r.merged };
+  return { kind: "shipped", committed: r.committed, merged: r.merged, baseStatus: r.baseStatus ?? null };
 }
 
 export function isConflict(message: string): boolean {
@@ -55,4 +56,25 @@ export function toastPr(result: string) {
 export function conflictPrompt(agent: Agent, error: string): string {
   const base = agent.baseBranch ?? "the base branch";
   return `Merging ${agent.branch ?? "your branch"} into ${base} failed:\n\n${error}\n\nPlease merge ${base} into your branch, resolve the conflicts, make sure everything still builds and tests pass, and commit the result.`;
+}
+
+/** One-line state of the base branch after a merge. "Commit & merge" never pushes. */
+export function baseSyncLine(s: BaseBranchStatus): string {
+  if (!s.upstream) return `Merged into ${s.branch} locally · ${s.branch} has no upstream on GitHub`;
+  if (s.ahead > 0) {
+    const behind = s.behind > 0 ? ` (${s.upstream} also has ${pluralize(s.behind, "new commit")})` : "";
+    return `Merged into ${s.branch} locally · ${pluralize(s.ahead, "commit")} not on ${s.upstream} yet${behind}`;
+  }
+  return `Merged into ${s.branch} · ${s.upstream} is up to date`;
+}
+
+/** The command that publishes the base branch from a terminal. */
+export function pushCommand(s: BaseBranchStatus): string {
+  return s.upstream ? "git push" : `git push -u origin ${s.branch}`;
+}
+
+/** Toast wording for a merge: explicit that nothing reached the remote. */
+export function mergeToast(branch: string, base: string, s: BaseBranchStatus | null): string {
+  const target = s?.upstream ? ` (not pushed to ${s.upstream})` : " (local only)";
+  return `${branch} is merged into ${base} locally${target}.`;
 }

@@ -28,7 +28,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use armada_core::{ArmadaEvent, Core};
-use tauri::{AppHandle, Manager, RunEvent};
+use tauri::{Manager, RunEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tracing::{error, info, warn};
 
@@ -36,54 +36,19 @@ use crate::attention::Attention;
 use crate::state::Shell;
 use crate::terminal::Terminals;
 
-/// Keeps the non-blocking file writer alive for the life of the app.
-struct LogGuard(#[allow(dead_code)] tracing_appender::non_blocking::WorkerGuard);
+/// The tauri runtime: real windows in the app, the mock runtime in unit tests (so the
+/// IPC smoke test can drive every command without a display).
+#[cfg(not(test))]
+pub(crate) type Rt = tauri::Wry;
+#[cfg(test)]
+pub(crate) type Rt = tauri::test::MockRuntime;
+pub(crate) type AppHandle = tauri::AppHandle<Rt>;
 
-pub fn run() {
-    let context = tauri::generate_context!();
-
-    // PATH is process-global and `set_var` is unsound once other threads may read the
-    // environment, so every PATH change happens here, before Tauri, tokio or anything
-    // else starts a thread. GUI launches (Finder, Start menu, .desktop files) get a
-    // minimal PATH; then Armada-managed Node and agent CLIs are added.
-    armada_core::providers::augment_path();
-    let startup_data_dir = app_data_dir(&context.config().identifier);
-    if let Some(dir) = &startup_data_dir {
-        armada_core::toolchain::add_managed_paths(dir);
-    }
-
-    tauri::Builder::default()
-        // Must be first so a second launch is caught before anything else starts.
-        // `armada --new-agent` from a compositor/WM keybinding works as a quick-launch
-        // where global hotkeys can't be grabbed (Wayland).
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            if argv.iter().any(|a| a == "--new-agent") {
-                window::navigate(app, armada_core::NavigateTarget::NewAgent);
-            } else {
-                window::show_main(app);
-            }
-        }))
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_autostart::init(
-            MacosLauncher::LaunchAgent,
-            Some(vec!["--autostart"]),
-        ))
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(hotkey::on_shortcut)
-                .build(),
-        )
-        .setup(move |app| {
-            window::create_main(app.handle())?;
-            setup(app.handle(), startup_data_dir.as_deref()).map_err(|e| {
-                error!("startup failed: {e:#}");
-                Box::<dyn std::error::Error>::from(format!("{e:#}"))
-            })
-        })
-        .on_window_event(window::on_window_event)
-        .invoke_handler(tauri::generate_handler![
+/// The registered command list, shared by `run()` and the IPC smoke test so the test
+/// exercises exactly what ships.
+macro_rules! handler {
+    () => {
+        tauri::generate_handler![
             commands::get_state,
             dictation::voice_status,
             dictation::voice_list_devices,
@@ -95,6 +60,7 @@ pub fn run() {
             dictation::voice_cancel,
             voice_assistant::va_start,
             voice_assistant::va_stop,
+            voice_assistant::va_confirm,
             voice_assistant::va_set_muted,
             voice_assistant::va_active,
             voice_assistant::va_usage,
@@ -129,6 +95,8 @@ pub fn run() {
             commands::secret_looking_files,
             commands::merge_agent,
             commands::ship_agent,
+            commands::base_branch_status,
+            commands::push_base_branch,
             commands::revert_patch,
             commands::test_mcp_server,
             commands::acknowledge_agent,
@@ -159,6 +127,7 @@ pub fn run() {
             workspace::workspace_terminal_open,
             workspace::workspace_scripts,
             workspace::probe_ports,
+            workspace::probe_loopback,
             commands::update_settings,
             commands::set_interface_zoom,
             commands::preview_sound,
@@ -180,7 +149,58 @@ pub fn run() {
             commands::remote_revoke_device,
             commands::create_share_link,
             commands::revoke_share_link,
-        ])
+        ]
+    };
+}
+
+/// Keeps the non-blocking file writer alive for the life of the app.
+struct LogGuard(#[allow(dead_code)] tracing_appender::non_blocking::WorkerGuard);
+
+pub fn run() {
+    let context = tauri::generate_context!();
+
+    // PATH is process-global and `set_var` is unsound once other threads may read the
+    // environment, so every PATH change happens here, before Tauri, tokio or anything
+    // else starts a thread. GUI launches (Finder, Start menu, .desktop files) get a
+    // minimal PATH; then Armada-managed Node and agent CLIs are added.
+    armada_core::providers::augment_path();
+    let startup_data_dir = app_data_dir(&context.config().identifier);
+    if let Some(dir) = &startup_data_dir {
+        armada_core::toolchain::add_managed_paths(dir);
+    }
+
+    tauri::Builder::<Rt>::new()
+        // Must be first so a second launch is caught before anything else starts.
+        // `armada --new-agent` from a compositor/WM keybinding works as a quick-launch
+        // where global hotkeys can't be grabbed (Wayland).
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if argv.iter().any(|a| a == "--new-agent") {
+                window::navigate(app, armada_core::NavigateTarget::NewAgent);
+            } else {
+                window::show_main(app);
+            }
+        }))
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec!["--autostart"]),
+        ))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(hotkey::on_shortcut)
+                .build(),
+        )
+        .setup(move |app| {
+            window::create_main(app.handle())?;
+            setup(app.handle(), startup_data_dir.as_deref()).map_err(|e| {
+                error!("startup failed: {e:#}");
+                Box::<dyn std::error::Error>::from(format!("{e:#}"))
+            })
+        })
+        .on_window_event(window::on_window_event)
+        .invoke_handler(handler!())
         .build(context)
         .expect("error while building Armada")
         .run(on_run_event);
@@ -191,6 +211,32 @@ pub fn run() {
 /// computed before the Tauri app (and its threads) exist.
 fn app_data_dir(identifier: &str) -> Option<PathBuf> {
     dirs::data_dir().map(|dir| dir.join(identifier))
+}
+
+/// Every `State<T>` a command may request. Shared by `setup()` and the IPC smoke test, so
+/// dropping a `manage()` here fails that test instead of failing at runtime.
+fn manage_state(
+    app: &AppHandle,
+    core: &Core,
+    data_dir: &Path,
+) -> (Arc<remote::Remote>, Arc<Attention>) {
+    app.manage(core.clone());
+    app.manage(Shell::new(data_dir.to_path_buf()));
+    app.manage(Terminals::default());
+    app.manage(dictation::Dictation::default());
+    app.manage(voice_assistant::VoiceAssistant::default());
+    app.manage(pr_status::PrCache::default());
+    app.manage(updater::UpdateState::default());
+    let remote = remote::Remote::new(
+        core.clone(),
+        app.package_info().version.to_string(),
+        data_dir.to_path_buf(),
+    );
+    app.manage(remote.clone());
+    let icon_path = write_notification_icon(data_dir);
+    let attention = Arc::new(Attention::new(app.clone(), icon_path));
+    app.manage(attention.clone());
+    (remote, attention)
 }
 
 fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()> {
@@ -219,28 +265,14 @@ fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()>
     // blocks the core; the dispatcher forwards them to the window.
     let (sink, rx) = events::channel();
     let core = tauri::async_runtime::block_on(async { Core::open(data_dir.clone(), sink) })?;
-    app.manage(core.clone());
-    app.manage(Shell::new(data_dir.clone()));
-    app.manage(Terminals::default());
-    app.manage(dictation::Dictation::default());
-    app.manage(voice_assistant::VoiceAssistant::default());
-    app.manage(pr_status::PrCache::default());
-    app.manage(updater::UpdateState::default());
-    let remote = remote::Remote::new(
-        core.clone(),
-        app.package_info().version.to_string(),
-        data_dir.clone(),
-    );
-    app.manage(remote.clone());
-
-    let icon_path = write_notification_icon(&data_dir);
-    let attention = Arc::new(Attention::new(app.clone(), icon_path));
-    app.manage(attention.clone());
+    let (remote, attention) = manage_state(app, &core, &data_dir);
 
     // Not fatal: some desktops have no tray (closing the window then quits).
-    match tray::create(app) {
-        Ok(()) => tray::AVAILABLE.store(true, Ordering::Relaxed),
-        Err(e) => warn!("could not create the tray icon: {e}"),
+    // On Linux the indicator library is loaded lazily and panics when it's missing.
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tray::create(app))) {
+        Ok(Ok(())) => tray::AVAILABLE.store(true, Ordering::Relaxed),
+        Ok(Err(e)) => warn!("could not create the tray icon: {e}"),
+        Err(_) => warn!("could not create the tray icon: the tray library panicked (is libayatana-appindicator installed?)"),
     }
     events::spawn_dispatcher(app.clone(), rx);
     spawn_signal_handler(app.clone());
@@ -281,9 +313,20 @@ fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()>
             }
         });
     }
-    if settings.close_to_tray && tray::available() && std::env::args().any(|a| a == "--autostart") {
-        // Launched at login: start quietly in the tray.
-        window::hide_main(app);
+    if autostart_launch() {
+        // Launched at login: the window was built hidden (quietly in the tray). Without
+        // a usable tray there'd be no way back to it, so show it then.
+        if !(settings.close_to_tray && tray::available()) {
+            window::show_main(app);
+        }
+    }
+    if std::env::args().any(|a| a == "--new-agent") {
+        // Cold start via `armada --new-agent`: open New agent once the UI is listening.
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(2000)).await;
+            window::navigate(&app, armada_core::NavigateTarget::NewAgent);
+        });
     }
 
     updater::spawn_background_checks(app.clone());
@@ -320,6 +363,11 @@ fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()>
         });
     }
     Ok(())
+}
+
+/// Started by the login item (`--autostart`).
+pub(crate) fn autostart_launch() -> bool {
+    std::env::args().any(|a| a == "--autostart")
 }
 
 fn init_logging(log_dir: &Path) -> tracing_appender::non_blocking::WorkerGuard {
@@ -405,6 +453,8 @@ pub(crate) fn begin_update() -> bool {
 /// terminals ~1 s) so nothing stuck can block exit. Used on exit and before an
 /// update installs.
 pub(crate) async fn shutdown_services(app: &AppHandle) {
+    // End a live voice session first (bounded to 2 s) so its usage is recorded.
+    voice_assistant::shutdown(app).await;
     if let Some(remote) = app.try_state::<Arc<remote::Remote>>() {
         // Also keeps a still-running startup `apply` from starting it again.
         remote.shutdown().await;
@@ -501,7 +551,22 @@ fn on_run_event(app: &AppHandle, event: RunEvent) {
         }
         // Last resort (e.g. a quit path that skipped ExitRequested): no agent
         // process may outlive the app.
-        RunEvent::Exit => armada_core::kill_all_children(),
+        RunEvent::Exit => {
+            // A quit path that skipped ExitRequested (Windows log-off, some macOS
+            // paths): run the clean shutdown here, bounded, if it hasn't run yet.
+            if EXIT_STATE
+                .compare_exchange(RUNNING, SHUTTING_DOWN, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                let app2 = app.clone();
+                let _ = tauri::async_runtime::block_on(tokio::time::timeout(
+                    Duration::from_secs(5),
+                    shutdown_services(&app2),
+                ));
+                EXIT_STATE.store(DONE, Ordering::SeqCst);
+            }
+            armada_core::kill_all_children()
+        }
         #[cfg(target_os = "macos")]
         RunEvent::Reopen { .. } => window::show_main(app),
         _ => {}
@@ -518,5 +583,274 @@ mod tests {
             serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         assert!(conf["app"].get("appDirectoriesOverride").is_none());
         assert_eq!(conf["identifier"], "dev.armada.app");
+    }
+
+    /// A command asking for `State<T>` of a type that `run()` never `manage()`s compiles
+    /// fine and fails only when called ("state not managed for field …"). Every type a
+    /// command requests must be one of the managed ones below (keep in sync with `run()`).
+    #[test]
+    fn commands_only_request_managed_state() {
+        const MANAGED: &[&str] = &[
+            "Core",
+            "armada_core::Core",
+            "Shell",
+            "Terminals",
+            "Dictation",
+            "dictation::Dictation",
+            "VoiceAssistant",
+            "voice_assistant::VoiceAssistant",
+            "PrCache",
+            "pr_status::PrCache",
+            "UpdateState",
+            "updater::UpdateState",
+            "Arc<Remote>",
+            "Arc<Attention>",
+            "TrayState",
+        ];
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut files,
+        );
+        let mut bad = Vec::new();
+        for f in files {
+            let text = std::fs::read_to_string(&f).unwrap();
+            for (i, line) in text.lines().enumerate() {
+                let mut rest = line;
+                // Split so this test's own source doesn't match.
+                let needle = concat!("State<", "'_,");
+                while let Some(at) = rest.find(needle) {
+                    rest = &rest[at + needle.len()..];
+                    // The type runs to the `>` that closes `State<`.
+                    let (mut depth, mut end) = (0i32, rest.len());
+                    for (j, c) in rest.char_indices() {
+                        match c {
+                            '<' => depth += 1,
+                            '>' if depth == 0 => {
+                                end = j;
+                                break;
+                            }
+                            '>' => depth -= 1,
+                            _ => {}
+                        }
+                    }
+                    let ty: String = rest[..end].split_whitespace().collect();
+                    if !MANAGED.contains(&ty.as_str()) {
+                        bad.push(format!("{}:{}: State<{ty}>", f.display(), i + 1));
+                    }
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "commands request unmanaged state:\n{}",
+            bad.join("\n")
+        );
+    }
+}
+
+/// Drives every registered command through the real IPC path (mock runtime, the real
+/// `handler!()` list, the real `manage_state()`), so a command that requests state
+/// `setup()` never manages, or a `manage()` that gets dropped, fails here and not on a
+/// user's machine ("state not managed for field …" only appears when a command runs).
+#[cfg(test)]
+mod ipc_smoke {
+    use super::*;
+    use serde_json::{json, Value};
+    use tauri::test::{mock_builder, mock_context, noop_assets, INVOKE_KEY};
+    use tauri::webview::InvokeRequest;
+    use tauri::{ipc::CallbackFn, WebviewWindowBuilder};
+
+    /// Commands that would touch the network, install software, the audio device or the
+    /// desktop even with throwaway arguments. Their state requests are still covered by
+    /// `commands_only_request_managed_state`.
+    const SKIP: &[&str] = &[
+        "install_missing",
+        "install_update",
+        "check_for_update",
+        "va_start",
+        // Never open the microphone or push from a test run.
+        "voice_start",
+        "push_base_branch",
+        "test_notification",
+        "open_path",
+        "detect_local_servers",
+    ];
+
+    fn src(name: &str) -> String {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        std::fs::read_to_string(dir.join(format!("{name}.rs")))
+            .or_else(|_| std::fs::read_to_string(dir.join(name).join("mod.rs")))
+            .unwrap_or_else(|_| panic!("no source for module {name}"))
+            // Windows checkouts may have CRLF line endings.
+            .replace("\r\n", "\n")
+    }
+
+    /// `(module, command)` for every entry of the `handler!` list.
+    fn registered() -> Vec<(String, String)> {
+        let lib = src("lib");
+        let start = lib.find("tauri::generate_handler![").unwrap();
+        let body = &lib[start..lib[start..].find("\n        ]\n").unwrap() + start];
+        body.lines()
+            .filter_map(|l| l.trim().strip_suffix(','))
+            .filter_map(|l| l.split_once("::"))
+            .map(|(m, c)| (m.to_string(), c.to_string()))
+            .collect()
+    }
+
+    /// Plausible throwaway value for one parameter type; `None` = not an IPC argument.
+    fn value_for(ty: &str) -> Option<Value> {
+        let ty = ty.replace(' ', "");
+        if ["State<", "tauri::State<", "AppHandle", "tauri::AppHandle"]
+            .iter()
+            .any(|p| ty.starts_with(p))
+        {
+            return None;
+        }
+        if ty.starts_with("Channel<") {
+            return None;
+        }
+        Some(match ty.as_str() {
+            "String" => json!("x"),
+            "bool" => json!(false),
+            "u16" | "u32" | "u64" | "usize" | "i32" | "i64" => json!(0),
+            t if t.starts_with("Option<") => Value::Null,
+            t if t.starts_with("Vec<") => json!([]),
+            _ => json!({}),
+        })
+    }
+
+    fn camel(s: &str) -> String {
+        let mut out = String::new();
+        let mut up = false;
+        for c in s.chars() {
+            if c == '_' {
+                up = true;
+            } else if up {
+                out.extend(c.to_uppercase());
+                up = false;
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    fn args_for(module: &str, name: &str) -> Value {
+        let text = src(module);
+        let at = text
+            .find(&format!("fn {name}("))
+            .or_else(|| text.find(&format!("fn {name}<")))
+            .unwrap_or_else(|| panic!("fn {name} not found in {module}"));
+        let open = at + text[at..].find('(').unwrap();
+        let (mut depth, mut end) = (0i32, open);
+        for (i, c) in text[open..].char_indices() {
+            match c {
+                '(' | '<' | '[' => depth += 1,
+                ')' | '>' | ']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = open + i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let params = &text[open + 1..end];
+        let (mut parts, mut depth, mut cur) = (Vec::new(), 0i32, String::new());
+        for c in params.chars() {
+            match c {
+                '<' | '(' | '[' => depth += 1,
+                '>' | ')' | ']' => depth -= 1,
+                ',' if depth == 0 => {
+                    parts.push(std::mem::take(&mut cur));
+                    continue;
+                }
+                _ => {}
+            }
+            cur.push(c);
+        }
+        parts.push(cur);
+        let mut map = serde_json::Map::new();
+        for p in parts {
+            let Some((n, ty)) = p.split_once(": ").or_else(|| p.split_once(':')) else {
+                continue;
+            };
+            let n = n.trim().trim_start_matches("mut ").trim();
+            if let Some(v) = value_for(ty.trim()) {
+                map.insert(camel(n), v);
+            }
+        }
+        Value::Object(map)
+    }
+
+    #[test]
+    fn every_command_resolves_its_state() {
+        let tmp = std::env::temp_dir().join(format!("armada-ipc-smoke-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let app = mock_builder()
+            .invoke_handler(handler!())
+            .build(mock_context(noop_assets()))
+            .unwrap();
+        let (sink, _rx) = events::channel();
+        let core = tauri::async_runtime::block_on(async { Core::open(tmp.clone(), sink) }).unwrap();
+        manage_state(app.handle(), &core, &tmp);
+        let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+
+        let cmds = registered();
+        assert!(cmds.len() > 50, "parsed only {} commands", cmds.len());
+        let mut failures = Vec::new();
+        for (module, name) in &cmds {
+            if SKIP.contains(&name.as_str()) {
+                continue;
+            }
+            let req = InvokeRequest {
+                cmd: name.clone(),
+                callback: CallbackFn(0),
+                error: CallbackFn(1),
+                // Must count as the app's own origin, or the ACL layer rejects the call
+                // before it reaches the command.
+                url: if cfg!(windows) {
+                    "http://tauri.localhost"
+                } else {
+                    "tauri://localhost"
+                }
+                .parse()
+                .unwrap(),
+                body: tauri::ipc::InvokeBody::Json(args_for(module, name)),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.to_string(),
+            };
+            let res = tauri::test::get_ipc_response(&webview, req);
+            let text = match &res {
+                Ok(b) => format!("{b:?}"),
+                Err(e) => e.to_string(),
+            };
+            let low = text.to_lowercase();
+            if low.contains("not managed") || low.contains("not found") && low.contains("command") {
+                failures.push(format!("{name}: {text}"));
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert!(
+            failures.is_empty(),
+            "IPC failures:\n{}",
+            failures.join("\n")
+        );
     }
 }

@@ -54,6 +54,7 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
       { keys: ["@"], label: "Mention a file" },
       { keys: ["Esc"], label: "Stop this turn (press twice from an empty composer)" },
       { keys: [modKey, "`"], label: "Show or hide the workspace panel (terminals, scripts)" },
+      { keys: [modKey, "⇧", "P"], label: "Show or hide the web preview beside the conversation" },
       { keys: ["F2"], label: "Rename the focused agent in the list" },
       { keys: ["/"], label: "Filter the agent list (when nothing is focused)" },
     ],

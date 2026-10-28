@@ -3,13 +3,14 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::AppHandle;
 use armada_core::{
     accounts, toolchain, Account, Agent, AgentStatus, ArmadaEvent, Attachment, AttentionReason,
     Core, CreateAccountRequest, CreateAgentRequest, CustomAgent, McpServer, Provider, ProviderInfo,
     Schedule, SearchHit, Settings, TimelineItem, UpdateInfo,
 };
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use tracing::{info, warn};
@@ -281,7 +282,7 @@ pub async fn chime_watched(attention: State<'_, Arc<Attention>>) -> CmdResult<()
 
 /// Sets the main window's title (taskbar, alt-tab, tiling-WM bars).
 #[tauri::command]
-pub async fn set_window_title(app: tauri::AppHandle, title: String) -> CmdResult<()> {
+pub async fn set_window_title(app: AppHandle, title: String) -> CmdResult<()> {
     let title: String = title.chars().take(200).collect();
     if let Some(w) = crate::window::main_window(&app) {
         w.set_title(&title).map_err(|e| e.to_string())?;
@@ -413,6 +414,9 @@ pub struct ShipResult {
     /// Set when the commit succeeded but the merge failed:
     /// "Committed <hash> on <branch>, but the merge failed: …".
     pub error: Option<String>,
+    /// The base branch's upstream state after a successful merge: the merge is local
+    /// until it is pushed.
+    pub base_status: Option<git_review::BaseBranchStatus>,
 }
 
 /// "Commit & merge" for the desktop and the phone remote: commits what's left in the
@@ -452,6 +456,7 @@ pub(crate) async fn ship_excluding_impl(
             committed,
             merged: Some(merged),
             error: None,
+            base_status: git_review::base_branch_status(&agent).await.ok(),
         }),
         Err(e) => match committed {
             Some(hash) => Ok(ShipResult {
@@ -461,6 +466,7 @@ pub(crate) async fn ship_excluding_impl(
                 )),
                 committed: Some(hash),
                 merged: None,
+                base_status: None,
             }),
             None => Err(e),
         },
@@ -489,6 +495,26 @@ pub(crate) async fn merge_impl(core: &Core, agent_id: &str) -> anyhow::Result<St
 #[tauri::command]
 pub async fn merge_agent(core: State<'_, Core>, agent_id: String) -> CmdResult<String> {
     merge_impl(&core, &agent_id).await.map_err(err)
+}
+
+/// Upstream state of the agent's base branch (no network).
+#[tauri::command]
+pub async fn base_branch_status(
+    core: State<'_, Core>,
+    agent_id: String,
+) -> CmdResult<git_review::BaseBranchStatus> {
+    let agent = core.agent(&agent_id).map_err(err)?;
+    git_review::base_branch_status(&agent).await.map_err(err)
+}
+
+/// Pushes the agent's base branch to its upstream (never forced).
+#[tauri::command]
+pub async fn push_base_branch(
+    core: State<'_, Core>,
+    agent_id: String,
+) -> CmdResult<git_review::BaseBranchStatus> {
+    let (_guard, agent) = lock_idle_agent(&core, &agent_id, "pushing").map_err(err)?;
+    git_review::push_base_branch(&agent).await.map_err(err)
 }
 
 /// "Commit & merge". See [`ShipResult`] for the partial-failure contract.
@@ -840,8 +866,13 @@ pub async fn update_settings(
             previous.as_ref().map(|p| p.global_hotkey.trim()) != Some(saved.global_hotkey.trim());
         if changed {
             return Err(format!(
-                "Settings saved, but the shortcut \"{}\" couldn't be registered: {e}. It may be invalid or used by another app.",
-                saved.global_hotkey.trim()
+                "Settings saved, but the shortcut \"{}\" couldn't be registered: {e}{}",
+                saved.global_hotkey.trim(),
+                if e.to_string().contains("Wayland") {
+                    ""
+                } else {
+                    ". It may be invalid or used by another app."
+                }
             ));
         }
     }

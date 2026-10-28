@@ -4,11 +4,12 @@
 
 use std::path::PathBuf;
 
+use crate::AppHandle;
 use anyhow::Context;
 use armada_core::{
     AttentionReason, Core, ItemBody, NavigateTarget, PermissionOption, PermissionOptionKind,
 };
-use tauri::{AppHandle, Manager};
+use tauri::Manager;
 use tracing::{info, warn};
 
 use crate::window;
@@ -60,10 +61,26 @@ pub fn close_for_request(request_id: &str) {
 /// Longest command (characters) a notification can carry Approve/Deny for. Notification
 /// daemons clip bodies well before this, so anything longer is reviewed in the app.
 #[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
-const MAX_ACTIONABLE_CHARS: usize = 300;
+const MAX_ACTIONABLE_CHARS: usize = 120;
+/// The title also carries the command, so it gets more room before Approve is withdrawn.
+#[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
+const MAX_TITLE_CHARS: usize = 300;
 /// Most lines of a command a notification can carry Approve/Deny for (servers show few lines).
 #[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
-const MAX_ACTIONABLE_LINES: usize = 6;
+const MAX_ACTIONABLE_LINES: usize = 2;
+
+/// Characters a notification would render invisibly or as formatting: C0/C1 controls (except
+/// newline and tab), bidi overrides/isolates, zero-width characters, BOM and Unicode tags.
+#[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
+fn has_hidden_chars(s: &str) -> bool {
+    s.chars().any(|c| {
+        (c.is_control() && c != '\n' && c != '\t')
+            || matches!(c,
+                '\u{AD}' | '\u{61C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{206F}' | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{E0000}'..='\u{E007F}')
+    })
+}
 
 /// The notification body for a permission request and whether it may offer Approve/Deny.
 /// A short command is shown whole, so Approve is never pressed on a clipped command; a long
@@ -74,8 +91,15 @@ fn request_body(title: &str, command: Option<&str>) -> (String, bool) {
     let too_long = |s: &str| {
         s.chars().count() > MAX_ACTIONABLE_CHARS || s.lines().count() > MAX_ACTIONABLE_LINES
     };
+    let title_too_long =
+        title.chars().count() > MAX_TITLE_CHARS || title.lines().count() > MAX_ACTIONABLE_LINES + 4;
     let truncated_title = command.is_none() && title.ends_with('\u{2026}');
-    if truncated_title || command.is_some_and(too_long) || too_long(title) {
+    if truncated_title
+        || command.is_some_and(too_long)
+        || title_too_long
+        || has_hidden_chars(title)
+        || command.is_some_and(has_hidden_chars)
+    {
         let head: String = title.chars().take(80).collect();
         let head = head.lines().next().unwrap_or("");
         return (
@@ -130,10 +154,10 @@ mod xdg {
     use std::sync::{Arc, OnceLock};
     use std::time::{Duration, Instant};
 
+    use crate::AppHandle;
     use armada_core::{AttentionReason, NavigateTarget};
     use futures_util::StreamExt;
     use parking_lot::Mutex;
-    use tauri::AppHandle;
     use tracing::{debug, warn};
     use zbus::zvariant::Variant;
 
@@ -661,13 +685,33 @@ mod tests {
         assert!(body.contains("Long command"));
         assert!(!body.contains(&huge));
         // Many short lines hide the tail just as well.
-        let tall = "a\n".repeat(MAX_ACTIONABLE_LINES + 1);
+        let tall = "a\n".repeat(MAX_ACTIONABLE_LINES) + "b";
         assert!(!request_body("Run", Some(&tall)).1);
         // A title that was truncated by the agent layer, with no command to show.
         assert!(!request_body("Run rm -rf ./build && git pu\u{2026}", None).1);
         // Exactly at the limit is still fine.
         let ok = "x".repeat(MAX_ACTIONABLE_CHARS);
         assert!(request_body("Run", Some(&ok)).1);
+    }
+
+    #[test]
+    fn hidden_characters_withdraw_approve() {
+        for c in [
+            "ls \u{202E}gnp.txt",
+            "ls\u{200B} -la",
+            "echo \u{2066}x",
+            "echo \u{FEFF}",
+            "echo \u{E0041}",
+            "echo \x1b[2K",
+            "echo \u{85}x",
+            "a\rb",
+        ] {
+            let (body, actionable) = request_body("Run", Some(c));
+            assert!(!actionable, "{c:?}");
+            assert!(!body.contains(c), "{c:?}");
+        }
+        assert!(!request_body("Run \u{202E}x", None).1);
+        assert!(request_body("Run", Some("ls\n\tpwd")).1);
     }
 
     #[test]

@@ -160,6 +160,17 @@ export function VoiceAssistantSection({ settings }: { settings: Settings }) {
           />
         </SettingRow>
         <SettingRow
+          title="I'm using headphones (allow interrupting)"
+          description="Without headphones the microphone is muted while the assistant talks, so your speakers can't make it hear itself. With them, you can talk over it."
+          htmlFor="va-headphones"
+        >
+          <Switch
+            id="va-headphones"
+            checked={va.headphones}
+            onCheckedChange={(on) => void update({ headphones: on })}
+          />
+        </SettingRow>
+        <SettingRow
           title="Maximum session length"
           description="The session ends by itself after this long, so a forgotten one can't keep billing."
           htmlFor="va-max"
