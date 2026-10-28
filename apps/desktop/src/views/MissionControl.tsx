@@ -1,0 +1,188 @@
+import { LayoutGrid, Plus, Radar } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { useEffect, useMemo, useState } from "react";
+import { EmptyState } from "@/components/EmptyState";
+import { AgentTile } from "@/components/mission/AgentTile";
+import { PageHeader } from "@/components/PageHeader";
+import { Button } from "@/components/ui/button";
+import { Segmented } from "@/components/ui/segmented";
+import { useNow } from "@/hooks/useNow";
+import { formatCost } from "@/lib/format";
+import type { Agent, AgentStatus } from "@/lib/types";
+import { isMac, modKey } from "@/lib/utils";
+import { collectPending, useApp } from "@/store/app";
+import { useUi } from "@/store/ui";
+
+type Filter = "all" | "live" | "needs" | "idle";
+
+const LIVE: AgentStatus[] = ["working", "starting", "needs_permission"];
+const NEEDS: AgentStatus[] = ["needs_permission", "error", "interrupted"];
+const IDLE: AgentStatus[] = ["idle", "stopped"];
+
+const ORDER: Record<AgentStatus, number> = {
+  needs_permission: 0,
+  working: 1,
+  starting: 2,
+  error: 3,
+  interrupted: 4,
+  idle: 5,
+  stopped: 6,
+};
+
+function matches(a: Agent, f: Filter) {
+  if (f === "live") return LIVE.includes(a.status);
+  if (f === "needs") return NEEDS.includes(a.status) || a.pendingPermissions > 0;
+  if (f === "idle") return IDLE.includes(a.status);
+  return true;
+}
+
+export function MissionControlView() {
+  const agentsMap = useApp((s) => s.agents);
+  const items = useApp((s) => s.items);
+  const accounts = useApp((s) => s.accounts);
+  const openAgent = useUi((s) => s.openAgent);
+  const openNewAgent = useUi((s) => s.openNewAgent);
+  const now = useNow();
+  const [filter, setFilter] = useState<Filter>("all");
+
+  const agents = useMemo(
+    () =>
+      Object.values(agentsMap)
+        .filter((a) => !a.archived)
+        .sort((a, b) => ORDER[a.status] - ORDER[b.status] || b.lastActivityAt - a.lastActivityAt),
+    [agentsMap],
+  );
+
+  const pendingByAgent = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof collectPending>[number]["item"]>();
+    for (const p of collectPending({ agents: agentsMap, items })) {
+      if (!map.has(p.agent.id)) map.set(p.agent.id, p.item);
+    }
+    return map;
+  }, [agentsMap, items]);
+
+  // Lazily load timelines for live agents so tiles can show their last action.
+  const liveIds = agents
+    .filter((a) => LIVE.includes(a.status))
+    .map((a) => a.id)
+    .join(",");
+  useEffect(() => {
+    if (!liveIds) return;
+    const ensure = useApp.getState().ensureItems;
+    for (const id of liveIds.split(",")) void ensure(id);
+  }, [liveIds]);
+
+  const counts = useMemo(() => {
+    const c = { all: agents.length, live: 0, needs: 0, idle: 0 };
+    for (const a of agents) {
+      if (matches(a, "live")) c.live++;
+      if (matches(a, "needs")) c.needs++;
+      if (matches(a, "idle")) c.idle++;
+    }
+    return c;
+  }, [agents]);
+
+  const spend = agents.reduce((s, a) => s + a.costUsd, 0);
+  const visible = agents.filter((a) => matches(a, filter));
+  const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
+
+  const chip = (label: string, n: number, tone?: string) => (
+    <span className="flex items-center gap-1.5 whitespace-nowrap">
+      {label}
+      <span
+        className="rounded-md bg-base/70 px-1 text-[10.5px] tabular text-steel"
+        style={tone && n > 0 ? { color: tone } : undefined}
+      >
+        {n}
+      </span>
+    </span>
+  );
+
+  return (
+    <div className="flex h-full flex-col">
+      <PageHeader
+        icon={<LayoutGrid />}
+        title="Mission Control"
+        subtitle={
+          <>
+            <span className="tabular">{counts.live}</span> live · <span className="tabular">{counts.needs}</span> need
+            you · <span className="tabular">{formatCost(spend)}</span> spent across the fleet
+          </>
+        }
+        right={
+          <Button variant="primary" size="sm" onClick={() => openNewAgent()}>
+            <Plus /> New agent
+            <span className="ml-1 text-[10.5px] opacity-70">
+              {modKey}
+              {isMac ? "" : "+"}N
+            </span>
+          </Button>
+        }
+      >
+        <Segmented<Filter>
+          size="sm"
+          aria-label="Filter agents"
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { value: "all", label: chip("All", counts.all) },
+            { value: "live", label: chip("Live", counts.live, "var(--accent)") },
+            { value: "needs", label: chip("Needs you", counts.needs, "var(--warn)") },
+            { value: "idle", label: chip("Idle", counts.idle) },
+          ]}
+        />
+      </PageHeader>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        {agents.length === 0 ? (
+          <EmptyState
+            icon={<Radar />}
+            title="Your fleet is docked"
+            description="Launch an agent and it shows up here as a live tile: status, last action and approvals at a glance."
+            action={
+              <Button variant="primary" onClick={() => openNewAgent()}>
+                <Plus /> New agent
+              </Button>
+            }
+          />
+        ) : visible.length === 0 ? (
+          <EmptyState
+            icon={<Radar />}
+            title="All quiet on this channel"
+            description="No agents match this filter right now."
+            action={
+              <Button variant="secondary" onClick={() => setFilter("all")}>
+                Show all agents
+              </Button>
+            }
+          />
+        ) : (
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
+            <AnimatePresence initial={false} mode="popLayout">
+              {visible.map((a) => (
+                <motion.div
+                  key={a.id}
+                  layout="position"
+                  className="h-full"
+                  initial={{ opacity: 0, scale: 0.97 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.97 }}
+                  transition={{ duration: 0.16, ease: [0.2, 0.8, 0.2, 1] }}
+                >
+                  <AgentTile
+                    agent={a}
+                    account={accountMap.get(a.accountId)}
+                    items={items[a.id]}
+                    pending={pendingByAgent.get(a.id) ?? null}
+                    now={now}
+                    onOpen={openAgent}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

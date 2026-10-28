@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev libasound2-dev libdbus-1-dev patchelf
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            apps/desktop/package-lock.json
+            apps/remote/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Build frontend
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run build
+
+      # Embedded into the desktop binary by src-tauri/build.rs.
+      - name: Build mobile companion
+        working-directory: apps/remote
+        run: |
+          npm ci
+          npm run build
+
+      - name: Formatting
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        if: runner.os == 'Linux'
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      # Catches bundler misconfiguration (targets, deb dependencies, icons, CSP) before a
+      # release does. Updater artifacts need the signing key, which CI doesn't have.
+      - name: Bundle (deb, debug)
+        if: runner.os == 'Linux'
+        working-directory: apps/desktop
+        run: npm run tauri build -- --ci --debug --bundles deb --config '{"bundle":{"createUpdaterArtifacts":false}}'

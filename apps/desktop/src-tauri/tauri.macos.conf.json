@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Armada",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 640,
+        "center": true,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "resizable": true,
+        "backgroundColor": "#0B0D10"
+      }
+    ]
+  }
+}

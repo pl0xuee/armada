@@ -258,7 +258,7 @@ Views:
 
 | OS | Formats |
 |---|---|
-| Windows 10/11 | NSIS `.exe` installer, `.msi`, winget |
+| Windows 10/11 | NSIS `.exe` installer (per-user, no admin), winget |
 | macOS 12+ | Universal `.dmg` (Apple Silicon + Intel), notarized, Homebrew cask |
 | Linux | AppImage, `.deb`, `.rpm`, Flatpak, AUR |
 

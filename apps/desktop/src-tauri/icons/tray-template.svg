@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="182 160 660 680">
+  <defs><path id="dart" d="M0,-1 L0.70,0.86 Q0.72,0.93 0.64,0.90 L0,0.52 L-0.64,0.90 Q-0.72,0.93 -0.70,0.86 Z"/></defs>
+  <g fill="black">
+    <path d="M276,628 C276,756 380,818 512,818 C644,818 748,756 748,628" fill="none" stroke="black" stroke-width="58" stroke-linecap="round"/>
+    <rect x="486" y="430" width="52" height="384" rx="26"/>
+    <rect x="396" y="560" width="232" height="50" rx="25"/>
+    <use href="#dart" transform="translate(512 352) scale(186)"/>
+    <use href="#dart" transform="translate(268 612) rotate(-14) scale(104)"/>
+    <use href="#dart" transform="translate(756 612) rotate(14) scale(104)"/>
+  </g>
+</svg>

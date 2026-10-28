@@ -1,0 +1,1403 @@
+// In-memory mock of the Rust backend, used when the UI runs in a plain browser.
+// It mirrors the command surface of ./api.ts and emits the same ArmadaEvents,
+// including simulated streaming, permissions, login terminals and installs.
+
+import type { ArmadaApi } from "./api";
+import {
+  commandsFor,
+  configFor,
+  seedAccounts,
+  seedAgents,
+  seedDiff,
+  seedItems,
+  seedProviders,
+  seedSchedules,
+  seedSettings,
+} from "./mock-data";
+import type {
+  Account,
+  Agent,
+  AppState,
+  ArmadaEvent,
+  AttentionReason,
+  FileDiff,
+  PermissionOption,
+  PlanEntry,
+  Provider,
+  ProviderInfo,
+  Schedule,
+  SearchHit,
+  Settings,
+  TimelineItem,
+  ToolKind,
+  UpdateInfo,
+} from "./types";
+
+type Listener = (e: ArmadaEvent) => void;
+
+const listeners = new Set<Listener>();
+
+export function subscribeMock(cb: Listener): () => void {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+
+function emit(e: ArmadaEvent) {
+  for (const l of listeners) {
+    try {
+      l(e);
+    } catch (err) {
+      console.error("[mock] listener failed", err);
+    }
+  }
+}
+
+// ---------------------------------------------------------------- state
+
+const params = typeof location !== "undefined" ? new URLSearchParams(location.search) : null;
+const platformParam = params?.get("platform");
+
+const db = {
+  accounts: seedAccounts(),
+  providers: seedProviders(),
+  settings: seedSettings(!(params?.has("onboarding") ?? false)),
+  agents: seedAgents(),
+  schedules: seedSchedules(),
+  items: seedItems(),
+};
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const rand = (a: number, b: number) => a + Math.random() * (b - a);
+const clone = <T>(v: T): T => structuredClone(v);
+
+function getAgent(id: string): Agent {
+  const a = db.agents.find((x) => x.id === id);
+  if (!a) throw new Error(`Unknown agent ${id}`);
+  return a;
+}
+
+function patchAgent(id: string, patch: Partial<Agent>) {
+  const a = getAgent(id);
+  Object.assign(a, patch, { updatedAt: Date.now() });
+  emit({ type: "agent_updated", agent: clone(a) });
+}
+
+function itemsOf(agentId: string): TimelineItem[] {
+  return (db.items[agentId] ??= []);
+}
+
+let idCounter = 1000;
+const newId = (p: string) => `${p}-${Date.now().toString(36)}-${(idCounter++).toString(36)}`;
+
+type NewItem = TimelineItem extends infer T
+  ? T extends TimelineItem
+    ? Omit<T, "id" | "agentId" | "seq" | "ts">
+    : never
+  : never;
+
+function addItem(agentId: string, init: NewItem): TimelineItem {
+  const list = itemsOf(agentId);
+  const seq = (list[list.length - 1]?.seq ?? 0) + 1;
+  const item = { ...init, id: newId(agentId), agentId, seq, ts: Date.now() } as TimelineItem;
+  list.push(item);
+  emit({ type: "item_upserted", item: clone(item) });
+  return item;
+}
+
+function updateItem(agentId: string, itemId: string, patch: Record<string, unknown>) {
+  const item = itemsOf(agentId).find((i) => i.id === itemId);
+  if (!item) return;
+  Object.assign(item, patch);
+  emit({ type: "item_upserted", item: clone(item) });
+}
+
+function appendDelta(agentId: string, itemId: string, field: "text" | "output", delta: string) {
+  const item = itemsOf(agentId).find((i) => i.id === itemId) as Record<string, unknown> | undefined;
+  if (!item) return;
+  item[field] = String(item[field] ?? "") + delta;
+  emit({ type: "text_delta", agentId, itemId, field, delta });
+}
+
+function bumpUsage(agentId: string, tokens: number) {
+  const a = getAgent(agentId);
+  const price = a.provider === "claude" ? 9e-6 : a.provider === "codex" ? 5e-6 : 3e-6;
+  a.tokensUsed += tokens;
+  a.costUsd = Math.round((a.costUsd + tokens * price) * 1000) / 1000;
+  if (a.contextUsed !== null && a.contextSize !== null) {
+    a.contextUsed = Math.min(a.contextSize, a.contextUsed + Math.round(tokens * 0.35));
+  }
+}
+
+function attention(agentId: string, reason: AttentionReason, body: string) {
+  const a = getAgent(agentId);
+  const title =
+    reason === "permission"
+      ? `${a.title} needs approval`
+      : reason === "done"
+        ? `${a.title} is done`
+        : `${a.title} hit an error`;
+  emit({ type: "attention", agentId, reason, title, body, requestId: null });
+}
+
+// ---------------------------------------------------------------- streaming helpers
+
+/** Cooperative cancellation for simulated turns. */
+const turns = new Map<string, { cancelled: boolean }>();
+class Cancelled extends Error {}
+
+function tokenize(text: string): string[] {
+  return text.match(/\S+\s*|\s+/g) ?? [];
+}
+
+async function streamField(
+  agentId: string,
+  itemId: string,
+  field: "text" | "output",
+  text: string,
+  turn: { cancelled: boolean },
+  speed = 1,
+) {
+  const words = tokenize(text);
+  let i = 0;
+  while (i < words.length) {
+    if (turn.cancelled) throw new Cancelled();
+    const n = Math.max(1, Math.round(rand(1, 4)));
+    appendDelta(agentId, itemId, field, words.slice(i, i + n).join(""));
+    i += n;
+    await sleep(rand(28, 70) / speed);
+  }
+}
+
+async function streamLines(
+  agentId: string,
+  itemId: string,
+  lines: string[],
+  turn: { cancelled: boolean },
+  delay: [number, number] = [120, 380],
+) {
+  for (const l of lines) {
+    if (turn.cancelled) throw new Cancelled();
+    appendDelta(agentId, itemId, "output", `${l}\n`);
+    await sleep(rand(delay[0], delay[1]));
+  }
+}
+
+async function pause(ms: number, turn: { cancelled: boolean }) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (turn.cancelled) throw new Cancelled();
+    await sleep(Math.min(100, end - Date.now()));
+  }
+}
+
+const permissionWaiters = new Map<string, (optionId: string) => void>();
+
+function waitForPermission(requestId: string, turn: { cancelled: boolean }): Promise<string> {
+  return new Promise((resolve, reject) => {
+    permissionWaiters.set(requestId, resolve);
+    const poll = setInterval(() => {
+      if (turn.cancelled) {
+        clearInterval(poll);
+        permissionWaiters.delete(requestId);
+        reject(new Cancelled());
+      }
+    }, 150);
+    const orig = resolve;
+    permissionWaiters.set(requestId, (v) => {
+      clearInterval(poll);
+      orig(v);
+    });
+  });
+}
+
+async function runTurn(agentId: string, body: (turn: { cancelled: boolean }) => Promise<void>) {
+  const prev = turns.get(agentId);
+  if (prev) prev.cancelled = true;
+  const turn = { cancelled: false };
+  turns.set(agentId, turn);
+  try {
+    await body(turn);
+  } catch (e) {
+    if (!(e instanceof Cancelled)) {
+      console.error("[mock] turn failed", e);
+      addItem(agentId, { kind: "notice", level: "error", text: String(e) });
+      patchAgent(agentId, { status: "error" });
+    }
+  } finally {
+    if (turns.get(agentId) === turn) turns.delete(agentId);
+  }
+}
+
+// ---------------------------------------------------------------- scripted responses
+
+const REPLIES = [
+  "Done. Here's what changed:\n\n- Extracted the shared logic into `src/lib/retry.ts`\n- Added exponential backoff with **jitter** (base 200 ms, cap 5 s)\n- Covered the edge cases with three new unit tests\n\n```ts\nexport async function withRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {\n  for (let i = 0; ; i++) {\n    try {\n      return await fn();\n    } catch (e) {\n      if (i >= attempts - 1 || !isRetryable(e)) throw e;\n      await sleep(Math.min(5000, 200 * 2 ** i) * (0.5 + Math.random()));\n    }\n  }\n}\n```\n\nEverything passes. Want me to open a PR?",
+  "Good question. There are two reasonable options:\n\n1. **Keep it in the request handler**: simplest, but couples validation to transport.\n2. **Move it to a domain service**: a little more code, much easier to test.\n\nI'd go with option 2. I've sketched it in `src/services/orders.ts` and left the handler as a thin adapter. The diff is small and nothing else changes.",
+  "I looked through the call sites and the issue is a stale closure: `onSave` captures `draft` from the first render. Switching to a functional update fixes it:\n\n```tsx\nsetDraft((d) => ({ ...d, title }));\n```\n\nI also added a test that types quickly into the field and asserts the final value.",
+];
+
+const READ_TARGETS = ["src/index.ts", "src/lib/retry.ts", "package.json", "src/services/orders.ts", "README.md"];
+
+async function scriptedTurn(agentId: string, prompt: string, turn: { cancelled: boolean }) {
+  patchAgent(agentId, { status: "working", running: true, lastActivityAt: Date.now() });
+  await pause(500, turn);
+
+  // Thinking
+  const thought = addItem(agentId, { kind: "thought", text: "" });
+  await streamField(
+    agentId,
+    thought.id,
+    "text",
+    `The user wants: "${prompt.slice(0, 80)}${prompt.length > 80 ? "…" : ""}". Let me look at the relevant files first, then make the smallest change that solves it and verify with tests.`,
+    turn,
+    1.6,
+  );
+
+  // Read
+  const target = READ_TARGETS[Math.floor(Math.random() * READ_TARGETS.length)];
+  const read = addItem(agentId, {
+    kind: "tool_call",
+    toolCallId: newId("tc"),
+    title: `Read ${target}`,
+    toolKind: "read",
+    status: "in_progress",
+    locations: [target],
+    diffs: [],
+    output: "",
+    command: null,
+  });
+  await pause(700, turn);
+  updateItem(agentId, read.id, { status: "completed" });
+
+  // Permission-gated command when the prompt sounds like it wants to run something.
+  if (/\b(test|run|install|build|deploy|migrat|lint)\w*/i.test(prompt)) {
+    const command = /lint/i.test(prompt) ? "npm run lint" : /build/i.test(prompt) ? "npm run build" : "npm test";
+    const requestId = newId("perm");
+    const options: PermissionOption[] = [
+      { id: "allow", name: "Allow once", kind: "allow_once" },
+      { id: "always", name: `Always allow \`${command.split(" ")[0]}\``, kind: "allow_always" },
+      { id: "deny", name: "Deny", kind: "reject_once" },
+    ];
+    addItem(agentId, {
+      kind: "permission",
+      requestId,
+      title: `Run ${command}`,
+      toolKind: "execute",
+      command,
+      diffs: [],
+      options,
+      resolution: null,
+    });
+    const a = getAgent(agentId);
+    patchAgent(agentId, { status: "needs_permission", pendingPermissions: a.pendingPermissions + 1 });
+    emit({
+      type: "attention",
+      agentId,
+      reason: "permission",
+      title: `${getAgent(agentId).title} needs approval`,
+      body: `Wants to run: ${command}`,
+      requestId,
+    });
+    const choice = await waitForPermission(requestId, turn);
+    const chosen = options.find((o) => o.id === choice);
+    patchAgent(agentId, { status: "working" });
+    if (chosen && chosen.kind.startsWith("reject")) {
+      const msg = addItem(agentId, { kind: "agent_message", text: "" });
+      await streamField(
+        agentId,
+        msg.id,
+        "text",
+        "Understood, I won't run that. What would you like me to do instead?",
+        turn,
+      );
+      finishTurn(agentId, "Waiting for your direction.");
+      return;
+    }
+    const exec = addItem(agentId, {
+      kind: "tool_call",
+      toolCallId: newId("tc"),
+      title: `Run ${command}`,
+      toolKind: "execute",
+      status: "in_progress",
+      locations: [],
+      diffs: [],
+      output: "",
+      command,
+    });
+    await streamLines(
+      agentId,
+      exec.id,
+      [
+        "",
+        `> app@1.0.0 ${command.replace("npm run ", "").replace("npm ", "")}`,
+        "",
+        " ✓ src/lib/retry.test.ts (6 tests) 41ms",
+        " ✓ src/services/orders.test.ts (11 tests) 87ms",
+        " ✓ src/http/client.test.ts (9 tests) 64ms",
+        "",
+        " Test Files  3 passed (3)",
+        "      Tests  26 passed (26)",
+        "   Duration  1.42s",
+      ],
+      turn,
+    );
+    updateItem(agentId, exec.id, { status: "completed" });
+  } else {
+    // An edit with a diff
+    const path = "src/lib/retry.ts";
+    const oldText = "export async function withRetry<T>(fn: () => Promise<T>): Promise<T> {\n  return fn();\n}\n";
+    const newText =
+      "export async function withRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {\n  for (let i = 0; ; i++) {\n    try {\n      return await fn();\n    } catch (e) {\n      if (i >= attempts - 1 || !isRetryable(e)) throw e;\n      await sleep(Math.min(5000, 200 * 2 ** i) * (0.5 + Math.random()));\n    }\n  }\n}\n";
+    const edit = addItem(agentId, {
+      kind: "tool_call",
+      toolCallId: newId("tc"),
+      title: `Edit ${path}`,
+      toolKind: "edit",
+      status: "in_progress",
+      locations: [path],
+      diffs: [],
+      output: "",
+      command: null,
+    });
+    await pause(900, turn);
+    const diffs: FileDiff[] = [{ path, oldText, newText, unified: null }];
+    updateItem(agentId, edit.id, { status: "completed", diffs });
+  }
+
+  bumpUsage(agentId, Math.round(rand(6000, 22000)));
+  const reply = REPLIES[Math.floor(Math.random() * REPLIES.length)];
+  const msg = addItem(agentId, { kind: "agent_message", text: "" });
+  await streamField(agentId, msg.id, "text", reply, turn);
+  finishTurn(agentId, reply);
+}
+
+function finishTurn(agentId: string, text: string) {
+  const preview = text
+    .replace(/[#*`>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 140);
+  bumpUsage(agentId, Math.round(rand(800, 3000)));
+  patchAgent(agentId, {
+    status: "idle",
+    lastMessage: preview,
+    lastActivityAt: Date.now(),
+    unread: true,
+  });
+  attention(agentId, "done", preview);
+}
+
+// ---------------------------------------------------------------- boot-time live activity
+
+let liveStarted = false;
+
+function startLiveActivity() {
+  if (liveStarted) return;
+  liveStarted = true;
+
+  // 1) Claude agent finishing its test run, then summarizing.
+  void runTurn("a-token", async (turn) => {
+    await pause(1800, turn);
+    const exec = itemsOf("a-token").find((i) => i.kind === "tool_call" && i.status === "in_progress");
+    if (exec) {
+      await streamLines(
+        "a-token",
+        exec.id,
+        [
+          " ✓ test/auth.test.ts > refreshToken > stores the new token pair 3ms",
+          " ✓ test/auth.test.ts > refreshToken > clears tokens on invalid_grant 2ms",
+          " ✓ test/auth.test.ts > refreshToken > shares one request between concurrent callers 4ms",
+          " ✓ test/http/client.test.ts > interceptor > retries once after refresh 6ms",
+          " ✓ test/http/client.test.ts > interceptor > queues requests during refresh 9ms",
+          " ✓ test/http/client.test.ts > interceptor > logs out after a failed refresh 3ms",
+          "",
+          " Test Files  2 passed (2)",
+          "      Tests  6 passed (6)",
+          "   Start at  14:02:11",
+          "   Duration  612ms (transform 88ms, setup 0ms, collect 141ms, tests 27ms)",
+        ],
+        turn,
+        [500, 1400],
+      );
+      updateItem("a-token", exec.id, { status: "completed" });
+    }
+    const plan = itemsOf("a-token").find((i) => i.kind === "plan");
+    if (plan && plan.kind === "plan") {
+      const entries: PlanEntry[] = plan.entries.map((e, i) =>
+        i < 4 ? { ...e, status: "completed" } : { ...e, status: "in_progress" },
+      );
+      updateItem("a-token", plan.id, { entries });
+    }
+    bumpUsage("a-token", 14000);
+    const msg = addItem("a-token", { kind: "agent_message", text: "" });
+    const summary =
+      "All **6 auth tests pass**, including the new concurrency regression test.\n\n### What changed\n\n- `refreshToken()` is now **single-flight**: one in-flight promise shared by concurrent callers, cleared in `finally` so a failed refresh can be retried.\n- The interceptor queues requests that 401 while a refresh is running and replays them with the new token.\n- New test: two parallel `refreshToken()` calls hit `/oauth/token` exactly **once**.\n\n```diff\n- export async function refreshToken(): Promise<string> {\n+ export function refreshToken(): Promise<string> {\n+   inflight ??= doRefresh().finally(() => { inflight = null; });\n+   return inflight;\n```\n\nThe branch `armada/fix-token-refresh` is ready for review.";
+    await streamField("a-token", msg.id, "text", summary, turn, 0.45);
+    if (plan && plan.kind === "plan") {
+      updateItem("a-token", plan.id, { entries: plan.entries.map((e) => ({ ...e, status: "completed" })) });
+    }
+    finishTurn("a-token", "All 6 auth tests pass, including the new concurrency regression test.");
+  });
+
+  // 2) Grok research agent keeps fetching sources for a while.
+  void runTurn("a-research", async (turn) => {
+    const sources = [
+      ["Fetch turbopuffer.com/docs/performance", "200 OK · 36 KB · object-storage backed, ~10ms p50 warm namespaces"],
+      ["Fetch aws.amazon.com/rds/postgresql/pricing", "200 OK · 210 KB · r6g.2xlarge on-demand + storage"],
+      ['Search "pgvector 4M vectors p95 latency"', "8 results · 3 relevant benchmarks (2025)"],
+      ["Fetch qdrant.tech/pricing", "200 OK · 61 KB · managed cloud tiers"],
+    ];
+    for (const [title, out] of sources) {
+      await pause(rand(2500, 4500), turn);
+      const kind: ToolKind = title.startsWith("Search") ? "search" : "fetch";
+      const tc = addItem("a-research", {
+        kind: "tool_call",
+        toolCallId: newId("gk"),
+        title,
+        toolKind: kind,
+        status: "in_progress",
+        locations: [],
+        diffs: [],
+        output: "",
+        command: null,
+      });
+      await pause(rand(1200, 2400), turn);
+      appendDelta("a-research", tc.id, "output", out);
+      updateItem("a-research", tc.id, { status: "completed" });
+      bumpUsage("a-research", 9000);
+      patchAgent("a-research", { lastMessage: title.replace(/^Fetch /, "Reading ") });
+    }
+    await pause(1500, turn);
+    const msg = addItem("a-research", { kind: "agent_message", text: "" });
+    const text =
+      "## Recommendation: start with pgvector\n\n| | pgvector (HNSW) | Qdrant Cloud | Turbopuffer |\n|---|---|---|---|\n| p95 @ 4M × 1536 | ~18 ms | ~9 ms | ~25 ms (warm) |\n| Filtered search | good (0.8 iterative scans) | excellent | good |\n| Est. monthly cost | **~$410** | ~$690 | ~$140 + egress |\n| Ops burden | none new | new service | new vendor |\n\n**Why:** you already run Postgres, latency is well inside the 100 ms budget, and it keeps tickets and embeddings transactionally consistent. Revisit Qdrant if filtered queries exceed ~30% of traffic or the corpus passes 20M.";
+    await streamField("a-research", msg.id, "text", text, turn, 0.6);
+    finishTurn(
+      "a-research",
+      "Recommendation: start with pgvector. ~18 ms p95 at 4M vectors and no new infrastructure.",
+    );
+  });
+}
+
+// ---------------------------------------------------------------- terminals
+
+interface MockTerminal {
+  id: string;
+  kind: "login" | "install";
+  accountId?: string;
+  provider?: Provider;
+  buffer: string;
+  stage: number;
+  done: boolean;
+}
+
+const terminals = new Map<string, MockTerminal>();
+
+function termOut(id: string, data: string) {
+  emit({ type: "terminal_output", terminalId: id, data });
+}
+
+async function termExit(t: MockTerminal, code: number) {
+  t.done = true;
+  await sleep(400);
+  emit({ type: "terminal_exit", terminalId: t.id, code });
+  terminals.delete(t.id);
+}
+
+const C = {
+  dim: "\x1b[2m",
+  bold: "\x1b[1m",
+  cyan: "\x1b[36m",
+  green: "\x1b[32m",
+  yellow: "\x1b[33m",
+  reset: "\x1b[0m",
+};
+
+async function runLogin(t: MockTerminal) {
+  const acc = db.accounts.find((a) => a.id === t.accountId);
+  const cli = acc?.provider === "codex" ? "codex" : acc?.provider === "grok" ? "grok" : "claude";
+  await sleep(350);
+  termOut(t.id, `${C.dim}$ ${cli} ${cli === "claude" ? "/login" : "login"}${C.reset}\r\n\r\n`);
+  await sleep(500);
+  termOut(
+    t.id,
+    `${C.bold}Sign in to ${acc ? (cli === "codex" ? "ChatGPT" : cli === "grok" ? "Grok" : "Claude") : "provider"}${C.reset}\r\n\r\n`,
+  );
+  await sleep(300);
+  termOut(t.id, `Opening your browser to complete sign-in…\r\n`);
+  await sleep(500);
+  termOut(
+    t.id,
+    `If the browser didn't open, visit:\r\n${C.cyan}https://auth.example.com/oauth/authorize?client_id=armada-demo&code_challenge=Xq9…${C.reset}\r\n\r\n`,
+  );
+  await sleep(400);
+  termOut(
+    t.id,
+    `${C.yellow}Paste the code from the browser here (or press Enter to simulate success):${C.reset}\r\n> `,
+  );
+  t.stage = 1;
+}
+
+async function finishLogin(t: MockTerminal) {
+  t.stage = 2;
+  termOut(t.id, `\r\n\r\n${C.dim}Exchanging code…${C.reset}\r\n`);
+  await sleep(900);
+  const acc = db.accounts.find((a) => a.id === t.accountId);
+  if (acc) {
+    acc.status = {
+      loggedIn: true,
+      label: acc.provider === "claude" ? "Claude Max" : acc.provider === "codex" ? "ChatGPT Plus" : "SuperGrok",
+      email: `sam+${acc.name.toLowerCase().replace(/\W+/g, "")}@fleet.dev`,
+      plan: acc.provider === "claude" ? "Max 5x" : acc.provider === "codex" ? "Plus" : "SuperGrok",
+      checkedAt: Date.now(),
+      error: null,
+    };
+    emit({ type: "account_updated", account: clone(acc) });
+  }
+  termOut(t.id, `${C.green}✔ Login successful.${C.reset} Credentials saved to this profile.\r\n`);
+  await termExit(t, 0);
+}
+
+async function runInstallMissing(t: MockTerminal) {
+  const missing = db.providers.filter((p) => !p.installed || (p.adapterRequired && !p.adapterInstalled));
+  await sleep(300);
+  const out = (s: string, ms = 250) => {
+    termOut(t.id, `${s}\r\n`);
+    return sleep(rand(ms * 0.6, ms * 1.4));
+  };
+  await out(`${C.cyan}▸${C.reset} Checking for Node.js…`);
+  await out(`${C.green}✓${C.reset} Node.js 22.11.0 found`);
+  if (missing.length === 0) {
+    await out(`${C.green}✓${C.reset} Everything is already installed.`);
+    return termExit(t, 0);
+  }
+  for (const p of missing) {
+    if (t.done) return;
+    await out(`${C.cyan}▸${C.reset} Installing ${p.displayName} (${p.cliName})…`, 400);
+    await out(
+      `${C.dim}  npm install --prefix ~/.local/share/armada/tools ${p.installCommand.split(" ").slice(3).join(" ")}${C.reset}`,
+    );
+    await out(`${C.dim}  added 18 packages in 3s${C.reset}`, 700);
+    p.installed = true;
+    p.version = p.version ?? "1.0.3";
+    p.path = `~/.local/share/armada/tools/bin/${p.cliName}`;
+    if (p.adapterRequired) p.adapterInstalled = true;
+    await out(`${C.green}✓${C.reset} ${p.displayName} ${p.version} ready`);
+  }
+  await out("");
+  await out(`${C.green}✓ All agents installed.${C.reset}`);
+  emit({ type: "providers_changed", providers: clone(db.providers) });
+  await termExit(t, 0);
+}
+
+async function runInstall(t: MockTerminal) {
+  const p = db.providers.find((x) => x.provider === t.provider);
+  if (!p) return termExit(t, 1);
+  await sleep(300);
+  termOut(t.id, `${C.dim}$ ${p.installCommand}${C.reset}\r\n\r\n`);
+  const steps = [
+    "npm http fetch GET 200 https://registry.npmjs.org/ 142ms",
+    "npm http fetch GET 200 https://registry.npmjs.org/@types%2fnode 88ms",
+    "npm info run postinstall",
+    "",
+    `added 12 packages in 4s`,
+    "",
+  ];
+  for (const s of steps) {
+    termOut(t.id, `${s}\r\n`);
+    await sleep(rand(200, 600));
+  }
+  p.installed = true;
+  p.version = p.version ?? "1.0.3";
+  p.path = `/usr/local/bin/${p.cliName}`;
+  if (p.adapterRequired) p.adapterInstalled = true;
+  termOut(t.id, `${C.green}✔ ${p.displayName} installed (${p.version}).${C.reset}\r\n`);
+  emit({ type: "providers_changed", providers: clone(db.providers) });
+  await termExit(t, 0);
+}
+
+// ---------------------------------------------------------------- sound (WebAudio preview)
+
+let audioCtx: AudioContext | null = null;
+function playTone(reason: AttentionReason) {
+  try {
+    audioCtx ??= new AudioContext();
+    const ctx = audioCtx;
+    const vol = db.settings.sounds.volume * 0.18;
+    const notes = reason === "permission" ? [660, 990] : reason === "done" ? [523.25, 659.25, 783.99] : [196, 147];
+    notes.forEach((f, i) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = reason === "error" ? "triangle" : "sine";
+      o.frequency.value = f;
+      const t0 = ctx.currentTime + i * 0.11;
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(vol, t0 + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45);
+      o.connect(g).connect(ctx.destination);
+      o.start(t0);
+      o.stop(t0 + 0.5);
+    });
+  } catch {
+    /* audio not available */
+  }
+}
+
+// ---------------------------------------------------------------- API
+
+function delay<T>(v: T, ms = 120): Promise<T> {
+  return new Promise((r) => setTimeout(() => r(v), ms + Math.random() * 80));
+}
+
+export const mockApi: ArmadaApi = {
+  async getState(): Promise<AppState> {
+    setTimeout(startLiveActivity, 600);
+    const platform =
+      platformParam === "macos" || platformParam === "windows" || platformParam === "linux"
+        ? platformParam
+        : /Mac/i.test(navigator.platform)
+          ? "macos"
+          : /Win/i.test(navigator.platform)
+            ? "windows"
+            : "linux";
+    return delay(
+      clone({
+        agents: db.agents,
+        accounts: db.accounts,
+        providers: db.providers,
+        settings: db.settings,
+        version: "0.1.0-mock",
+        platform,
+      }),
+      350,
+    );
+  },
+
+  async listItems(agentId) {
+    return delay(clone(itemsOf(agentId)), 220);
+  },
+
+  async search(query) {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const hits: SearchHit[] = [];
+    for (const [agentId, list] of Object.entries(db.items)) {
+      for (const it of list) {
+        const text =
+          it.kind === "user_message" || it.kind === "agent_message" || it.kind === "thought" || it.kind === "notice"
+            ? it.text
+            : it.kind === "tool_call" || it.kind === "permission"
+              ? `${it.title} ${it.kind === "tool_call" ? it.output : (it.command ?? "")}`
+              : it.kind === "plan"
+                ? it.entries.map((e) => e.content).join(" ")
+                : "";
+        const idx = text.toLowerCase().indexOf(q);
+        if (idx >= 0) {
+          const start = Math.max(0, idx - 40);
+          hits.push({
+            agentId,
+            itemId: it.id,
+            kind: it.kind,
+            snippet: `${start > 0 ? "…" : ""}${text.slice(start, idx + q.length + 60).replace(/\s+/g, " ")}`,
+            ts: it.ts,
+          });
+        }
+      }
+    }
+    return delay(hits.sort((a, b) => b.ts - a.ts).slice(0, 30), 160);
+  },
+
+  async createAgent(req) {
+    const now = Date.now();
+    const id = newId("a");
+    const slug = (req.title ?? req.prompt)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .slice(0, 28)
+      .replace(/-+$/, "");
+    const agent: Agent = {
+      id,
+      title: req.title?.trim() || req.prompt.split(/[.\n]/)[0].slice(0, 60) || "New agent",
+      provider: req.provider,
+      accountId: req.accountId,
+      projectPath: req.projectPath,
+      cwd: req.worktree ? `/home/sam/.armada/worktrees/${req.projectPath.split("/").pop()}/${id}` : req.projectPath,
+      worktree: req.worktree,
+      branch: req.worktree ? `armada/${slug}` : null,
+      baseBranch: req.worktree ? "main" : null,
+      baseCommit: req.worktree ? "4f1c2e9a7b" : null,
+      sessionId: null,
+      status: "starting",
+      running: true,
+      groupId: req.groupId,
+      createdAt: now,
+      updatedAt: now,
+      lastActivityAt: now,
+      costUsd: 0,
+      tokensUsed: 0,
+      contextUsed: 0,
+      contextSize: req.provider === "claude" ? 200_000 : req.provider === "codex" ? 272_000 : 256_000,
+      unread: false,
+      archived: false,
+      lastMessage: null,
+      pendingPermissions: 0,
+      configOptions: configFor(req.provider, req.model),
+      availableCommands: commandsFor(req.provider),
+      rateLimited: false,
+      scheduleId: null,
+      customAgentId: req.provider === "custom" ? req.customAgentId : null,
+    };
+    db.agents.unshift(agent);
+    db.items[id] = [];
+    if (!db.settings.recentProjects.includes(req.projectPath)) {
+      db.settings.recentProjects = [req.projectPath, ...db.settings.recentProjects].slice(0, 8);
+    }
+    emit({ type: "agent_updated", agent: clone(agent) });
+    setTimeout(() => {
+      patchAgent(id, { sessionId: `ses_${id.slice(-8)}`, status: "working" });
+      addItem(id, {
+        kind: "user_message",
+        text: req.prompt,
+        ...(req.attachments.length ? { attachments: req.attachments } : {}),
+      });
+      void runTurn(id, (turn) => scriptedTurn(id, req.prompt, turn));
+    }, 700);
+    return delay(clone(agent), 250);
+  },
+
+  async sendPrompt(agentId, text, attachments) {
+    const a = getAgent(agentId);
+    if (!a.running) throw new Error("Agent is not running. Resume it first.");
+    addItem(agentId, { kind: "user_message", text, ...(attachments?.length ? { attachments } : {}) });
+    patchAgent(agentId, { status: "working", lastActivityAt: Date.now() });
+    const n = attachments?.length ?? 0;
+    const described = n ? `${text || "Take a look at this"} (with ${n} image${n === 1 ? "" : "s"} attached)` : text;
+    void runTurn(agentId, (turn) => scriptedTurn(agentId, described, turn));
+    return delay(undefined, 40);
+  },
+
+  async cancelTurn(agentId) {
+    const t = turns.get(agentId);
+    if (t) t.cancelled = true;
+    // Resolve any pending permission as cancelled.
+    for (const it of itemsOf(agentId)) {
+      if (it.kind === "permission" && it.resolution === null) updateItem(agentId, it.id, { resolution: "cancelled" });
+    }
+    for (const it of itemsOf(agentId)) {
+      if (it.kind === "tool_call" && (it.status === "in_progress" || it.status === "pending")) {
+        updateItem(agentId, it.id, { status: "failed" });
+      }
+    }
+    addItem(agentId, { kind: "notice", level: "info", text: "Turn cancelled." });
+    patchAgent(agentId, { status: "idle", pendingPermissions: 0 });
+    return delay(undefined, 60);
+  },
+
+  async respondPermission(agentId, requestId, optionId) {
+    const item = itemsOf(agentId).find((i) => i.kind === "permission" && i.requestId === requestId);
+    if (!item || item.kind !== "permission") throw new Error("Unknown permission request");
+    updateItem(agentId, item.id, { resolution: optionId });
+    const a = getAgent(agentId);
+    const pending = Math.max(0, a.pendingPermissions - 1);
+    patchAgent(agentId, { pendingPermissions: pending, status: pending ? "needs_permission" : "working" });
+
+    const waiter = permissionWaiters.get(requestId);
+    if (waiter) {
+      permissionWaiters.delete(requestId);
+      waiter(optionId);
+    } else {
+      // Seeded permissions: simulate the rest of the turn.
+      const opt = item.options.find((o) => o.id === optionId);
+      void runTurn(agentId, async (turn) => {
+        if (opt?.kind.startsWith("reject")) {
+          const msg = addItem(agentId, { kind: "agent_message", text: "" });
+          await streamField(agentId, msg.id, "text", "Okay, I won't do that. How would you like me to proceed?", turn);
+          finishTurn(agentId, "Waiting for your direction.");
+          return;
+        }
+        if (item.toolKind === "execute" && item.command) {
+          const exec = addItem(agentId, {
+            kind: "tool_call",
+            toolCallId: newId("tc"),
+            title: `Run ${item.command}`,
+            toolKind: "execute",
+            status: "in_progress",
+            locations: [],
+            diffs: [],
+            output: "",
+            command: item.command,
+          });
+          await streamLines(
+            agentId,
+            exec.id,
+            [
+              "Environment variables loaded from .env",
+              "Prisma schema loaded from prisma/schema.prisma",
+              'Datasource "db": PostgreSQL database "atlas_dev" at "localhost:5432"',
+              "",
+              "Applying migration `20261027140211_billing_payment_intents`",
+              "",
+              "The following migration(s) have been created and applied from new schema changes:",
+              "",
+              "migrations/",
+              "  └─ 20261027140211_billing_payment_intents/",
+              "    └─ migration.sql",
+              "",
+              "Your database is now in sync with your schema.",
+              "",
+              "✔ Generated Prisma Client (v6.17.1) to ./node_modules/@prisma/client in 212ms",
+            ],
+            turn,
+          );
+          updateItem(agentId, exec.id, { status: "completed" });
+        } else {
+          const tc = addItem(agentId, {
+            kind: "tool_call",
+            toolCallId: newId("tc"),
+            title: item.title,
+            toolKind: item.toolKind ?? "edit",
+            status: "in_progress",
+            locations: item.diffs.map((d) => d.path),
+            diffs: item.diffs,
+            output: "",
+            command: null,
+          });
+          await pause(800, turn);
+          updateItem(agentId, tc.id, { status: "completed" });
+        }
+        bumpUsage(agentId, 12000);
+        const msg = addItem(agentId, { kind: "agent_message", text: "" });
+        const reply =
+          item.toolKind === "execute"
+            ? "Migration applied cleanly. I also regenerated the Prisma client and ran the billing tests: **all 31 pass**.\n\nNext I'd backfill `paymentIntentId` for recent charges with a one-off script. Want me to write it?"
+            : "Created the middleware and mounted it on `/api/v1/*` before the auth layer, so unauthenticated floods are limited too. I added tests for the header values and the `429` path.";
+        await streamField(agentId, msg.id, "text", reply, turn);
+        finishTurn(agentId, reply);
+      });
+    }
+    return delay(undefined, 60);
+  },
+
+  async resumeAgent(agentId, autoContinue) {
+    patchAgent(agentId, { status: "starting", running: true });
+    await sleep(700);
+    addItem(agentId, {
+      kind: "notice",
+      level: "info",
+      text: `Session resumed${autoContinue ? " and continuing" : ""}.`,
+    });
+    if (autoContinue) {
+      patchAgent(agentId, { status: "working" });
+      void runTurn(agentId, async (turn) => {
+        for (const it of itemsOf(agentId)) {
+          if (it.kind === "tool_call" && it.status === "in_progress")
+            updateItem(agentId, it.id, { status: "completed" });
+        }
+        await pause(900, turn);
+        const msg = addItem(agentId, { kind: "agent_message", text: "" });
+        const reply =
+          "Picking up where I left off. The chart palette now reads from the theme tokens, and the header toggle persists to `localStorage` while still respecting `prefers-color-scheme` by default.";
+        await streamField(agentId, msg.id, "text", reply, turn);
+        finishTurn(agentId, reply);
+      });
+    } else {
+      patchAgent(agentId, { status: "idle" });
+    }
+  },
+
+  async stopAgent(agentId) {
+    const t = turns.get(agentId);
+    if (t) t.cancelled = true;
+    addItem(agentId, { kind: "notice", level: "info", text: "Stopped by you." });
+    patchAgent(agentId, { status: "stopped", running: false, pendingPermissions: 0 });
+    return delay(undefined);
+  },
+
+  async deleteAgent(agentId) {
+    const t = turns.get(agentId);
+    if (t) t.cancelled = true;
+    db.agents = db.agents.filter((a) => a.id !== agentId);
+    delete db.items[agentId];
+    emit({ type: "agent_removed", agentId });
+    return delay(undefined);
+  },
+
+  async renameAgent(agentId, title) {
+    patchAgent(agentId, { title });
+    return delay(undefined, 40);
+  },
+
+  async archiveAgent(agentId, archived) {
+    patchAgent(agentId, { archived });
+    return delay(undefined, 40);
+  },
+
+  async markRead(agentId) {
+    const a = db.agents.find((x) => x.id === agentId);
+    if (a?.unread) patchAgent(agentId, { unread: false });
+    return delay(undefined, 20);
+  },
+
+  async setAgentConfig(agentId, optionId, value) {
+    const a = getAgent(agentId);
+    const configOptions = a.configOptions.map((o) => (o.id === optionId ? { ...o, currentValue: value } : o));
+    patchAgent(agentId, { configOptions });
+    return delay(undefined, 80);
+  },
+
+  async handoffAgent(agentId, provider, accountId, instruction, customAgentId) {
+    const src = getAgent(agentId);
+    const agent = await mockApi.createAgent({
+      provider,
+      accountId,
+      projectPath: src.projectPath,
+      prompt: `${instruction}\n\n(Handed off from "${src.title}"; context summary attached.)`,
+      title: `${src.title} · handoff`,
+      worktree: src.worktree,
+      model: null,
+      groupId: null,
+      customAgentId: provider === "custom" ? (customAgentId ?? null) : null,
+      attachments: [],
+    });
+    return agent;
+  },
+
+  async switchAccount(agentId, accountId) {
+    const a = getAgent(agentId);
+    const acc = db.accounts.find((x) => x.id === accountId);
+    if (!acc) throw new Error("Unknown account");
+    if (acc.provider !== a.provider) throw new Error(`${acc.name} is not a ${a.provider} account`);
+    if (!acc.status?.loggedIn) throw new Error(`${acc.name} is not signed in`);
+    await sleep(700);
+    const from = db.accounts.find((x) => x.id === a.accountId)?.name ?? "previous account";
+    addItem(agentId, {
+      kind: "notice",
+      level: "info",
+      text: `Moved from ${from} to ${acc.name}. The session continues with full history.`,
+    });
+    patchAgent(agentId, { accountId, rateLimited: false, status: "idle", running: true });
+    return clone(getAgent(agentId));
+  },
+
+  async exportAgent(agentId) {
+    const a = getAgent(agentId);
+    // The real backend shows a native save dialog; the mock prompts instead.
+    const name = `${a.title.replace(/[\\/:*?"<>|]+/g, "-").trim() || "conversation"}.md`;
+    const path = window.prompt("Save conversation as (browser mock)", `/home/sam/Documents/${name}`)?.trim();
+    if (!path) return null;
+    await sleep(400);
+    return path;
+  },
+
+  async listSchedules() {
+    return delay(clone(db.schedules), 200);
+  },
+
+  async saveSchedule(schedule: Schedule) {
+    await sleep(250);
+    if (!schedule.name.trim()) throw new Error("Give the schedule a name.");
+    if (!schedule.prompt.trim()) throw new Error("The prompt can't be empty.");
+    if (!schedule.projectPath.trim()) throw new Error("Pick a project folder.");
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(schedule.time))
+      throw new Error(`"${schedule.time}" isn't a valid time (HH:MM).`);
+    if (schedule.days.some((d) => d < 0 || d > 6)) throw new Error("Days must be 0 (Sun) to 6 (Sat).");
+    const acc = db.accounts.find((x) => x.id === schedule.accountId);
+    if (!acc || acc.provider !== schedule.provider) throw new Error("Choose an account for the selected provider.");
+    const saved: Schedule = {
+      ...schedule,
+      id: schedule.id || newId("sch"),
+      days: [...new Set(schedule.days)].sort(),
+      updatedAt: Date.now(),
+    };
+    const i = db.schedules.findIndex((x) => x.id === saved.id);
+    if (i >= 0) db.schedules[i] = saved;
+    else db.schedules.push(saved);
+    return clone(saved);
+  },
+
+  async deleteSchedule(scheduleId) {
+    db.schedules = db.schedules.filter((x) => x.id !== scheduleId);
+    return delay(undefined, 150);
+  },
+
+  async runSchedule(scheduleId) {
+    const sch = db.schedules.find((x) => x.id === scheduleId);
+    if (!sch) throw new Error("Schedule not found");
+    const agent = await mockApi.createAgent({
+      provider: sch.provider,
+      accountId: sch.accountId,
+      projectPath: sch.projectPath,
+      prompt: sch.prompt,
+      title: sch.name,
+      worktree: sch.worktree,
+      model: null,
+      groupId: null,
+      customAgentId: sch.customAgentId,
+      attachments: [],
+    });
+    const a = getAgent(agent.id);
+    a.scheduleId = sch.id;
+    emit({ type: "agent_updated", agent: clone(a) });
+    sch.lastRunAt = Date.now();
+    sch.lastAgentId = agent.id;
+    return clone(a);
+  },
+
+  async setFocus() {
+    return undefined;
+  },
+
+  async getDiff(agentId) {
+    return delay(seedDiff(itemsOf(agentId)), 400);
+  },
+
+  async commitAgent(agentId) {
+    addItem(agentId, {
+      kind: "notice",
+      level: "info",
+      text: `Committed 3f9a1c2 on ${getAgent(agentId).branch ?? "HEAD"}.`,
+    });
+    return delay("3f9a1c2", 600);
+  },
+
+  async mergeAgent(agentId) {
+    const a = getAgent(agentId);
+    return delay(`Merged ${a.branch ?? "branch"} into ${a.baseBranch ?? "main"} (fast-forward).`, 700);
+  },
+
+  async createPr() {
+    return delay("https://github.com/acme/atlas-api/pull/128", 900);
+  },
+
+  async discardWorktree(agentId) {
+    patchAgent(agentId, { worktree: false, branch: null, cwd: getAgent(agentId).projectPath });
+    return delay(undefined, 500);
+  },
+
+  async createAccount(req) {
+    const acc: Account = {
+      id: newId("acc"),
+      provider: req.provider,
+      name: req.name,
+      color: req.color,
+      authKind: req.authKind,
+      isSystem: false,
+      configDir: `~/.local/share/armada/profiles/${req.name.toLowerCase().replace(/\W+/g, "-")}`,
+      createdAt: Date.now(),
+      status:
+        req.authKind === "api_key"
+          ? { loggedIn: true, label: "API key", email: null, plan: "Pay as you go", checkedAt: Date.now(), error: null }
+          : { loggedIn: false, label: null, email: null, plan: null, checkedAt: Date.now(), error: null },
+      usage: null,
+    };
+    db.accounts.push(acc);
+    emit({ type: "account_updated", account: clone(acc) });
+    return delay(clone(acc), 200);
+  },
+
+  async updateAccount(accountId, name, color) {
+    const acc = db.accounts.find((a) => a.id === accountId);
+    if (!acc) throw new Error("Unknown account");
+    Object.assign(acc, { name, color });
+    emit({ type: "account_updated", account: clone(acc) });
+    return delay(clone(acc), 80);
+  },
+
+  async deleteAccount(accountId) {
+    db.accounts = db.accounts.filter((a) => a.id !== accountId);
+    emit({ type: "account_removed", accountId });
+    return delay(undefined);
+  },
+
+  async checkAccount(accountId) {
+    const acc = db.accounts.find((a) => a.id === accountId);
+    if (!acc) throw new Error("Unknown account");
+    await sleep(900);
+    acc.status = acc.status ? { ...acc.status, checkedAt: Date.now() } : null;
+    emit({ type: "account_updated", account: clone(acc) });
+    return clone(acc);
+  },
+
+  async loginAccount(accountId) {
+    if (db.accounts.find((a) => a.id === accountId)?.provider === "custom") {
+      throw new Error("Custom agents don't need a sign-in.");
+    }
+    const t: MockTerminal = { id: newId("term"), kind: "login", accountId, buffer: "", stage: 0, done: false };
+    terminals.set(t.id, t);
+    void runLogin(t);
+    return delay(t.id, 80);
+  },
+
+  async detectProviders(): Promise<ProviderInfo[]> {
+    await sleep(800);
+    emit({ type: "providers_changed", providers: clone(db.providers) });
+    return clone(db.providers);
+  },
+
+  async installProvider(provider) {
+    const t: MockTerminal = { id: newId("term"), kind: "install", provider, buffer: "", stage: 0, done: false };
+    terminals.set(t.id, t);
+    void runInstall(t);
+    return delay(t.id, 80);
+  },
+
+  async installMissing() {
+    const t: MockTerminal = { id: newId("term"), kind: "install", buffer: "", stage: 0, done: false };
+    terminals.set(t.id, t);
+    void runInstallMissing(t);
+    return delay(t.id, 80);
+  },
+
+  async terminalWrite(terminalId, data) {
+    const t = terminals.get(terminalId);
+    if (!t || t.done) return;
+    if (t.kind === "login" && t.stage === 1) {
+      for (const ch of data) {
+        if (ch === "\r" || ch === "\n") {
+          void finishLogin(t);
+          return;
+        }
+        if (ch === "\x7f") {
+          if (t.buffer.length) {
+            t.buffer = t.buffer.slice(0, -1);
+            termOut(t.id, "\b \b");
+          }
+        } else if (ch === "\x03") {
+          termOut(t.id, "^C\r\n");
+          void termExit(t, 130);
+          return;
+        } else if (ch >= " ") {
+          t.buffer += ch;
+          termOut(t.id, "*");
+        }
+      }
+    }
+  },
+
+  async terminalResize() {
+    return undefined;
+  },
+
+  async terminalKill(terminalId) {
+    const t = terminals.get(terminalId);
+    if (t && !t.done) void termExit(t, 143);
+  },
+
+  async updateSettings(settings: Settings) {
+    const prevRemote = db.settings.remote;
+    db.settings = clone(settings);
+    const r = settings.remote;
+    if (r.enabled !== prevRemote.enabled || r.lan !== prevRemote.lan || r.port !== prevRemote.port) {
+      await sleep(500);
+      if (r.port < 1024 || r.port > 65535) {
+        remote.error = `Port ${r.port} is out of range (1024–65535).`;
+      } else if (r.port === 3000) {
+        remote.error = "Port 3000 is already in use. Pick another port.";
+      } else {
+        remote.error = null;
+      }
+    }
+    return delay(clone(db.settings), 60);
+  },
+
+  async previewSound(reason) {
+    playTone(reason);
+  },
+
+  async testNotification() {
+    emit({
+      type: "attention",
+      agentId: db.agents[0]?.id ?? "",
+      reason: "done",
+      title: "Armada test notification",
+      body: "Notifications are working. You'll hear from us when an agent needs you.",
+      requestId: null,
+    });
+  },
+
+  async openPath(path) {
+    if (/^https?:\/\//.test(path)) window.open(path, "_blank", "noopener");
+    else console.info("[mock] open path", path);
+  },
+
+  async listFiles(agentId, query) {
+    getAgent(agentId);
+    const q = query.toLowerCase().replace(/^@/, "");
+    const score = (p: string) => {
+      const l = p.toLowerCase();
+      if (!q) return 1;
+      const base = l.slice(l.lastIndexOf("/") + 1);
+      if (base.startsWith(q)) return 3;
+      if (l.includes(q)) return 2;
+      // subsequence match
+      let i = 0;
+      for (const ch of l) if (ch === q[i]) i++;
+      return i === q.length ? 1 : 0;
+    };
+    const hits = MOCK_FILES.map((p) => [p, score(p)] as const)
+      .filter(([, sc]) => sc > 0)
+      .sort((a, b) => b[1] - a[1] || a[0].length - b[0].length)
+      .slice(0, 50)
+      .map(([p]) => p);
+    return delay(hits, 90);
+  },
+
+  async testCustomAgent(agent) {
+    await sleep(1100);
+    const known: Record<string, string> = {
+      gemini: "Gemini CLI 0.52.0 (ACP v1)",
+      goose: "Goose 1.14.2 (ACP v1)",
+      opencode: "OpenCode 0.15.8 (ACP v1)",
+    };
+    const v = known[agent.command.trim()];
+    if (!agent.command.trim()) throw new Error("Command is empty.");
+    if (!v) throw new Error(`spawn ${agent.command.trim()}: No such file or directory (os error 2)`);
+    if (agent.command.trim() === "gemini" && !agent.args.includes("--acp")) {
+      throw new Error("gemini exited before the ACP handshake (code 1):\nUnknown mode. Did you mean --acp?");
+    }
+    return v;
+  },
+
+  async remoteStatus() {
+    return delay(remoteStatus(), 150);
+  },
+
+  async remoteRotateToken() {
+    remote.token = randomToken();
+    return delay(remoteStatus(), 300);
+  },
+
+  async createShareLink(agentId) {
+    const a = getAgent(agentId);
+    if (!db.settings.remote.enabled) throw new Error("Turn on remote access to create share links.");
+    const token = randomToken().slice(0, 16);
+    const link = {
+      token,
+      agentId,
+      agentTitle: a.title,
+      url: `${baseUrl()}/share/${token}`,
+      createdAt: Date.now(),
+    };
+    remote.shares.push(link);
+    return delay(clone(link), 250);
+  },
+
+  async revokeShareLink(token) {
+    remote.shares = remote.shares.filter((x) => x.token !== token);
+    return delay(undefined, 150);
+  },
+
+  async checkForUpdate() {
+    await sleep(900);
+    return MOCK_UPDATE;
+  },
+
+  async installUpdate() {
+    const total = 14_200_000;
+    let downloaded = 0;
+    while (downloaded < total) {
+      await sleep(rand(120, 260));
+      downloaded = Math.min(total, downloaded + Math.round(rand(500_000, 1_400_000)));
+      emit({ type: "update_progress", downloaded, total });
+    }
+    await sleep(600);
+    // A real install restarts the app; the mock just reloads.
+    location.reload();
+  },
+};
+
+const MOCK_UPDATE: UpdateInfo = {
+  currentVersion: "0.1.0-mock",
+  version: "0.2.0",
+  date: new Date(Date.now() - 86_400_000).toISOString(),
+  url: "https://github.com/pl0xuee/armada/releases/tag/v0.2.0",
+  canInstall: true,
+  notes:
+    "## Highlights\n\n- **One-click installer**: Armada installs missing agents for you, no admin rights needed.\n- **Inbox** keyboard flow is faster: `A` / `D` now advance automatically.\n- Mission Control tiles stream the latest action live.\n\n## Fixes\n\n- Resuming an interrupted Codex agent no longer replays the last tool call.\n- The context meter is accurate for 1M-token sessions.",
+};
+
+// Announce the update shortly after boot, like the backend's auto-check.
+setTimeout(() => {
+  if (db.settings.autoCheckUpdates) emit({ type: "update_available", update: MOCK_UPDATE });
+}, 9000);
+
+// ---------------------------------------------------------------- remote control
+
+const MOCK_FILES = [
+  "src/auth/session.ts",
+  "src/auth/store.ts",
+  "src/auth/errors.ts",
+  "src/http/client.ts",
+  "src/http/retry.ts",
+  "src/billing/stripe.ts",
+  "src/billing/refunds.ts",
+  "src/webhooks/stripe.ts",
+  "src/middleware/rateLimit.ts",
+  "src/lib/redis.ts",
+  "src/lib/retry.ts",
+  "src/server.ts",
+  "src/index.ts",
+  "test/auth.test.ts",
+  "test/http/client.test.ts",
+  "prisma/schema.prisma",
+  "package.json",
+  "tsconfig.json",
+  "README.md",
+  "docs/architecture.md",
+];
+
+function randomToken(): string {
+  const a = new Uint8Array(18);
+  crypto.getRandomValues(a);
+  return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+const remote = {
+  token: randomToken(),
+  error: null as string | null,
+  shares: [] as { token: string; agentId: string; agentTitle: string | null; url: string | null; createdAt: number }[],
+};
+
+function baseUrl(): string {
+  const r = db.settings.remote;
+  return `http://${r.lan ? "192.168.1.42" : "127.0.0.1"}:${r.port}`;
+}
+
+/** Deterministic QR-looking SVG (placeholder; the backend returns a real QR code). */
+function fakeQrSvg(seed: string): string {
+  const n = 29;
+  let h = 2166136261;
+  const rnd = () => {
+    h ^= h << 13;
+    h ^= h >>> 17;
+    h ^= h << 5;
+    return (h >>> 0) / 4294967296;
+  };
+  for (const ch of seed) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  const cells: string[] = [];
+  const finder = (x: number, y: number) =>
+    `<rect x="${x}" y="${y}" width="7" height="7" fill="#000"/><rect x="${x + 1}" y="${y + 1}" width="5" height="5" fill="#fff"/><rect x="${x + 2}" y="${y + 2}" width="3" height="3" fill="#000"/>`;
+  const inFinder = (x: number, y: number) => (x < 8 && y < 8) || (x >= n - 8 && y < 8) || (x < 8 && y >= n - 8);
+  for (let y = 0; y < n; y++)
+    for (let x = 0; x < n; x++)
+      if (!inFinder(x, y) && rnd() > 0.52) cells.push(`<rect x="${x}" y="${y}" width="1" height="1"/>`);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2 -2 ${n + 4} ${n + 4}" shape-rendering="crispEdges"><rect x="-2" y="-2" width="${n + 4}" height="${n + 4}" fill="#fff"/><g fill="#000">${cells.join("")}</g>${finder(0, 0)}${finder(n - 7, 0)}${finder(0, n - 7)}</svg>`;
+}
+
+function remoteStatus() {
+  const r = db.settings.remote;
+  const running = r.enabled && remote.error === null;
+  const url = running ? baseUrl() : null;
+  const pairingUrl = running ? `${url}/pair#${remote.token}` : null;
+  return clone({
+    enabled: r.enabled,
+    running,
+    lan: r.lan,
+    port: r.port,
+    url,
+    pairingUrl,
+    qrSvg: pairingUrl ? fakeQrSvg(pairingUrl) : null,
+    error: r.enabled ? remote.error : null,
+    shares: remote.shares,
+  });
+}
