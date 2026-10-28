@@ -176,6 +176,9 @@
   --animate-spin-slow: spin 1.4s linear infinite;
   --animate-breathe: breathe 2.4s ease-in-out infinite;
   --animate-think-in: think-in 0.35s ease-out;
+  --animate-done-pop: done-pop 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.25);
+  --animate-done-glow: done-glow 1.4s ease-out;
+  --animate-done-draw: done-draw 0.45s 0.12s ease-out both;
 }
 
 @keyframes pulse-ring {
@@ -213,6 +216,35 @@
   from {
     opacity: 0;
     transform: translateY(3px);
+  }
+}
+
+@keyframes done-pop {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes done-glow {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--ok) 0%, transparent);
+  }
+}
+
+@keyframes done-draw {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
   }
 }
 

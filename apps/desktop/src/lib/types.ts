@@ -297,6 +297,8 @@ export interface SoundSettings {
   customPermission: string | null;
   customDone: string | null;
   customError: string | null;
+  /** Soft chime when the agent you are watching finishes a task longer than 30 s. */
+  chimeWhenWatching: boolean;
 }
 
 export interface NotificationSettings {

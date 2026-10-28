@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineItem } from "@/lib/types";
-import { formatElapsed, shouldShowThinking, turnStart } from "./thinking";
+import { formatElapsed, shouldShowThinking, turnEndOf, turnStart } from "./thinking";
 
 const b = { id: "x", agentId: "a", seq: 0, ts: 100 };
 const user = { ...b, kind: "user_message", text: "hi" } as TimelineItem;
@@ -44,5 +44,31 @@ describe("turnStart / formatElapsed", () => {
     expect(formatElapsed(12_400)).toBe("12s");
     expect(formatElapsed(125_000)).toBe("2m 05s");
     expect(formatElapsed(-5)).toBe("0s");
+  });
+});
+
+describe("turnEndOf", () => {
+  const u = { ...b, kind: "user_message", text: "hi", ts: 1000 } as TimelineItem;
+  const m = { ...b, kind: "agent_message", text: "ok", ts: 2000 } as TimelineItem;
+  const summary = { ...b, kind: "turn_summary" } as unknown as TimelineItem;
+  const cancelled = { ...b, kind: "notice", level: "info", text: "Turn cancelled" } as unknown as TimelineItem;
+
+  it("is null while busy or without a prompt", () => {
+    expect(turnEndOf("working", [u, m], m, 5000)).toBeNull();
+    expect(turnEndOf("idle", [m], m, 5000)).toBeNull();
+    expect(turnEndOf("interrupted", [u, m], m, 5000)).toBeNull();
+  });
+  it("reports Done with the turn's duration, also for answer-only turns", () => {
+    expect(turnEndOf("idle", [u, m], m, 73_000)).toEqual({ tone: "done", label: "Done", elapsedMs: 72_000 });
+  });
+  it("leaves the summary card to say it", () => {
+    expect(turnEndOf("idle", [u, m, summary], summary, 5000)).toBeNull();
+  });
+  it("distinguishes errors and user cancels", () => {
+    expect(turnEndOf("error", [u, m], m, 5000)?.label).toBe("Stopped with an error");
+    expect(turnEndOf("idle", [u, m, cancelled], cancelled, 5000)).toMatchObject({ tone: "stopped", label: "Stopped" });
+  });
+  it("ignores an unknown or negative duration", () => {
+    expect(turnEndOf("idle", [u, m], m, 10)?.elapsedMs).toBeNull();
   });
 });

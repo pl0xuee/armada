@@ -58,3 +58,45 @@ export function formatElapsed(ms: number): string {
 export function waitingLabel(subagents: number): string {
   return `Waiting on ${subagents} sub-agent${subagents === 1 ? "" : "s"}`;
 }
+
+/** How a finished turn ended, for the end-of-turn line. */
+export interface TurnEnd {
+  tone: "done" | "error" | "stopped";
+  label: string;
+  /** Turn duration for "done" (null when unknown). */
+  elapsedMs: number | null;
+}
+
+/** How the latest turn (after the last prompt) ended: a user cancel leaves a "Turn cancelled" notice. */
+export function turnOutcome(items: readonly TimelineItem[]): "done" | "cancelled" {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.kind === "user_message") break;
+    if (it.kind === "notice" && it.text === "Turn cancelled") return "cancelled";
+  }
+  return "done";
+}
+
+/**
+ * The compact end-of-turn line shown where the thinking indicator was, or null. Exists for the
+ * latest turn of every finished agent, except when a turn summary card is the last row (the card
+ * carries the "Done" emphasis itself).
+ */
+export function turnEndOf(
+  status: AgentStatus,
+  items: readonly TimelineItem[],
+  lastRow: TimelineItem | undefined,
+  lastActivityAt: number,
+): TurnEnd | null {
+  if (status !== "idle" && status !== "error") return null;
+  if (!lastRow || lastRow.kind === "turn_summary") return null;
+  const start = items.findLast((i) => i.kind === "user_message");
+  if (!start) return null;
+  if (status === "error") return { tone: "error", label: "Stopped with an error", elapsedMs: null };
+  if (turnOutcome(items) === "cancelled") return { tone: "stopped", label: "Stopped", elapsedMs: null };
+  const elapsed = lastActivityAt - start.ts;
+  return { tone: "done", label: "Done", elapsedMs: elapsed >= 0 ? elapsed : null };
+}
+
+/** Turns longer than this get the soft "you were watching" chime. */
+export const LONG_TURN_MS = 30_000;

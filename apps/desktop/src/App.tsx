@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { usePrPolling } from "@/hooks/usePrPolling";
+import { useWindowTitle } from "@/hooks/useWindowTitle";
+import { installCompletionTracker } from "@/store/completion";
 import { api } from "@/lib/api";
 import { applyDevLinks } from "@/lib/devlinks";
 import { installNavigationGuard } from "@/lib/external";
@@ -83,6 +85,10 @@ export function App() {
     void useApp.getState().boot().then(applyDevLinks).then(prefetchChunks);
     return off;
   }, []);
+
+  // "Done" pill state + chime when the watched agent finishes.
+  useEffect(() => installCompletionTracker(), []);
+  useWindowTitle(booted);
 
   // Links open externally; nothing navigates the webview.
   useEffect(() => installNavigationGuard(), []);

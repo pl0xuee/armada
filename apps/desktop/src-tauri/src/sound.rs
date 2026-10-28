@@ -244,9 +244,14 @@ impl AudioPlayer {
     }
 
     pub fn play(&self, reason: AttentionReason, settings: &SoundSettings) {
+        self.play_scaled(reason, settings, 1.0);
+    }
+
+    /// Like [`play`](Self::play), at `scale` times the configured volume.
+    pub fn play_scaled(&self, reason: AttentionReason, settings: &SoundSettings, scale: f32) {
         let _ = self.tx.send(PlayRequest {
             reason,
-            volume: settings.volume,
+            volume: settings.volume * scale,
             custom: custom_sound(settings, reason),
         });
     }

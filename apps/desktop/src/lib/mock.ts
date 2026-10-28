@@ -1323,6 +1323,14 @@ export const mockApi: ArmadaApi = {
     return undefined;
   },
 
+  async chimeWatched() {
+    return undefined;
+  },
+
+  async setWindowTitle(title) {
+    if (typeof document !== "undefined") document.title = title;
+  },
+
   async getDiff(agentId) {
     return delay(withoutReverted(seedDiff(itemsOf(agentId)), revertedPatches.get(agentId) ?? []), 400);
   },
@@ -2165,10 +2173,38 @@ function ntfyProblem(url: string): string | null {
 }
 
 const MOCK_VOICE_MODELS = [
-  { id: "tiny.en", label: "Tiny (English)", description: "Fastest, least accurate", sizeBytes: 77_704_715, multilingual: false, isDefault: false },
-  { id: "base.en", label: "Base (English)", description: "Good balance of speed and accuracy", sizeBytes: 147_964_211, multilingual: false, isDefault: true },
-  { id: "small.en", label: "Small (English)", description: "More accurate, slower", sizeBytes: 487_614_201, multilingual: false, isDefault: false },
-  { id: "small", label: "Small (multilingual)", description: "Understands about 99 languages", sizeBytes: 487_601_967, multilingual: true, isDefault: false },
+  {
+    id: "tiny.en",
+    label: "Tiny (English)",
+    description: "Fastest, least accurate",
+    sizeBytes: 77_704_715,
+    multilingual: false,
+    isDefault: false,
+  },
+  {
+    id: "base.en",
+    label: "Base (English)",
+    description: "Good balance of speed and accuracy",
+    sizeBytes: 147_964_211,
+    multilingual: false,
+    isDefault: true,
+  },
+  {
+    id: "small.en",
+    label: "Small (English)",
+    description: "More accurate, slower",
+    sizeBytes: 487_614_201,
+    multilingual: false,
+    isDefault: false,
+  },
+  {
+    id: "small",
+    label: "Small (multilingual)",
+    description: "Understands about 99 languages",
+    sizeBytes: 487_601_967,
+    multilingual: true,
+    isDefault: false,
+  },
 ];
 const MOCK_VOICE_LANGUAGES: [string, string][] = [
   ["en", "English"],

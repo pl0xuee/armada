@@ -201,6 +201,7 @@ export function seedSettings(onboarded: boolean): Settings {
       customPermission: null,
       customDone: null,
       customError: null,
+      chimeWhenWatching: true,
     },
     notifications: {
       enabled: true,

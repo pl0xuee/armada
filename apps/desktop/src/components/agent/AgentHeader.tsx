@@ -51,6 +51,7 @@ import { useUi } from "@/store/ui";
 import { AccountAvatar } from "../AccountAvatar";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { StatusPill } from "../StatusDot";
+import { useIsDone } from "@/store/completion";
 import { ConfirmDialog } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/misc";
@@ -74,6 +75,7 @@ const EMPTY_CUSTOM: CustomAgent[] = [];
 export function AgentHeader({ agent }: { agent: Agent }) {
   const account = useApp((s) => s.accounts.find((a) => a.id === agent.accountId));
   const identity = useIdentity(agent.provider, agent.customAgentId);
+  const done = useIsDone(agent);
   const wide = useMediaQuery(INSPECTOR_DOCK_QUERY);
   const list = useAgentListLayout();
   const [ref, width] = useElementWidth<HTMLElement>();
@@ -251,7 +253,7 @@ export function AgentHeader({ agent }: { agent: Agent }) {
           tier !== "compact" && (!list.docked || !list.open ? "pl-[72px]" : "pl-[38px]"),
         )}
       >
-        <StatusPill status={agent.status} />
+        <StatusPill status={agent.status} done={done} />
         <SubagentsChip agent={agent} />
         {agent.rateLimited && (
           <Chip className="border-warn/35 bg-warn/10 text-warn">

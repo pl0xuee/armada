@@ -1,6 +1,5 @@
 import {
   CircleCheckBig,
-  Clock,
   Coins,
   FileCode2,
   GitCommitHorizontal,
@@ -67,6 +66,8 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
   const shipped = shipState?.kind === "shipped";
   const [revertFile, setRevertFile] = useState<string | null>(null);
   const hasFiles = item.files.length > 0;
+  // Animate only when the card appears live, not when an old conversation is opened.
+  const [fresh] = useState(() => Date.now() - item.ts < 10_000);
   const busyReason = gitBusyReason(agent);
   const agentBusy = busyReason !== null;
   // A newer prompt means a new turn started: this summary no longer describes the latest state.
@@ -116,7 +117,10 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
     >
       <header className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 pb-2.5 pt-3">
         <span className="flex items-center gap-2 text-[13px] font-semibold text-fg">
-          <span className="flex h-6 w-6 items-center justify-center rounded-full border border-ok/40 bg-ok/15 text-ok">
+          <span
+            className="flex h-6 w-6 items-center justify-center rounded-full border border-ok/40 bg-ok/15 text-ok"
+            style={fresh ? { animation: "var(--animate-done-pop), var(--animate-done-glow)" } : undefined}
+          >
             <CircleCheckBig className="h-3.5 w-3.5" />
           </span>
           {shipped
@@ -124,8 +128,11 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
             : shipState?.kind === "not_merged"
               ? "Committed, not merged"
               : hasFiles
-                ? "Ready to review"
+                ? "Done · ready to review"
                 : "Done"}
+          {!shipped && !shipState && (
+            <span className="tabular text-[12px] font-normal text-ok/90">· {formatDuration(item.durationMs)}</span>
+          )}
         </span>
         {stale && !shipped && (
           <span className="rounded-md border border-line-strong px-1.5 text-[10.5px] font-medium text-muted">
@@ -133,7 +140,6 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
           </span>
         )}
         <dl className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[11.5px] text-muted">
-          <Stat icon={<Clock />} label="Duration" value={formatDuration(item.durationMs)} />
           <Stat icon={<Wrench />} label="Tool calls" value={String(item.toolCalls)} />
           <Stat icon={<SquareTerminal />} label="Commands" value={String(item.commands)} />
           <Stat icon={<Coins />} label="Cost" value={formatCost(item.costUsd)} />
