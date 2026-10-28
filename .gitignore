@@ -10,3 +10,4 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+apps/desktop/src-tauri/gen/

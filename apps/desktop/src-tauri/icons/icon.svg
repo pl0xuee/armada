@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Armada</title>
+  <defs>
+    <!-- gunmetal body -->
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3A454A"/>
+      <stop offset="0.18" stop-color="#2C3539"/>
+      <stop offset="1" stop-color="#0B0D10"/>
+    </linearGradient>
+    <!-- brushed sheen across the face -->
+    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.07"/>
+      <stop offset="0.45" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <!-- machined top edge highlight -->
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.38"/>
+      <stop offset="0.12" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <!-- ice-blue mark -->
+    <linearGradient id="ice" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#A9E4FF"/>
+      <stop offset="0.5" stop-color="#4FC3F7"/>
+      <stop offset="1" stop-color="#2A9FD6"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.47" r="0.42">
+      <stop offset="0" stop-color="#4FC3F7" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#4FC3F7" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="tile">
+      <rect x="64" y="64" width="896" height="896" rx="200" ry="200"/>
+    </clipPath>
+    <!-- notched dart / arrowhead, nose at (0,-1) -->
+    <path id="dart" d="M0,-1 L0.70,0.86 Q0.72,0.93 0.64,0.90 L0,0.52 L-0.64,0.90 Q-0.72,0.93 -0.70,0.86 Z"/>
+  </defs>
+
+  <!-- tile -->
+  <rect x="64" y="64" width="896" height="896" rx="200" ry="200" fill="url(#body)"/>
+  <g clip-path="url(#tile)">
+    <rect x="64" y="64" width="896" height="896" fill="url(#sheen)"/>
+    <rect x="64" y="64" width="896" height="896" fill="url(#glow)"/>
+  </g>
+  <rect x="68" y="68" width="888" height="888" rx="196" ry="196" fill="none" stroke="url(#edge)" stroke-width="8"/>
+
+  <!-- anchor: the lead ship is the crown, the wingmen are the flukes -->
+  <g fill="url(#ice)">
+    <!-- crown arc -->
+    <path d="M276,628 C276,756 380,818 512,818 C644,818 748,756 748,628" fill="none" stroke="url(#ice)" stroke-width="42" stroke-linecap="round"/>
+    <!-- shank + stock -->
+    <rect x="493" y="430" width="38" height="384" rx="19"/>
+    <rect x="404" y="566" width="216" height="36" rx="18"/>
+    <!-- lead ship -->
+    <use href="#dart" transform="translate(512 352) scale(178)"/>
+    <!-- wingmen / flukes -->
+    <use href="#dart" transform="translate(268 612) rotate(-14) scale(96)"/>
+    <use href="#dart" transform="translate(756 612) rotate(14) scale(96)"/>
+  </g>
+</svg>
