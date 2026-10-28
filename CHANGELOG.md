@@ -7,6 +7,14 @@ docs/RELEASING.md).
 
 ## Unreleased
 
+## v0.1.4 — 2026-10-28
+
+### Fixed
+
+- **Voice dictation starts.** Pressing the mic in 0.1.3 failed with "Couldn't start dictation:
+  state not managed for field `core`". Dictation, its model downloads and its settings now start
+  normally. A new check keeps this kind of mistake from reaching a release again.
+
 ## v0.1.3 — 2026-10-28
 
 ### New

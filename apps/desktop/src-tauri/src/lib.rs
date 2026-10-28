@@ -519,4 +519,77 @@ mod tests {
         assert!(conf["app"].get("appDirectoriesOverride").is_none());
         assert_eq!(conf["identifier"], "dev.armada.app");
     }
+
+    /// A command asking for `State<T>` of a type that `run()` never `manage()`s compiles
+    /// fine and fails only when called ("state not managed for field …"). Every type a
+    /// command requests must be one of the managed ones below (keep in sync with `run()`).
+    #[test]
+    fn commands_only_request_managed_state() {
+        const MANAGED: &[&str] = &[
+            "Core",
+            "armada_core::Core",
+            "Shell",
+            "Terminals",
+            "Dictation",
+            "dictation::Dictation",
+            "VoiceAssistant",
+            "voice_assistant::VoiceAssistant",
+            "PrCache",
+            "pr_status::PrCache",
+            "UpdateState",
+            "updater::UpdateState",
+            "Arc<Remote>",
+            "Arc<Attention>",
+            "TrayState",
+        ];
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut files,
+        );
+        let mut bad = Vec::new();
+        for f in files {
+            let text = std::fs::read_to_string(&f).unwrap();
+            for (i, line) in text.lines().enumerate() {
+                let mut rest = line;
+                // Split so this test's own source doesn't match.
+                let needle = concat!("State<", "'_,");
+                while let Some(at) = rest.find(needle) {
+                    rest = &rest[at + needle.len()..];
+                    // The type runs to the `>` that closes `State<`.
+                    let (mut depth, mut end) = (0i32, rest.len());
+                    for (j, c) in rest.char_indices() {
+                        match c {
+                            '<' => depth += 1,
+                            '>' if depth == 0 => {
+                                end = j;
+                                break;
+                            }
+                            '>' => depth -= 1,
+                            _ => {}
+                        }
+                    }
+                    let ty: String = rest[..end].split_whitespace().collect();
+                    if !MANAGED.contains(&ty.as_str()) {
+                        bad.push(format!("{}:{}: State<{ty}>", f.display(), i + 1));
+                    }
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "commands request unmanaged state:\n{}",
+            bad.join("\n")
+        );
+    }
 }

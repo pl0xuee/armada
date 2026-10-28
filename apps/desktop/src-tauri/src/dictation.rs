@@ -90,7 +90,7 @@ struct DownloadEvent {
 
 #[tauri::command]
 pub fn voice_status(
-    core: State<'_, Arc<Core>>,
+    core: State<'_, Core>,
     shell: State<'_, Shell>,
     dict: State<'_, Dictation>,
 ) -> CmdResult<VoiceStatus> {
@@ -425,7 +425,7 @@ fn run_capture(
 #[tauri::command]
 pub async fn voice_start(
     app: AppHandle,
-    core: State<'_, Arc<Core>>,
+    core: State<'_, Core>,
     dict: State<'_, Dictation>,
 ) -> CmdResult<()> {
     let device = core
@@ -563,7 +563,7 @@ pub struct Transcript {
 
 #[tauri::command]
 pub async fn voice_stop(
-    core: State<'_, Arc<Core>>,
+    core: State<'_, Core>,
     shell: State<'_, Shell>,
     dict: State<'_, Dictation>,
 ) -> CmdResult<Transcript> {
