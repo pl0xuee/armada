@@ -266,6 +266,15 @@ impl<'a> Git<'a> {
                 tokio::fs::copy(&real, &tmp.0)
                     .await
                     .context("copying the git index")?;
+                // Keep the index's own mtime: git re-hashes entries as new as the index
+                // ("racily clean"), and a fresh mtime on the copy would turn that off,
+                // missing same-size edits made in the same timestamp tick.
+                let mtime = std::fs::metadata(&real).and_then(|m| m.modified());
+                if let Ok(mtime) = mtime {
+                    let file = std::fs::OpenOptions::new().write(true).open(&tmp.0);
+                    file.and_then(|f| f.set_modified(mtime))
+                        .context("keeping the git index timestamp")?;
+                }
             }
         }
         Ok(tmp)
@@ -908,6 +917,32 @@ mod tests {
         let head = r.git(&["rev-parse", "HEAD"]);
         let last = &all[KEEP - 1].commit;
         assert_eq!(r.git(&["rev-parse", &format!("{last}^@")]), head);
+    }
+
+    /// A same-size edit in the same timestamp tick as the index ("racily clean") must
+    /// still be snapshotted: the temp index keeps the real index's mtime.
+    #[tokio::test]
+    async fn same_tick_same_size_edit_is_seen() {
+        let r = Repo::new();
+        let set_mtime = |path: &Path, t: std::time::SystemTime| {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(path)
+                .and_then(|f| f.set_modified(t))
+                .unwrap();
+        };
+        let tick = std::time::SystemTime::now() - Duration::from_secs(60);
+        // The index recorded a.txt ("one\n") in the same tick as the edit below.
+        r.git(&["update-index", "--refresh"]);
+        set_mtime(&r.dir.join("a.txt"), tick);
+        r.git(&["update-index", "--refresh"]);
+        set_mtime(&r.dir.join(".git/index"), tick);
+        r.write("a.txt", "two\n");
+        set_mtime(&r.dir.join("a.txt"), tick);
+
+        let c = take_for_turn(&r.db, &r.agent, None).await.unwrap().unwrap();
+        let blob = r.git(&["rev-parse", &format!("{}:a.txt", c.tree)]);
+        assert_eq!(r.git(&["cat-file", "-p", blob.trim()]), "two\n");
     }
 
     #[tokio::test]
