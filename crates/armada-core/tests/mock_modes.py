@@ -1,9 +1,10 @@
 """Configurable ACP agent for lifecycle tests.
-Modes: normal, die, badstderr, slowinit, hanginit, replay, noresume, flood.
+Modes: normal, die, badstderr, slowinit, hanginit, replay, noresume, flood, steer.
 Prompt keywords: CRASH, PERM, HANG, CANCELERR, NOOPTS, EXITLATER, COST, ECHO."""
 import json, sys, os, time
 MODE = sys.argv[1] if len(sys.argv) > 1 else "normal"
 next_id = 1000
+steered = []
 def send(m):
     sys.stdout.write(json.dumps(m) + "\n"); sys.stdout.flush()
 def update(sid, u):
@@ -29,7 +30,11 @@ while True:
         caps = {"loadSession": True}
         if MODE != "replay":
             caps["sessionCapabilities"] = {"resume": {}}
-        send({"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": 1, "agentCapabilities": caps}})
+        result = {"protocolVersion": 1, "agentCapabilities": caps}
+        if MODE == "steer":
+            # claude-agent-acp's steering extension.
+            result["_meta"] = {"steering": {"supported": True}}
+        send({"jsonrpc": "2.0", "id": mid, "result": result})
     elif method == "session/new":
         send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "s1"}})
     elif method in ("session/resume", "session/load") and MODE == "noresume":
@@ -85,8 +90,16 @@ while True:
                     update(sid, {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "."}})
             while True:
                 r = read()
+                if r.get("method") == "_session/steering":
+                    # Taken into this turn while it waits for the approval.
+                    steered.append(r["params"]["prompt"][0]["text"])
+                    send({"jsonrpc": "2.0", "id": r["id"], "result": {"outcome": "injected"}})
+                    continue
                 if r.get("id") == pid and "method" not in r:
                     break
+        if steered:
+            text = text + " +steered " + ", ".join(steered)
+            steered.clear()
         update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "reply to " + text}})
         send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
         if "EXITLATER" in text:
@@ -94,5 +107,8 @@ while True:
             sys.exit(0)
     elif method == "session/cancel":
         pass
+    elif method == "_session/steering" and MODE == "steer":
+        # No turn running: the client sends it as a normal prompt.
+        send({"jsonrpc": "2.0", "id": mid, "result": {"outcome": "promptRequired"}})
     elif mid is not None and method is not None:
         send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "unsupported"}})

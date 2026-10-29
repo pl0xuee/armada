@@ -528,6 +528,121 @@ async fn prompts_sent_mid_turn_are_queued_and_run_in_order() {
     env.core.shutdown().await;
 }
 
+/// "Send now" while a turn runs puts the message into that turn when the agent
+/// supports steering: nothing is cancelled, the message shows where it was sent,
+/// and the turn's reply covers it. Asking to interrupt still stops the turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn send_now_steers_into_the_running_turn() {
+    let mut env = setup("steer", mode("steer")).await;
+    let agent = env
+        .core
+        .create_agent(request(&env, "PERM first"))
+        .await
+        .unwrap();
+    let ev = wait_for(&mut env.rx, 15, |e| {
+        matches!(e, ArmadaEvent::ItemUpserted { item } if matches!(item.body, ItemBody::Permission { resolution: None, .. }))
+    })
+    .await
+    .expect("permission");
+    assert!(env.core.agent(&agent.id).unwrap().steerable);
+
+    env.core
+        .send_prompt(&agent.id, "also this", vec![])
+        .await
+        .unwrap();
+    let queued = env.core.agent(&agent.id).unwrap().queue[0].id.clone();
+    env.core
+        .send_queued_now(&agent.id, &queued, false)
+        .await
+        .unwrap();
+    let a = env.core.agent(&agent.id).unwrap();
+    assert!(
+        a.queue.is_empty(),
+        "it went into the turn, not back in line"
+    );
+    assert_ne!(a.status, AgentStatus::Idle, "the turn is still running");
+    assert_eq!(user_texts(&env, &agent.id), ["PERM first", "also this"]);
+
+    // A slash command only works at the start of a turn: it goes first in line.
+    env.core
+        .send_prompt(&agent.id, "later", vec![])
+        .await
+        .unwrap();
+    env.core
+        .send_prompt(&agent.id, "/compact", vec![])
+        .await
+        .unwrap();
+    let a = env.core.agent(&agent.id).unwrap();
+    let command = a.queue[1].id.clone();
+    env.core
+        .send_queued_now(&agent.id, &command, false)
+        .await
+        .unwrap();
+    let a = env.core.agent(&agent.id).unwrap();
+    let queued: Vec<&str> = a.queue.iter().map(|q| q.text.as_str()).collect();
+    assert_eq!(queued, ["/compact", "later"]);
+    assert_eq!(user_texts(&env, &agent.id), ["PERM first", "also this"]);
+
+    let ArmadaEvent::ItemUpserted { item } = ev else {
+        unreachable!()
+    };
+    let ItemBody::Permission { request_id, .. } = item.body else {
+        unreachable!()
+    };
+    env.core
+        .respond_permission(&agent.id, &request_id, "yes")
+        .await
+        .unwrap();
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
+        .await
+        .expect("the turn finishes");
+    assert_eq!(
+        agent_texts(&env, &agent.id),
+        [
+            "reply to PERM first +steered also this",
+            "reply to /compact",
+            "reply to later"
+        ],
+        "the first turn took the message in; the command ran as its own turn"
+    );
+
+    // Stop & send: the running turn is cancelled and the message runs next.
+    env.core
+        .send_prompt(&agent.id, "PERM again", vec![])
+        .await
+        .unwrap();
+    wait_for(&mut env.rx, 15, |e| {
+        matches!(e, ArmadaEvent::ItemUpserted { item } if matches!(item.body, ItemBody::Permission { resolution: None, .. }))
+    })
+    .await
+    .expect("second permission");
+    env.core
+        .send_prompt(&agent.id, "instead", vec![])
+        .await
+        .unwrap();
+    let queued = env.core.agent(&agent.id).unwrap().queue[0].id.clone();
+    env.core
+        .send_queued_now(&agent.id, &queued, true)
+        .await
+        .unwrap();
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
+        .await
+        .expect("the chosen message runs");
+    let texts = agent_texts(&env, &agent.id);
+    assert_eq!(
+        texts.last().map(String::as_str),
+        Some("reply to instead"),
+        "{texts:?}"
+    );
+    assert!(
+        !texts
+            .iter()
+            .any(|t| t.contains("instead") && t.contains("PERM again")),
+        "interrupting doesn't steer: {texts:?}"
+    );
+    env.core.shutdown().await;
+}
+
 fn user_texts(env: &Env, agent_id: &str) -> Vec<String> {
     env.core
         .items(agent_id)
@@ -596,7 +711,10 @@ async fn queue_is_editable_and_pauses_on_stop() {
 
     // Sending one now runs it, then the rest of the queue follows.
     let third = a.queue[1].id.clone();
-    env.core.send_queued_now(&agent.id, &third).await.unwrap();
+    env.core
+        .send_queued_now(&agent.id, &third, false)
+        .await
+        .unwrap();
     // One "done" alert when the whole run (third, then second) finishes.
     wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
         .await
@@ -776,7 +894,10 @@ async fn send_now_during_start_runs_the_chosen_message() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     env.core.send_prompt(&agent.id, "B", vec![]).await.unwrap();
     let queued = env.core.agent(&agent.id).unwrap().queue[0].id.clone();
-    env.core.send_queued_now(&agent.id, &queued).await.unwrap();
+    env.core
+        .send_queued_now(&agent.id, &queued, false)
+        .await
+        .unwrap();
     wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
         .await
         .expect("B runs");

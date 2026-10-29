@@ -514,6 +514,7 @@ function makeAgent(s: AgentSeed): Agent {
     lastMessage: s.lastMessage,
     pendingPermissions: s.pending ?? 0,
     configOptions: configFor(s.provider),
+    steerable: s.provider === "claude" || s.provider === "codex",
     availableCommands: commandsFor(s.provider),
     rateLimited: s.rateLimited ?? false,
     scheduleId: s.scheduleId ?? null,
@@ -1773,6 +1774,11 @@ export function commandsFor(provider: Provider): SlashCommand[] {
       { name: "security-review", description: "Security review of pending changes", hint: null },
       { name: "pr-comments", description: "Pull in comments from a GitHub pull request", hint: "<pr-number>" },
       { name: "context", description: "Show what's using the context window", hint: null },
+      {
+        name: "remote-control",
+        description: "Continue this session from claude.ai/code or the Claude mobile app; `off` disconnects",
+        hint: "[session name | off]",
+      },
     ];
   }
   if (provider === "codex") {

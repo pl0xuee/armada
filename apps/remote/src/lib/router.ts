@@ -96,8 +96,14 @@ export function navigate(route: Route, opts: { replace?: boolean } = {}) {
   const hash = routeHash(route);
   if (hash === location.hash || (hash === "#/" && location.hash === "")) return;
   const url = `${location.pathname}${location.search}${hash}`;
+  // Navigating from an open sheet: its history entry (pushed so Back closes it) is on
+  // top. Take that entry over rather than pushing past it, or Back would land on it
+  // and seem to do nothing.
+  const overSheet = (history.state as { overlay?: number } | null)?.overlay !== undefined;
   if (opts.replace) {
     history.replaceState({ armada: true, depth: depth() } satisfies HistoryMark, "", url);
+  } else if (overSheet) {
+    history.replaceState({ armada: true, depth: depth() + 1 } satisfies HistoryMark, "", url);
   } else {
     history.pushState({ armada: true, depth: depth() + 1 } satisfies HistoryMark, "", url);
   }

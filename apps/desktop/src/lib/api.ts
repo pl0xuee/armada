@@ -150,7 +150,9 @@ const tauriApi = {
   /** Removes every queued message; returns how many were removed. */
   clearQueue: (agentId: string) => invoke<number>("clear_queue", { agentId }),
   /** Interrupts the running turn and runs this queued prompt next. */
-  sendQueuedNow: (agentId: string, queuedId: string) => invoke<void>("send_queued_now", { agentId, queuedId }),
+  /** Into the running turn when the agent can take it; `interrupt` stops the turn and runs it next. */
+  sendQueuedNow: (agentId: string, queuedId: string, interrupt = false) =>
+    invoke<void>("send_queued_now", { agentId, queuedId, interrupt }),
   /** Tell the backend what the user is looking at (for smart-mute). */
   setFocus: (agentId: string | null) => invoke<void>("set_focus", { agentId }),
   /** Soft "the agent you're watching finished a long task" chime (backend applies sound settings). */

@@ -5,6 +5,25 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.1.8 — 2026-10-29
+
+### Changed
+
+- **"Send now" no longer stops the agent.** For Claude and Codex agents, sending a queued message now adds it to the turn that's running, like typing into Claude Code while it works: the agent reads it at its next step and keeps going, and its sub-agents and background tools keep running. The message appears in the conversation where you sent it. To stop the turn and run the message instead, use the ⚡ **Stop & send** button next to it. Agents that can't take messages mid-turn show **Interrupt & send**.
+- **`/rc` works.** Slash commands can be found by their initials, as in Claude Code: `/rc` finds and runs `/remote-control` (continue a Claude session from claude.ai/code or the Claude app). A queued slash command's **Run next** puts it first in line, since commands only work at the start of a turn.
+
+### Fixed
+
+- **Phone: attaching photos works again.** The phone app's security policy blocked the step that reads a picked photo, so every attachment failed with "Couldn't read…".
+- **Phone: Stop & send.** The phone's queue gets the same ⚡ Stop & send (with a confirmation) and "Run next" for commands as the desktop.
+- **Phone: Commit and Commit & merge** no longer report a failure when commit hooks take more than 15 seconds.
+- **Phone: approvals you swipe just before locking the phone** are still delivered.
+- **Phone: a paired phone** that scanned a fresh code while the computer was asleep no longer ends up back on the pairing screen; and that screen no longer flickers while it retries.
+- **Phone: the agent list refreshes** reliably after reconnecting, and Back works in one tap after opening Review from a sheet.
+- **Phone: typing** no longer leaves an empty band above the iPhone keyboard, and sheets (like the commit message) stay above the keyboard.
+- **Phone: large diffs** say when they're cut short, and are cut between files instead of mid-line.
+- Retried requests from the phone (start an agent, send a message) are never cut off halfway when the phone gives up waiting.
+
 ## v0.1.7 — 2026-10-28
 
 ### New

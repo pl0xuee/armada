@@ -261,6 +261,10 @@ pub struct Agent {
     pub pending_permissions: i64,
     #[serde(default)]
     pub config_options: Vec<ConfigOption>,
+    /// The running agent takes messages into its current turn (steering), so
+    /// "Send now" doesn't have to stop it.
+    #[serde(default)]
+    pub steerable: bool,
     /// Slash commands the agent advertises (ACP `available_commands_update`).
     #[serde(default)]
     pub available_commands: Vec<SlashCommand>,

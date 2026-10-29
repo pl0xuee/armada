@@ -1,4 +1,5 @@
 /** Pure helpers behind the composer: pending-prompt reconciliation and the "/" command picker. */
+import { commandRank } from "@shared/slashCommands";
 import type { PendingPrompt } from "./store";
 import type { QueuedPrompt, RemoteEvent, SlashCommand, TimelineItem } from "./types";
 
@@ -34,13 +35,17 @@ export function slashQuery(text: string): string | null {
 export function filterCommands(commands: SlashCommand[], query: string, limit = 8): SlashCommand[] {
   const q = query.toLowerCase();
   const prefix: SlashCommand[] = [];
+  const initials: SlashCommand[] = [];
   const rest: SlashCommand[] = [];
   for (const c of commands) {
     const name = c.name.replace(/^\//, "").toLowerCase();
-    if (name.startsWith(q)) prefix.push(c);
-    else if (q && (name.includes(q) || (c.description ?? "").toLowerCase().includes(q))) rest.push(c);
+    const rank = commandRank(name, q);
+    if (rank === 0) prefix.push(c);
+    // "rc" finds remote-control, as in Claude Code.
+    else if (rank === 1) initials.push(c);
+    else if (q && (rank === 2 || (c.description ?? "").toLowerCase().includes(q))) rest.push(c);
   }
-  return [...prefix, ...rest].slice(0, limit);
+  return [...prefix, ...initials, ...rest].slice(0, limit);
 }
 
 /** Composer text after picking a command. */

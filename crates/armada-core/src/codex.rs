@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 
 use crate::jsonrpc::{looks_like_auth_error, Incoming, Peer, SpawnOptions};
 use crate::model::*;
-use crate::session::{AgentCtx, Prompt, StartCancelled, StreamKind, TurnOutcome};
+use crate::session::{AgentCtx, Prompt, StartCancelled, Steer, StreamKind, TurnOutcome};
 
 /// What kind of server request a pending approval answers (they differ in the
 /// response shape).
@@ -84,6 +84,8 @@ pub struct CodexDriver {
     model: Mutex<Option<String>>,
     local_models: Option<Vec<LocalModel>>,
     effort: Mutex<Option<String>>,
+    /// Codex takes `turn/steer` (cleared if this Codex predates it).
+    steering: std::sync::atomic::AtomicBool,
 }
 
 pub struct StartOptions<'a> {
@@ -246,6 +248,7 @@ impl CodexDriver {
             model: Mutex::new(resp["model"].as_str().map(str::to_string)),
             local_models: opts.local_models.map(<[LocalModel]>::to_vec),
             effort: Mutex::new(resp["reasoningEffort"].as_str().map(str::to_string)),
+            steering: std::sync::atomic::AtomicBool::new(true),
         });
         tokio::spawn(event_loop(
             Arc::downgrade(&driver),
@@ -255,6 +258,7 @@ impl CodexDriver {
             generation,
         ));
         driver.publish_config().await;
+        ctx.set_steerable(true);
         Ok(driver)
     }
 
@@ -392,17 +396,7 @@ impl CodexDriver {
             Some(pre) => format!("{pre}\n\n---\n\n{}", prompt.text),
             None => prompt.text.clone(),
         };
-        let mut input = vec![json!({ "type": "text", "text": body })];
-        for a in &prompt.attachments {
-            // Codex takes images as local files.
-            match write_attachment(&self.attachments_dir, a).await {
-                Ok(path) => input.push(json!({ "type": "localImage", "path": path })),
-                Err(e) => self.ctx.notice(
-                    NoticeLevel::Warn,
-                    format!("Couldn't attach {}: {e:#}", a.name),
-                ),
-            }
-        }
+        let input = self.input(body, &prompt.attachments).await;
         let mut params = json!({
             "threadId": self.thread_id,
             "input": input,
@@ -445,6 +439,64 @@ impl CodexDriver {
             }
         }
         None
+    }
+
+    /// A turn's input items (Codex takes images as local files).
+    async fn input(&self, text: String, attachments: &[Attachment]) -> Vec<Value> {
+        let mut input = vec![json!({ "type": "text", "text": text })];
+        for a in attachments {
+            match write_attachment(&self.attachments_dir, a).await {
+                Ok(path) => input.push(json!({ "type": "localImage", "path": path })),
+                Err(e) => self.ctx.notice(
+                    NoticeLevel::Warn,
+                    format!("Couldn't attach {}: {e:#}", a.name),
+                ),
+            }
+        }
+        input
+    }
+
+    pub fn steerable(&self) -> bool {
+        self.steering.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Sends a message into the running turn (`turn/steer`): Codex reads it at its
+    /// next step and keeps going instead of the turn being interrupted.
+    pub async fn steer(&self, prompt: &Prompt) -> anyhow::Result<Steer> {
+        if !self.steerable() {
+            return Ok(Steer::Unsupported);
+        }
+        let Some(turn_id) = self.turn_id.lock().clone() else {
+            return Ok(Steer::NotRunning);
+        };
+        let input = self.input(prompt.text.clone(), &prompt.attachments).await;
+        let res = self
+            .peer
+            .request_timeout(
+                "turn/steer",
+                json!({ "threadId": self.thread_id, "expectedTurnId": turn_id, "input": input }),
+                Some(Duration::from_secs(30)),
+            )
+            .await;
+        match res {
+            Ok(_) => Ok(Steer::Injected),
+            Err(e) => {
+                if e.downcast_ref::<crate::jsonrpc::RpcError>()
+                    .is_some_and(|r| r.code == -32601)
+                {
+                    // An older Codex: interrupt-and-send from now on.
+                    self.steering
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    self.ctx.set_steerable(false);
+                    return Ok(Steer::Unsupported);
+                }
+                // The turn ended (or moved on) while the request was in flight.
+                if self.turn_id.lock().as_deref() != Some(turn_id.as_str()) {
+                    return Ok(Steer::NotRunning);
+                }
+                Err(e)
+            }
+        }
     }
 
     pub async fn cancel(&self) -> anyhow::Result<()> {

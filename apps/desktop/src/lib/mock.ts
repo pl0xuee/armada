@@ -1017,6 +1017,7 @@ export const mockApi: ArmadaApi = {
       lastMessage: null,
       pendingPermissions: 0,
       configOptions: configFor(req.provider, req.model),
+      steerable: req.provider === "claude" || req.provider === "codex",
       availableCommands: commandsFor(req.provider),
       rateLimited: false,
       scheduleId: null,
@@ -1163,13 +1164,28 @@ export const mockApi: ArmadaApi = {
     return delay(n, 60);
   },
 
-  async sendQueuedNow(agentId, queuedId) {
+  async sendQueuedNow(agentId, queuedId, interrupt = false) {
     const a = getAgent(agentId);
     const q = a.queue.find((x) => x.id === queuedId);
     if (!q) throw new Error("That message already ran.");
+    const t = turns.get(agentId);
+    if (!interrupt && a.steerable && t && !t.cancelled && q.text.trimStart().startsWith("/")) {
+      // Commands only work at the start of a turn: first in line instead.
+      setQueue(agentId, [q, ...a.queue.filter((x) => x.id !== queuedId)], { queuePaused: false });
+      return delay(undefined, 60);
+    }
+    if (!interrupt && a.steerable && t && !t.cancelled) {
+      // Steered into the running turn: it shows where it was sent and the turn goes on.
+      setQueue(
+        agentId,
+        a.queue.filter((x) => x.id !== queuedId),
+        { queuePaused: false },
+      );
+      addItem(agentId, { kind: "user_message", text: q.text });
+      return delay(undefined, 60);
+    }
     // Move it to the front, stop the current turn, and let the queue run it.
     setQueue(agentId, [q, ...a.queue.filter((x) => x.id !== queuedId)], { queuePaused: false });
-    const t = turns.get(agentId);
     if (t) t.cancelled = true;
     for (const it of itemsOf(agentId)) {
       if (it.kind === "permission" && it.resolution === null) updateItem(agentId, it.id, { resolution: "cancelled" });

@@ -134,6 +134,8 @@ function agent(
     lastMessage: null,
     pendingPermissions: 0,
     configOptions: [],
+    // Claude and Codex take messages into a running turn.
+    steerable: provider === "claude" || provider === "codex",
     availableCommands: [],
     rateLimited: false,
     scheduleId: null,

@@ -13,10 +13,13 @@ use tokio::sync::mpsc;
 
 use crate::jsonrpc::{looks_like_auth_error, Incoming, Peer, SpawnOptions};
 use crate::model::*;
-use crate::session::{AgentCtx, Prompt, StartCancelled, StreamKind, TurnOutcome};
+use crate::session::{AgentCtx, Prompt, StartCancelled, Steer, StreamKind, TurnOutcome};
 
 const PROTOCOL_VERSION: i64 = 1;
 const RESUME_TIMEOUT: Duration = Duration::from_secs(120);
+/// ACP steering extension: puts a message into the running turn instead of
+/// cancelling it (claude-agent-acp advertises it in `initialize`'s `_meta`).
+const STEER_METHOD: &str = "_session/steering";
 const REPLAY_DONE: u64 = 1;
 const FIRST_SYNC_BARRIER: u64 = 2;
 
@@ -36,6 +39,8 @@ pub struct AcpDriver {
     /// our request id → JSON-RPC id of the agent's `session/request_permission`
     perms: Mutex<HashMap<String, Value>>,
     accepts_images: std::sync::atomic::AtomicBool,
+    /// The agent takes `_session/steering` (see `steer`).
+    steering: std::sync::atomic::AtomicBool,
     /// Barriers waiting for the event loop to catch up (see `sync_events`).
     barriers: Mutex<HashMap<u64, tokio::sync::oneshot::Sender<()>>>,
     next_barrier: std::sync::atomic::AtomicU64,
@@ -101,6 +106,7 @@ impl AcpDriver {
             session_id: Mutex::new(String::new()),
             perms: Mutex::default(),
             accepts_images: std::sync::atomic::AtomicBool::new(false),
+            steering: std::sync::atomic::AtomicBool::new(false),
             barriers: Mutex::default(),
             next_barrier: std::sync::atomic::AtomicU64::new(FIRST_SYNC_BARRIER),
             config_src: Mutex::default(),
@@ -131,6 +137,12 @@ impl AcpDriver {
         let caps = &init["agentCapabilities"];
         driver.accepts_images.store(
             caps["promptCapabilities"]["image"]
+                .as_bool()
+                .unwrap_or(false),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        driver.steering.store(
+            init["_meta"]["steering"]["supported"]
                 .as_bool()
                 .unwrap_or(false),
             std::sync::atomic::Ordering::Relaxed,
@@ -195,6 +207,7 @@ impl AcpDriver {
         };
         *driver.session_id.lock() = session_id;
         driver.apply_session_config(&resp);
+        ctx.set_steerable(driver.steerable());
         Ok(driver)
     }
 
@@ -322,21 +335,7 @@ impl AcpDriver {
                     Some(pre) => format!("{pre}\n\n---\n\n{}", prompt.text),
                     None => prompt.text.clone(),
                 };
-                let mut blocks = vec![json!({ "type": "text", "text": body })];
-                if !prompt.attachments.is_empty() {
-                    if me.accepts_images.load(std::sync::atomic::Ordering::Relaxed) {
-                        for a in &prompt.attachments {
-                            blocks.push(
-                                json!({ "type": "image", "mimeType": a.mime_type, "data": a.data }),
-                            );
-                        }
-                    } else {
-                        me.ctx.notice(
-                            NoticeLevel::Warn,
-                            "This agent doesn't accept images, so only the text was sent.",
-                        );
-                    }
-                }
+                let blocks = me.blocks(body, &prompt.attachments);
                 let res = me
                     .peer
                     .request(
@@ -398,6 +397,60 @@ impl AcpDriver {
                 }
             }
         });
+    }
+
+    /// The prompt's content blocks (images only when the agent takes them).
+    fn blocks(&self, text: String, attachments: &[Attachment]) -> Vec<Value> {
+        let mut blocks = vec![json!({ "type": "text", "text": text })];
+        if !attachments.is_empty() {
+            if self
+                .accepts_images
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                for a in attachments {
+                    blocks
+                        .push(json!({ "type": "image", "mimeType": a.mime_type, "data": a.data }));
+                }
+            } else {
+                self.ctx.notice(
+                    NoticeLevel::Warn,
+                    "This agent doesn't accept images, so only the text was sent.",
+                );
+            }
+        }
+        blocks
+    }
+
+    pub fn steerable(&self) -> bool {
+        self.steering.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Sends a message into the running turn: the agent reads it at its next step
+    /// and keeps going (a tool still running, e.g. a sub-agent, moves to the
+    /// background) instead of the turn being cancelled.
+    pub async fn steer(&self, prompt: &Prompt) -> anyhow::Result<Steer> {
+        if !self.steerable() {
+            return Ok(Steer::Unsupported);
+        }
+        let blocks = self.blocks(prompt.text.clone(), &prompt.attachments);
+        let resp = self
+            .peer
+            .request_timeout(
+                STEER_METHOD,
+                json!({
+                    "sessionId": self.session_id(),
+                    "prompt": blocks,
+                    // When the turn already ended, say so instead of starting one we
+                    // wouldn't be tracking: the caller sends it as a normal prompt.
+                    "_meta": { "steering": { "idleBehavior": "promptRequired" } }
+                }),
+                Some(Duration::from_secs(30)),
+            )
+            .await?;
+        Ok(match resp["outcome"].as_str() {
+            Some("promptRequired") => Steer::NotRunning,
+            _ => Steer::Injected,
+        })
     }
 
     /// Waits until the event loop has handled everything read before this call.

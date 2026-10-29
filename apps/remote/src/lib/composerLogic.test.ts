@@ -49,6 +49,9 @@ describe("slash commands", () => {
   it("ranks prefix matches before substring matches", () => {
     expect(filterCommands(cmds, "co").map((c) => c.name)).toEqual(["compact", "cost"]);
     expect(filterCommands(cmds, "usage").map((c) => c.name)).toEqual(["cost"]);
+    // Initials, as in Claude Code: "rc" finds remote-control (after name matches).
+    const withRc = [...cmds, { name: "remote-control", description: null, hint: null }];
+    expect(filterCommands(withRc, "rc").map((c) => c.name)).toEqual(["remote-control"]);
     expect(filterCommands(cmds, "").map((c) => c.name)).toEqual(["compact", "review", "cost"]);
   });
   it("inserts the command with a trailing space", () => {

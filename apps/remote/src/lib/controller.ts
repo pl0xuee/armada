@@ -172,12 +172,14 @@ function deviceName(): string {
  * Pair with the one-time code from a pairing link/QR: trade it for this device's own token,
  * then connect with that token like any other (it is only stored once the session accepts it).
  */
-export async function pairWithCode(code: string) {
+export async function pairWithCode(code: string, quiet = false) {
   if (pendingPair?.code !== code) pendingPair = { code, readAt: Date.now() };
   const gen = ++generation;
   connection?.stop();
   connection = null;
-  setState({ phase: "boot", blockedReason: null, blockedMessage: null });
+  // Retries from the "can't reach Armada" screen stay on it (no flash of the boot screen).
+  if (!quiet)
+    setState({ phase: "boot", blockedReason: null, blockedMessage: null });
   try {
     const { token } = await pairDevice(code, deviceName());
     if (gen !== generation) return;
@@ -250,11 +252,18 @@ export async function retryConnect() {
     Date.now() - pendingPair.readAt < PAIR_CODE_TTL_MS &&
     !current
   )
-    return pairWithCode(pendingPair.code);
+    return pairWithCode(pendingPair.code, true);
+  // A code that expired while Armada was unreachable: this device may already be
+  // paired, so keep using its own pairing rather than dropping to the pairing screen.
+  const expiredCode = pendingPair !== null;
   pendingPair = null;
-  const ref = attempting ?? current;
+  const ref = attempting ?? current ?? storedToken();
   if (ref) await connect(ref, true);
-  else setState({ phase: "unpaired" });
+  else
+    setState({
+      phase: "unpaired",
+      unpairedReason: expiredCode ? "invalid_link" : null,
+    });
 }
 
 async function connect(ref: TokenRef, quiet = false) {
@@ -613,7 +622,8 @@ function openConnection(b: Backend, gen: number): ConnectionHandle {
 // ---------------------------------------------------------------------------
 // Snapshots
 
-let stateInFlight = false;
+/** The connection generation whose `/api/state` is in flight (null: none). */
+let stateInFlight: number | null = null;
 let stateAgain = false;
 /** Agent events seen while `/api/state` is in flight, re-applied on top of the snapshot. */
 let stateJournal: { updated: Map<string, Agent>; removed: Set<string> } | null =
@@ -669,13 +679,16 @@ function agentRecency(a: Agent) {
 export async function refreshState() {
   const b = backend;
   if (!b) return;
-  if (stateInFlight) {
+  // One at a time per connection; a request from an older connection is ignored
+  // when it returns, so a new connection never waits on it.
+  if (stateInFlight === generation) {
     stateAgain = true;
     return;
   }
-  stateInFlight = true;
-  stateJournal = { updated: new Map(), removed: new Set() };
   const gen = generation;
+  stateInFlight = gen;
+  stateAgain = false;
+  stateJournal = { updated: new Map(), removed: new Set() };
   if (getState().stateStatus !== "ready")
     setState({ stateStatus: "loading", stateError: null });
   try {
@@ -737,11 +750,14 @@ export async function refreshState() {
     if (getState().stateStatus !== "ready")
       setState({ stateStatus: "error", stateError: errorMessage(e) });
   } finally {
-    stateJournal = null;
-    stateInFlight = false;
-    if (stateAgain && gen === generation) {
-      stateAgain = false;
-      await refreshState();
+    // A newer connection's request owns the journal and flags now.
+    if (stateInFlight === gen) {
+      stateJournal = null;
+      stateInFlight = null;
+      if (stateAgain && gen === generation) {
+        stateAgain = false;
+        await refreshState();
+      }
     }
   }
 }
@@ -949,7 +965,8 @@ function scheduleRefetch(agentId: string) {
   );
 }
 
-let permsInFlight = false;
+/** The connection generation whose /api/permissions is in flight (null: none). */
+let permsInFlight: number | null = null;
 let permsAgain = false;
 /** Approval events seen while /api/permissions is in flight (latest per request). */
 let permsJournal: Map<string, PermissionItem> | null = null;
@@ -959,13 +976,14 @@ let permsTimer: ReturnType<typeof setTimeout> | null = null;
 export async function loadPermissions() {
   const b = backend;
   if (!b || getState().session?.scope !== "owner") return;
-  if (permsInFlight) {
+  if (permsInFlight === generation) {
     permsAgain = true;
     return;
   }
-  permsInFlight = true;
-  permsJournal = new Map();
   const gen = generation;
+  permsInFlight = gen;
+  permsAgain = false;
+  permsJournal = new Map();
   if (getState().permissionsStatus !== "ready")
     setState({ permissionsStatus: "loading" });
   try {
@@ -992,11 +1010,14 @@ export async function loadPermissions() {
     if (getState().permissionsStatus !== "ready")
       setState({ permissionsStatus: "error" });
   } finally {
-    permsJournal = null;
-    permsInFlight = false;
-    if (permsAgain && gen === generation) {
-      permsAgain = false;
-      void loadPermissions();
+    // A newer connection's request owns the journal and flags now.
+    if (permsInFlight === gen) {
+      permsJournal = null;
+      permsInFlight = null;
+      if (permsAgain && gen === generation) {
+        permsAgain = false;
+        void loadPermissions();
+      }
     }
   }
 }
@@ -1315,13 +1336,15 @@ export async function respondToPermission(
   agentId: string,
   requestId: string,
   optionId: string,
+  /** Sent while the app is being hidden: let the request outlive the page. */
+  keepalive = false,
 ): Promise<boolean> {
   const s = getState();
   if (s.resolving[requestId]) return false;
   setState((st) => ({ resolving: { ...st.resolving, [requestId]: optionId } }));
   vibrate(12);
   try {
-    await api.permission(requireBackend(), agentId, requestId, optionId);
+    await api.permission(requireBackend(), agentId, requestId, optionId, keepalive);
     // Reflect the answer locally right away; the server's upsert confirms it.
     const t = getState().timelines[agentId];
     if (t) {
@@ -1415,16 +1438,19 @@ function undoAnswer(requestId: string) {
   });
 }
 
-function flushAnswer(requestId: string) {
+function flushAnswer(requestId: string, keepalive = false) {
   const d = deferredAnswers.get(requestId);
   if (!d) return;
   undoAnswer(requestId);
-  void respondToPermission(d.agentId, requestId, d.optionId);
+  void respondToPermission(d.agentId, requestId, d.optionId, keepalive);
 }
 
-/** Leaving the app sends pending answers now instead of losing them. */
+/**
+ * Leaving the app sends pending answers now instead of losing them; keepalive,
+ * since iOS suspends a hidden page before an ordinary request completes.
+ */
 function flushAllAnswers() {
-  for (const id of [...deferredAnswers.keys()]) flushAnswer(id);
+  for (const id of [...deferredAnswers.keys()]) flushAnswer(id, true);
 }
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
@@ -1727,11 +1753,14 @@ export function clearQueue(agentId: string) {
   );
 }
 
-/** Interrupt the current turn and run this queued message now. */
-export function sendQueuedNow(agentId: string, qid: string) {
+/**
+ * Run a queued message now: into the running turn when the agent can take it
+ * (it keeps working), or with `interrupt`, stop the turn and run it next.
+ */
+export function sendQueuedNow(agentId: string, qid: string, interrupt = false) {
   vibrate(10);
   return busyAction(`queue:${qid}`, "Couldn't send that message", () =>
-    api.sendQueuedNow(requireBackend(), agentId, qid),
+    api.sendQueuedNow(requireBackend(), agentId, qid, interrupt),
   );
 }
 

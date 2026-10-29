@@ -24,16 +24,15 @@
       #static-fallback { font: 16px/1.5 -apple-system, system-ui, sans-serif; color: #e6eaef; background: #0b0d10; min-height: 100vh; padding: 48px 24px; text-align: center; }
       #static-fallback[hidden] { display: none; }
       #static-fallback h1 { font-size: 22px; margin: 0 0 8px; }
-      #static-fallback p { color: #9aa4b2; margin: 0 0 20px; }
-      #static-fallback button { font: inherit; color: #e6eaef; background: #1a1f26; border: 1px solid #2a313b; border-radius: 12px; padding: 10px 20px; }
+      #static-fallback p { color: #9aa4b2; margin: 0; }
     </style>
   </head>
   <body>
     <div id="root">
+      <!-- Shown instead of the app on browsers too old to run it (see the script below). -->
       <div id="static-fallback" hidden>
-        <h1>Can't reach Armada</h1>
-        <p>Check that the desktop app is running and you're on the same Wi-Fi, or connected to Tailscale.</p>
-        <button id="static-fallback-retry" type="button">Try again</button>
+        <h1>Please update your browser</h1>
+        <p>Armada Remote needs iOS 16.4 or later, or a recent Chrome, Edge or Firefox.</p>
       </div>
     </div>
     <noscript>Armada Remote needs JavaScript enabled.</noscript>
@@ -42,11 +41,10 @@
       (function () {
         var ok = window.CSS && CSS.supports && CSS.supports("color", "color-mix(in srgb, red, blue)") && "noModule" in document.createElement("script");
         if (ok) return;
+        // The styles live in the <style> above: the CSP blocks inline style attributes.
         document.addEventListener("DOMContentLoaded", function () {
-          document.body.innerHTML =
-            '<div style="font:16px/1.5 -apple-system,system-ui,sans-serif;color:#E6EAEF;background:#0B0D10;min-height:100vh;padding:48px 24px;text-align:center">' +
-            "<h1 style=\"font-size:22px;margin:0 0 8px\">Please update your browser</h1>" +
-            '<p style="color:#9AA4B2;margin:0">Armada Remote needs iOS 16.4 or later, or a recent Chrome, Edge or Firefox.</p></div>';
+          var note = document.getElementById("static-fallback");
+          if (note) note.hidden = false;
         });
       })();
     </script>

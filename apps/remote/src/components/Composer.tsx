@@ -10,6 +10,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { expandCommandShortcut } from "@shared/slashCommands";
 import { filterCommands, insertCommand, slashQuery } from "@/lib/composerLogic";
 import { MAX_ATTACHMENTS, mergeAttachments } from "@/lib/attachments";
 import { cancelTurn, clearQueue, removeQueued, resumeQueue, sendPrompt, sendQueuedNow, toastError } from "@/lib/controller";
@@ -102,7 +103,8 @@ export const Composer = memo(function Composer({
   }, [agent.id, attachments]);
 
   const send = useCallback(() => {
-    const text = value.trim();
+    // `/rc` → `/remote-control`: agents only act on a command's full name.
+    const text = expandCommandShortcut(value.trim(), agent.availableCommands ?? []);
     if (!text && !attachments.length) return;
     onChange("");
     setAttachments([]);
@@ -110,7 +112,7 @@ export const Composer = memo(function Composer({
     void sendPrompt(agent.id, text, attachments);
     // Keep the keyboard up on phones so follow-ups are quick.
     ref.current?.focus({ preventScroll: true });
-  }, [agent.id, attachments, onChange, value]);
+  }, [agent.id, agent.availableCommands, attachments, onChange, value]);
 
   const editQueued = useCallback(
     async (q: QueuedPrompt) => {
@@ -153,7 +155,7 @@ export const Composer = memo(function Composer({
   return (
     <div
       ref={root}
-      className="chrome sticky z-20 border-t border-line/70 pb-[max(10px,var(--safe-bottom))]"
+      className="chrome sticky z-20 border-t border-line/70 pb-[max(10px,var(--safe-bottom-kb))]"
       style={{ bottom: "var(--kb, 0px)" }}
     >
       {banner}
@@ -309,6 +311,10 @@ function QueueStack({ agent, onEdit }: { agent: Agent; onEdit: (q: QueuedPrompt)
       <ul className="space-y-1.5">
         {shown.map((q) => {
           const sending = !!busy[`queue:${q.id}`];
+          // Steering agents take it into the running turn; a slash command only works at
+          // the start of a turn, so it goes first in line instead.
+          const steers = !!agent.steerable && isBusy(agent.status);
+          const isCommand = q.text.trimStart().startsWith("/");
           return (
             <li key={q.id} className="animate-fade flex items-center gap-1 rounded-2xl border border-line-strong bg-card py-1 pr-1 pl-3.5 edge">
               <div className="min-w-0 flex-1 py-1.5">
@@ -332,11 +338,38 @@ function QueueStack({ agent, onEdit }: { agent: Agent; onEdit: (q: QueuedPrompt)
                 type="button"
                 onClick={() => void sendQueuedNow(agent.id, q.id)}
                 disabled={sending}
-                aria-label="Send now (interrupts the current turn)"
+                aria-label={
+                  !isBusy(agent.status)
+                    ? "Send now"
+                    : !agent.steerable
+                      ? "Send now (interrupts the current turn)"
+                      : isCommand
+                        ? "Run next (when the current turn ends)"
+                        : "Send now (adds it to the running turn)"
+                }
                 className="press inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-accent active:bg-raised disabled:opacity-50"
               >
                 {sending ? <Spinner size={16} /> : <Icon name="arrowUp" size={19} strokeWidth={2.2} />}
               </button>
+              {steers && !isCommand && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const ok = await confirmAction({
+                      title: "Stop the current turn?",
+                      body: "The agent stops what it's doing and runs this message instead.",
+                      confirmLabel: "Stop & send",
+                      destructive: true,
+                    });
+                    if (ok) void sendQueuedNow(agent.id, q.id, true);
+                  }}
+                  disabled={sending}
+                  aria-label="Stop & send (stops the current turn and runs this instead)"
+                  className="press inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-warn active:bg-raised disabled:opacity-50"
+                >
+                  <Icon name="stop" size={17} />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => void removeQueued(agent.id, q.id)}

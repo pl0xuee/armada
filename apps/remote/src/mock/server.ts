@@ -237,12 +237,14 @@ export class MockBackend implements Backend {
       }
       throw new ApiError(405, "method not allowed");
     }
-    const q = /^\/api\/agents\/([^/]+)\/queue\/([^/]+)(\/send)?$/.exec(path);
+    const [queuePath, queueQuery = ""] = path.split("?");
+    const q = /^\/api\/agents\/([^/]+)\/queue\/([^/]+)(\/send)?$/.exec(queuePath);
     if (q) {
       if (this.s.scope !== "owner") throw new ApiError(403, "This is a read-only link.");
       const agent = this.agents.get(decodeURIComponent(q[1]));
       if (!agent) throw new ApiError(404, "agent not found");
-      return this.queueAction(agent, decodeURIComponent(q[2]), method === "POST" && !!q[3]);
+      const interrupt = new URLSearchParams(queueQuery).get("interrupt") === "true";
+      return this.queueAction(agent, decodeURIComponent(q[2]), method === "POST" && !!q[3], interrupt);
     }
     const [pathOnly, query = ""] = path.split("?");
     const m = /^\/api\/agents\/([^/]+)\/(items|prompt|permission|cancel|resume|stop|config|account|archive|read|diff|commit|ship|image)$/.exec(pathOnly);
@@ -449,11 +451,24 @@ export class MockBackend implements Backend {
     setTimeout(() => this.prompt(this.agents.get(agentId)!, next.text), 400);
   }
 
-  private queueAction(agent: Agent, qid: string, sendNow: boolean) {
+  private queueAction(agent: Agent, qid: string, sendNow: boolean, interrupt = false) {
     const queue = agent.queue ?? [];
     const entry = queue.find((x) => x.id === qid);
     if (!entry) throw new ApiError(404, "That message is no longer queued");
     const rest = queue.filter((x) => x.id !== qid);
+    const busy = agent.status === "working" || agent.status === "starting" || agent.status === "needs_permission";
+    if (sendNow && !interrupt && busy && agent.steerable) {
+      if (entry.text.trimStart().startsWith("/")) {
+        // A command only works at the start of a turn: first in line instead.
+        const front = [entry, ...rest];
+        this.update(agent.id, { queue: front, queuedPrompts: front.length, queuePaused: false });
+        return undefined;
+      }
+      // Into the running turn, like the real server: it shows where it was sent.
+      this.update(agent.id, { queue: rest, queuedPrompts: rest.length });
+      this.push(this.newItem<"user_message">(agent.id, { kind: "user_message", text: entry.text }));
+      return undefined;
+    }
     this.update(agent.id, { queue: rest, queuedPrompts: rest.length });
     if (!sendNow) {
       // The real server returns the photos too; the mock has a sample for entries that had some.
