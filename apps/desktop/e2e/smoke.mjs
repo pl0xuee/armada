@@ -157,10 +157,18 @@ try {
     log(`view: ${label}`);
     await goRail(label);
     if (h1) {
-      await browser.waitUntil(
-        async () => (await browser.$$("h1")).length > 0 && (await browser.$$("h1").map((e) => e.getText())).includes(h1),
-        { timeout: 15_000, timeoutMsg: `"${label}" view did not render its "${h1}" heading` },
-      );
+      // DOM text, not WebDriver's rendered text (WebKit trims/ellipsizes truncated headings).
+      const headings = () =>
+        browser.execute(() => [...document.querySelectorAll("h1")].map((e) => (e.textContent || "").trim()));
+      try {
+        await browser.waitUntil(async () => (await headings()).includes(h1), { timeout: 15_000 });
+      } catch {
+        const seen = await headings().catch(() => []);
+        const text = await browser
+          .execute(() => (document.querySelector("main") || document.body).innerText.slice(0, 400))
+          .catch(() => "");
+        throw new Error(`"${label}" view did not render its "${h1}" heading; h1s: ${JSON.stringify(seen)}; page: ${JSON.stringify(text)}`);
+      }
     }
     await sleep(500); // let the view's own loads (accounts list, usage, ...) settle
     await assertHealthy(label);
