@@ -47,6 +47,7 @@ import {
   attempt,
   cancelTurn,
   checkForUpdates,
+  copyDiagnostics,
   exportConversation,
   quickRespond,
   renameAgent,
@@ -538,6 +539,12 @@ function Palette({ onClose }: { onClose: () => void }) {
             </Command.Group>
 
             <Command.Group heading="Settings" className={groupClass}>
+              <PaletteAction
+                icon={<Download />}
+                label="Copy diagnostics"
+                keywords={["bug", "report", "debug", "logs", "support"]}
+                onSelect={() => run(() => void copyDiagnostics())}
+              />
               {SETTINGS_SECTIONS.map((sec) => (
                 <PaletteAction
                   key={sec.id}

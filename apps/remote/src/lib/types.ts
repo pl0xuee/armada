@@ -60,7 +60,17 @@ export type ViewerTrimmedField =
  * newer servers are optional for compatibility with older ones.
  */
 /** Fields newer servers added; optional so older servers keep working. */
-type AddedLater = "customAgentId" | "queuedPrompts" | "queue" | "queuePaused" | "permissionMode" | "acknowledgedAt" | "needsBriefing";
+type AddedLater =
+  | "customAgentId"
+  | "queuedPrompts"
+  | "queue"
+  | "queuePaused"
+  | "permissionMode"
+  | "acknowledgedAt"
+  | "needsBriefing"
+  | "configChoices"
+  | "parentId"
+  | "helperSync";
 
 export type Agent = Omit<CoreAgent, ViewerTrimmedField | AddedLater> & Partial<Pick<CoreAgent, ViewerTrimmedField | AddedLater>>;
 

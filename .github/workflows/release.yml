@@ -44,7 +44,7 @@ jobs:
             "macOS"
             "Windows"
             "release build (linux)"
-            "deb bundle smoke (linux)"
+            "deb bundle + e2e smoke (linux)"
           )
           failed=()
           for job in "${required[@]}"; do

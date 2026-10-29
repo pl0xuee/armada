@@ -91,12 +91,25 @@ export function useDiffHighlight(
   path: string,
   hunks: { lines: TokenizableDiffLine[] }[],
   enabled: boolean,
+  /** Review mode: highlight in small slices, one file at a time, whenever the browser is idle. */
+  deferred = false,
 ): DiffTokens | null {
   const lang = langFromPath(path);
   const [out, setOut] = useState<{ hunks: unknown; tokens: DiffTokens } | null>(null);
   useEffect(() => {
     if (!enabled || !lang || hunks.length === 0) return;
     let cancelled = false;
+    if (deferred) {
+      void highlightDeferred(
+        lang,
+        hunks,
+        () => cancelled,
+        (tokens) => setOut({ hunks, tokens }),
+      );
+      return () => {
+        cancelled = true;
+      };
+    }
     void (async () => {
       const tokens: DiffTokens = [];
       for (const h of hunks) {
@@ -110,6 +123,74 @@ export function useDiffHighlight(
     return () => {
       cancelled = true;
     };
-  }, [lang, hunks, enabled]);
+  }, [lang, hunks, enabled, deferred]);
   return out && out.hunks === hunks ? out.tokens : null;
+}
+
+// ---------------------------------------------------------------- deferred (Review) highlighting
+
+/** Lines tokenized per task: small enough that one slice never blocks input for long. */
+export const HL_SLICE_LINES = 250;
+/** Past this many diff lines a file's remainder stays plain text. */
+export const HL_MAX_FILE_LINES = 6000;
+
+let hlTail: Promise<void> = Promise.resolve();
+
+function whenIdle(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function")
+      window.requestIdleCallback(() => resolve(), { timeout: 300 });
+    else setTimeout(resolve, 16);
+  });
+}
+
+/** Run `job` after everything queued before it, once the browser is idle (skipped when cancelled). */
+function enqueueHighlight(job: () => Promise<void>, cancelled: () => boolean): Promise<void> {
+  const run = hlTail.then(async () => {
+    if (cancelled()) return;
+    await whenIdle();
+    if (cancelled()) return;
+    await job();
+  });
+  hlTail = run.catch(() => {});
+  return run;
+}
+
+/** Split a hunk's lines into slices; a slice break only costs accuracy of multi-line constructs. */
+export function sliceLines<T>(lines: T[], size = HL_SLICE_LINES): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < lines.length; i += size) out.push(lines.slice(i, i + size));
+  return out.length ? out : [[]];
+}
+
+async function highlightDeferred(
+  lang: string,
+  hunks: { lines: TokenizableDiffLine[] }[],
+  cancelled: () => boolean,
+  publish: (tokens: DiffTokens) => void,
+) {
+  const tokens: DiffTokens = hunks.map(() => []);
+  let budget = HL_MAX_FILE_LINES;
+  let lastPublish = 0;
+  for (let hi = 0; hi < hunks.length && budget > 0; hi++) {
+    for (const slice of sliceLines(hunks[hi].lines)) {
+      if (cancelled() || budget <= 0) return;
+      budget -= slice.length;
+      const { oldText, newText } = hunkSides(slice);
+      const hit = peekHighlight(lang, oldText) && peekHighlight(lang, newText);
+      const work = async () => {
+        const [o, n] = await Promise.all([highlight(lang, oldText), highlight(lang, newText)]);
+        if (!cancelled()) tokens[hi].push(...mapDiffTokens(slice, o, n));
+      };
+      if (hit) await work();
+      else await enqueueHighlight(work, cancelled);
+      if (cancelled()) return;
+      const now = performance.now();
+      if (now - lastPublish > 200) {
+        lastPublish = now;
+        publish(tokens.map((t) => t.slice()));
+      }
+    }
+  }
+  if (!cancelled()) publish(tokens.map((t) => t.slice()));
 }

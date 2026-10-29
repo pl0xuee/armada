@@ -297,6 +297,66 @@ pub struct Agent {
     /// agent moved to another account; survives restarts until the brief is sent).
     #[serde(default)]
     pub needs_briefing: bool,
+    /// The user's last choice per composer option (model, effort, …), re-applied
+    /// whenever this agent's adapter restarts. Never holds permission options.
+    #[serde(default)]
+    pub config_choices: std::collections::BTreeMap<String, String>,
+    /// For a helper agent: the main agent it works for.
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    /// Present only on helpers: how their files relate to the main agent's.
+    #[serde(default)]
+    pub helper_sync: Option<HelperSync>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HelperSyncState {
+    InSync,
+    PendingToMain,
+    PendingFromMain,
+    Merging,
+    Conflict,
+}
+
+/// How a helper's files relate to its main agent's. (The sync bases are private
+/// git refs, `refs/armada/helpers/<helper>/...`, not fields.)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HelperSync {
+    pub state: HelperSyncState,
+    /// When the last merge in either direction happened (ms).
+    #[serde(default)]
+    pub last_sync_at: Option<i64>,
+    /// User-facing detail, e.g. the files that conflicted.
+    #[serde(default)]
+    pub detail: Option<String>,
+    /// Files merged in the last sync.
+    #[serde(default)]
+    pub files: i64,
+}
+
+/// What the composer's send does while the agent is busy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BusySend {
+    /// Ask each time.
+    #[default]
+    Ask,
+    /// Queue behind the running turn.
+    Queue,
+    /// Start a helper agent right away.
+    Helper,
+}
+
+/// Which agent a helper runs as; unset parts mean "same as the main agent".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct HelperDefaults {
+    pub provider: Option<Provider>,
+    pub account_id: Option<String>,
+    pub custom_agent_id: Option<String>,
+    pub model: Option<String>,
 }
 
 /// Prefix of the error `delete_agent` returns when removing the agent's worktree
@@ -662,6 +722,8 @@ pub struct ProviderInfo {
     rename_all = "snake_case",
     rename_all_fields = "camelCase"
 )]
+// Events are short-lived and queued, so the size of the `Agent` variant is harmless.
+#[allow(clippy::large_enum_variant)]
 pub enum ArmadaEvent {
     AgentUpdated {
         agent: Agent,
@@ -812,6 +874,14 @@ pub struct Settings {
     pub voice: VoiceSettings,
     /// The OpenAI Realtime voice assistant (off by default).
     pub voice_assistant: VoiceAssistantSettings,
+    /// The last composer choices per provider identity (`claude`, `custom:<id>`, …),
+    /// applied to new agents of that provider. Never holds permission options.
+    pub config_defaults:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    /// What sending does while an agent is busy: "ask" | "queue" | "helper".
+    pub busy_send: BusySend,
+    /// Which agent a helper runs as (unset = same as the main agent).
+    pub helper_defaults: HelperDefaults,
 }
 
 /// The voice assistant: talk to Armada through OpenAI's Realtime API. Off by default;
@@ -1095,6 +1165,17 @@ impl Settings {
             self.voice.language = defaults.voice.language;
             reset.push("voice.language");
         }
+        let hd = &mut self.helper_defaults;
+        for (field, name) in [
+            (&mut hd.account_id, "helperDefaults.accountId"),
+            (&mut hd.custom_agent_id, "helperDefaults.customAgentId"),
+            (&mut hd.model, "helperDefaults.model"),
+        ] {
+            if field.as_deref().is_some_and(|v| v.trim().is_empty()) {
+                *field = None;
+                reset.push(name);
+            }
+        }
         reset
     }
 }
@@ -1142,6 +1223,9 @@ impl Default for Settings {
             remote: RemoteSettings::default(),
             voice: VoiceSettings::default(),
             voice_assistant: VoiceAssistantSettings::default(),
+            config_defaults: Default::default(),
+            busy_send: BusySend::Ask,
+            helper_defaults: HelperDefaults::default(),
         }
     }
 }
@@ -1233,5 +1317,101 @@ mod voice_settings_tests {
     fn old_settings_files_get_voice_defaults() {
         let s: Settings = serde_json::from_str(r#"{"theme":"gunmetal"}"#).unwrap();
         assert_eq!(s.voice.model, "base.en");
+    }
+
+    #[test]
+    fn old_files_load_without_remembered_choices() {
+        let s: Settings = serde_json::from_str(r#"{"theme":"gunmetal"}"#).unwrap();
+        assert!(s.config_defaults.is_empty());
+        let mut s = Settings::default();
+        s.config_defaults
+            .entry("claude".into())
+            .or_default()
+            .insert("model".into(), "opus".into());
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back.config_defaults["claude"]["model"], "opus");
+        assert!(back.validate().is_ok());
+    }
+
+    #[test]
+    fn helper_settings_round_trip_and_old_files_load() {
+        let s: Settings = serde_json::from_str(r#"{"theme":"gunmetal"}"#).unwrap();
+        assert_eq!(s.busy_send, BusySend::Ask);
+        assert_eq!(s.helper_defaults, HelperDefaults::default());
+        let mut s = Settings {
+            busy_send: BusySend::Helper,
+            ..Settings::default()
+        };
+        s.helper_defaults.provider = Some(Provider::Codex);
+        s.helper_defaults.model = Some("gpt".into());
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(json["busySend"], "helper");
+        assert_eq!(json["helperDefaults"]["provider"], "codex");
+        assert!(json["helperDefaults"]["accountId"].is_null());
+        let back: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(back.busy_send, BusySend::Helper);
+        assert_eq!(back.helper_defaults.model.as_deref(), Some("gpt"));
+        assert!(back.validate().is_ok());
+        assert!(serde_json::from_str::<Settings>(r#"{"busySend":"nope"}"#).is_err());
+        let mut blank = Settings::default();
+        blank.helper_defaults.model = Some("  ".into());
+        assert!(blank.sanitize().contains(&"helperDefaults.model"));
+    }
+
+    #[test]
+    fn helper_sync_serializes_camel_case_and_old_agents_load() {
+        let mut a = sample_agent();
+        assert!(a.parent_id.is_none() && a.helper_sync.is_none());
+        a.parent_id = Some("m".into());
+        a.helper_sync = Some(HelperSync {
+            state: HelperSyncState::PendingToMain,
+            last_sync_at: Some(5),
+            detail: None,
+            files: 2,
+        });
+        let v = serde_json::to_value(&a).unwrap();
+        assert_eq!(v["parentId"], "m");
+        assert_eq!(v["helperSync"]["state"], "pendingToMain");
+        assert_eq!(v["helperSync"]["lastSyncAt"], 5);
+        assert_eq!(v["helperSync"]["files"], 2);
+        assert!(v["helperSync"]["detail"].is_null());
+        for (s, n) in [
+            (HelperSyncState::InSync, "inSync"),
+            (HelperSyncState::PendingFromMain, "pendingFromMain"),
+            (HelperSyncState::Merging, "merging"),
+            (HelperSyncState::Conflict, "conflict"),
+        ] {
+            assert_eq!(serde_json::to_value(s).unwrap(), n);
+        }
+        let mut old = v;
+        old.as_object_mut().unwrap().remove("parentId");
+        old.as_object_mut().unwrap().remove("helperSync");
+        let back: Agent = serde_json::from_value(old).unwrap();
+        assert!(back.parent_id.is_none() && back.helper_sync.is_none());
+    }
+
+    #[test]
+    fn old_agent_json_loads_without_config_choices() {
+        let mut a = serde_json::to_value(sample_agent()).unwrap();
+        a.as_object_mut().unwrap().remove("configChoices");
+        let a: Agent = serde_json::from_value(a).unwrap();
+        assert!(a.config_choices.is_empty());
+        let mut b = a.clone();
+        b.config_choices.insert("effort".into(), "high".into());
+        let back: Agent = serde_json::from_str(&serde_json::to_string(&b).unwrap()).unwrap();
+        assert_eq!(back.config_choices["effort"], "high");
+    }
+
+    fn sample_agent() -> Agent {
+        serde_json::from_value(serde_json::json!({
+            "id": "a", "title": "t", "provider": "claude", "accountId": "x",
+            "projectPath": "/p", "cwd": "/p", "worktree": false, "branch": null,
+            "baseBranch": null, "baseCommit": null, "sessionId": null,
+            "status": "idle", "running": false, "groupId": null, "createdAt": 0,
+            "updatedAt": 0, "lastActivityAt": 0, "costUsd": 0.0, "tokensUsed": 0,
+            "contextUsed": null, "contextSize": null, "unread": false, "archived": false,
+            "lastMessage": null, "pendingPermissions": 0
+        }))
+        .unwrap()
     }
 }

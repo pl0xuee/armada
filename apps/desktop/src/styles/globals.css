@@ -131,7 +131,7 @@
   /* Syntax highlighting (Shiki css-variables theme, see lib/highlight.ts). */
   --syntax-foreground: currentColor;
   --syntax-background: transparent;
-  --syntax-token-comment: #69727e;
+  --syntax-token-comment: #5d6672;
   --syntax-token-keyword: #6d4fd8;
   --syntax-token-string: #0c7652;
   --syntax-token-string-expression: #0c7652;
@@ -537,6 +537,9 @@
     padding: 0.35em 0.7em;
     text-align: left;
   }
+  .prose-armada .md-table {
+    margin-top: 0.7em;
+  }
   .prose-armada th {
     background: var(--bg-3);
     font-weight: 600;
@@ -544,6 +547,130 @@
   .prose-armada input[type="checkbox"] {
     margin-right: 0.4em;
     accent-color: var(--accent);
+  }
+
+  /* Conversation typography: a readable measure for prose, full column width for code/tables. */
+  .prose-chat {
+    font-size: 15px;
+    line-height: 1.68;
+  }
+  .prose-chat > * + *,
+  .prose-chat .md-block > * + *,
+  .prose-chat .md-block + .md-block > :first-child {
+    margin-top: 0.8em;
+  }
+  .prose-chat > .md-block:first-child > :first-child {
+    margin-top: 0;
+  }
+  .prose-chat :is(p, ul, ol, blockquote, h1, h2, h3, h4) {
+    max-width: 72ch;
+  }
+  .prose-chat h1,
+  .prose-chat h2,
+  .prose-chat h3,
+  .prose-chat h4 {
+    letter-spacing: -0.012em;
+    line-height: 1.3;
+  }
+  .prose-chat h1 {
+    font-size: 1.4em;
+    font-weight: 700;
+  }
+  .prose-chat h2 {
+    font-size: 1.2em;
+    font-weight: 650;
+  }
+  .prose-chat h3 {
+    font-size: 1.05em;
+    font-weight: 650;
+  }
+  .prose-chat h4 {
+    font-size: 0.95em;
+    font-weight: 600;
+    color: var(--text-2);
+  }
+  .prose-chat .md-block + .md-block > h1 {
+    margin-top: 1.7em;
+  }
+  .prose-chat .md-block + .md-block > h2 {
+    margin-top: 1.5em;
+  }
+  .prose-chat .md-block + .md-block > :is(h3, h4) {
+    margin-top: 1.25em;
+  }
+  .prose-chat .md-block + .md-block > :is(h1, h2, h3, h4) + *,
+  .prose-chat :is(h1, h2, h3, h4) + * {
+    margin-top: 0.5em;
+  }
+  .prose-chat ul,
+  .prose-chat ol {
+    padding-left: 1.5em;
+  }
+  .prose-chat li + li {
+    margin-top: 0.3em;
+  }
+  .prose-chat li > :is(ul, ol) {
+    margin-top: 0.3em;
+  }
+  .prose-chat li > p + p {
+    margin-top: 0.4em;
+  }
+  .prose-chat :not(pre) > code {
+    font-size: 0.87em;
+    padding: 0.1em 0.38em;
+    border-color: transparent;
+    background: color-mix(in srgb, var(--bg-3) 85%, transparent);
+  }
+  .prose-chat blockquote {
+    border-left: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
+    padding: 0.5em 1em;
+    border-radius: 0 10px 10px 0;
+  }
+  .prose-chat blockquote > * + * {
+    margin-top: 0.5em;
+  }
+  .prose-chat hr {
+    margin: 1.6em 0;
+  }
+  .prose-chat .md-table {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .prose-chat .md-table table {
+    display: table;
+    width: 100%;
+    overflow: visible;
+    font-size: 0.9em;
+    line-height: 1.5;
+  }
+  .prose-chat th,
+  .prose-chat td {
+    border: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+    padding: 0.5em 0.85em;
+    vertical-align: top;
+  }
+  .prose-chat th {
+    background: color-mix(in srgb, var(--bg-3) 70%, transparent);
+    color: var(--text-2);
+    font-size: 0.92em;
+    white-space: nowrap;
+  }
+  .prose-chat tbody tr:nth-child(even) td {
+    background: color-mix(in srgb, var(--bg-2) 55%, transparent);
+  }
+  .prose-chat tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  /* Narration between tool calls: same size (no reflow when it stops being the tail), softer color. */
+  .prose-interim,
+  .prose-interim strong {
+    color: var(--text-2);
+  }
+  .prose-interim :not(pre) > code {
+    color: var(--text-2);
   }
 
   .xterm-host .xterm {

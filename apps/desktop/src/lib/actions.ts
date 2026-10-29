@@ -2,6 +2,7 @@
 import { toast } from "sonner";
 import { markRemoved, suppressAgent, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
+import { copyText } from "@/components/CopyButton";
 import { api } from "./api";
 import { PROVIDERS } from "./providers";
 import type { Account, Agent, PermissionOption, PermissionOptionKind, Provider, TimelineItem } from "./types";
@@ -261,6 +262,36 @@ export async function exportConversation(agent: Agent) {
     });
   } catch (e) {
     toast.error("Export failed", { description: errorMessage(e) });
+  }
+}
+
+/** Copies the diagnostics report to the clipboard for a bug report. */
+export async function copyDiagnostics() {
+  try {
+    const report = await api.diagnostics();
+    if (!(await copyText(report))) {
+      toast.error("Couldn't copy to the clipboard", { description: "Try Save to file instead." });
+      return;
+    }
+    toast.success("Diagnostics copied — paste it into your bug report");
+  } catch (e) {
+    toast.error("Couldn't collect diagnostics", { description: errorMessage(e) });
+  }
+}
+
+/** Writes the diagnostics report to a file and offers to show it. */
+export async function saveDiagnosticsFile() {
+  try {
+    const path = await api.saveDiagnostics();
+    toast.success("Diagnostics saved", {
+      description: path,
+      action: {
+        label: "Show in folder",
+        onClick: () => void attempt("Couldn't show the file", () => api.openPath(path)),
+      },
+    });
+  } catch (e) {
+    toast.error("Couldn't save diagnostics", { description: errorMessage(e) });
   }
 }
 

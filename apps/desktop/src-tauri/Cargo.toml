@@ -53,10 +53,15 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2"
 axum = "0.8"
 # The remote server's accept loop (connection cap, header-read timeout).
-hyper = { version = "1", features = ["server", "http1"] }
+hyper = { version = "1", features = ["server", "client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 tower = { version = "0.5", features = ["util"] }
 futures-util = "0.3"
+# Preview pane reverse proxy: body streaming/limits, bytes, and decoding of compressed HTML.
+http-body-util = "0.1"
+bytes = "1"
+flate2 = "1"
+brotli-decompressor = "6"
 qrcode = "0.14"
 base64 = "0.22"
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }

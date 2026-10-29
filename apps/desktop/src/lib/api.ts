@@ -86,6 +86,13 @@ const tauriApi = {
     invoke<{ attachments: Attachment[]; problems: string[] }>("read_clipboard_images", { agentId: agentId ?? null }),
   /** Fuzzy file search in the agent's cwd: top 50 relative paths. */
   listFiles: (agentId: string, query: string) => invoke<string[]>("list_files", { agentId, query }),
+  /** Starts a helper agent beside a busy one: runs now, in parallel, on a copy of the main agent's files. */
+  spawnHelper: (parentId: string, prompt: string, attachments?: Attachment[]) =>
+    invoke<Agent>("spawn_helper", { parentId, prompt, attachments: attachments ?? [] }),
+  /** Merges the helper and its main agent now (when both are idle enough to do so). */
+  syncHelper: (helperId: string) => invoke<Agent>("sync_helper", { helperId }),
+  /** After a merge conflict: asks the main agent to resolve it. */
+  askMainToMerge: (helperId: string) => invoke<void>("ask_main_to_merge", { helperId }),
   cancelTurn: (agentId: string) => invoke<void>("cancel_turn", { agentId }),
   respondPermission: (agentId: string, requestId: string, optionId: string) =>
     invoke<void>("respond_permission", { agentId, requestId, optionId }),
@@ -102,6 +109,14 @@ const tauriApi = {
   markRead: (agentId: string) => invoke<void>("mark_read", { agentId }),
   /** Triage "Done": records acknowledgedAt and clears unread; new activity brings it back. */
   acknowledgeAgent: (agentId: string) => invoke<void>("acknowledge_agent", { agentId }),
+  /** Composer choices remembered per provider identity, applied to new agents. */
+  configDefaults: () => invoke<Record<string, Record<string, string>>>("config_defaults"),
+  /**
+   * Forgets remembered composer choices (one provider identity, or all). `clearAgents` also clears each
+   * agent's own saved choices.
+   */
+  clearConfigDefaults: (key?: string, clearAgents?: boolean) =>
+    invoke<Record<string, Record<string, string>>>("clear_config_defaults", { key, clearAgents }),
   setAgentConfig: (agentId: string, optionId: string, value: string) =>
     invoke<void>("set_agent_config", { agentId, optionId, value }),
   /** Hand the agent's work to another provider/account with an instruction. */
@@ -123,6 +138,10 @@ const tauriApi = {
   switchAccount: (agentId: string, accountId: string) => invoke<Agent>("switch_account", { agentId, accountId }),
   /** Shows a native save dialog (Markdown or JSON) and writes the transcript; returns the saved path, or null if cancelled. */
   exportAgent: (agentId: string) => invoke<string | null>("export_agent", { agentId }),
+  /** A plain-text diagnostics report for bug reports (secrets, emails and tokens removed; home shown as ~). */
+  diagnostics: () => invoke<string>("diagnostics"),
+  /** Writes the diagnostics report to the Downloads folder, reveals it and returns its path. */
+  saveDiagnostics: () => invoke<string>("save_diagnostics"),
   /** Removes a queued prompt; returns its text and images (null if it already ran). */
   removeQueued: (agentId: string, queuedId: string) =>
     invoke<{ text: string; attachments: Attachment[] } | null>("remove_queued", { agentId, queuedId }),
@@ -225,6 +244,15 @@ const tauriApi = {
   probePorts: (ports: number[]) => invoke<number[]>("probe_ports", { ports }),
   /** Like probePorts, but says which loopback families (127.0.0.1 / [::1]) accept on each live port. */
   probeLoopback: (ports: number[]) => invoke<PortFamilies[]>("probe_loopback", { ports }),
+  /**
+   * Starts (or reuses) the agent's local Preview proxy in front of a loopback dev server. The proxy adds
+   * the page tools (screenshots, console, element picker); `url` is what the iframe loads.
+   */
+  previewProxyStart: (agentId: string, target: string) =>
+    invoke<PreviewProxyInfo>("preview_proxy_start", { agentId, target }),
+  /** Stops the agent's Preview proxy; with `token`, only if it is still that session. */
+  previewProxyStop: (agentId: string, token?: string) =>
+    invoke<void>("preview_proxy_stop", { agentId, token: token ?? null }),
 
   // settings & attention
   updateSettings: (settings: Settings) => invoke<Settings>("update_settings", { settings }),
@@ -304,6 +332,13 @@ function createMockProxy(): ArmadaApi {
     out[key] = (...args: unknown[]) => loadMock().then((m) => (m.mockApi[key] as unknown as AnyAsyncFn)(...args));
   }
   return out as unknown as ArmadaApi;
+}
+
+export interface PreviewProxyInfo {
+  url: string;
+  token: string;
+  /** Browser mock: no proxy runs, the page loads directly (page tools only work if the page includes the agent). */
+  simulated?: boolean;
 }
 
 export interface PortFamilies {

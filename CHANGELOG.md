@@ -5,6 +5,25 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.1.5 — 2026-10-28
+
+### New
+
+- **Helper agents.** Send a message while an agent is working and start a helper instead of queueing it (Ctrl/⌘+Enter, or choose when asked; Settings → Behavior sets the default). The helper works in parallel on a copy of the agent's current files, merges its changes back into the main agent, and receives the main agent's. Helpers tile beside the main agent with their own conversation and composer, show their sync state, and can ask the main agent to resolve a conflict.
+- **Preview becomes a front-end loop.** The Preview pane can send a screenshot of the page (at the current device width) to the agent, collect the page's console errors, warnings and uncaught exceptions behind a badge with a "Send to agent" summary, and pick an element on the page to send its selector, text, size and an optional cropped image. It works through a small local proxy that only forwards to the dev server you chose (hot reload keeps working); turn it off under the pane's ⋯ menu if a page misbehaves behind it.
+- **A calmer, easier-to-read conversation.** Replies sit in a centered reading column with clearer headings, lists, tables and quotes; each turn starts with the agent's name, and narration between tool calls is softer than the final answer. Tool activity is a quiet one-line trace, command output shows a compact tail with "Show all N lines", and the end of a turn is a slim "Done in 6m 42s · 3 files changed" footer with the metrics in a tooltip.
+- **Composer choices are remembered.** The model, effort and other options you pick are kept per agent across restarts and used for new agents of the same provider. Permission mode stays a per-agent choice. Reset what's remembered in Settings.
+- **Copy diagnostics for bug reports.** Settings → About (and the command palette) copies a report with versions, system info, a settings summary, detected tools and the recent log, or saves it to a file. Keys, tokens, emails, prompts and file paths under your home folder are removed.
+
+### Fixed
+
+- **Review opens fast and stays smooth on huge diffs, including Git LFS repos.** Reviewing thousands of changed files (or a diff near the 8 MB cap) no longer freezes the sheet: files load and highlight as you scroll, giant files start collapsed with a "Show diff" button, and binary/LFS assets are compact rows you can hide. If a repository uses Git LFS but Git LFS isn't installed, Review now says so, with the install command, and pauses Commit and Merge until it is.
+- **The chat stays put.** A finished command no longer folds away while you can see it (it folds once it has scrolled out of view), command output boxes keep a fixed height while they stream, and the view stays pinned to the bottom when a sub-agent card grows.
+- **"Jump to latest" goes away at the bottom.** Scrolling back down with the mouse wheel hides it again, it no longer appears when a conversation is too short to scroll, and scrolling inside command output or a code block no longer triggers it.
+- **No more jumping "Used 1 other tool" row** while sub-agents run: a sub-agent's tool call no longer flashes in the chat for a couple of seconds before moving into its card.
+- **Safer agent folders.** Creating an agent's or helper's worktree no longer runs the repository's git hooks; helper merges keep file permissions and clean up after an interrupted merge.
+- **Smaller things.** Tile widths are remembered; Review's narrow-window file picker is searchable and handles thousands of files; Reset in Settings can also clear each agent's saved choices; code comments are easier to read in the light theme.
+
 ## v0.1.4 — 2026-10-28
 
 ### New

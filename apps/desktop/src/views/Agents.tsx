@@ -11,16 +11,19 @@ import {
 } from "lucide-react";
 import * as D from "@radix-ui/react-dialog";
 import { AnimatePresence } from "motion/react";
+import { memo } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentHeader } from "@/components/agent/AgentHeader";
 import { AgentList } from "@/components/agent/AgentList";
 import { Composer } from "@/components/agent/Composer";
+import { ConflictBanner } from "@/components/agent/HelperBits";
+import { TileRow } from "@/components/agent/TileGroup";
+import { TimelinePane } from "@/components/agent/TimelinePane";
 import { Inspector } from "@/components/agent/Inspector";
 import { AppMark } from "@/components/AppMark";
 import { HomeComposer } from "@/components/home/HomeComposer";
 import { RelTime } from "@/components/RelTime";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
-import { Timeline } from "@/components/timeline/Timeline";
 import { PreviewTab } from "@/components/workspace/PreviewTab";
 import { CONVERSATION_MIN, WorkspacePanel, workspaceMaxHeight } from "@/components/workspace/WorkspacePanel";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
@@ -31,6 +34,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { resumeAgent } from "@/lib/actions";
 import { triageQueue } from "@/lib/agents";
 import { api } from "@/lib/api";
+import { helperGroupOf } from "@/lib/helpers";
 import type { Agent } from "@/lib/types";
 import { basename, modKey } from "@/lib/utils";
 import { useAgentListLayout } from "@/hooks/useAgentListLayout";
@@ -53,6 +57,13 @@ export function AgentsView() {
   const selectedId = useUi((s) => s.selectedAgentId);
   const agent = useApp((s) => (selectedId ? s.agents[selectedId] : undefined));
   const list = useAgentListLayout();
+  // "main,helper,helper" while the open agent is part of a main + helpers group (and tiling is on).
+  const tileOn = useUi((s) => s.tileHelpers);
+  const familyKey = useApp((s) => {
+    if (!selectedId || !tileOn) return null;
+    const g = helperGroupOf(Object.values(s.agents), selectedId);
+    return g ? [g.main.id, ...g.helpers.map((h) => h.id)].join(",") : null;
+  });
 
   // Narrow window, nothing open: the list is the main area.
   if (!list.docked && !agent) {
@@ -71,7 +82,16 @@ export function AgentsView() {
   return (
     <div className="relative flex h-full">
       {list.docked && list.open && <AgentList variant="docked" />}
-      {agent ? <AgentPane key={agent.id} agentId={agent.id} /> : <Welcome />}
+      {agent ? (
+        // Tiled: one pane for the whole group, so focusing another tile never remounts the others.
+        <AgentPane
+          key={familyKey ? familyKey.split(",")[0] : agent.id}
+          agentId={agent.id}
+          tileIds={familyKey ? familyKey.split(",") : undefined}
+        />
+      ) : (
+        <Welcome />
+      )}
       {!list.docked && <AgentDrawer open={list.open} onClose={list.close} />}
     </div>
   );
@@ -112,51 +132,79 @@ function AgentDrawer({ open, onClose }: { open: boolean; onClose: () => void }) 
   );
 }
 
-/** Owns the items subscription so streamed frames re-render only the timeline, not the whole pane. */
-function TimelinePane({ agent }: { agent: Agent }) {
-  const items = useApp((s) => s.items[agent.id]);
-  const loading = useApp((s) => s.itemsLoading[agent.id] ?? false);
-  const loadError = useApp((s) => s.itemsError[agent.id]);
-  return (
-    <Timeline
-      agent={agent}
-      items={items}
-      loading={loading}
-      footer={
-        loadError && !items ? (
-          <div className="mx-auto mt-10 max-w-sm rounded-xl border border-err/30 bg-err/[0.06] p-4 text-center">
-            <p className="text-[13px] font-medium text-err">Couldn't load this conversation</p>
-            <p className="selectable mt-1 break-words font-mono text-[11.5px] text-muted">{loadError}</p>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="mt-3"
-              onClick={() => void useApp.getState().ensureItems(agent.id, true)}
-            >
-              Try again
-            </Button>
-          </div>
-        ) : items && items.length === 0 && !loading ? (
-          <div className="py-16 text-center text-[12.5px] text-steel">
-            {agent.status === "starting" ? "Starting session…" : "No messages yet. Say hello below."}
-          </div>
-        ) : null
-      }
-    />
-  );
-}
-
 function InspectorPane({ agent, className }: { agent: Agent; className?: string }) {
   const items = useApp((s) => s.items[agent.id]);
   return <Inspector agent={agent} items={items} className={className} />;
 }
 
-function AgentPane({ agentId }: { agentId: string }) {
+/** One agent's header, conversation and composer. In a tiled group, one of several. */
+const Tile = memo(function Tile({
+  agentId,
+  focused,
+  tiled,
+  first,
+  headerRef,
+  composerRef,
+  between,
+}: {
+  agentId: string;
+  // Primitives (not a ctx object) so dragging a divider doesn't re-render every conversation.
+  focused: boolean;
+  tiled: boolean;
+  first: boolean;
+  headerRef?: React.Ref<HTMLDivElement>;
+  composerRef?: React.Ref<HTMLDivElement>;
+  /** Between conversation and composer (the workspace panel, in a single pane). */
+  between?: React.ReactNode;
+}) {
+  const agent = useApp((s) => s.agents[agentId]);
+  const windowFocused = useUi((s) => s.windowFocused);
+  useEffect(() => {
+    void useApp.getState().ensureItems(agentId);
+  }, [agentId]);
+  const unread = agent?.unread ?? false;
+  useEffect(() => {
+    if (unread && windowFocused && focused) api.markRead(agentId).catch(() => {});
+  }, [agentId, unread, windowFocused, focused]);
+  if (!agent) return null;
+  return (
+    <section
+      aria-label={agent.title}
+      className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-base"
+      onPointerDownCapture={() => {
+        if (tiled && !focused) useUi.getState().openAgent(agentId);
+      }}
+    >
+      {tiled && (
+        <span
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 transition-colors duration-150",
+            focused ? "bg-accent" : "bg-transparent",
+          )}
+        />
+      )}
+      <div ref={headerRef} className="shrink-0">
+        <AgentHeader agent={agent} tile={tiled ? { focused, first } : undefined} />
+      </div>
+      <ConflictBanner agent={agent} />
+      <TimelinePane agent={agent} />
+      {between}
+      <div ref={composerRef} className="shrink-0">
+        <Composer agent={agent} focused={focused} />
+      </div>
+    </section>
+  );
+});
+
+function AgentPane({ agentId, tileIds }: { agentId: string; tileIds?: string[] }) {
+  // Tiles that actually fit side by side (a narrow window shows one even when the group has several).
+  const [shown, setShown] = useState(tileIds?.length ?? 1);
+  const tiled = shown > 1;
   const agent = useApp((s) => s.agents[agentId]);
   const inspectorPref = useUi((s) => s.inspectorOpen);
   const overlay = useUi((s) => s.inspectorOverlay);
   const wide = useMediaQuery(INSPECTOR_DOCK_QUERY);
-  const windowFocused = useUi((s) => s.windowFocused);
   const workspaceOpen = useUi((s) => s.workspaceOpen);
   // Preview pane: right of the conversation. Detection runs whenever this agent is on screen so the
   // header can offer the pane as soon as a server is up; it polls faster while the pane is open.
@@ -177,7 +225,7 @@ function AgentPane({ agentId }: { agentId: string }) {
   const shownW = drag ?? lay?.width ?? PREVIEW_DEFAULT_WIDTH;
   // The panel only takes what the conversation and composer can spare (tiling WMs go down to 600px tall).
   // Measures the header and composer (incl. queue) so the conversation always keeps its minimum.
-  const sectionRef = useRef<HTMLElement>(null);
+  const sectionRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const [workspaceMax, setWorkspaceMax] = useState(0);
@@ -199,42 +247,58 @@ function AgentPane({ agentId }: { agentId: string }) {
     for (const el of [section, headerRef.current, composerRef.current]) if (el) ro.observe(el);
     measure();
     return () => ro.disconnect();
-  }, []);
+    // Re-attach when focus moves: the header/composer refs follow the focused tile.
+  }, [tiled, agentId]);
   useEffect(() => {
     setWorkspaceRoom(workspaceMax);
   }, [workspaceMax, setWorkspaceRoom]);
 
-  useEffect(() => {
-    void useApp.getState().ensureItems(agentId);
-  }, [agentId]);
-
-  // Mark read when opened, and whenever new activity arrives while it's on screen.
-  const unread = agent?.unread ?? false;
-  useEffect(() => {
-    if (unread && windowFocused) api.markRead(agentId).catch(() => {});
-  }, [agentId, unread, windowFocused]);
-
+  // Items loading and mark-read live in each Tile (the focused tile marks its agent read).
   if (!agent) return null;
 
   return (
     <div ref={rootRef} className="relative flex min-w-0 flex-1">
-      <section ref={sectionRef} aria-label={agent.title} className="flex min-w-0 flex-1 flex-col bg-base">
-        <div ref={headerRef} className="shrink-0">
-          <AgentHeader agent={agent} />
-        </div>
-        <TimelinePane agent={agent} />
-        {workspaceOpen && workspaceMax > 0 && <WorkspacePanel agent={agent} maxHeight={workspaceMax} />}
-        {workspaceOpen && workspaceMax === 0 && (
+      <div ref={sectionRef} className="flex min-w-0 flex-1 flex-col bg-base">
+        <TileRow
+          ids={tileIds ?? [agentId]}
+          focusId={agentId}
+          onVisibleCount={setShown}
+          renderTile={(id, ctx) => (
+            <Tile
+              agentId={id}
+              focused={ctx.focused}
+              tiled={ctx.tiled}
+              first={ctx.first}
+              headerRef={ctx.focused ? headerRef : undefined}
+              composerRef={ctx.focused ? composerRef : undefined}
+              between={
+                !ctx.tiled && workspaceOpen && workspaceMax > 0 ? (
+                  <WorkspacePanel agent={agent} maxHeight={workspaceMax} />
+                ) : undefined
+              }
+            />
+          )}
+        />
+        {workspaceOpen && (tiled || workspaceMax === 0) && (
           <div
             role="status"
             className="flex h-8 shrink-0 items-center gap-2 border-t border-line bg-base px-3 text-[12px] text-muted"
           >
             <SquareTerminal className="h-3.5 w-3.5 shrink-0 text-steel" />
-            <span className="min-w-0 truncate">Workspace panel: not enough room. Enlarge the window.</span>
+            <span className="min-w-0 truncate">
+              {tiled
+                ? "Workspace panel: shown when one agent fills the view."
+                : "Workspace panel: not enough room. Enlarge the window."}
+            </span>
+            {tiled && (
+              <Button size="xs" variant="ghost" className="ml-auto" onClick={() => useUi.getState().setTileHelpers(false)}>
+                Show one pane
+              </Button>
+            )}
             <Button
               size="icon-sm"
               variant="ghost"
-              className="ml-auto"
+              className={cn(!tiled && "ml-auto")}
               aria-label="Hide workspace panel"
               onClick={() => useUi.getState().setWorkspaceOpen(false)}
             >
@@ -242,10 +306,7 @@ function AgentPane({ agentId }: { agentId: string }) {
             </Button>
           </div>
         )}
-        <div ref={composerRef} className="shrink-0">
-          <Composer agent={agent} />
-        </div>
-      </section>
+      </div>
       {lay && (
         // One element for split and full so the page isn't reloaded when maximizing.
         <aside

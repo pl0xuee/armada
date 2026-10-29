@@ -125,6 +125,8 @@ export function installNavigationGuard(): () => void {
     // Links with their own click handler (Markdown: mismatch warning, Preview routing) open
     // themselves; opening here too would open twice and skip that handler's checks.
     if (e.type === "click" && a.hasAttribute("data-own-click")) return;
+    // Middle-click has no handler of its own there: never let it skip the mismatch warning.
+    if (e.type === "auxclick" && a.hasAttribute("data-own-click") && linkMismatchHost(a.textContent ?? "", href)) return;
     // Loopback links open the agent's in-app Preview (unless the visible text names another host).
     if (e.type === "click" && loopbackLink(href) && !linkMismatchHost(a.textContent ?? "", href)) {
       const agentId = resolveAgentId(a);

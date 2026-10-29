@@ -4,6 +4,7 @@
 mod attention;
 mod clipboard;
 mod commands;
+mod diagnostics;
 mod dictation;
 mod events;
 mod git_review;
@@ -12,6 +13,7 @@ mod local;
 mod log_writer;
 mod notify;
 mod pr_status;
+mod preview_proxy;
 mod remote;
 mod sound;
 mod state;
@@ -70,6 +72,9 @@ macro_rules! handler {
             commands::search,
             commands::create_agent,
             commands::send_prompt,
+            commands::spawn_helper,
+            commands::sync_helper,
+            commands::ask_main_to_merge,
             commands::cancel_turn,
             commands::remove_queued,
             commands::send_queued_now,
@@ -83,6 +88,8 @@ macro_rules! handler {
             commands::archive_agent,
             commands::mark_read,
             commands::set_agent_config,
+            commands::config_defaults,
+            commands::clear_config_defaults,
             commands::handoff_agent,
             commands::set_focus,
             commands::chime_watched,
@@ -128,6 +135,8 @@ macro_rules! handler {
             workspace::workspace_scripts,
             workspace::probe_ports,
             workspace::probe_loopback,
+            preview_proxy::preview_proxy_start,
+            preview_proxy::preview_proxy_stop,
             commands::update_settings,
             commands::set_interface_zoom,
             commands::preview_sound,
@@ -137,6 +146,8 @@ macro_rules! handler {
             commands::install_update,
             commands::switch_account,
             commands::export_agent,
+            diagnostics::diagnostics,
+            diagnostics::save_diagnostics,
             commands::list_schedules,
             commands::save_schedule,
             commands::delete_schedule,
@@ -227,6 +238,7 @@ fn manage_state(
     app.manage(voice_assistant::VoiceAssistant::default());
     app.manage(pr_status::PrCache::default());
     app.manage(updater::UpdateState::default());
+    app.manage(preview_proxy::PreviewProxies::default());
     let remote = remote::Remote::new(
         core.clone(),
         app.package_info().version.to_string(),
@@ -603,6 +615,8 @@ mod tests {
             "pr_status::PrCache",
             "UpdateState",
             "updater::UpdateState",
+            "PreviewProxies",
+            "preview_proxy::PreviewProxies",
             "Arc<Remote>",
             "Arc<Attention>",
             "TrayState",
@@ -684,6 +698,8 @@ mod ipc_smoke {
         "push_base_branch",
         "test_notification",
         "open_path",
+        // Writes a file to Downloads and reveals it.
+        "save_diagnostics",
         "detect_local_servers",
     ];
 

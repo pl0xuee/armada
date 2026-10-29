@@ -92,6 +92,8 @@ export interface FileReviewActions {
   revertFile: (path: string) => void;
   revertHunk: (path: string, hunkIndex: number) => void;
   toggleViewed: (path: string) => void;
+  /** Remember a file's open/collapsed state (virtualised lists unmount files that scroll away). */
+  setOpen?: (path: string, open: boolean) => void;
 }
 
 const STATUS_ICON = {
@@ -110,9 +112,18 @@ export const FileDiffView = memo(function FileDiffView({
   commenting,
   review,
   viewed = false,
+  initialOpen,
+  collapsedHint,
+  onExpandRequest,
 }: {
   file: ParsedFileDiff;
   defaultOpen?: boolean;
+  /** Overrides `defaultOpen`/`viewed` for the first render (restoring a remembered state). */
+  initialOpen?: boolean;
+  /** Shown under the header while collapsed (e.g. a "Show diff" button for huge files). */
+  collapsedHint?: ReactNode;
+  /** When set, expanding a collapsed file calls this instead of toggling (the diff isn't loaded yet). */
+  onExpandRequest?: () => void;
   maxHeight?: number;
   className?: string;
   /** Render without outer border/radius (when nested in a card). */
@@ -124,15 +135,22 @@ export const FileDiffView = memo(function FileDiffView({
   /** Marked as viewed in review: collapsed, with a check. */
   viewed?: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen && !viewed);
+  const [open, setOpenState] = useState(initialOpen ?? (defaultOpen && !viewed));
+  const setOpen = useCallback(
+    (v: boolean) => {
+      setOpenState(v);
+      review?.setOpen?.(file.path, v);
+    },
+    [review, file.path],
+  );
   // Marking a file viewed collapses it (unmarking re-opens it), like a code-review tool.
   const prevViewed = useRef(viewed);
   useEffect(() => {
     if (prevViewed.current !== viewed) setOpen(!viewed);
     prevViewed.current = viewed;
-  }, [viewed]);
+  }, [viewed, setOpen]);
   const Icon = STATUS_ICON[file.status];
-  const hunkTokens = useDiffHighlight(file.path, file.hunks, open && !file.binary);
+  const hunkTokens = useDiffHighlight(file.path, file.hunks, open && !file.binary, !!review);
   const dir = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/") + 1) : "";
   const name = file.path.slice(dir.length);
   return (
@@ -140,7 +158,7 @@ export const FileDiffView = memo(function FileDiffView({
       <div className="sticky top-0 z-[1] flex h-9 w-full items-center border-b border-line bg-panel/90 backdrop-blur">
         <button
           type="button"
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => (!open && onExpandRequest ? onExpandRequest() : setOpen(!open))}
           aria-expanded={open}
           className="flex h-full min-w-0 flex-1 items-center gap-2 px-3 text-left transition-colors hover:bg-raised/70"
         >
@@ -204,6 +222,7 @@ export const FileDiffView = memo(function FileDiffView({
           </div>
         )}
       </div>
+      {!open && collapsedHint}
       {open && (
         <div className="selectable overflow-auto" style={maxHeight ? { maxHeight } : undefined}>
           {file.binary ? (
@@ -421,6 +440,7 @@ const LazyChunk = memo(function LazyChunk({
   chunk,
   path,
   focusLocal,
+  noteSig,
   commenting,
   review,
   onKey,
@@ -438,36 +458,44 @@ const LazyChunk = memo(function LazyChunk({
   onFocusRow: (i: number) => void;
   setRow: (i: number, el: HTMLTableRowElement | null) => void;
 }) {
-  // First chunks render immediately; later ones once they come near the viewport (and then stay).
+  // First chunks render immediately; others while they are near the viewport. Chunks that
+  // scroll far away swap back to a spacer of their measured height, so the DOM stays bounded
+  // however long the file is. A chunk with comments (or an open editor) always stays mounted.
   const [visible, setVisible] = useState(chunk.start < CHUNK * 2);
   const ref = useRef<HTMLTableSectionElement>(null);
+  const measured = useRef<number | null>(null);
+  const pinned = noteSig !== "";
   useEffect(() => {
-    if (visible) return;
     const el = ref.current;
     if (!el) return;
     const io = new IntersectionObserver(
       (entries) => {
-        if (entries.some((x) => x.isIntersecting)) {
-          setVisible(true);
-          io.disconnect();
+        const e = entries[entries.length - 1];
+        if (!e) return;
+        if (e.isIntersecting) setVisible(true);
+        else {
+          if (e.boundingClientRect.height > 0 && el.dataset.spacer !== "1")
+            measured.current = e.boundingClientRect.height;
+          setVisible(false);
         }
       },
       { rootMargin: "1200px 0px" },
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [visible]);
+  }, []);
 
   const header = chunk.header && (
     <HunkHeaderRow header={chunk.header} onRevert={review ? () => review.revertHunk(path, chunk.hunk) : undefined} />
   );
 
-  if (!visible) {
+  if (!visible && !pinned) {
+    // Once measured, the spacer stands in for the whole chunk (header row included).
     return (
-      <tbody ref={ref} aria-hidden>
-        {header}
+      <tbody ref={ref} aria-hidden data-spacer="1">
+        {measured.current === null && header}
         <tr>
-          <td colSpan={4} style={{ height: chunk.lines.length * ROW_PX }} />
+          <td colSpan={4} style={{ height: measured.current ?? chunk.lines.length * ROW_PX, padding: 0 }} />
         </tr>
       </tbody>
     );

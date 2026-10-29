@@ -26,6 +26,8 @@ import { toast } from "sonner";
 import { AppMark } from "@/components/AppMark";
 import { GithubGlyph } from "@/components/settings/GithubGlyph";
 import { InstallAllBanner } from "@/components/settings/InstallAllBanner";
+import { HelperSettings } from "@/components/settings/HelperSettings";
+import { RememberedChoicesRow } from "@/components/settings/RememberedChoicesRow";
 import { AgentsSection } from "@/components/settings/AgentsSection";
 import { CustomSoundLine } from "@/components/settings/CustomSound";
 import { McpSection } from "@/components/settings/McpSection";
@@ -44,7 +46,7 @@ import { Segmented } from "@/components/ui/segmented";
 import { Select } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { checkForUpdates } from "@/lib/actions";
+import { checkForUpdates, copyDiagnostics, saveDiagnosticsFile } from "@/lib/actions";
 import { useGuardedInstall } from "@/components/settings/useGuardedInstall";
 import { HotkeyRecorder } from "@/components/settings/HotkeyRecorder";
 import { useCommitOnUnmount } from "@/components/settings/useCommitOnUnmount";
@@ -825,6 +827,7 @@ function Behavior({ settings }: { settings: Settings }) {
             />
             <FieldError field="permissionMode" />
           </SettingRow>
+          <RememberedChoicesRow />
           <SettingRow
             title="Auto-resume interrupted agents"
             description="When Armada starts, agents cut off by a crash or reboot pick up where they left off."
@@ -849,6 +852,8 @@ function Behavior({ settings }: { settings: Settings }) {
             />
           </SettingRow>
         </SettingGroup>
+
+        <HelperSettings settings={settings} />
 
         <SettingGroup title="Usage limits">
           <SettingRow
@@ -1053,6 +1058,22 @@ function About() {
             />
           </SettingRow>
         )}
+      </SettingGroup>
+
+      <SettingGroup title="Diagnostics" className="mb-8">
+        <SettingRow
+          title="Copy diagnostics"
+          description="Versions, system info, settings and recent logs for a bug report. Keys, tokens, emails and prompts are left out."
+        >
+          <div className="flex gap-2">
+            <Button size="sm" variant="secondary" onClick={() => void copyDiagnostics()}>
+              Copy diagnostics
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => void saveDiagnosticsFile()}>
+              Save to file…
+            </Button>
+          </div>
+        </SettingRow>
       </SettingGroup>
 
       <SettingGroup

@@ -74,6 +74,9 @@ interface UiStore {
   setWorkspaceRoom: (px: number) => void;
   /** Width of the right-side Preview pane (clamped to the room at layout time); remembered across restarts. */
   previewWidth: number;
+  /** Show a main agent and its helpers side by side. */
+  tileHelpers: boolean;
+  setTileHelpers: (on: boolean) => void;
   setPreviewWidth: (px: number) => void;
   /** Bumps to ask the composer to focus itself. */
   composerFocusTick: number;
@@ -145,6 +148,53 @@ function readPreviewWidth(): number {
   return PREVIEW_DEFAULT_WIDTH;
 }
 
+const TILE_KEY = "armada.tileHelpers";
+
+function readTileHelpers(): boolean {
+  try {
+    return localStorage.getItem(TILE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+const TILE_WEIGHTS_KEY = "armada.tileWeights";
+const WEIGHT_MIN = 1; // weights are tile widths in px
+const WEIGHT_MAX = 10000;
+
+function readAllTileWeights(): Record<string, Record<string, number>> {
+  try {
+    const v = JSON.parse(localStorage.getItem(TILE_WEIGHTS_KEY) ?? "{}");
+    return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Saved tile divider weights for a main agent's group; only ids in `ids`, clamped to a sane range. */
+export function readTileWeights(mainId: string, ids: readonly string[]): Record<string, number> {
+  const saved = readAllTileWeights()[mainId];
+  const out: Record<string, number> = {};
+  if (!saved || typeof saved !== "object") return out;
+  for (const id of ids) {
+    const w = (saved as Record<string, unknown>)[id];
+    if (typeof w === "number" && Number.isFinite(w)) out[id] = Math.min(WEIGHT_MAX, Math.max(WEIGHT_MIN, w));
+  }
+  return out;
+}
+
+/** Persist a group's weights (empty removes the entry). */
+export function saveTileWeights(mainId: string, weights: Record<string, number>) {
+  try {
+    const all = readAllTileWeights();
+    if (Object.keys(weights).length) all[mainId] = weights;
+    else delete all[mainId];
+    localStorage.setItem(TILE_WEIGHTS_KEY, JSON.stringify(all));
+  } catch {
+    /* ignore */
+  }
+}
+
 const INSPECTOR_KEY = "armada.inspectorOpen";
 const LIST_KEY = "armada.agentList";
 
@@ -210,6 +260,15 @@ export const useUi = create<UiStore>((set) => ({
   workspaceHeight: readWorkspace().height,
   workspaceRoom: 1000,
   previewWidth: readPreviewWidth(),
+  tileHelpers: readTileHelpers(),
+  setTileHelpers: (tileHelpers) => {
+    try {
+      localStorage.setItem(TILE_KEY, tileHelpers ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+    set({ tileHelpers });
+  },
   setPreviewWidth: (w) => {
     const previewWidth = Math.min(4000, Math.max(1, Math.round(w)));
     try {

@@ -1,0 +1,15 @@
+{
+  "name": "armada-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Real-app smoke test: drives the built Armada binary through tauri-driver (WebDriver).",
+  "scripts": {
+    "test": "node smoke.mjs"
+  },
+  "dependencies": {
+    "webdriverio": "10.1.0"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

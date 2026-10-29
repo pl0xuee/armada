@@ -14,9 +14,11 @@ pub mod voice;
 
 mod acp;
 mod codex;
+mod config_memory;
 mod db;
 mod files;
 mod git;
+mod helpers;
 mod jsonrpc;
 mod manager;
 mod mcp;

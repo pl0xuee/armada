@@ -1,6 +1,6 @@
 //! The agent supervisor. `Core` is cheap to clone and safe to share across threads.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
@@ -11,10 +11,23 @@ use parking_lot::Mutex;
 
 use crate::acp::{self, AcpDriver};
 use crate::codex::{self, CodexDriver};
+use crate::config_memory;
 use crate::db::Db;
 use crate::model::*;
 use crate::session::{AgentCtx, ExitIntent, Prompt, StartCancelled, TurnOutcome};
 use crate::{accounts, git, local, providers, EventSink, Result};
+
+mod helper_sync;
+
+/// Starts an agent as a helper of `parent_id`, from `commit` (a snapshot of the
+/// main agent's files). `preamble` is shown to the helper's model, not the user.
+struct HelperSeed {
+    id: String,
+    parent_id: String,
+    commit: String,
+    base_branch: Option<String>,
+    preamble: String,
+}
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -404,6 +417,56 @@ impl Core {
     /// Resumes interrupted agents when `settings.auto_resume` is on.
     pub async fn startup(&self) {
         self.spawn_scheduler();
+        // A merge that was running when the app closed is simply pending again.
+        let stuck: Vec<String> = self
+            .inner
+            .agents
+            .lock()
+            .values()
+            .filter(|r| {
+                r.agent
+                    .helper_sync
+                    .as_ref()
+                    .is_some_and(|h| h.state == HelperSyncState::Merging)
+            })
+            .map(|r| r.agent.id.clone())
+            .collect();
+        for id in stuck {
+            let _ = self.update_agent(&id, |a| {
+                if let Some(h) = a.helper_sync.as_mut() {
+                    h.state = HelperSyncState::PendingToMain;
+                }
+            });
+        }
+        // Staged/backup files from a merge cut short by a crash or kill.
+        let merge_dirs: Vec<String> = {
+            let agents = self.inner.agents.lock();
+            let mut dirs = std::collections::BTreeSet::new();
+            for r in agents.values() {
+                if let Some(parent) = r
+                    .agent
+                    .parent_id
+                    .as_ref()
+                    .filter(|_| r.agent.helper_sync.is_some())
+                {
+                    dirs.insert(r.agent.cwd.clone());
+                    if let Some(p) = agents.get(parent) {
+                        dirs.insert(p.agent.cwd.clone());
+                    }
+                }
+            }
+            dirs.into_iter().collect()
+        };
+        if !merge_dirs.is_empty() {
+            tokio::task::spawn_blocking(move || {
+                for d in merge_dirs {
+                    let n = crate::helpers::remove_merge_leftovers(std::path::Path::new(&d)).len();
+                    if n > 0 {
+                        tracing::info!("removed {n} leftover merge file(s) in {d}");
+                    }
+                }
+            });
+        }
         let attachments = self.attachments_dir();
         tokio::task::spawn_blocking(move || codex::prune_old_attachments(&attachments));
         if !self.inner.settings.lock().auto_resume {
@@ -1121,6 +1184,9 @@ impl Core {
         let fresh_session = resume != Some(session_id.as_str());
         // New sessions start in the agent's Auto mode when that's the default
         // (resumed sessions keep theirs) — before anyone can send a prompt.
+        // Remembered composer choices go first so the new-agent form's Auto mode and
+        // an explicit model (applied by the caller) still win.
+        self.apply_remembered(agent_id, &driver).await;
         if fresh_session && auto_mode {
             self.apply_auto_mode(agent_id, &driver).await;
         }
@@ -1157,6 +1223,159 @@ impl Core {
             a.needs_briefing = false;
         })?;
         Ok(driver)
+    }
+
+    /// Re-applies the agent's remembered composer choices to a freshly started
+    /// session (on an agent's first start, the provider's remembered defaults
+    /// underneath them). Best effort and bounded: failures are only logged.
+    async fn apply_remembered(&self, agent_id: &str, driver: &Driver) {
+        let Ok(agent) = self.agent(agent_id) else {
+            return;
+        };
+        let first_start = agent.session_id.is_none();
+        let choices = if first_start {
+            let key = config_memory::identity_key(agent.provider, agent.custom_agent_id.as_deref());
+            let mut defaults = self
+                .inner
+                .settings
+                .lock()
+                .config_defaults
+                .get(&key)
+                .cloned();
+            // A helper of the same provider starts with its main agent's choices.
+            if let Some(main) = agent
+                .parent_id
+                .as_deref()
+                .and_then(|id| self.agent(id).ok())
+            {
+                if main.provider == agent.provider && main.custom_agent_id == agent.custom_agent_id
+                {
+                    let base = defaults.get_or_insert_with(BTreeMap::new);
+                    base.extend(main.config_choices.clone());
+                }
+            }
+            config_memory::first_start_choices(defaults.as_ref(), &agent.config_choices)
+        } else {
+            agent.config_choices.clone()
+        };
+        if choices.is_empty() {
+            return;
+        }
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(8);
+        let mut attempted: Vec<String> = Vec::new();
+        // Switching the model can change which other options exist: re-plan a few times.
+        for _ in 0..3 {
+            let Ok(current) = self.agent(agent_id) else {
+                return;
+            };
+            let todo = config_memory::plan(&current.config_options, &choices, &attempted);
+            if todo.is_empty() {
+                break;
+            }
+            for (option_id, value) in todo {
+                attempted.push(option_id.clone());
+                match tokio::time::timeout_at(deadline, driver.set_config(&option_id, &value)).await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        tracing::debug!("{agent_id}: couldn't restore {option_id}={value}: {e:#}")
+                    }
+                    Err(_) => {
+                        tracing::debug!("{agent_id}: restoring composer choices timed out");
+                        return;
+                    }
+                }
+            }
+        }
+        if first_start {
+            // Keep what the first session started with, so a restart restores it.
+            if let Ok(now) = self.agent(agent_id) {
+                let kept: BTreeMap<String, String> = now
+                    .config_options
+                    .iter()
+                    .filter(|o| choices.get(&o.id).is_some_and(|v| *v == o.current_value))
+                    .map(|o| (o.id.clone(), o.current_value.clone()))
+                    .collect();
+                if !kept.is_empty() {
+                    let _ = self.update_agent(agent_id, |a| {
+                        for (k, v) in kept {
+                            a.config_choices.entry(k).or_insert(v);
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    /// Remembers the user's choice for an option: on the agent, and as the default
+    /// for new agents of the same provider. Permission options are skipped.
+    pub(crate) fn remember_choice(&self, agent_id: &str, option_id: &str, value: &str) {
+        let Ok(agent) = self.agent(agent_id) else {
+            return;
+        };
+        let Some(option) = agent.config_options.iter().find(|o| o.id == option_id) else {
+            return;
+        };
+        if !config_memory::may_remember(option, value) {
+            return;
+        }
+        let _ = self.update_agent(agent_id, |a| {
+            a.config_choices
+                .insert(option_id.to_string(), value.to_string());
+        });
+        if agent.provider == Provider::Local || agent.parent_id.is_some() {
+            // A local server's models belong to that server, not to the provider; a
+            // helper's choices are its own (it starts from its main agent's).
+            return;
+        }
+        let key = config_memory::identity_key(agent.provider, agent.custom_agent_id.as_deref());
+        let _ = self.update_settings(|s| {
+            s.config_defaults
+                .entry(key)
+                .or_default()
+                .insert(option_id.to_string(), value.to_string());
+        });
+    }
+
+    /// The remembered composer choices per provider identity.
+    pub fn config_defaults(&self) -> BTreeMap<String, BTreeMap<String, String>> {
+        self.inner.settings.lock().config_defaults.clone()
+    }
+
+    /// Forgets the remembered defaults (one provider identity, or all of them); with
+    /// `clear_agents` also the choices stored on those agents.
+    pub fn clear_config_defaults(
+        &self,
+        key: Option<&str>,
+        clear_agents: bool,
+    ) -> Result<BTreeMap<String, BTreeMap<String, String>>> {
+        if clear_agents {
+            let ids: Vec<String> = self
+                .inner
+                .agents
+                .lock()
+                .values()
+                .filter(|r| {
+                    key.is_none_or(|k| {
+                        config_memory::identity_key(
+                            r.agent.provider,
+                            r.agent.custom_agent_id.as_deref(),
+                        ) == k
+                    })
+                })
+                .map(|r| r.agent.id.clone())
+                .collect();
+            for id in ids {
+                let _ = self.update_agent(&id, |a| a.config_choices.clear());
+            }
+        }
+        let s = self.update_settings(|s| match key {
+            Some(k) => {
+                s.config_defaults.remove(k);
+            }
+            None => s.config_defaults.clear(),
+        })?;
+        Ok(s.config_defaults)
     }
 
     /// Switches the agent's permission mode to its "Auto" choice, if it has one.
@@ -1237,11 +1456,12 @@ impl Core {
                         )
                         .await
                         .unwrap_or_else(|_| Err(anyhow!("the agent didn't answer")));
-                        if let Err(e) = r {
-                            ctx.notice(
+                        match r {
+                            Ok(()) => core.remember_choice(&id, "model", m.trim()),
+                            Err(e) => ctx.notice(
                                 NoticeLevel::Warn,
                                 format!("Couldn't switch to model {m}: {e:#}"),
-                            );
+                            ),
                         }
                     }
                     // Checked again by the driver, atomically with starting the turn.
@@ -1263,7 +1483,7 @@ impl Core {
     /// Creates the worktree (if requested), spawns the adapter, opens a session and
     /// sends the first prompt. Returns once the agent row exists (status `starting`).
     pub async fn create_agent(&self, req: CreateAgentRequest) -> Result<Agent> {
-        self.create_agent_inner(req, None, None).await
+        self.create_agent_inner(req, None, None, None).await
     }
 
     async fn create_agent_inner(
@@ -1271,6 +1491,7 @@ impl Core {
         req: CreateAgentRequest,
         shared_checkout: Option<&Agent>,
         schedule_id: Option<String>,
+        helper: Option<HelperSeed>,
     ) -> Result<Agent> {
         // A prompt is optional: without one the agent starts up and waits for you.
         let prompt = req.prompt.trim().to_string();
@@ -1302,7 +1523,9 @@ impl Core {
         if !project.is_dir() {
             bail!("Folder not found: {}", req.project_path);
         }
-        let id = uuid::Uuid::new_v4().to_string();
+        let id = helper
+            .as_ref()
+            .map_or_else(|| uuid::Uuid::new_v4().to_string(), |h| h.id.clone());
         let custom_title = req
             .title
             .as_deref()
@@ -1318,15 +1541,41 @@ impl Core {
         });
 
         let mut worktree_error = None;
-        let (cwd, worktree, branch, base_branch, base_commit) = match shared_checkout {
-            Some(src) => (
+        let (cwd, worktree, branch, base_branch, base_commit) = match (shared_checkout, &helper) {
+            (Some(src), _) => (
                 src.cwd.clone(),
                 false,
                 src.branch.clone(),
                 src.base_branch.clone(),
                 src.base_commit.clone(),
             ),
-            None => match git::repo_info(&project).await {
+            // A helper always gets its own worktree, started from a snapshot of the
+            // main agent's files (a failure is an error, never a shared folder).
+            (None, Some(seed)) => {
+                let repo = git::repo_info(&project)
+                    .await
+                    .ok_or_else(|| anyhow!(crate::helpers::NOT_GIT))?;
+                let from_snapshot = git::RepoInfo {
+                    head_commit: seed.commit.clone(),
+                    ..repo
+                };
+                let wt = git::create_worktree(
+                    &project,
+                    &from_snapshot,
+                    &self.inner.data_dir,
+                    &id,
+                    &format!("helper {title}"),
+                )
+                .await?;
+                (
+                    wt.cwd.to_string_lossy().into_owned(),
+                    true,
+                    Some(wt.branch),
+                    seed.base_branch.clone(),
+                    Some(seed.commit.clone()),
+                )
+            }
+            (None, None) => match git::repo_info(&project).await {
                 Some(repo) if req.worktree => {
                     match git::create_worktree(&project, &repo, &self.inner.data_dir, &id, &title)
                         .await
@@ -1389,6 +1638,7 @@ impl Core {
             last_message: None,
             pending_permissions: 0,
             config_options: Vec::new(),
+            config_choices: Default::default(),
             available_commands: Vec::new(),
             rate_limited: false,
             schedule_id,
@@ -1404,6 +1654,13 @@ impl Core {
             permission_mode,
             acknowledged_at: None,
             needs_briefing: false,
+            parent_id: helper.as_ref().map(|h| h.parent_id.clone()),
+            helper_sync: helper.as_ref().map(|_| HelperSync {
+                state: HelperSyncState::InSync,
+                last_sync_at: None,
+                detail: None,
+                files: 0,
+            }),
         };
         {
             // Under the agents lock, which `delete_account` holds across its checks:
@@ -1464,6 +1721,9 @@ impl Core {
                 format!("Couldn't create a git worktree, so the agent works directly in the project folder.\n{err}"),
             );
         }
+        if let Some(seed) = &helper {
+            ctx.set_preamble(seed.preamble.clone());
+        }
         if !has_prompt {
             self.warm_up(&id, req.model.clone());
         } else if let Some(p) = ctx.submit_prompt(&prompt, req.attachments) {
@@ -1481,11 +1741,12 @@ impl Core {
             match core.ensure_running(&id).await {
                 Ok(driver) => {
                     if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
-                        if let Err(e) = driver.set_config("model", m.trim()).await {
-                            core.ctx(&id).notice(
+                        match driver.set_config("model", m.trim()).await {
+                            Ok(()) => core.remember_choice(&id, "model", m.trim()),
+                            Err(e) => core.ctx(&id).notice(
                                 NoticeLevel::Warn,
                                 format!("Couldn't switch to model {m}: {e:#}"),
-                            );
+                            ),
                         }
                     }
                     // A prompt sent meanwhile owns the status from here.
@@ -1533,6 +1794,10 @@ impl Core {
         validate_attachments(&attachments)?;
         let agent = self.agent(agent_id)?;
         let ctx = self.ctx(agent_id);
+        // A helper picks up what the main agent changed before it starts its turn.
+        if !internal && agent.parent_id.is_some() && !ctx.is_turn_active() {
+            self.sync_before_prompt(agent_id).await;
+        }
         let running = self.live_driver(agent_id).is_some();
         // Agents started without a prompt are named after their first message.
         let first_message = !internal && !self.inner.db.has_user_message(agent_id)?;
@@ -1952,6 +2217,7 @@ impl Core {
         crate::checkpoints::forget_agent(&agent).await;
         self.inner.db.delete_agent(agent_id)?;
         self.inner.agents.lock().remove(agent_id);
+        self.helper_deleted(&agent).await;
         self.inner.ctxs.lock().remove(agent_id);
         self.inner.start_locks.lock().remove(agent_id);
         self.emit(ArmadaEvent::AgentRemoved {
@@ -2012,6 +2278,7 @@ impl Core {
         )
         .await
         .map_err(|_| anyhow!("The agent didn't respond to the setting change"))??;
+        self.remember_choice(agent_id, option_id, value);
         // A local agent remembers its model, so a restart keeps using it.
         if option_id == "model" {
             let _ = self.update_agent(agent_id, |a| {
@@ -2071,7 +2338,7 @@ impl Core {
             permission_mode: None,
             attachments: Vec::new(),
         };
-        self.create_agent_inner(req, Some(&src), None).await
+        self.create_agent_inner(req, Some(&src), None, None).await
     }
 
     /// Files the agent edited, deleted or moved (absolute or cwd-relative paths).
@@ -2495,7 +2762,7 @@ impl Core {
             schedule: schedule.clone(),
         });
         let result = self
-            .create_agent_inner(req, None, Some(schedule.id.clone()))
+            .create_agent_inner(req, None, Some(schedule.id.clone()), None)
             .await;
         // Re-read: the schedule may have been edited or deleted meanwhile.
         match self.find_schedule(&schedule.id) {

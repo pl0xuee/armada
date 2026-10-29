@@ -134,6 +134,31 @@ pub async fn send_prompt(
         .map_err(err)
 }
 
+/// Starts a helper agent for `parent_id` right away (the main agent is busy).
+#[tauri::command]
+pub async fn spawn_helper(
+    core: State<'_, Core>,
+    parent_id: String,
+    prompt: String,
+    attachments: Vec<Attachment>,
+) -> CmdResult<Agent> {
+    core.spawn_helper(&parent_id, &prompt, attachments)
+        .await
+        .map_err(err)
+}
+
+/// Runs a helper's sync with its main agent now.
+#[tauri::command]
+pub async fn sync_helper(core: State<'_, Core>, helper_id: String) -> CmdResult<Agent> {
+    core.sync_helper(&helper_id).await.map_err(err)
+}
+
+/// Conflict fallback: the main agent is asked to integrate the helper's changes.
+#[tauri::command]
+pub async fn ask_main_to_merge(core: State<'_, Core>, helper_id: String) -> CmdResult<()> {
+    core.ask_main_to_merge(&helper_id).await.map_err(err)
+}
+
 #[tauri::command]
 pub async fn cancel_turn(core: State<'_, Core>, agent_id: String) -> CmdResult<()> {
     core.cancel_turn(&agent_id).await.map_err(err)
@@ -242,6 +267,25 @@ pub async fn set_agent_config(
 ) -> CmdResult<()> {
     core.set_agent_config(&agent_id, &option_id, &value)
         .await
+        .map_err(err)
+}
+
+/// Composer choices remembered per provider identity (for new agents).
+#[tauri::command]
+pub fn config_defaults(
+    core: State<'_, Core>,
+) -> std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> {
+    core.config_defaults()
+}
+
+/// Forgets remembered composer choices: one provider identity, or all.
+#[tauri::command]
+pub fn clear_config_defaults(
+    core: State<'_, Core>,
+    key: Option<String>,
+    clear_agents: Option<bool>,
+) -> CmdResult<std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>> {
+    core.clear_config_defaults(key.as_deref(), clear_agents.unwrap_or(false))
         .map_err(err)
 }
 
@@ -850,6 +894,9 @@ pub async fn update_settings(
     let saved = core
         .update_settings(move |current| {
             settings.recent_projects = std::mem::take(&mut current.recent_projects);
+            // Likewise remembered composer choices, which the UI only edits through
+            // `clear_config_defaults`.
+            settings.config_defaults = std::mem::take(&mut current.config_defaults);
             *current = settings;
         })
         .map_err(err)?;

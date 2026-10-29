@@ -44,7 +44,8 @@ import { hasNewServer, previewOf, togglePreview, usePreview } from "@/store/prev
 import { useUi } from "@/store/ui";
 import { AccountAvatar } from "../AccountAvatar";
 import { ProviderGlyph } from "../ProviderGlyph";
-import { StatusPill } from "../StatusDot";
+import { StatusDot, StatusPill } from "../StatusDot";
+import { STATUS } from "@/lib/providers";
 import { useIsDone } from "@/store/completion";
 import { ConfirmDialog } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
@@ -60,6 +61,7 @@ import {
 import { Tooltip } from "../ui/tooltip";
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { PrChip } from "./PrChip";
+import { HelperOfLine, HelpersChip, SyncChip, TileToggle } from "./HelperBits";
 import { SubagentList } from "./SubagentList";
 import { UsageMeters, pctTextTone, windowLabel } from "../UsageMeter";
 import { relativeTimeLong } from "@/lib/format";
@@ -97,7 +99,15 @@ function PreviewChip({ agentId, showLabel }: { agentId: string; showLabel: boole
   );
 }
 
-function AgentHeaderImpl({ agent }: { agent: Agent }) {
+/** How a header behaves as one tile of a tiled helper group. */
+export interface HeaderTile {
+  /** The focused tile owns the inspector and preview. */
+  focused: boolean;
+  /** First tile: carries the agent-list toggle. */
+  first: boolean;
+}
+
+function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
   const account = useApp((s) => s.accounts.find((a) => a.id === agent.accountId));
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const done = useIsDone(agent);
@@ -105,7 +115,12 @@ function AgentHeaderImpl({ agent }: { agent: Agent }) {
   const list = useAgentListLayout();
   const [ref, width] = useElementWidth<HTMLElement>();
   // full: labelled buttons · icons: icon buttons · compact: secondary actions live in ⋯
-  const tier = width === 0 || width >= 1000 ? "full" : width >= 600 ? "icons" : "compact";
+  const tier = tile ? "compact" : width === 0 || width >= 1000 ? "full" : width >= 600 ? "icons" : "compact";
+  // Live helpers (for a main agent): drives the "N helpers" chip and the tile toggle.
+  const helperCount = useApp((s) =>
+    agent.parentId ? 0 : Object.values(s.agents).filter((a) => a.parentId === agent.id && !a.archived).length,
+  );
+  const inGroup = helperCount > 0 || !!agent.parentId;
   const inspectorPref = useUi((s) => s.inspectorOpen);
   const overlay = useUi((s) => s.inspectorOverlay);
   const inspectorOpen = wide ? inspectorPref : overlay;
@@ -142,7 +157,7 @@ function AgentHeaderImpl({ agent }: { agent: Agent }) {
       {/* Fixed height: title + one meta line on the left, status/chips/actions on the right.
           Nothing wraps, so switching agents or states never moves the conversation. */}
       <div className="flex h-[58px] min-w-0 items-center gap-2.5">
-        {(!list.docked || !list.open) && (
+        {(!list.docked || !list.open) && (!tile || tile.first) && (
           <Tooltip content="Show agents" shortcut={[modKey, "B"]}>
             <Button size="icon-sm" variant="ghost" aria-label="Show agent list" onClick={list.toggle} className="-ml-1">
               <PanelLeftOpen />
@@ -153,7 +168,12 @@ function AgentHeaderImpl({ agent }: { agent: Agent }) {
         <div className="min-w-0 flex-1">
           <EditableTitle agent={agent} />
           <div className="flex h-4 min-w-0 items-center gap-1.5 text-[11.5px] leading-none text-steel">
-            {tail ? (
+            {agent.parentId ? (
+              <>
+                <HelperOfLine agent={agent} />
+                <SyncChip agent={agent} />
+              </>
+            ) : tail ? (
               <>
                 <Spinner className="h-3 w-3 shrink-0" />
                 <Tooltip content={tail} side="bottom" align="start">
@@ -183,8 +203,17 @@ function AgentHeaderImpl({ agent }: { agent: Agent }) {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          <StatusPill status={agent.status} done={done} />
-          <SubagentsChip agent={agent} />
+          {tile || (tier === "compact" && inGroup) ? (
+            <Tooltip content={done ? "Done" : STATUS[agent.status].label}>
+              <span className="flex h-6 w-5 items-center justify-center" role="img" aria-label={STATUS[agent.status].label}>
+                <StatusDot status={agent.status} size={8} done={done} />
+              </span>
+            </Tooltip>
+          ) : (
+            <StatusPill status={agent.status} done={done} />
+          )}
+          {!tile && <SubagentsChip agent={agent} />}
+          {helperCount > 0 && <HelpersChip count={helperCount} label={tier !== "compact"} />}
           {agent.rateLimited && (
             <Chip className="border-warn/35 bg-warn/10 text-warn">
               <Gauge className="h-3 w-3" />
@@ -195,6 +224,7 @@ function AgentHeaderImpl({ agent }: { agent: Agent }) {
           {tier === "full" && agent.provider !== "custom" && agent.provider !== "local" && account && (
             <UsageChip account={account} compact={false} />
           )}
+          {!tile && (
           <DetailsPopover
             agent={agent}
             account={account}
@@ -202,6 +232,7 @@ function AgentHeaderImpl({ agent }: { agent: Agent }) {
             identityColor={identity.color}
             tier={tier}
           />
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {resumable && !busy ? (
@@ -220,7 +251,7 @@ function AgentHeaderImpl({ agent }: { agent: Agent }) {
           {tier !== "compact" && (
             <HandoffMenu agent={agent} onCustom={() => setHandoffAgent(agent)} showLabel={tier === "full"} />
           )}
-          <PreviewChip agentId={agent.id} showLabel={tier === "full"} />
+          {(!tile || tile.focused) && <PreviewChip agentId={agent.id} showLabel={tier === "full"} />}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button size="icon-sm" variant="ghost" aria-label="More actions">
@@ -288,6 +319,9 @@ function AgentHeaderImpl({ agent }: { agent: Agent }) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          {agent.parentId && <TileToggle />}
+          {!tile && (
+            <>
           <Tooltip
             content={
               workspaceOpen
@@ -310,6 +344,9 @@ function AgentHeaderImpl({ agent }: { agent: Agent }) {
               <SquareTerminal />
             </Button>
           </Tooltip>
+            </>
+          )}
+          {(!tile || tile.focused) && (
           <Tooltip content={inspectorOpen ? "Hide inspector" : "Show inspector"}>
             <Button
               size="icon-sm"
@@ -321,6 +358,7 @@ function AgentHeaderImpl({ agent }: { agent: Agent }) {
               {inspectorOpen ? <PanelRightClose /> : <PanelRightOpen />}
             </Button>
           </Tooltip>
+          )}
         </div>
       </div>
 

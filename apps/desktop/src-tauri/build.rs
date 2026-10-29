@@ -18,6 +18,23 @@ fn main() {
     println!("cargo:rerun-if-changed={}", built.display());
     println!("cargo:rerun-if-env-changed=ARMADA_ALLOW_MISSING_REMOTE");
 
+    // Commit of this build for the diagnostics report (set it explicitly to override; a
+    // source tree without git reports "unknown"). Not tracked for reruns: CI builds are clean.
+    println!("cargo:rerun-if-env-changed=ARMADA_GIT_SHA");
+    if std::env::var_os("ARMADA_GIT_SHA").is_none() {
+        let sha = std::process::Command::new("git")
+            .args(["rev-parse", "--short=12", "HEAD"])
+            .current_dir(&manifest_dir)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit()));
+        if let Some(sha) = sha {
+            println!("cargo:rustc-env=ARMADA_GIT_SHA={sha}");
+        }
+    }
+
     match std::fs::read(&built) {
         Ok(html) => std::fs::write(&out, html).expect("writing remote.html"),
         Err(e) => {

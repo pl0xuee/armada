@@ -203,7 +203,15 @@ export function seedProviders(): ProviderInfo[] {
 export function seedSettings(onboarded: boolean): Settings {
   return {
     onboarded,
-    theme: "gunmetal",
+    // Review convenience: ?theme=titanium|carbon.
+    theme: ((): Settings["theme"] => {
+      try {
+        const t = new URLSearchParams(location.search).get("theme");
+        return t === "titanium" || t === "carbon" ? t : "gunmetal";
+      } catch {
+        return "gunmetal";
+      }
+    })(),
     interfaceScale: 100,
     sounds: {
       enabled: true,
@@ -241,6 +249,8 @@ export function seedSettings(onboarded: boolean): Settings {
     autoCheckUpdates: true,
     failover: "ask",
     defaultPermissionMode: "auto",
+    busySend: "ask",
+    helperDefaults: { provider: null, accountId: null, customAgentId: null, model: null },
     remote: { enabled: false, lan: false, port: 47821 },
     voice: { inputDevice: null, model: "base.en", language: "auto", autoSend: false },
     voiceAssistant: {
@@ -470,6 +480,8 @@ interface AgentSeed {
   customAgentId?: string;
   queue?: QueuedPrompt[];
   queuePaused?: boolean;
+  parentId?: string;
+  helperSync?: Agent["helperSync"];
 }
 
 function makeAgent(s: AgentSeed): Agent {
@@ -511,7 +523,10 @@ function makeAgent(s: AgentSeed): Agent {
     queuePaused: s.queuePaused ?? false,
     acknowledgedAt: null,
     needsBriefing: false,
+    configChoices: {},
     permissionMode: "auto",
+    parentId: s.parentId ?? null,
+    helperSync: s.helperSync ?? null,
   };
 }
 
@@ -534,6 +549,43 @@ export function seedAgents(): Agent[] {
         { id: "q-1", text: "After that, also cover the logout-on-refresh-failure path with a test.", attachments: 0 },
         { id: "q-2", text: "Then summarize the change as a PR description.", attachments: 0 },
       ],
+    }),
+    makeAgent({
+      id: "a-token-h1",
+      title: "Helper: logout-on-refresh-failure test",
+      provider: "claude",
+      accountId: "acc-claude-work",
+      project: "atlas-api",
+      branch: "armada/fix-token-refresh-h1",
+      status: "working",
+      minsAgo: 0.4,
+      cost: 0.21,
+      tokens: 48_200,
+      context: [18_400, 200_000],
+      lastMessage: "Writing the failing test first…",
+      parentId: "a-token",
+      helperSync: { state: "inSync", lastSyncAt: Date.now() - 40_000, detail: null, files: 2 },
+    }),
+    makeAgent({
+      id: "a-token-h2",
+      title: "Helper: update the session docs",
+      provider: "claude",
+      accountId: "acc-claude-work",
+      project: "atlas-api",
+      branch: "armada/fix-token-refresh-h2",
+      status: "working",
+      minsAgo: 0.6,
+      cost: 0.09,
+      tokens: 21_500,
+      context: [9_200, 200_000],
+      lastMessage: "Both of us edited docs/auth.md; I need a hand merging.",
+      parentId: "a-token",
+      helperSync: {
+        state: "conflict",
+        lastSyncAt: Date.now() - 5 * 60_000,
+        detail: "Conflicting edits in docs/auth.md",
+        files: 3,
+      },
     }),
     makeAgent({
       id: "a-billing",
@@ -917,6 +969,21 @@ export async function rateLimit(req: Request, res: Response, next: NextFunction)
 
 export function seedItems(): Record<string, TimelineItem[]> {
   const out: Record<string, TimelineItem[]> = {};
+
+  out["a-token-h1"] = build("a-token-h1", 3, [
+    {
+      kind: "user_message",
+      text: "While you fix the race, write a test for the logout-on-refresh-failure path.",
+    },
+    { kind: "agent_message", text: "On it. I'll start from your current `session.ts` and write the failing test first." },
+  ]);
+  out["a-token-h2"] = build("a-token-h2", 5, [
+    { kind: "user_message", text: "Update docs/auth.md to describe the single-flight refresh." },
+    {
+      kind: "agent_message",
+      text: "I rewrote the **Token refresh** section of `docs/auth.md`. The main agent also touched that file, so the merge stopped on a conflict.",
+    },
+  ]);
 
   out["a-token"] = build("a-token", 9, [
     {
@@ -1580,6 +1647,7 @@ export function seedDiff(items: TimelineItem[]): AgentDiff {
         status: d.oldText === null && !d.unified ? "added" : "modified",
         additions: adds,
         deletions: dels,
+        lfs: false,
       });
     }
   }
@@ -1589,7 +1657,109 @@ export function seedDiff(items: TimelineItem[]): AgentDiff {
     ahead: files.length ? 2 : 0,
     uncommitted: Math.min(files.length, 3),
     truncated: false,
+    lfs: null,
   };
+}
+
+/**
+ * Huge fixture for `?bigdiff=1` (a game repo on Git LFS without git-lfs installed): ~3,400
+ * binary/LFS assets plus ~100 text files, three of them 3-5k lines. Roughly 6-7 MB of patch.
+ * `?lfs=ok` makes the tool present (subtle note only); `?lfs=none` drops the LFS block.
+ */
+let bigDiffCache: AgentDiff | null = null;
+export function bigDiff(mode: "missing" | "ok" | "none" = "missing"): AgentDiff {
+  if (!bigDiffCache) bigDiffCache = buildBigDiff();
+  const lfs = mode === "none" ? null : { toolMissing: mode === "missing", hidden: 812 };
+  return { ...bigDiffCache, lfs };
+}
+
+function buildBigDiff(): AgentDiff {
+  const files: AgentDiff["files"] = [];
+  const parts: string[] = [];
+  let seed = 7;
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
+  const ident = () =>
+    ["token", "session", "queue", "frame", "render", "asset", "level", "state", "entity", "buffer"][
+      Math.floor(rnd() * 10)
+    ];
+  const codeLine = (i: number) => {
+    const a = ident();
+    const b = ident();
+    switch (i % 6) {
+      case 0:
+        return `export function ${a}${b[0].toUpperCase()}${b.slice(1)}${i}(input: ${a}Options, ctx: Context): Promise<${b}Result> {`;
+      case 1:
+        return `  const ${a} = await ctx.${b}.load(input.${a}Id, { retries: ${i % 5}, timeoutMs: ${1000 + (i % 40) * 50} });`;
+      case 2:
+        return `  if (!${a} || ${a}.version < ${i % 9}) throw new Error("stale ${a} for ${b}: " + String(input.${a}Id));`;
+      case 3:
+        return `  // TODO(${b}): handle ${a} eviction when the cache exceeds ${64 + (i % 8) * 16} entries`;
+      case 4:
+        return `  return { ${a}, ${b}: ${a}.items.map((x) => x.${b} ?? ${i}), done: true };`;
+      default:
+        return "}";
+    }
+  };
+  const mk = (path: string, changed: number, added: boolean) => {
+    const h: string[] = [`diff --git a/${path} b/${path}`];
+    if (added) h.push("new file mode 100644", "index 0000000..1111111", "--- /dev/null", `+++ b/${path}`);
+    else h.push("index 1111111..2222222 100644", `--- a/${path}`, `+++ b/${path}`);
+    let adds = 0;
+    let dels = 0;
+    if (added) {
+      h.push(`@@ -0,0 +1,${changed} @@`);
+      for (let i = 0; i < changed; i++) h.push(`+${codeLine(i)}`);
+      adds = changed;
+    } else {
+      let oldNo = 1;
+      let newNo = 1;
+      let left = changed;
+      while (left > 0) {
+        const block = Math.min(left, 20 + Math.floor(rnd() * 60));
+        const dn = Math.floor(block / 3);
+        const an = block - dn;
+        const ctx = 3;
+        h.push(`@@ -${oldNo},${ctx * 2 + dn} +${newNo},${ctx * 2 + an} @@ function ${ident()}()`);
+        for (let c = 0; c < ctx; c++) h.push(` ${codeLine(oldNo + c)}`);
+        for (let d = 0; d < dn; d++) h.push(`-${codeLine(oldNo + ctx + d)}`);
+        for (let a = 0; a < an; a++) h.push(`+${codeLine(newNo + ctx + a + 1)}`);
+        for (let c = 0; c < ctx; c++) h.push(` ${codeLine(oldNo + ctx + dn + c)}`);
+        oldNo += ctx * 2 + dn + 40;
+        newNo += ctx * 2 + an + 40;
+        adds += an;
+        dels += dn;
+        left -= block;
+      }
+    }
+    parts.push(`${h.join("\n")}\n`);
+    files.push({ path, status: added ? "added" : "modified", additions: adds, deletions: dels, lfs: false });
+  };
+  const dirs = ["engine", "gameplay", "ui", "net", "tools", "ai", "audio", "render"];
+  mk("src/engine/world_streaming.ts", 4800, true);
+  mk("src/gameplay/generated_level_table.ts", 3600, true);
+  mk("src/render/shader_cache_dump.ts", 3100, true);
+  for (let i = 0; i < 97; i++) {
+    const d = dirs[i % dirs.length];
+    mk(`src/${d}/module_${String(i).padStart(3, "0")}.ts`, 300 + Math.floor(rnd() * 600), i % 9 === 0);
+  }
+  const exts = ["png", "wav", "fbx", "uasset", "psd", "ogg", "mp4", "dds"];
+  for (let i = 0; i < 3400; i++) {
+    const ext = exts[i % exts.length];
+    const path = `Content/${["Art", "Audio", "Maps", "Props"][i % 4]}/Pack${String(Math.floor(i / 40)).padStart(2, "0")}/asset_${String(i).padStart(4, "0")}.${ext}`;
+    const lfs = i % 8 !== 0;
+    const status = i % 11 === 0 ? "added" : i % 17 === 0 ? "deleted" : "modified";
+    if (lfs) {
+      parts.push(
+        `diff --git a/${path} b/${path}\nindex 3f1a2b4..9c8d7e6 100644\n--- a/${path}\n+++ b/${path}\n@@ -1,3 +1,3 @@\n version https://git-lfs.github.com/spec/v1\n-oid sha256:${"a1b2c3d4".repeat(8)}\n-size ${100000 + i}\n+oid sha256:${"e5f6a7b8".repeat(8)}\n+size ${120000 + i}\n`,
+      );
+    } else {
+      parts.push(
+        `diff --git a/${path} b/${path}\nindex 3f1a2b4..9c8d7e6 100644\nBinary files a/${path} and b/${path} differ\n`,
+      );
+    }
+    files.push({ path, status, additions: 0, deletions: 0, lfs });
+  }
+  return { files, patch: parts.join(""), ahead: 3, uncommitted: 3500, truncated: false, lfs: null };
 }
 
 // ---------------------------------------------------------------- slash commands

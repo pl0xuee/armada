@@ -161,7 +161,7 @@ export function App() {
                 <VoiceAssistantPanel />
                 <VoiceSetupDialog />
                 <Announcer />
-                <WhenOpened open={(s) => s.reviewAgentId !== null}>
+                <WhenOpened open={(s) => s.reviewAgentId !== null} warm>
                   <ReviewSheet />
                 </WhenOpened>
                 <WhenOpened open={(s) => s.shareAgent !== null}>
@@ -197,15 +197,24 @@ export function App() {
 function WhenOpened({
   open,
   children,
+  warm = false,
 }: {
   open: (s: ReturnType<typeof useUi.getState>) => boolean;
   children: ReactNode;
+  /** Mount (closed) once the UI is idle, so the first open doesn't wait on Suspense's reveal throttle. */
+  warm?: boolean;
 }) {
   const isOpen = useUi(open);
   const [mounted, setMounted] = useState(isOpen);
   useEffect(() => {
     if (isOpen) setMounted(true);
   }, [isOpen]);
+  useEffect(() => {
+    if (!warm || mounted) return;
+    // A plain timer is enough: it only has to land before the user's first click.
+    const t = window.setTimeout(() => setMounted(true), 2500);
+    return () => clearTimeout(t);
+  }, [warm, mounted]);
   if (!mounted) return null;
   return <Suspense fallback={null}>{children}</Suspense>;
 }

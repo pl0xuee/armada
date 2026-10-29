@@ -4,6 +4,7 @@
 
 import type { ArmadaApi } from "./api";
 import { emitVoiceBus } from "./voiceBus";
+import { configDefaultsKey, isRememberableOption } from "./configMemory";
 import { isStressMode, STRESS_AGENTS, STRESS_TICK_MS, stressAgents, stressItems, stressWords } from "./mock-stress";
 import {
   commandsFor,
@@ -12,6 +13,7 @@ import {
   seedAccounts,
   seedAgents,
   seedDiff,
+  bigDiff,
   seedItems,
   seedProviders,
   seedSchedules,
@@ -83,6 +85,9 @@ function flushOutbox() {
 
 const params = typeof location !== "undefined" ? new URLSearchParams(location.search) : null;
 const platformParam = params?.get("platform");
+
+/** Remembered composer choices per provider identity (what the backend keeps in settings). */
+const configDefaultsDb: Record<string, Record<string, string>> = {};
 
 const db = {
   accounts: seedAccounts(),
@@ -969,6 +974,8 @@ export const mockApi: ArmadaApi = {
   },
 
   async createAgent(req) {
+    const helperOf = nextHelperParent;
+    nextHelperParent = null;
     const now = Date.now();
     const id = newId("a");
     const folder = req.projectPath.split("/").filter(Boolean).pop() ?? "";
@@ -1017,7 +1024,12 @@ export const mockApi: ArmadaApi = {
       queuePaused: false,
       acknowledgedAt: null,
       needsBriefing: false,
+      configChoices: {},
       permissionMode: req.permissionMode ?? db.settings.defaultPermissionMode,
+      parentId: helperOf?.id ?? null,
+      helperSync: helperOf
+        ? { state: "pendingToMain", lastSyncAt: null, detail: null, files: 0 }
+        : null,
     };
     db.agents.unshift(agent);
     db.items[id] = [];
@@ -1060,6 +1072,63 @@ export const mockApi: ArmadaApi = {
     if (a.queuePaused) patchAgent(agentId, { queuePaused: false });
     startPrompt(agentId, text, attachments ?? []);
     return delay(undefined, 40);
+  },
+
+  async spawnHelper(parentId, prompt, attachments) {
+    const parent = getAgent(parentId);
+    if (parent.parentId) throw new Error("Helpers can't start their own helpers.");
+    if (!parent.running) throw new Error("Agent is not running. Resume it first.");
+    const d = db.settings.helperDefaults;
+    const provider = d.provider ?? parent.provider;
+    nextHelperParent = parent;
+    const helper = await mockApi.createAgent({
+      title: null,
+      provider,
+      accountId: d.accountId ?? parent.accountId,
+      customAgentId: provider === "custom" ? (d.customAgentId ?? parent.customAgentId) : null,
+      projectPath: parent.projectPath,
+      prompt,
+      attachments: attachments ?? [],
+      worktree: true,
+      groupId: null,
+      model: d.model ?? null,
+    });
+    setTimeout(() => {
+      const cur = db.agents.find((a) => a.id === helper.id);
+      if (cur?.helperSync?.state === "pendingToMain")
+        patchAgent(helper.id, { helperSync: { state: "inSync", lastSyncAt: Date.now(), detail: null, files: 0 } });
+    }, 3500);
+    return helper;
+  },
+
+  async syncHelper(helperId) {
+    const h = getAgent(helperId);
+    if (!h.parentId || !h.helperSync) throw new Error("This agent isn't a helper.");
+    const wasConflict = h.helperSync.state === "conflict";
+    patchAgent(helperId, { helperSync: { ...h.helperSync, state: "merging", detail: null } });
+    setTimeout(() => {
+      const cur = db.agents.find((a) => a.id === helperId);
+      if (!cur?.helperSync) return;
+      // A conflict needs the main agent; anything else merges cleanly.
+      const conflict = wasConflict;
+      patchAgent(helperId, {
+        helperSync: conflict
+          ? { ...cur.helperSync, state: "conflict", detail: "Conflicting edits in docs/auth.md" }
+          : { state: "inSync", lastSyncAt: Date.now(), detail: null, files: cur.helperSync.files },
+      });
+    }, 1400);
+    return delay(clone(getAgent(helperId)), 60);
+  },
+
+  async askMainToMerge(helperId) {
+    const h = getAgent(helperId);
+    if (!h.parentId) throw new Error("This agent isn't a helper.");
+    const main = getAgent(h.parentId);
+    const text = `Please merge the changes from the helper “${h.title}”. It reported: ${h.helperSync?.detail ?? "a merge conflict"}.`;
+    await mockApi.sendPrompt(main.id, text);
+    patchAgent(helperId, {
+      helperSync: { ...(h.helperSync ?? { lastSyncAt: null, files: 0 }), state: "pendingToMain", detail: null },
+    });
   },
 
   async removeQueued(agentId, queuedId) {
@@ -1290,8 +1359,31 @@ export const mockApi: ArmadaApi = {
   async setAgentConfig(agentId, optionId, value) {
     const a = getAgent(agentId);
     const configOptions = a.configOptions.map((o) => (o.id === optionId ? { ...o, currentValue: value } : o));
-    patchAgent(agentId, { configOptions });
+    const opt = a.configOptions.find((o) => o.id === optionId);
+    const configChoices =
+      opt && isRememberableOption(opt) ? { ...a.configChoices, [optionId]: value } : a.configChoices;
+    patchAgent(agentId, { configOptions, configChoices });
+    if (opt && isRememberableOption(opt) && a.provider !== "local") {
+      const key = configDefaultsKey(a.provider, a.customAgentId);
+      configDefaultsDb[key] = { ...configDefaultsDb[key], [optionId]: value };
+    }
     return delay(undefined, 80);
+  },
+
+  async configDefaults() {
+    return delay(clone(configDefaultsDb), 30);
+  },
+
+  async clearConfigDefaults(key, clearAgents) {
+    if (key) delete configDefaultsDb[key];
+    else for (const k of Object.keys(configDefaultsDb)) delete configDefaultsDb[k];
+    if (clearAgents) {
+      for (const a of db.agents) {
+        if (key && configDefaultsKey(a.provider, a.customAgentId) !== key) continue;
+        if (Object.keys(a.configChoices ?? {}).length) patchAgent(a.id, { configChoices: {} });
+      }
+    }
+    return delay(clone(configDefaultsDb), 30);
   },
 
   async handoffAgent(agentId, provider, accountId, instruction, customAgentId) {
@@ -1326,6 +1418,16 @@ export const mockApi: ArmadaApi = {
     });
     patchAgent(agentId, { accountId, rateLimited: false, status: "idle", running: true });
     return clone(getAgent(agentId));
+  },
+
+  async diagnostics() {
+    await sleep(300);
+    return MOCK_DIAGNOSTICS;
+  },
+
+  async saveDiagnostics() {
+    await sleep(300);
+    return "~/Downloads/armada-diagnostics-20260101-120000.txt";
   },
 
   async exportAgent(agentId) {
@@ -1413,6 +1515,15 @@ export const mockApi: ArmadaApi = {
   },
 
   async getDiff(agentId) {
+    // ?diffdelay=4000 and ?differror=1 exercise the Review sheet's slow and failed loads.
+    const wait = Number(params?.get("diffdelay") ?? 0);
+    if (wait > 0) await sleep(wait);
+    if (params?.has("differror")) throw new Error("git diff failed: fatal: unable to read tree (mock)");
+    const big = params?.get("bigdiff");
+    if (big) {
+      const lfs = params?.get("lfs");
+      return delay(bigDiff(lfs === "ok" ? "ok" : lfs === "none" ? "none" : "missing"), 400);
+    }
     return delay(withoutReverted(seedDiff(itemsOf(agentId)), revertedPatches.get(agentId) ?? []), 400);
   },
 
@@ -1874,6 +1985,15 @@ export const mockApi: ArmadaApi = {
       }
     }, 200);
     return delay(t.id, 60);
+  },
+
+  async previewProxyStart(_agentId, target) {
+    // No Rust proxy in the browser mock: the page loads directly.
+    return delay({ url: target, token: "mock-preview-token", simulated: true }, 80);
+  },
+
+  async previewProxyStop() {
+    return delay(undefined, 10);
   },
 
   async probeLoopback(ports) {
@@ -2552,7 +2672,10 @@ const mockVoice = {
   timer: null as ReturnType<typeof setInterval> | null,
 };
 
+let nextHelperParent: Agent | null = null;
+
 function validateSettings(s: Settings): string | null {
+  if (!["ask", "queue", "helper"].includes(s.busySend)) return `Unknown busy-send setting “${s.busySend}”`;
   if (!["off", "ask", "auto"].includes(s.failover)) return `Unknown failover setting “${s.failover}”`;
   if (!["auto", "ask"].includes(s.defaultPermissionMode)) return `Unknown permission mode “${s.defaultPermissionMode}”`;
   if (!Number.isInteger(s.remote.port) || s.remote.port < 1 || s.remote.port > 65535) {
@@ -2573,3 +2696,26 @@ function validateSettings(s: Settings): string | null {
   }
   return null;
 }
+
+const MOCK_DIAGNOSTICS = `# Armada diagnostics
+
+(browser mock: this is a sample report)
+
+## System
+Armada 0.0.0-mock (debug, git unknown)
+OS: linux x86_64
+WebKitGTK: 2.44.0
+CPU threads: 8, RAM: 16.0 GB
+
+## Agents
+total: 3
+by provider: claude 2, codex 1
+
+## Settings
+{ "theme": "dark" }
+
+## Log (most recent lines)
+\`\`\`
+INFO armada: started
+\`\`\`
+`;
