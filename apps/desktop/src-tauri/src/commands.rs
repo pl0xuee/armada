@@ -1264,7 +1264,7 @@ pub async fn list_files(
 
 #[tauri::command]
 pub async fn remote_status(remote: State<'_, Arc<Remote>>) -> CmdResult<RemoteStatus> {
-    remote.refresh_lan().await;
+    remote.refresh().await;
     Ok(remote.status())
 }
 

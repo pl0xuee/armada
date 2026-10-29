@@ -1,18 +1,41 @@
-import { Eye, EyeOff, Link2, QrCode, RefreshCw, ShieldCheck, Smartphone, Trash2, Unplug } from "lucide-react";
+import {
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Link2,
+  QrCode,
+  RefreshCw,
+  ShieldAlert,
+  ShieldCheck,
+  Smartphone,
+  Trash2,
+  Unplug,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CopyButton } from "@/components/CopyButton";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Segmented } from "@/components/ui/segmented";
+import { Select, type SelectOption } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/misc";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useNow } from "@/hooks/useNow";
 import { api } from "@/lib/api";
+import { openExternal } from "@/lib/external";
 import { relativeTimeLong } from "@/lib/format";
-import type { RemoteDevice, RemoteSettings, RemoteStatus, Settings, ShareLink } from "@/lib/types";
+import type {
+  LanAddress,
+  RemoteDevice,
+  RemoteSettings,
+  RemoteStatus,
+  Settings,
+  ShareLink,
+  TailscaleStatus,
+} from "@/lib/types";
 import { cn, errorMessage } from "@/lib/utils";
 import { useShallow } from "zustand/react/shallow";
 import { useApp } from "@/store/app";
@@ -23,7 +46,41 @@ import { useCommitOnUnmount } from "./useCommitOnUnmount";
 import { SectionHeader, SettingGroup, SettingRow } from "./SettingRow";
 
 const SECURITY_COPY =
-  "Off by default. On your local network, traffic between your phone and this computer is not encrypted (plain HTTP): anyone on the same Wi-Fi could read or tamper with it. Use it at home or on networks you trust, and use Tailscale (or another VPN) to reach Armada from anywhere else. The pairing code in the QR works once and expires after 5 minutes; each paired device gets its own key you can revoke below. Share links are read-only, limited to one agent, and expire.";
+  "Off by default. Tailscale is the safest way in: traffic is encrypted and only your own devices can connect, at home or away, without opening anything on your network. On your local network (LAN), traffic is not encrypted (plain HTTP): anyone on the same Wi-Fi could read or tamper with it, so use it only on networks you trust. The pairing code in the QR works once and expires after 5 minutes; each paired device gets its own key you can revoke below. Share links are read-only, limited to one agent, and expire.";
+
+type Reach = "local" | "tailscale" | "lan";
+
+const REACH_HELP: Record<Reach, string> = {
+  local: "Only this computer can connect (localhost).",
+  tailscale: "Your devices on Tailscale, from anywhere. Encrypted; nothing is opened on your network.",
+  lan: "Phones and computers on this Wi-Fi. Not encrypted.",
+};
+
+const KIND_LABEL: Record<LanAddress["kind"], string> = {
+  lan: "Wi-Fi / Ethernet",
+  tailscale: "Tailscale",
+  vpn: "VPN",
+  virtual: "Virtual network",
+};
+
+const AUTO = "auto";
+
+/** "Automatic" plus each address; a saved pick this computer no longer has stays listed. */
+function networkOptions(addresses: LanAddress[], saved: string | null | undefined): SelectOption[] {
+  const best = addresses[0];
+  const options: SelectOption[] = [
+    {
+      value: AUTO,
+      label: "Automatic",
+      description: best ? `${KIND_LABEL[best.kind]} · ${best.ip}` : "Wi-Fi or Ethernet when connected",
+    },
+    ...addresses.map((a) => ({ value: a.ip, label: `${KIND_LABEL[a.kind]} · ${a.ip}`, description: a.interface })),
+  ];
+  if (saved && !addresses.some((a) => a.ip === saved)) {
+    options.push({ value: saved, label: saved, description: "Not connected right now", disabled: true });
+  }
+  return options;
+}
 
 function validPort(raw: string): number | null {
   if (!/^\d+$/.test(raw.trim())) return null;
@@ -102,6 +159,8 @@ export function RemoteSection({ settings }: { settings: Settings }) {
     setApplying(false);
   };
 
+  const reach: Reach = remote.tailscale ? "tailscale" : remote.lan ? "lan" : "local";
+
   const portBackendError = useFieldError("port");
   const parsedPort = validPort(port);
   const portError = parsedPort === null ? "Use a port between 1024 and 65535." : null;
@@ -155,21 +214,21 @@ export function RemoteSection({ settings }: { settings: Settings }) {
               onCheckedChange={(v) => void apply({ enabled: v })}
             />
           </SettingRow>
-          <SettingRow
-            title="Allow devices on my network (LAN)"
-            description={
-              remote.lan
-                ? "Reachable from phones and computers on this network."
-                : "Only this computer can connect (localhost)."
-            }
-            htmlFor="remote-lan"
-          >
-            <Switch
-              id="remote-lan"
-              checked={remote.lan}
-              disabled={applying}
-              // Opening the server to the network is a real exposure: confirm it.
-              onCheckedChange={(v) => (v ? setConfirmLan(true) : void apply({ lan: false }))}
+          <SettingRow title="Reachable from" description={REACH_HELP[reach]}>
+            <Segmented<Reach>
+              aria-label="Reachable from"
+              value={reach}
+              onChange={(v) => {
+                if (v === reach) return;
+                // Opening the server to the network is a real exposure: confirm it.
+                if (v === "lan") setConfirmLan(true);
+                else void apply({ lan: false, tailscale: v === "tailscale" });
+              }}
+              options={[
+                { value: "local", label: "This computer", disabled: applying },
+                { value: "tailscale", label: "Tailscale", disabled: applying },
+                { value: "lan", label: "Local network", disabled: applying },
+              ]}
             />
           </SettingRow>
           <SettingRow
@@ -202,6 +261,23 @@ export function RemoteSection({ settings }: { settings: Settings }) {
               <FieldError field="port" />
             </div>
           </SettingRow>
+          {remote.lan && status && (status.lanAddresses.length > 1 || remote.lanAddress) && (
+            <SettingRow
+              title="Network"
+              description={networkDescription(status, remote.lanAddress)}
+              htmlFor="remote-network"
+            >
+              <Select
+                id="remote-network"
+                aria-label="Network"
+                className="h-8 w-[240px]"
+                disabled={applying}
+                value={remote.lanAddress ?? AUTO}
+                onValueChange={(v) => void apply({ lanAddress: v === AUTO ? null : v })}
+                options={networkOptions(status.lanAddresses, remote.lanAddress)}
+              />
+            </SettingRow>
+          )}
         </SettingGroup>
 
         {loadError ? (
@@ -218,6 +294,10 @@ export function RemoteSection({ settings }: { settings: Settings }) {
         ) : (
           <>
             <StatusCard status={status} starting={starting} />
+            {status.running && status.tailscale && (
+              <TailscaleCard tailscale={status.tailscale} onRecheck={() => void refresh()} />
+            )}
+            {status.running && status.firewall && <FirewallCard firewall={status.firewall} />}
             {status.running && status.pairingUrl && (
               <PairingCard
                 status={status}
@@ -245,14 +325,14 @@ export function RemoteSection({ settings }: { settings: Settings }) {
         description={
           <>
             Anyone on this network who scans the pairing code while it's shown can control your agents, and traffic on
-            the local network isn't encrypted. Use it on networks you trust (home, or a VPN such as Tailscale), not on
-            public Wi-Fi. Armada refuses to listen on a public address.
+            the local network isn't encrypted. Use it on networks you trust, not on public Wi-Fi; Tailscale is the safer
+            choice. Armada refuses to listen on a public address.
           </>
         }
         confirmLabel="Allow network access"
         onConfirm={() => {
           setConfirmLan(false);
-          void apply({ lan: true });
+          void apply({ lan: true, tailscale: false });
         }}
       />
 
@@ -267,6 +347,41 @@ export function RemoteSection({ settings }: { settings: Settings }) {
         onConfirm={unpair}
       />
     </>
+  );
+}
+
+/** The address in use, warning when phones on the Wi-Fi can't reach it. */
+function networkDescription(status: RemoteStatus, saved: string | null | undefined): string {
+  const host = status.url ? new URL(status.url).hostname : null;
+  const current = status.lanAddresses.find((a) => a.ip === host);
+  if (current && (current.kind === "vpn" || current.kind === "virtual")) {
+    return "Phones on your Wi-Fi can't reach this address. Pick Wi-Fi / Ethernet, or connect the phone to the same VPN.";
+  }
+  if (saved && !status.lanAddresses.some((a) => a.ip === saved)) {
+    return "The address you picked isn't connected, so Armada is using the best one available.";
+  }
+  return "Which of this computer's addresses phones on your network connect to.";
+}
+
+/** Linux firewalls drop the phone's connections silently: Safari just shows a blank page. */
+function FirewallCard({ firewall }: { firewall: NonNullable<RemoteStatus["firewall"]> }) {
+  return (
+    <div role="note" className="flex gap-3 rounded-xl border border-warn/30 bg-warn/[0.06] px-4 py-3">
+      <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-medium">This computer's firewall may block your phone</div>
+        <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted">
+          {firewall.name} is on and doesn't allow Armada's port, so a phone that scans the code waits on a blank page.
+          Allow devices on your network by running this in a terminal:
+        </p>
+        <div className="mt-2 flex items-center gap-2">
+          <code className="selectable min-w-0 flex-1 truncate rounded-lg border border-line bg-base/60 px-2.5 py-1.5 font-mono text-[12px] text-fg/90">
+            {firewall.command}
+          </code>
+          <CopyButton text={firewall.command} />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -311,9 +426,80 @@ function StatusCard({ status, starting }: { status: RemoteStatus; starting: bool
         {status.running ? "Running" : "Starting…"}
       </span>
       {status.url && <span className="selectable min-w-0 truncate font-mono text-[12px] text-fg/90">{status.url}</span>}
-      <span className="ml-auto text-[12px] text-steel">{status.lan ? "LAN" : "This computer only"}</span>
+      <span className="ml-auto text-[12px] text-steel">
+        {status.lan || status.tailscale?.state === "on" ? lanLabel(status) : "This computer only"}
+      </span>
     </div>
   );
+}
+
+/** Setup steps until Tailscale Serve is sharing Armada, then what the phone needs. */
+function TailscaleCard({ tailscale, onRecheck }: { tailscale: TailscaleStatus; onRecheck: () => void }) {
+  if (tailscale.state === "on") {
+    return (
+      <div className="flex gap-3 rounded-xl border border-line bg-card/60 px-4 py-3 edge">
+        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-ok" />
+        <p className="text-[12.5px] leading-relaxed text-muted">
+          Shared over Tailscale with HTTPS. Your phone needs the Tailscale app, signed in to the same account; then scan
+          the pairing code below.
+        </p>
+      </div>
+    );
+  }
+  if (tailscale.state === "checking") {
+    return (
+      <div role="status" className="flex items-center gap-2.5 rounded-xl border border-line bg-card/60 px-4 py-3 edge">
+        <Spinner className="h-3.5 w-3.5 text-steel" />
+        <span className="text-[12.5px] text-muted">Setting up Tailscale…</span>
+      </div>
+    );
+  }
+  const title =
+    tailscale.state === "notInstalled"
+      ? "Install Tailscale"
+      : tailscale.state === "notConnected"
+        ? "Connect Tailscale on this computer"
+        : tailscale.state === "needsOperator"
+          ? "Let Armada use Tailscale Serve"
+          : tailscale.state === "needsHttps"
+            ? "Turn on HTTPS for your tailnet"
+            : "Tailscale couldn't share Armada";
+  return (
+    <div role="note" className="flex gap-3 rounded-xl border border-warn/30 bg-warn/[0.06] px-4 py-3">
+      <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-medium">{title}</div>
+        {tailscale.message && (
+          <p className="selectable mt-0.5 text-[12.5px] leading-relaxed text-muted">{tailscale.message}</p>
+        )}
+        {tailscale.command && (
+          <div className="mt-2 flex items-center gap-2">
+            <code className="selectable min-w-0 flex-1 truncate rounded-lg border border-line bg-base/60 px-2.5 py-1.5 font-mono text-[12px] text-fg/90">
+              {tailscale.command}
+            </code>
+            <CopyButton text={tailscale.command} />
+          </div>
+        )}
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          {tailscale.link && (
+            <Button size="sm" variant="secondary" onClick={() => void openExternal(tailscale.link as string)}>
+              <ExternalLink /> {tailscale.state === "notInstalled" ? "Download Tailscale" : "Open"}
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={onRecheck}>
+            <RefreshCw /> Check again
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function lanLabel(status: RemoteStatus): string {
+  if (status.tailscale?.state === "on") return "Tailscale";
+  const host = status.url ? new URL(status.url).hostname : null;
+  const current = status.lanAddresses.find((a) => a.ip === host);
+  return current ? `${KIND_LABEL[current.kind]} (${current.interface})` : "LAN";
 }
 
 function PairingCard({
