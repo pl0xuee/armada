@@ -321,7 +321,7 @@ fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()>
                 if EXIT_STATE.load(Ordering::SeqCst) != RUNNING {
                     break;
                 }
-                remote.refresh_lan().await;
+                remote.refresh().await;
             }
         });
     }

@@ -87,11 +87,11 @@ Optional and off by default. Press Ctrl/Cmd+Shift+A and just talk: ask what your
 
 ### Phone companion
 
-Pair your phone with a QR code and run the fleet from it while it is on the same network as your computer: start agents in any project, send prompts with photos, approve or deny requests, switch mode, model and account, stop, resume or remove agents, manage queued messages, review diffs and Commit & merge, and follow sub-agents and turn summaries live. **Read-only share links** let a teammate follow one agent live.
+Pair your phone with a QR code and run the fleet from it, from anywhere over Tailscale or on the same Wi-Fi as your computer: start agents in any project, send prompts with photos, approve or deny requests, switch mode, model and account, stop, resume or remove agents, manage queued messages, review diffs and Commit & merge, and follow sub-agents and turn summaries live. **Read-only share links** let a teammate follow one agent live.
 
 <img width="100%" src="docs/screenshots/phone-companion.png" alt="Three phone screens of the companion app: the agent list with pending approvals, an agent working with a sub-agent and queued messages, and a finished agent with a Done summary" />
 
-> **Remote-control safety.** For access from anywhere, use a private network such as Tailscale. Don't expose the port to the internet.
+> **Remote-control safety.** Choose **Tailscale** in Settings → Remote & mobile: Armada stays on this computer only and Tailscale Serve shares it with your own devices over HTTPS, with nothing opened on your network. Local network access is plain HTTP, for networks you trust. Don't expose the port to the internet.
 
 ### Automation
 

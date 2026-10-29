@@ -79,7 +79,7 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
     try {
       await useApp
         .getState()
-        .setSettings({ ...settings, remote: { ...settings.remote, enabled: true, lan: scope === "lan" } });
+        .setSettings({ ...settings, remote: { ...settings.remote, enabled: true, lan: scope === "lan", tailscale: false } });
       // The server starts asynchronously: wait for it so we don't flash an error or a stale "off".
       await pollRemoteStatus((st) => setStatus(st));
       setLoadError(null);

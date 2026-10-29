@@ -509,6 +509,19 @@ export interface RemoteSettings {
   enabled: boolean;
   lan: boolean;
   port: number;
+  /** Reach Armada over Tailscale (Tailscale Serve, HTTPS); never together with `lan`. */
+  tailscale?: boolean;
+  /** The address LAN access listens on; null picks automatically (Wi-Fi/Ethernet first). */
+  lanAddress?: string | null;
+}
+
+/** One of this computer's network addresses LAN access can listen on. */
+export interface LanAddress {
+  ip: string;
+  /** Interface name (eno1, Wi-Fi, tailscale0, …). */
+  interface: string;
+  kind: "lan" | "tailscale" | "vpn" | "virtual";
+  prefixLen: number;
 }
 
 export interface ShareLink {
@@ -547,6 +560,22 @@ export interface RemoteStatus {
   error: string | null;
   shares: ShareLink[];
   devices: RemoteDevice[];
+  /** Addresses LAN access can listen on, best first (empty while LAN access is off). */
+  lanAddresses: LanAddress[];
+  /** Linux: a firewall blocking the LAN server, and the command that opens it. */
+  firewall: { name: string; command: string } | null;
+  /** Tailscale Serve, while remote access over Tailscale is on. */
+  tailscale: TailscaleStatus | null;
+}
+
+export interface TailscaleStatus {
+  state: "checking" | "notInstalled" | "notConnected" | "needsOperator" | "needsHttps" | "on" | "error";
+  /** https://machine.tailnet.ts.net:port while on. */
+  url: string | null;
+  /** What the user has to fix, with a command and/or a page that fixes it. */
+  message: string | null;
+  command: string | null;
+  link: string | null;
 }
 
 /** `body` may contain {{placeholders}}. */

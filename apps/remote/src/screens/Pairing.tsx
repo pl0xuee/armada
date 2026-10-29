@@ -342,7 +342,7 @@ export function Blocked() {
           {[
             "Armada is open and your computer is awake",
             "Remote access is on in Settings → Remote",
-            "Your phone is on the same network as your computer",
+            "Your phone is on the same Wi-Fi as your computer, or connected to Tailscale",
           ].map((t) => (
             <li key={t} className="flex items-start gap-2.5">
               <Icon

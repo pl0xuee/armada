@@ -35,6 +35,8 @@ import type {
   AppState,
   ArmadaEvent,
   Attachment,
+  LanAddress,
+  TailscaleStatus,
   LocalKind,
   LocalModel,
   LocalProbe,
@@ -2465,9 +2467,67 @@ const remote = {
   }[],
 };
 
+/** A laptop on home Wi-Fi with Tailscale and a full-tunnel VPN connected. */
+const MOCK_LAN_ADDRESSES: LanAddress[] = [
+  { ip: "192.168.1.42", interface: "wlan0", kind: "lan", prefixLen: 24 },
+  { ip: "100.101.12.7", interface: "tailscale0", kind: "tailscale", prefixLen: 32 },
+  { ip: "10.2.0.2", interface: "proton0", kind: "vpn", prefixLen: 32 },
+];
+
+function lanIp(): string {
+  const want = db.settings.remote.lanAddress;
+  return MOCK_LAN_ADDRESSES.find((a) => a.ip === want)?.ip ?? MOCK_LAN_ADDRESSES[0].ip;
+}
+
+/** `?tailscale=needsOperator` (or any other state) previews Tailscale setup problems. */
+function mockTailscale(): TailscaleStatus | null {
+  const r = db.settings.remote;
+  if (!r.enabled || !r.tailscale) return null;
+  const state = (params?.get("tailscale") ?? "on") as TailscaleStatus["state"];
+  const none = { url: null, message: null, command: null, link: null };
+  switch (state) {
+    case "on":
+      return { ...none, state, url: `https://armada-pc.tail1234.ts.net:${r.port}` };
+    case "notInstalled":
+      return {
+        ...none,
+        state,
+        message: "Install Tailscale on this computer and on your phone, and sign both in to the same account.",
+        link: "https://tailscale.com/download",
+      };
+    case "notConnected":
+      return {
+        ...none,
+        state,
+        message:
+          "Tailscale is installed but not connected on this computer. Start it and sign in (the --operator part lets Armada manage Serve without sudo):",
+        command: "sudo systemctl enable --now tailscaled && sudo tailscale up --operator=$USER",
+      };
+    case "needsOperator":
+      return {
+        ...none,
+        state,
+        message: "Tailscale only lets its operator change Serve. Allow your user once, then check again:",
+        command: "sudo tailscale set --operator=$USER",
+      };
+    case "needsHttps":
+      return {
+        ...none,
+        state,
+        message:
+          "Turn on MagicDNS and HTTPS Certificates on the DNS page of the Tailscale admin console (Tailscale Serve needs them), then check again.",
+        link: "https://login.tailscale.com/admin/dns",
+      };
+    default:
+      return { ...none, state };
+  }
+}
+
 function baseUrl(): string {
   const r = db.settings.remote;
-  return `http://${r.lan ? "192.168.1.42" : "127.0.0.1"}:${r.port}`;
+  const ts = mockTailscale();
+  if (ts?.url) return ts.url;
+  return `http://${r.lan ? lanIp() : "127.0.0.1"}:${r.port}`;
 }
 
 /** Deterministic QR-looking SVG (placeholder; the backend returns a real QR code). */
@@ -2495,7 +2555,9 @@ function remoteStatus() {
   const r = db.settings.remote;
   const running = r.enabled && remote.error === null;
   const url = running ? baseUrl() : null;
-  const pairingUrl = running ? `${url}/#pair=${remote.pairCode}` : null;
+  const tailscale = mockTailscale();
+  const reachable = !tailscale || tailscale.state === "on";
+  const pairingUrl = running && reachable ? `${url}/#pair=${remote.pairCode}` : null;
   return clone({
     enabled: r.enabled,
     running,
@@ -2508,6 +2570,12 @@ function remoteStatus() {
     error: r.enabled ? remote.error : null,
     shares: remote.shares,
     devices: remote.devices,
+    lanAddresses: r.lan ? MOCK_LAN_ADDRESSES : [],
+    firewall:
+      running && r.lan && lanIp().startsWith("192.168.")
+        ? { name: "ufw", command: `sudo ufw allow from 192.168.1.0/24 to any port ${r.port} proto tcp` }
+        : null,
+    tailscale,
   });
 }
 
