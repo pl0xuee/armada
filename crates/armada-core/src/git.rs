@@ -360,6 +360,24 @@ fn slugify(s: &str) -> String {
     out.trim_matches('-').to_string()
 }
 
+/// A private, empty directory to point `core.hooksPath` at for automatic git operations
+/// (works the same on every OS, unlike `/dev/null`). Any stray file in it is removed.
+/// Only `create_worktree` runs hook-free: removal, branch and prune commands don't
+/// invoke hooks, and user-triggered flows (commit, merge, push) keep the user's hooks.
+fn empty_hooks_dir(data_dir: &Path) -> anyhow::Result<PathBuf> {
+    let dir = data_dir.join("empty-hooks");
+    std::fs::create_dir_all(&dir)?;
+    for entry in std::fs::read_dir(&dir)?.flatten() {
+        let p = entry.path();
+        let _ = if p.is_dir() {
+            std::fs::remove_dir_all(&p)
+        } else {
+            std::fs::remove_file(&p)
+        };
+    }
+    Ok(dir)
+}
+
 /// Creates `<data>/worktrees/<repo>-<id8>` on a new branch `armada/<slug>-<id8>`.
 /// Returns the directory matching `project_path` inside the new worktree.
 pub async fn create_worktree(
@@ -386,12 +404,17 @@ pub async fn create_worktree(
         .join(format!("{}-{short}", slugify(&repo_name)));
     std::fs::create_dir_all(root.parent().unwrap_or(data_dir))?;
     let root_str = root.to_string_lossy().into_owned();
+    // Checkout would run the repo's (or the user's) post-checkout hook; an automatic
+    // worktree must not. Filters (LFS) stay enabled.
+    let hooks_arg = format!("core.hooksPath={}", empty_hooks_dir(data_dir)?.display());
     git_with_timeout(
         &repo.toplevel,
         &[
             // Deep node_modules/target paths exceed MAX_PATH on Windows otherwise.
             "-c",
             "core.longpaths=true",
+            "-c",
+            &hooks_arg,
             "worktree",
             "add",
             "-b",
@@ -684,6 +707,38 @@ mod tests {
             "git {args:?}: {}",
             String::from_utf8_lossy(&out.stderr)
         );
+    }
+
+    #[tokio::test]
+    async fn worktree_creation_skips_post_checkout_hook() {
+        let base =
+            std::env::temp_dir().join(format!("armada-git-{}", uuid::Uuid::new_v4().simple()));
+        let repo_dir = base.join("repo");
+        std::fs::create_dir_all(&repo_dir).unwrap();
+        sh_git(&repo_dir, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo_dir.join("a.txt"), "a").unwrap();
+        sh_git(&repo_dir, &["add", "."]);
+        sh_git(&repo_dir, &["commit", "-q", "-m", "a"]);
+        let marker = base.join("hook-ran");
+        let hook = repo_dir.join(".git/hooks/post-checkout");
+        std::fs::write(
+            &hook,
+            format!("#!/bin/sh\ntouch '{}'\n", marker.to_string_lossy()),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let repo = repo_info(&repo_dir).await.unwrap();
+        let data = base.join("data");
+        let wt = create_worktree(&repo_dir, &repo, &data, "abcdef0123456789", "hooky")
+            .await
+            .unwrap();
+        assert!(wt.cwd.join("a.txt").is_file());
+        assert!(!marker.exists(), "post-checkout hook ran");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[tokio::test]

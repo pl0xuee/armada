@@ -1,15 +1,13 @@
 import {
+  Check,
   CircleCheckBig,
-  Coins,
   FileCode2,
   GitCommitHorizontal,
   GitCompare,
   GitMerge,
   GitPullRequest,
   MessageSquarePlus,
-  SquareTerminal,
   Undo2,
-  Wrench,
 } from "lucide-react";
 import { memo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -124,90 +122,83 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
     }
   };
 
+  const metrics = `${pluralize(item.toolCalls, "tool call")} · ${pluralize(item.commands, "command")} · ${formatCost(item.costUsd)} · ${formatTokens(item.tokens)} tokens`;
   return (
-    <section
-      aria-label="Turn finished"
-      className="overflow-hidden rounded-2xl border border-ok/25 bg-gradient-to-b from-ok/[0.06] to-card edge"
-    >
-      <header className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 pb-2.5 pt-3">
-        <span className="flex items-center gap-2 text-[13px] font-semibold text-fg">
+    <section aria-label="Turn finished" className="border-t border-line/60 pt-3">
+      <header className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <Tooltip content={metrics}>
           <span
-            className="flex h-6 w-6 items-center justify-center rounded-full border border-ok/40 bg-ok/15 text-ok"
-            style={fresh ? { animation: "var(--animate-done-pop), var(--animate-done-glow)" } : undefined}
+            tabIndex={0}
+            aria-label={`Turn finished. ${metrics}`}
+            className="flex items-center gap-2 rounded-md text-[13px] font-medium text-fg/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
           >
-            <CircleCheckBig className="h-3.5 w-3.5" />
+            <span
+              className="flex h-5 w-5 items-center justify-center rounded-full bg-ok/15 text-ok"
+              style={fresh ? { animation: "var(--animate-done-pop), var(--animate-done-glow)" } : undefined}
+            >
+              <Check className="h-3 w-3" strokeWidth={3} />
+            </span>
+            {shipped
+              ? "Merged locally"
+              : shipState?.kind === "not_merged"
+                ? "Committed, not merged"
+                : !shipState
+                  ? `Done in ${formatDuration(item.durationMs)}`
+                  : "Done"}
+            {hasFiles && !shipped && (
+              <span className="font-normal text-steel">· {pluralize(item.files.length, "file")} changed</span>
+            )}
           </span>
-          {shipped
-            ? "Merged locally ✓"
-            : shipState?.kind === "not_merged"
-              ? "Committed, not merged"
-              : hasFiles
-                ? "Done · ready to review"
-                : "Done"}
-          {!shipped && !shipState && (
-            <span className="tabular text-[12px] font-normal text-ok/90">· {formatDuration(item.durationMs)}</span>
-          )}
-        </span>
+        </Tooltip>
         {stale && !shipped && (
           <span className="rounded-md border border-line-strong px-1.5 text-[10.5px] font-medium text-muted">
             Earlier turn
           </span>
         )}
-        <dl className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[11.5px] text-muted">
-          <Stat icon={<Wrench />} label="Tool calls" value={String(item.toolCalls)} />
-          <Stat icon={<SquareTerminal />} label="Commands" value={String(item.commands)} />
-          <Stat icon={<Coins />} label="Cost" value={formatCost(item.costUsd)} />
-          <Stat label="Tokens" value={formatTokens(item.tokens)} suffix="tokens" />
-        </dl>
       </header>
 
       {hasFiles && (
-        <div className="px-4 pb-3">
-          <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-steel">
-            {pluralize(item.files.length, "file")} changed
-          </div>
-          <ul className="flex flex-wrap gap-1.5" aria-label="Files changed">
-            {item.files.map((f) => (
-              <li key={f} className="inline-flex items-center overflow-hidden rounded-md border border-line bg-base/50">
-                <Tooltip content={`Open diff · ${f}`}>
+        <ul className="mt-2.5 flex flex-wrap gap-1.5" aria-label="Files changed">
+          {item.files.map((f) => (
+            <li key={f} className="inline-flex items-center overflow-hidden rounded-md border border-line bg-card/40">
+              <Tooltip content={`Open diff · ${f}`}>
+                <button
+                  type="button"
+                  onClick={() => setReviewAgent(agent.id, f)}
+                  className="inline-flex h-6 max-w-[240px] items-center gap-1.5 px-2 font-mono text-[11.5px] text-fg/85 transition-colors hover:bg-raised hover:text-fg"
+                >
+                  <FileCode2 className="h-3 w-3 shrink-0 text-steel" />
+                  <span className="truncate">{basename(f)}</span>
+                </button>
+              </Tooltip>
+              {!shipped && (
+                <Tooltip content={`Revert changes to ${basename(f)}…`}>
                   <button
                     type="button"
-                    onClick={() => setReviewAgent(agent.id, f)}
-                    className="inline-flex h-6 max-w-[260px] items-center gap-1.5 px-2 font-mono text-[11.5px] text-fg/90 transition-colors hover:bg-raised hover:text-fg"
+                    onClick={() => setRevertFile(f)}
+                    disabled={agentBusy}
+                    title={busyReason ?? undefined}
+                    aria-label={`Revert changes to ${f}`}
+                    className="flex h-6 w-6 items-center justify-center border-l border-line text-steel transition-colors hover:bg-err/12 hover:text-err disabled:opacity-40"
                   >
-                    <FileCode2 className="h-3 w-3 shrink-0 text-steel" />
-                    <span className="truncate">{basename(f)}</span>
+                    <Undo2 className="h-3 w-3" />
                   </button>
                 </Tooltip>
-                {!shipped && (
-                  <Tooltip content={`Revert changes to ${basename(f)}…`}>
-                    <button
-                      type="button"
-                      onClick={() => setRevertFile(f)}
-                      disabled={agentBusy}
-                      title={busyReason ?? undefined}
-                      aria-label={`Revert changes to ${f}`}
-                      className="flex h-6 w-6 items-center justify-center border-l border-line text-steel transition-colors hover:bg-err/12 hover:text-err disabled:opacity-40"
-                    >
-                      <Undo2 className="h-3 w-3" />
-                    </button>
-                  </Tooltip>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
 
       {shipState?.kind === "shipped" && (
-        <div className="border-t border-ok/25 bg-ok/[0.05] px-4 py-2">
+        <div className="mt-2.5">
           <PushBaseNotice agentId={agent.id} initial={shipState.baseStatus} />
         </div>
       )}
       {shipState?.kind === "not_merged" && (
         <div
           role="status"
-          className="flex flex-wrap items-center gap-2 border-t border-warn/25 bg-warn/[0.07] px-4 py-2 text-[12px]"
+          className="mt-2.5 flex flex-wrap items-center gap-2 rounded-xl border border-warn/25 bg-warn/[0.07] px-3 py-2 text-[12px]"
         >
           <span className="min-w-0 flex-1 break-words text-muted">{shipState.error}</span>
           {shipState.conflict && (
@@ -225,7 +216,7 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
           )}
         </div>
       )}
-      <footer className="flex flex-wrap items-center gap-1.5 border-t border-line bg-base/30 px-3 py-2.5">
+      <footer className="mt-3 flex flex-wrap items-center gap-1.5">
         {hasFiles && (
           <Button size="sm" variant="primary" onClick={() => setReviewAgent(agent.id)}>
             <GitCompare /> Review diff
@@ -330,19 +321,6 @@ function RevertFileDialog({ agent, path, onClose }: { agent: Agent; path: string
         </p>
       )}
     </ConfirmDialog>
-  );
-}
-
-function Stat({ icon, label, value, suffix }: { icon?: ReactNode; label: string; value: string; suffix?: string }) {
-  return (
-    <div className="flex items-center gap-1 [&_svg]:h-3.5 [&_svg]:w-3.5 [&_svg]:text-steel">
-      {icon}
-      <dt className="sr-only">{label}</dt>
-      <dd className="tabular text-fg/90">
-        {value}
-        {suffix && <span className="ml-1 text-steel">{suffix}</span>}
-      </dd>
-    </div>
   );
 }
 

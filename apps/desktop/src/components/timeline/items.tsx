@@ -28,6 +28,7 @@ import { memo, useEffect, useMemo, useRef, useState, type ComponentType } from "
 import { respondPermission } from "@/lib/actions";
 import { api } from "@/lib/api";
 import { PREVIEW_LINK_HINT, splitLoopbackUrls } from "@/lib/external";
+import { pluralize } from "@/lib/format";
 import type { Agent, Attachment, PermissionOption, TimelineItem, ToolKind } from "@/lib/types";
 import { cn, errorMessage } from "@/lib/utils";
 import { toast } from "sonner";
@@ -62,17 +63,17 @@ type Item<K extends TimelineItem["kind"]> = Extract<TimelineItem, { kind: K }>;
 
 export const UserBubble = memo(function UserBubble({ item }: { item: Item<"user_message"> }) {
   return (
-    <div className="group flex justify-end pl-6 @lg:pl-12">
-      <div className="relative max-w-[min(680px,88%)]">
+    <div className="group flex justify-end">
+      <div className="relative max-w-[80%]">
         {item.attachments && item.attachments.length > 0 && (
           <AttachmentStrip attachments={item.attachments} size={88} className="mb-1.5 justify-end" />
         )}
         {item.text && (
-          <div className="selectable whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-line-strong bg-gradient-to-b from-gunmetal/90 to-gunmetal/60 px-3.5 py-2.5 text-[13.5px] leading-relaxed text-fg shadow-[0_6px_20px_-12px_rgba(0,0,0,0.6)] edge">
+          <div className="selectable whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-line/70 bg-raised/60 px-3.5 py-2 text-[14.5px] leading-[1.55] text-fg">
             {item.text}
           </div>
         )}
-        <div className="mt-1 flex justify-end gap-1 text-[10.5px] text-steel opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+        <div className="absolute right-0 top-full z-[1] flex gap-1 pt-0.5 text-[10.5px] text-steel opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
           {item.text && <CopyButton text={item.text} className="h-5" />}
           <RestoreAction item={item} />
           <RelTime ts={item.ts} long className="self-center" />
@@ -84,33 +85,43 @@ export const UserBubble = memo(function UserBubble({ item }: { item: Item<"user_
 
 // ---------------------------------------------------------------- agent message
 
+/** Start of an agent turn: avatar and name; the time shows on hover. Rendered once per turn. */
+export const TurnHeader = memo(function TurnHeader({ agent, ts }: { agent: Agent; ts: number }) {
+  const identity = useIdentity(agent.provider, agent.customAgentId);
+  return (
+    <div className="group/turn mb-2 flex h-6 items-center gap-2">
+      <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="xs" />
+      <span className="text-[12.5px] font-semibold text-fg/90">{identity.short}</span>
+      <RelTime
+        ts={ts}
+        long
+        className="text-[11px] text-steel opacity-0 transition-opacity group-hover/turn:opacity-100 [.group:hover_&]:opacity-100"
+      />
+    </div>
+  );
+});
+
 export const AgentMessage = memo(function AgentMessage({
   item,
   agent,
-  showHeader,
+  interim = false,
   streaming,
 }: {
   item: Item<"agent_message">;
   agent: Agent;
-  showHeader: boolean;
+  /** Narration between tool calls (not the answer that closes the turn): softer color, same size. */
+  interim?: boolean;
   streaming: boolean;
 }) {
-  const identity = useIdentity(agent.provider, agent.customAgentId);
   return (
-    <div className="group">
-      {showHeader && (
-        <div className="mb-1.5 flex items-center gap-2">
-          <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="xs" />
-          <span className="text-[12px] font-medium text-muted">{identity.short}</span>
-          <RelTime ts={item.ts} long className="text-[10.5px] text-steel" />
-        </div>
-      )}
+    <div className="group relative">
       {item.text ? (
         <Markdown
           text={item.text}
           streaming={streaming}
           agentId={agent.id}
           runAgentId={agent.cwd ? agent.id : undefined}
+          className={cn("prose-chat", interim && "prose-interim")}
         />
       ) : !streaming ? (
         <p className="text-[12.5px] italic text-steel">No reply (the turn ended before any text).</p>
@@ -126,7 +137,8 @@ export const AgentMessage = memo(function AgentMessage({
         </div>
       )}
       {!streaming && item.text && (
-        <div className="mt-1 flex opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+        // Overlaid in the row's bottom padding, so showing it never changes the row's height.
+        <div className="absolute -bottom-1 left-0 z-[1] flex opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
           <CopyButton text={item.text} className="-ml-1.5" label="Copy message" />
         </div>
       )}
@@ -206,7 +218,7 @@ function ToolStatusIcon({ status, stalled }: { status: Item<"tool_call">["status
   if (stalled) return <CirclePause className="h-3.5 w-3.5 text-violet" aria-label="Paused" />;
   if (status === "in_progress" || status === "pending") return <Spinner className="h-3.5 w-3.5" />;
   if (status === "failed") return <CircleX className="h-3.5 w-3.5 text-err" aria-label="Failed" />;
-  return <CircleCheck className="h-3.5 w-3.5 text-ok/80" aria-label="Completed" />;
+  return <CircleCheck className="h-3.5 w-3.5 text-ok/60" aria-label="Completed" />;
 }
 
 /** Only the tail of very long output is rendered (and processed). */
@@ -253,25 +265,41 @@ const LinkifiedText = memo(function LinkifiedText({ text }: { text: string }) {
   );
 });
 
+/** Lines shown in the compact tail of a command's output. */
+const TAIL_LINES = 6;
+/** Visual height budget of the compact tail: padding + a command line + TAIL_LINES lines (12px * 1.6). */
+const TAIL_MAX_HEIGHT = 20 + 24 + TAIL_LINES * 19.2;
+
 export function TerminalOutput({
   command,
   output,
   live,
   maxHeight = 300,
+  compact = false,
 }: {
   command: string | null;
   output: string;
   live?: boolean;
   maxHeight?: number;
+  /** Chat mode: only the last few (wrapped) lines, with "Show all N lines". */
+  compact?: boolean;
 }) {
   const ref = useRef<HTMLPreElement>(null);
   // Follow new output only while the user hasn't scrolled up inside this box.
   const stick = useRef(true);
+  const [all, setAll] = useState(false);
   const { text, hidden } = useMemo(() => cleanTerminalOutput(output), [output]);
+  const lines = useMemo(() => (compact ? text.replace(/\n+$/, "").split("\n") : []), [compact, text]);
+  const tail = compact && !all && lines.length > TAIL_LINES;
+  // Footer space is reserved from the start for a running command (and kept afterwards), so the box
+  // never changes height when the output first outgrows the tail.
+  const footer = useRef(false);
+  if (compact && (live || lines.length > TAIL_LINES)) footer.current = true;
   useEffect(() => {
     const el = ref.current;
-    if (el && live && stick.current) el.scrollTop = el.scrollHeight;
-  }, [text, live]);
+    if (el && (live || tail) && stick.current) el.scrollTop = el.scrollHeight;
+  }, [text, live, all, tail]);
+  const shown = tail ? lines.slice(-TAIL_LINES).join("\n") : text;
   return (
     <div className="group/term relative bg-code">
       {(command || text) && (
@@ -285,8 +313,13 @@ export function TerminalOutput({
           const el = e.currentTarget;
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
         }}
-        className="selectable overflow-auto px-3.5 py-2.5 font-mono text-[12px] leading-[1.6] text-fg/85"
-        style={{ maxHeight }}
+        className={cn(
+          "selectable px-3.5 py-2.5 font-mono text-[12px] leading-[1.6] text-fg/85",
+          compact ? "overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]" : "overflow-auto",
+          tail && "overflow-hidden [mask-image:linear-gradient(to_bottom,transparent,#000_1.6rem)]",
+        )}
+        // Compact tail: a fixed visual-line budget, so wrapped lines can't make the box (and the chat) jump.
+        style={{ maxHeight: compact && !all ? TAIL_MAX_HEIGHT : maxHeight }}
       >
         {command && (
           <div className="mb-1 text-fg">
@@ -297,12 +330,32 @@ export function TerminalOutput({
         {hidden > 0 && (
           <div className="mb-1 select-none text-steel">… {hidden.toLocaleString()} earlier characters not shown</div>
         )}
-        <LinkifiedText text={text} />
+        <LinkifiedText text={shown} />
         {live && <span className="caret" />}
         {!text && !live && !command && <span className="text-steel">No output</span>}
       </pre>
+      {compact && footer.current &&
+        (lines.length > TAIL_LINES ? (
+          <button
+            type="button"
+            onClick={() => setAll((v) => !v)}
+            className="flex h-7 w-full items-center justify-center gap-1 border-t border-line/60 text-[11.5px] text-steel transition-colors hover:bg-raised/40 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
+          >
+            {all ? "Show less" : `Show all ${lines.length.toLocaleString()} lines`}
+          </button>
+        ) : (
+          <div className="flex h-7 w-full items-center justify-center border-t border-line/60 text-[11.5px] tabular-nums text-steel">
+            {live ? "Live" : pluralize(text ? lines.length : 0, "line")}
+          </div>
+        ))}
     </div>
   );
+}
+
+/** "exit 1" from the end of a failed command's output, when it says so. */
+function exitCodeOf(output: string): string | null {
+  const m = /(?:exit(?:ed)?(?: with)?(?: code| status)?|code)[:= ]+(-?\d+)\s*\)?\s*$/i.exec(output.trimEnd().slice(-200));
+  return m ? m[1] : null;
 }
 
 export const ToolCallCard = memo(function ToolCallCard({
@@ -313,7 +366,7 @@ export const ToolCallCard = memo(function ToolCallCard({
 }: {
   item: Item<"tool_call">;
   agentId: string;
-  /** Inside a sub-agent card: tighter row. */
+  /** Inside a sub-agent card or an expanded trace: same quiet row. */
   nested?: boolean;
   /** False when the agent process isn't running (interrupted/stopped): unfinished calls are paused, not spinning. */
   agentLive?: boolean;
@@ -323,7 +376,10 @@ export const ToolCallCard = memo(function ToolCallCard({
   const stalled = unfinished && !agentLive;
   const hasBody = item.diffs.length > 0 || item.output.length > 0 || !!item.command;
   const [open, setOpen] = useState<boolean | null>(null);
-  const expanded = open ?? ((running && item.toolKind === "execute") || item.status === "failed");
+  // A command that opened itself while running stays open when it finishes (no height jump).
+  const autoOpened = useRef(false);
+  if (running && item.toolKind === "execute") autoOpened.current = true;
+  const expanded = open ?? (autoOpened.current || item.status === "failed");
   const Icon = TOOL_ICON[item.toolKind] ?? Wrench;
   const hasDiffs = item.diffs.length > 0;
   // Cheap counts for the header; the structured diff is only computed when expanded (cached).
@@ -333,14 +389,16 @@ export const ToolCallCard = memo(function ToolCallCard({
     [expanded, hasDiffs, item.id, item.diffs],
   );
   const isCmd = item.toolKind === "execute";
+  const failed = item.status === "failed";
+  const exit = isCmd && failed ? exitCodeOf(item.output) : null;
 
   return (
     <div
       className={cn(
-        "overflow-hidden border bg-card/70 transition-colors focus-within:border-line-strong",
-        nested ? "rounded-lg" : "rounded-xl",
-        expanded ? "border-line-strong" : "border-line hover:border-line-strong",
-        item.status === "failed" && "border-err/30",
+        "overflow-hidden rounded-lg border transition-colors",
+        !nested && "-mx-1.5",
+        expanded && hasBody ? "border-line bg-card/40" : "border-transparent",
+        failed && expanded && "border-err/30",
       )}
     >
       <button
@@ -348,32 +406,39 @@ export const ToolCallCard = memo(function ToolCallCard({
         disabled={!hasBody}
         onClick={() => setOpen(!expanded)}
         aria-expanded={hasBody ? expanded : undefined}
+        title={item.title}
         className={cn(
-          "flex w-full items-center gap-2.5 px-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:cursor-default",
-          nested ? "h-8" : "h-9",
+          "group/row flex w-full items-center gap-2 px-1.5 text-left text-steel transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:cursor-default",
+          nested ? "h-7" : "h-8",
+          hasBody && "hover:bg-raised/40 hover:text-muted",
         )}
       >
+        <Icon className={cn("h-3.5 w-3.5 shrink-0", running && "text-accent")} aria-hidden />
         <span
           className={cn(
-            "flex shrink-0 items-center justify-center rounded-md border border-line bg-raised text-steel",
-            nested ? "h-5 w-5" : "h-6 w-6",
-            running && "border-accent/30 text-accent",
+            "min-w-0 flex-1 truncate text-[12.5px]",
+            isCmd && "font-mono text-[12px]",
+            running ? "text-muted" : failed ? "text-err/90" : "",
           )}
         >
-          <Icon className="h-3.5 w-3.5" />
-        </span>
-        <span className={cn("min-w-0 flex-1 truncate text-[12.5px] text-fg/90", isCmd && "font-mono text-[12px]")}>
           {item.title}
         </span>
         {hasDiffs && <DiffStat additions={stats.additions} deletions={stats.deletions} />}
+        {exit !== null && (
+          <span className="shrink-0 rounded-md bg-err/10 px-1.5 text-[11px] font-medium tabular-nums text-err">
+            exit {exit}
+          </span>
+        )}
         <ToolStatusIcon status={item.status} stalled={stalled} />
         {hasBody && (
           <ChevronRight
-            className={cn("h-3.5 w-3.5 text-steel transition-transform duration-150", expanded && "rotate-90")}
+            className={cn(
+              "h-3 w-3 shrink-0 text-steel/70 transition-transform duration-150 group-hover/row:text-muted",
+              expanded && "rotate-90",
+            )}
           />
         )}
       </button>
-      {running && !expanded && <div className="shimmer-bar h-px bg-accent/10" />}
       <ToolImages item={item} agentId={agentId} />
       <AnimatePresence initial={false}>
         {expanded && hasBody && (
@@ -382,10 +447,10 @@ export const ToolCallCard = memo(function ToolCallCard({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.12 }}
-            className="border-t border-line"
+            className="border-t border-line/70"
           >
             {(item.command || item.output) && !hasDiffs && (
-              <TerminalOutput command={item.command} output={item.output} live={running} />
+              <TerminalOutput command={item.command} output={item.output} live={running} compact />
             )}
             {parsed.length > 0 && (
               <div className="divide-y divide-line">
@@ -491,7 +556,7 @@ export const PermissionCard = memo(function PermissionCard({
     const allowed = chosen?.kind.startsWith("allow");
     const Icon = cancelled ? ShieldX : allowed ? ShieldCheck : ShieldX;
     return (
-      <div className="flex h-9 items-center gap-2.5 rounded-xl border border-line bg-card/50 px-2.5 text-[12.5px]">
+      <div className="flex h-8 items-center gap-2 px-1.5 text-[12.5px]">
         <span
           className={cn(
             "flex h-6 w-6 shrink-0 items-center justify-center rounded-md border",
@@ -731,7 +796,7 @@ export const PlanCard = memo(function PlanCard({ item }: { item: Item<"plan"> })
   const done = item.entries.filter((e) => e.status === "completed").length;
   const total = item.entries.length;
   return (
-    <div className="rounded-xl border border-line bg-card/70 p-3.5 edge">
+    <div className="rounded-xl border border-line bg-card/50 p-3.5">
       <div className="mb-2.5 flex items-center gap-2">
         <ListChecks className="h-4 w-4 text-accent" />
         <span className="text-[12.5px] font-semibold">Plan</span>
@@ -793,7 +858,7 @@ export const NoticeBanner = memo(function NoticeBanner({
     <div
       role={item.level === "error" ? "alert" : "status"}
       className={cn(
-        "rounded-lg border text-[12.5px]",
+        "rounded-xl border text-[12.5px]",
         item.level === "error" && "border-err/30 bg-err/[0.07] text-err",
         item.level === "warn" && "border-warn/30 bg-warn/[0.07] text-warn",
         item.level === "info" && "border-line bg-card/40 text-muted",

@@ -1,6 +1,7 @@
 import { ArrowDown } from "lucide-react";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
+
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import type { Agent, TimelineItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
@@ -8,9 +9,18 @@ import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { Spinner } from "../ui/misc";
 import { Skeleton } from "../ui/skeleton";
-import { AgentMessage, NoticeBanner, PermissionCard, PlanCard, ThoughtBlock, ToolCallCard, UserBubble } from "./items";
+import {
+  AgentMessage,
+  NoticeBanner,
+  PermissionCard,
+  PlanCard,
+  ThoughtBlock,
+  ToolCallCard,
+  TurnHeader,
+  UserBubble,
+} from "./items";
 import { ActivityGroup } from "./ActivityGroup";
-import { groupActivity } from "./activityGroups";
+import { finalAnswers, groupActivity, nextKeep, type KeepRow } from "./activityGroups";
 import { SubagentCard } from "./SubagentCard";
 import { useRunningSubagentCount, useSubagentRuns } from "../agent/useSubagents";
 import { useHeld, WAITING_HOLD_MS } from "@/hooks/useHeld";
@@ -87,9 +97,17 @@ export function Timeline({
   const runningSubagents = useHeld(useRunningSubagentCount(agent.id), 0, WAITING_HOLD_MS);
   const waiting = runningSubagents > 0 && waitingStatus(agent.status);
   const bgRunningIds = useBackgroundRunning(agent.id);
-  const structureKey = `${list.length}:${list[0]?.id ?? ""}:${list[list.length - 1]?.id ?? ""}:${attributed}:${waiting}`;
+  // While sub-agents run, a brand-new unattributed call is usually a sub-agent's, named a moment
+  // later: held back briefly so it goes straight into its card instead of flashing in the chat.
+  const unattributed = useUnattributedHold(list, waiting);
+  // Tall standalone rows on screen stay unfolded (not absorbed into an activity group) until they scroll
+  // fully out of view, so a run folding never collapses content the reader is looking at.
+  const keepRef = useRef<ReadonlySet<string>>(new Set());
+  const [, bumpKeep] = useReducer((n: number) => n + 1, 0);
+  const keepKey = [...keepRef.current].join(",");
+  const structureKey = `${keepKey}:${list.length}:${list[0]?.id ?? ""}:${list[list.length - 1]?.id ?? ""}:${attributed}:${waiting}:${[...unattributed].join(",")}`;
   // Keyed on structure on purpose: it reads the current list, but deltas never change the structure.
-  const view = useMemo(() => buildView(list, waiting), [structureKey]);
+  const view = useMemo(() => buildView(list, waiting, unattributed, keepRef.current), [structureKey]);
   const rows = view.top;
   const childrenOf = useResolvedLists(view.children, list, isToolItem);
   const groupItems = useResolvedLists(view.groups, list);
@@ -105,6 +123,7 @@ export function Timeline({
     });
   }, []);
 
+  const syncKeep = useRef<(inst: Virtualizer<HTMLDivElement, Element>) => void>(() => {});
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -120,6 +139,7 @@ export function Timeline({
     paddingEnd: 8,
     // Stick to the bottom while content streams in; otherwise flag new activity.
     onChange: (inst) => {
+      syncKeep.current(inst);
       const total = inst.getTotalSize();
       if (total === lastTotal.current) return;
       const grew = total > lastTotal.current;
@@ -130,6 +150,51 @@ export function Timeline({
       else if (grew) setHasNew(true);
     },
   });
+
+  syncKeep.current = (inst) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const items = inst.getVirtualItems();
+    const visible: KeepRow[] = items.map((v) => {
+      const id = list[rows[v.index]]?.id ?? "";
+      return { id, standalone: !groupItems.has(id), start: v.start, end: v.end };
+    });
+    const byId = new Map<string, number>();
+    rows.forEach((r, i) => {
+      const id = list[r]?.id;
+      if (id && keepRef.current.has(id)) byId.set(id, i);
+    });
+    const next = nextKeep(
+      keepRef.current,
+      visible,
+      (id) => {
+        const m = inst.measurementsCache[byId.get(id) ?? -1];
+        return m && { start: m.start, end: m.end };
+      },
+      { top: el.scrollTop, bottom: el.scrollTop + el.clientHeight },
+      stick.current,
+    );
+    if (next === keepRef.current) return;
+    const released = [...keepRef.current].some((id) => !next.has(id));
+    keepRef.current = next;
+    if (released) bumpKeep();
+  };
+  // Rows mount/measure after render: refresh the kept set once the DOM settles too.
+  useLayoutEffect(() => syncKeep.current(virtualizer));
+
+  // Rows re-measure (and the thinking line / footer resize) after the virtualizer's onChange has
+  // already pinned: its scrollHeight was still the old one then. Re-pin whenever the content grows.
+  const contentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      const el = scrollRef.current;
+      if (el && stick.current && el.scrollHeight - el.scrollTop - el.clientHeight > 1) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, []);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -238,7 +303,11 @@ export function Timeline({
   };
   const onWheel = (e: React.WheelEvent) => {
     markIntent();
-    if (e.deltaY < 0) {
+    // Scrolling up stops following at once — unless a nested scroller under the pointer (command
+    // output, code block, wide table) takes the wheel and the conversation doesn't move at all.
+    const el = scrollRef.current;
+    // (Nothing to do when the conversation can't scroll up: no scroll event would ever clear it.)
+    if (e.deltaY < 0 && el && el.scrollTop > 0 && !nestedScrollTakes(e.target, el, e.deltaY)) {
       stick.current = false;
       setAtBottom(false);
     }
@@ -328,7 +397,7 @@ export function Timeline({
         className="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]"
         aria-busy={live}
       >
-        <div className="mx-auto w-full max-w-[860px] px-3 pb-6 @lg:px-6 @[1280px]:max-w-[1000px]">
+        <div ref={contentRef} className="mx-auto w-full max-w-[780px] px-3.5 pb-6 @lg:px-6">
           {loading && !items ? (
             <div className="pt-4">
               <TimelineSkeleton />
@@ -345,6 +414,7 @@ export function Timeline({
                 if (!it) return null;
                 const prev = v.index > 0 ? list[rows[v.index - 1]] : undefined;
                 const group = groupItems.get(it.id);
+                const turnStart = startsAgentTurn(it, prev, hasOlder);
                 return (
                   <div
                     key={v.key}
@@ -352,12 +422,13 @@ export function Timeline({
                     data-index={v.index}
                     ref={virtualizer.measureElement}
                     className={cn(
-                      "absolute left-0 top-0 w-full pb-3",
-                      spacingFor(it, prev),
+                      "absolute left-0 top-0 w-full",
+                      spacingFor(it, prev, !!group, !!prev && groupItems.has(prev.id)),
                       flashId === it.id && "[&>*]:rounded-xl [&>*]:ring-2 [&>*]:ring-accent/50",
                     )}
                     style={{ transform: `translateY(${v.start}px)` }}
                   >
+                    {turnStart && <TurnHeader agent={stableAgent} ts={it.ts} />}
                     {group ? (
                       <ActivityGroup
                         groupId={it.id}
@@ -392,9 +463,11 @@ export function Timeline({
           {footer}
         </div>
       </div>
-      {/* Its own strip below the conversation (not floating over it), so it never covers text. */}
+      {/* Floats over the conversation instead of taking layout space: a strip that shrinks the
+          scroller when it appears leaves the bottom 44px out of reach of the "at bottom" check, so
+          it would never go away. Only shown while scrolled up, so it never hides the last lines. */}
       {!atBottom && (
-        <div className="flex h-11 shrink-0 items-center justify-center border-t border-line/60 bg-base">
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
           <button
             type="button"
             onClick={() => {
@@ -403,7 +476,7 @@ export function Timeline({
               setAtBottom(true);
               scrollToBottom();
             }}
-            className="flex h-8 items-center gap-1.5 rounded-full border border-line-strong bg-card px-3 text-[12px] font-medium text-fg shadow-md shadow-black/30 edge transition-colors hover:border-accent/50"
+            className="glass pointer-events-auto flex h-8 items-center gap-1.5 rounded-full border border-line-strong px-3 text-[12px] font-medium text-fg shadow-md shadow-black/30 edge transition-colors hover:border-accent/50"
           >
             {hasNew && <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]" />}
             {hasNew ? "New activity" : "Jump to latest"}
@@ -451,12 +524,29 @@ function useStableAgent(agent: Agent): Agent {
   return ref.current;
 }
 
-/** Extra space above a row (padding, so it's included in the measured height). */
-function spacingFor(it: TimelineItem, prev: TimelineItem | undefined): string {
-  if (!prev) return "";
-  if (it.kind === "user_message") return "pt-4";
-  if (prev.kind === "user_message") return "pt-1";
-  return "";
+/** Quiet one-line rows (traces): tight to each other, so a run of them reads as one block. */
+function isTrace(it: TimelineItem, isGroup: boolean): boolean {
+  return isGroup || it.kind === "thought" || (it.kind === "tool_call" && !it.subagent);
+}
+
+/**
+ * One vertical rhythm, in padding (so it's part of the measured row height): 12px between blocks
+ * of a turn, 24px between turns, 4px between trace rows.
+ */
+function spacingFor(it: TimelineItem, prev: TimelineItem | undefined, isGroup: boolean, prevIsGroup: boolean): string {
+  const trace = isTrace(it, isGroup);
+  const base = trace ? "pb-1" : "pb-3";
+  if (!prev) return base;
+  if (it.kind === "user_message") return cn(base, "pt-3");
+  // After a trace row (always 4px below it), a non-trace row needs the rest of 12px.
+  if (!trace && isTrace(prev, prevIsGroup)) return cn(base, "pt-2");
+  return base;
+}
+
+/** First visible row of an agent turn (right after the user's message): carries the avatar + name header. */
+function startsAgentTurn(it: TimelineItem, prev: TimelineItem | undefined, hasOlder: boolean): boolean {
+  if (it.kind === "user_message" || it.kind === "notice" || it.kind === "turn_summary") return false;
+  return prev ? prev.kind === "user_message" : !hasOlder;
 }
 
 type ToolItem = Extract<TimelineItem, { kind: "tool_call" }>;
@@ -472,6 +562,8 @@ interface TimelineView {
   children: Map<string, number[]>;
   /** Index of each sub-agent call by its toolCallId. */
   parentIdx: Map<string, number>;
+  /** Item ids of each turn's closing agent message (others are interim narration). */
+  finalIds: Set<string>;
   lastSummaryId: string | null;
   lastErrorId: string | null;
   lastPromptIdx: number | null;
@@ -479,7 +571,55 @@ interface TimelineView {
 
 const NO_ITEMS: TimelineItem[] = [];
 
-function buildView(items: TimelineItem[], waiting = false): TimelineView {
+/** Whether an element between `target` and `root` can still scroll vertically by `deltaY`. */
+export function nestedScrollTakes(target: EventTarget | null, root: HTMLElement | null, deltaY: number): boolean {
+  for (let el = target instanceof Element ? target : null; el && el !== root; el = el.parentElement) {
+    if (!(el instanceof HTMLElement) || el.scrollHeight <= el.clientHeight + 1) continue;
+    const overflow = getComputedStyle(el).overflowY;
+    if (overflow !== "auto" && overflow !== "scroll") continue;
+    if (deltaY < 0 ? el.scrollTop > 0 : el.scrollTop + el.clientHeight < el.scrollHeight - 1) return true;
+  }
+  return false;
+}
+
+/** How long a new top-level tool call may wait for its sub-agent attribution (see Timeline). */
+export const ATTRIBUTION_GRACE_MS = 5000;
+
+/** Ids of tool calls still within their attribution grace (re-renders as each one expires). */
+export function heldUnattributed(items: TimelineItem[], waiting: boolean, now: number): string[] {
+  if (!waiting) return [];
+  const out: string[] = [];
+  for (const it of items) {
+    if (it.kind !== "tool_call" || it.subagent || it.parentToolCallId) continue;
+    // A timestamp from the future (clock skew) can't be judged: never hold it for longer than the grace.
+    const age = now - it.ts;
+    if (age < ATTRIBUTION_GRACE_MS && age > -ATTRIBUTION_GRACE_MS) out.push(it.id);
+  }
+  return out;
+}
+
+function useUnattributedHold(items: TimelineItem[], waiting: boolean): ReadonlySet<string> {
+  const [now, setNow] = useState(() => Date.now());
+  const held = heldUnattributed(items, waiting, Date.now());
+  const key = held.join(",");
+  useEffect(() => {
+    if (!held.length) return;
+    // Wake when the oldest held call's grace ends.
+    const byId = new Map(items.map((it) => [it.id, it.ts]));
+    const next = Math.min(...held.map((id) => (byId.get(id) ?? now) + ATTRIBUTION_GRACE_MS));
+    // Never sleep longer than the grace itself.
+    const t = setTimeout(() => setNow(Date.now()), Math.min(ATTRIBUTION_GRACE_MS + 50, Math.max(50, next - Date.now() + 20)));
+    return () => clearTimeout(t);
+  }, [key, now]);
+  return useMemo(() => new Set(held), [key]);
+}
+
+function buildView(
+  items: TimelineItem[],
+  waiting = false,
+  hold: ReadonlySet<string> = new Set(),
+  keep?: ReadonlySet<string>,
+): TimelineView {
   const parents = new Set<string>();
   const parentIdx = new Map<string, number>();
   items.forEach((it, i) => {
@@ -501,6 +641,7 @@ function buildView(items: TimelineItem[], waiting = false): TimelineView {
       children.set(it.parentToolCallId, list);
       return;
     }
+    if (hold.has(it.id)) return;
     if (it.kind === "turn_summary") lastSummaryId = it.id;
     if (it.kind === "notice" && it.level === "error") lastErrorId = it.id;
     if (it.kind === "user_message") {
@@ -509,10 +650,12 @@ function buildView(items: TimelineItem[], waiting = false): TimelineView {
     }
     top.push(i);
   });
-  const grouped = groupActivity(items, top, { foldTail: waiting });
+  const grouped = groupActivity(items, top, { foldTail: waiting, keep });
   const groups = new Map<string, number[]>();
   for (const [first, idxs] of grouped.groups) groups.set(items[first].id, idxs);
-  return { top: grouped.rows, groups, children, parentIdx, lastSummaryId, lastErrorId, lastPromptIdx };
+  const finalIds = new Set<string>();
+  for (const i of finalAnswers(items, top)) finalIds.add(items[i].id);
+  return { top: grouped.rows, groups, children, parentIdx, finalIds, lastSummaryId, lastErrorId, lastPromptIdx };
 }
 
 function sameList<T>(a: T[] | undefined, b: T[]): boolean {
@@ -582,14 +725,14 @@ function renderItem(
     reasonHandler: (requestId: string) => (open: boolean) => void;
   },
 ) {
-  const { agent, prev, liveTail, view } = ctx;
+  const { agent, liveTail, view } = ctx;
   const agentLive = agent.running && agent.status !== "interrupted";
   switch (it.kind) {
     case "user_message":
       return <UserBubble item={it} />;
     case "agent_message":
       return (
-        <AgentMessage item={it} agent={agent} showHeader={!prev || prev.kind === "user_message"} streaming={liveTail} />
+        <AgentMessage item={it} agent={agent} interim={!view.finalIds.has(it.id)} streaming={liveTail} />
       );
     case "thought":
       return <ThoughtBlock item={it} live={liveTail} agentId={agent.id} />;

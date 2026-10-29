@@ -1,5 +1,9 @@
 import {
   ArrowLeft,
+  Camera,
+  CircleAlert,
+  Crosshair,
+  Ellipsis,
   ExternalLink,
   Globe,
   Maximize2,
@@ -18,21 +22,32 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { insertIntoDraft } from "@/components/agent/drafts";
+import { insertAttachments, insertIntoDraft } from "@/components/agent/drafts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
-import { DropdownMenu, DropdownMenuCheckItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/menu";
+import {
+  DropdownMenu,
+  DropdownMenuCheckItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/menu";
 import { Spinner } from "@/components/ui/misc";
 import { Tooltip } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { openExternal } from "@/lib/external";
 import { effectiveLoopbackUrl, parseLoopbackUrl, urlPort } from "@/lib/ports";
+import { formatErrorsSummary, formatPicked, shotToAttachment, type ShotResult } from "@/lib/previewBridge";
 import type { Agent } from "@/lib/types";
 import { modKey } from "@/lib/utils";
 import { closePreview, markPreviewSeen, patchPreview, previewOf, usePreview } from "@/store/preview";
+import { setPreviewToolPref, usePreviewTools } from "@/store/previewTools";
 import { useUi } from "@/store/ui";
 import { useWorkspace } from "@/store/workspace";
+import { PreviewConsole } from "./PreviewConsole";
+import { usePreviewPage } from "./usePreviewPage";
 
 interface Preset {
   value: string;
@@ -85,6 +100,8 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
   const [loaded, setLoaded] = useState(false);
   const [bodyRef, body] = useElementSize<HTMLDivElement>();
   const newest = st.live[st.live.length - 1];
+  const prefs = usePreviewTools();
+  const [shooting, setShooting] = useState(false);
 
   // Showing the pane acknowledges any detected server (clears the header's "new" dot), and picks the
   // most recently mentioned live one when nothing is selected yet.
@@ -160,6 +177,93 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
     else patchPreview(agent.id, { maximized: false });
   }, [agent.id, forced]);
 
+  // Page tools: the preview goes through the local proxy, whose injected agent reports back by postMessage.
+  const afterInsert = () => {
+    useUi.getState().focusComposer();
+    if (full) exit();
+  };
+  const page = usePreviewPage({
+    agentId: agent.id,
+    url,
+    enabled: prefs.tools,
+    frameKey: `${url}#${reload}`,
+    handlers: {
+      picked: (info) => {
+        insertIntoDraft(agent.id, formatPicked(info, { pageUrl: urlRef.current ?? "", width: st.width }));
+        if (!usePreviewTools.getState().pickShot) afterInsert();
+      },
+      pickShot: (_selector, result) => {
+        attachShot(result, "preview-element");
+        afterInsert();
+      },
+    },
+  });
+  const attachShot = (result: ShotResult, name: string) => {
+    if (!result.ok) {
+      toast.error("Couldn't capture the page", { description: result.error });
+      return false;
+    }
+    const a = shotToAttachment(result, name);
+    if (!a.ok) {
+      toast.error("Couldn't attach the screenshot", { description: a.error });
+      return false;
+    }
+    if (!insertAttachments(agent.id, [a.attachment])) {
+      toast.error("Open the message box to attach the screenshot");
+      return false;
+    }
+    return true;
+  };
+  const toolsReady = page.tools === "ready";
+  const toolsWhy =
+    page.tools === "off"
+      ? prefs.tools
+        ? "Page tools need an http:// localhost address"
+        : "Page tools are off (More menu)"
+      : page.tools === "unavailable"
+        ? "Unavailable for this page (its security policy or content type blocks the helper script)"
+        : "Waiting for the page to load";
+  const screenshot = async () => {
+    if (shooting || !toolsReady) return;
+    setShooting(true);
+    try {
+      const r = await page.screenshot();
+      if (attachShot(r, "preview")) afterInsert();
+    } finally {
+      setShooting(false);
+    }
+  };
+  const sendErrors = () => {
+    const dev = url ? new URL(url) : null;
+    insertIntoDraft(
+      agent.id,
+      formatErrorsSummary(page.entries, {
+        pageUrl: url ?? "",
+        proxyOrigin: page.frameSrc && url ? new URL(page.frameSrc).origin : "",
+        devOrigin: dev?.origin ?? "",
+      }),
+    );
+    afterInsert();
+  };
+  const toggleInspect = () => {
+    if (!toolsReady) return;
+    page.inspect(!page.inspecting, prefs.pickShot);
+  };
+  // Esc stops picking (before it can leave the full-view preview).
+  const inspecting = page.inspecting;
+  const stopInspect = page.inspect;
+  useEffect(() => {
+    if (!inspecting) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      stopInspect(false, false);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [inspecting, stopInspect]);
+
   // Esc leaves the full-view preview (when focus is in the app, not inside the page itself).
   useEffect(() => {
     if (!full) return;
@@ -190,6 +294,8 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
   const availH = Math.max(120, body.h - PAD * 2 - CAPTION - preset.bezel * 2);
 
   const frame = (
+    // With page tools on, the iframe loads the local preview proxy (127.0.0.1, see preview_proxy.rs)
+    // instead of the dev server directly; the address bar still shows the real URL.
     // Security: the page is a different origin from the app (the CSP's frame-src only allows
     // loopback hosts), so same-origin policy keeps it away from the app's DOM, and Tauri only
     // injects IPC for the app's own origin: capabilities/default.json has no `remote` entry,
@@ -197,11 +303,15 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
     // origin so dev servers can use storage/cookies; there is no top-navigation permission.
     <iframe
       key={`${url}#${reload}`}
-      src={url ?? undefined}
+      ref={page.iframeRef}
+      src={page.frameSrc ?? undefined}
       title="App preview"
       sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
       referrerPolicy="no-referrer"
-      onLoad={() => setLoaded(true)}
+      onLoad={() => {
+        setLoaded(true);
+        page.onFrameLoad();
+      }}
       className="block border-0 bg-white"
       style={
         preset.width
@@ -299,24 +409,90 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
             <RefreshCw />
           </Button>
         </Tooltip>
-        <Tooltip content="Open in browser">
+        <span className="mx-0.5 hidden h-4 w-px bg-line @[420px]:block" aria-hidden />
+        <Tooltip content={toolsReady ? "Send a screenshot to the agent" : `Screenshot: ${toolsWhy}`}>
           <Button
             size="icon-sm"
             variant="ghost"
-            aria-label="Open in browser"
-            className="hidden @[360px]:inline-flex"
-            disabled={!url}
-            onClick={() => url && void openExternal(url)}
+            aria-label="Send screenshot to agent"
+            className="hidden @[420px]:inline-flex"
+            disabled={!url || !toolsReady || shooting}
+            onClick={() => void screenshot()}
           >
-            <ExternalLink />
+            {shooting ? <Spinner className="h-3.5 w-3.5" /> : <Camera />}
           </Button>
         </Tooltip>
-        <Tooltip content="Add the preview URL to your message (screenshots aren't supported)">
+        <Tooltip
+          content={toolsReady ? (page.inspecting ? "Stop picking" : "Pick an element to send to the agent") : `Inspect: ${toolsWhy}`}
+          shortcut={page.inspecting ? ["Esc"] : undefined}
+        >
+          <Button
+            size="icon-sm"
+            variant={page.inspecting ? "secondary" : "ghost"}
+            aria-label="Inspect element"
+            aria-pressed={page.inspecting}
+            className={page.inspecting ? "hidden text-accent @[420px]:inline-flex" : "hidden @[420px]:inline-flex"}
+            disabled={!url || !toolsReady}
+            onClick={toggleInspect}
+          >
+            <Crosshair />
+          </Button>
+        </Tooltip>
+        <PreviewConsole
+          entries={page.entries}
+          tools={page.tools}
+          onSend={sendErrors}
+          onClear={page.clear}
+          className="hidden @[420px]:inline-flex"
+        />
+        <Tooltip content="Add the preview URL to your message">
           <Button size="xs" variant="secondary" aria-label="Send to agent" disabled={!url} onClick={send} className="ml-0.5">
             <MessageSquarePlus className="!h-3 !w-3" />
-            <span className="hidden @[540px]:inline">Send to agent</span>
+            <span className="hidden @[620px]:inline">Send to agent</span>
           </Button>
         </Tooltip>
+        <DropdownMenu>
+          <Tooltip content="More">
+            <DropdownMenuTrigger asChild>
+              <Button size="icon-sm" variant="ghost" aria-label="More preview actions">
+                <Ellipsis />
+              </Button>
+            </DropdownMenuTrigger>
+          </Tooltip>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem disabled={!url} onSelect={() => url && void openExternal(url)}>
+              <ExternalLink /> Open in browser
+            </DropdownMenuItem>
+            {body.w < 420 && (
+              <>
+                <DropdownMenuItem disabled={!url || !toolsReady || shooting} onSelect={() => void screenshot()}>
+                  <Camera /> Send screenshot to agent
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={!url || !toolsReady} onSelect={toggleInspect}>
+                  <Crosshair /> {page.inspecting ? "Stop picking" : "Inspect element"}
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={page.entries.length === 0} onSelect={sendErrors}>
+                  <CircleAlert /> Send console problems{page.entries.length ? ` (${page.entries.length})` : ""}
+                </DropdownMenuItem>
+              </>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuCheckItem
+              checked={prefs.pickShot}
+              onSelect={() => setPreviewToolPref({ pickShot: !prefs.pickShot })}
+              description="Also attach a cropped image of the picked element"
+            >
+              Include element screenshot
+            </DropdownMenuCheckItem>
+            <DropdownMenuCheckItem
+              checked={prefs.tools}
+              onSelect={() => setPreviewToolPref({ tools: !prefs.tools })}
+              description="Routes the page through a local proxy. Turn off if the app misbehaves behind it."
+            >
+              Page tools
+            </DropdownMenuCheckItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <span className="mx-1 h-4 w-px bg-line" aria-hidden />
         {!forced && (
           <Tooltip content={st.maximized ? "Restore" : "Maximize"}>
@@ -389,7 +565,7 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
               <RefreshCw className="!h-3 !w-3" /> Retry
             </Button>
           </Empty>
-        ) : probe === "up" ? (
+        ) : probe === "up" && page.frameReady ? (
           preset.width ? (
             <div className="flex h-full flex-col items-center justify-center" style={{ padding: PAD }}>
               <div
@@ -417,7 +593,7 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
           )
         ) : null}
 
-        {url && probe !== "down" && !(probe === "up" && loaded) && (
+        {url && probe !== "down" && !(probe === "up" && page.frameReady && loaded) && (
           <div
             className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-base/80 backdrop-blur-[2px]"
             role="status"

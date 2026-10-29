@@ -1,17 +1,19 @@
-import { ArrowUp, BookText, FileText, ListPlus, Play, RotateCcw, Square } from "lucide-react";
+import { ArrowUp, BookText, ChevronDown, FileText, GitFork, ListPlus, Play, RotateCcw, Square } from "lucide-react";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { cancelTurn, resumeAgent } from "@/lib/actions";
 import { api } from "@/lib/api";
 import { MAX_ATTACHMENTS } from "@/lib/attachments";
+import { canStartHelper, decideBusySend, type BusyIntent } from "@/lib/helpers";
 import type { Agent, SlashCommand, Attachment } from "@/lib/types";
-import { cn, errorMessage } from "@/lib/utils";
+import { cn, errorMessage, modKey } from "@/lib/utils";
 import { useDebounced } from "@/hooks/useDebounced";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useAttachments } from "@/hooks/useAttachments";
+import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
-import { getDraft, onDraftInsert, setDraft } from "./drafts";
+import { getDraft, onAttachmentsInsert, onDraftInsert, setDraft } from "./drafts";
 import { AttachButton, DropOverlay } from "../AttachControls";
 import { ComposerVoiceButtons } from "../voice/ComposerVoiceButtons";
 import { AttachmentStrip } from "../AttachmentStrip";
@@ -20,6 +22,7 @@ import { Button } from "../ui/button";
 import { useIsDone } from "@/store/completion";
 import { Kbd } from "../ui/kbd";
 import { Tooltip } from "../ui/tooltip";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/menu";
 import { ConfigOverflowMenu, ConfigSelect } from "./ConfigSelect";
 import { QueueStack } from "./QueueStack";
 import { RateLimitBanner } from "./RateLimitBanner";
@@ -49,7 +52,7 @@ function slashQuery(text: string): string | null {
   return m ? m[1].toLowerCase() : null;
 }
 
-function ComposerImpl({ agent }: { agent: Agent }) {
+function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boolean }) {
   const [text, setText] = useState(() => getDraft(agent.id));
   // Latest text for async callbacks (queue Edit resolves after an await).
   const textRef = useRef(text);
@@ -69,7 +72,7 @@ function ComposerImpl({ agent }: { agent: Agent }) {
   // composer via --composer-clear, so they never cover Send / Queue / Stop.
   useLayoutEffect(() => {
     const el = wrapRef.current;
-    if (!el) return;
+    if (!el || !focused) return;
     const root = document.documentElement;
     const set = () =>
       root.style.setProperty("--composer-clear", `${Math.ceil(el.getBoundingClientRect().height) + 8}px`);
@@ -80,7 +83,7 @@ function ComposerImpl({ agent }: { agent: Agent }) {
       ro.disconnect();
       root.style.removeProperty("--composer-clear");
     };
-  }, [wrapRef]);
+  }, [wrapRef, focused]);
   // Toolbar tiers by available width: labels → icons → extra options in a "+" menu.
   const roomy = width === 0 || width >= 700;
   const tight = width > 0 && width < 520;
@@ -92,6 +95,9 @@ function ComposerImpl({ agent }: { agent: Agent }) {
   const resumable = agent.status === "interrupted" || agent.status === "stopped";
   const busy = working || blocked;
   // Sending while the agent works queues the message; it runs right after this turn.
+  const busySend = useApp((s) => s.settings?.busySend ?? "ask");
+  const helperAllowed = canStartHelper(agent);
+  const [chooser, setChooser] = useState(false);
   const canSend = !resumable && (text.trim().length > 0 || attach.attachments.length > 0) && !sending;
 
   const query = slashQuery(text);
@@ -166,7 +172,12 @@ function ComposerImpl({ agent }: { agent: Agent }) {
     setText(getDraft(agent.id));
     setHint(null);
     setEscArmed(false);
+    setChooser(false);
   }, [agent.id]);
+  // The turn ended while the chooser was open: a plain Enter sends now.
+  useEffect(() => {
+    if (!busy) setChooser(false);
+  }, [busy]);
 
   useEffect(
     () => () => {
@@ -179,12 +190,12 @@ function ComposerImpl({ agent }: { agent: Agent }) {
   // approval card (keyboard approvals), so keep focus off the textarea.
   const focusedForTick = useRef(focusTick);
   useEffect(() => {
-    if (resumable) return;
+    if (resumable || !focused) return;
     const explicit = focusTick !== focusedForTick.current;
     focusedForTick.current = focusTick;
     if (blocked && !explicit) return;
     ref.current?.focus();
-  }, [agent.id, focusTick, resumable]);
+  }, [agent.id, focusTick, resumable, focused]);
 
   // An approval arriving while the composer is focused with an empty draft releases focus.
   useEffect(() => {
@@ -206,6 +217,7 @@ function ComposerImpl({ agent }: { agent: Agent }) {
     setCaret(nextCaret);
     setDraft(agent.id, v);
     if (escArmed) setEscArmed(false);
+    if (chooser) setChooser(false);
     if (hint && v !== hint.prefix) setHint(null);
     if (slashQuery(v) === null && mentionQuery(v, nextCaret) === null) setSlashDismissed(false);
   };
@@ -225,6 +237,21 @@ function ComposerImpl({ agent }: { agent: Agent }) {
             el.focus();
             el.setSelectionRange(next.length, next.length);
           }
+        });
+      }),
+    [agent.id],
+  );
+
+  // Images sent in from elsewhere (Preview screenshots and element crops).
+  const setAttachmentsRef = useRef(attach.setAttachments);
+  setAttachmentsRef.current = attach.setAttachments;
+  useEffect(
+    () =>
+      onAttachmentsInsert(agent.id, (incoming) => {
+        setAttachmentsRef.current((cur) => {
+          const room = Math.max(0, MAX_ATTACHMENTS - cur.length);
+          if (incoming.length > room) toast.warning(`Only ${MAX_ATTACHMENTS} images per message; some weren't attached`);
+          return [...cur, ...incoming.slice(0, room)];
         });
       }),
     [agent.id],
@@ -330,7 +357,8 @@ function ComposerImpl({ agent }: { agent: Agent }) {
     else toast.info("Dictation inserted, but the message can't be sent right now");
   });
 
-  const send = async () => {
+  /** Queue behind the current turn (or send, when the agent is idle). */
+  const sendNow = async () => {
     if (!canSend) return;
     const value = text.trim();
     const images = attach.attachments;
@@ -347,6 +375,61 @@ function ComposerImpl({ agent }: { agent: Agent }) {
     } finally {
       setSending(false);
     }
+  };
+
+  /** Run the message in a new helper agent, in parallel with this one. */
+  const startHelper = async () => {
+    if (!canSend || !helperAllowed) return;
+    const value = text.trim();
+    const images = attach.attachments;
+    setSending(true);
+    update("");
+    attach.clear();
+    setHint(null);
+    try {
+      const helper = await api.spawnHelper(agent.id, value, images);
+      useApp.getState().upsertAgent(helper);
+      toast(`Started helper · ${helper.title}`, {
+        action: { label: "Open", onClick: () => useUi.getState().openAgent(helper.id) },
+      });
+    } catch (e) {
+      update(value);
+      attach.setAttachments(images);
+      toast.error("Couldn't start a helper", { description: errorMessage(e) });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  /** One send gesture. While busy it queues, starts a helper, or asks, per setting and gesture. */
+  const send = async (intent: BusyIntent = "enter") => {
+    if (!canSend) return;
+    if (busy) {
+      if (chooser && intent === "queueButton") {
+        setChooser(false);
+        return;
+      }
+      const d = decideBusySend(busySend, intent, helperAllowed);
+      if (d === "ask") {
+        setChooser(true);
+        return;
+      }
+      if (d === "helper") return void startHelper();
+    }
+    await sendNow();
+  };
+
+  /** A pick in the chooser; "remember" saves it as the default for every agent. */
+  const choose = (choice: "queue" | "helper", remember: boolean) => {
+    setChooser(false);
+    if (remember) {
+      void useApp
+        .getState()
+        .patchSettings({ busySend: choice })
+        .catch((e) => toast.error("Couldn't save your choice", { description: errorMessage(e) }));
+    }
+    void (choice === "helper" ? startHelper() : sendNow());
+    requestAnimationFrame(() => ref.current?.focus());
   };
 
   /** Esc on an empty draft stops the turn, but only on a second press (never by accident). */
@@ -385,7 +468,11 @@ function ComposerImpl({ agent }: { agent: Agent }) {
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      void send();
+      void send(e.metaKey || e.ctrlKey ? "modEnter" : "enter");
+    } else if (e.key === "Escape" && chooser) {
+      e.preventDefault();
+      e.stopPropagation();
+      setChooser(false);
     } else if (e.key === "Escape" && busy && text.trim() === "" && attach.attachments.length === 0) {
       e.preventDefault();
       onEscape();
@@ -440,6 +527,17 @@ function ComposerImpl({ agent }: { agent: Agent }) {
                 onHover={setSlashIndex}
                 onPick={pick}
                 mono={mode === "slash"}
+              />
+            )}
+            {chooser && busy && (
+              <BusyChooser
+                name={name}
+                helperAllowed={helperAllowed}
+                onChoose={choose}
+                onClose={() => {
+                  setChooser(false);
+                  requestAnimationFrame(() => ref.current?.focus());
+                }}
               />
             )}
             <AttachmentStrip
@@ -543,20 +641,69 @@ function ComposerImpl({ agent }: { agent: Agent }) {
                   </Tooltip>
                 )}
                 {busy ? (
-                  <Tooltip content="Queue message: runs right after the current turn" shortcut={["⏎"]}>
-                    <Button
-                      size={tight ? "icon-sm" : "sm"}
-                      // Flat until there's something to queue, so it doesn't read as clickable.
-                      variant={canSend ? "primary" : "secondary"}
-                      disabled={!canSend}
-                      onClick={() => void send()}
-                      aria-label="Queue message (runs after the current turn)"
-                      className="rounded-lg"
+                  <div data-busy-send className="flex items-center">
+                    <Tooltip
+                      content={
+                        busySend === "helper" && helperAllowed
+                          ? "Start a helper: works in parallel and merges back"
+                          : `Queue message: runs right after the current turn${helperAllowed ? ` · ${modKey}⏎ starts a helper instead` : ""}`
+                      }
+                      shortcut={["⏎"]}
                     >
-                      <ListPlus className="!h-4 !w-4" />
-                      {!tight && "Queue"}
-                    </Button>
-                  </Tooltip>
+                      <Button
+                        size={tight ? "icon-sm" : "sm"}
+                        // Flat until there's something to send, so it doesn't read as clickable.
+                        variant={canSend ? "primary" : "secondary"}
+                        disabled={!canSend}
+                        onClick={() => void send("queueButton")}
+                        aria-label={
+                          busySend === "helper" && helperAllowed
+                            ? "Start a helper with this message"
+                            : "Queue message (runs after the current turn)"
+                        }
+                        className={cn("rounded-lg", helperAllowed && "rounded-r-none")}
+                      >
+                        {busySend === "helper" && helperAllowed ? (
+                          <GitFork className="!h-4 !w-4" />
+                        ) : (
+                          <ListPlus className="!h-4 !w-4" />
+                        )}
+                        {!tight && (busySend === "helper" && helperAllowed ? "Helper" : "Queue")}
+                      </Button>
+                    </Tooltip>
+                    {helperAllowed && (
+                      <DropdownMenu>
+                        <Tooltip content="More ways to send" side="top">
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              size="icon-sm"
+                              variant={canSend ? "primary" : "secondary"}
+                              aria-label="More ways to send"
+                              className="w-6 rounded-l-none rounded-r-lg border-l border-l-black/20"
+                            >
+                              <ChevronDown className="!h-3.5 !w-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </Tooltip>
+                        <DropdownMenuContent align="end" side="top">
+                          {busySend === "helper" ? (
+                            <DropdownMenuItem disabled={!canSend} onSelect={() => void send("queueMenu")}>
+                              <ListPlus /> Queue for {name} instead
+                              <span className="ml-auto pl-4 text-[11px] text-steel">after this turn</span>
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem disabled={!canSend} onSelect={() => void send("helperMenu")}>
+                              <GitFork /> Start a helper now
+                              <span className="ml-auto pl-4 text-[11px] text-steel">{modKey}⏎</span>
+                            </DropdownMenuItem>
+                          )}
+                          {!canSend && (
+                            <div className="px-2.5 pb-1.5 pt-0.5 text-[11.5px] text-steel">Type a message first.</div>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </div>
                 ) : (
                   <Tooltip
                     content={agent.queuePaused && agent.queue.length > 0 ? "Send (resumes the paused queue)" : "Send"}
@@ -579,6 +726,156 @@ function ComposerImpl({ agent }: { agent: Agent }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Asked when you send while the agent works and the setting is "Ask": queue behind the turn, or
+ * start a helper that runs now. Keyboard-first (Q / H / ⏎ / Esc); focus stays inside until closed.
+ */
+function BusyChooser({
+  name,
+  helperAllowed,
+  onChoose,
+  onClose,
+}: {
+  name: string;
+  helperAllowed: boolean;
+  onChoose: (choice: "queue" | "helper", remember: boolean) => void;
+  onClose: () => void;
+}) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState<"queue" | "helper">("queue");
+  const [remember, setRemember] = useState(false);
+  useEffect(() => boxRef.current?.focus(), []);
+  const options = [
+    {
+      id: "queue" as const,
+      icon: <ListPlus className="h-4 w-4" />,
+      title: `Queue for ${name}`,
+      detail: "Runs right after the current turn",
+      keys: ["Q"],
+    },
+    ...(helperAllowed
+      ? [
+          {
+            id: "helper" as const,
+            icon: <GitFork className="h-4 w-4" />,
+            title: "Start a helper now",
+            detail: "Works in parallel, then merges back",
+            keys: [modKey, "⏎"],
+          },
+        ]
+      : []),
+  ];
+  return (
+    <div
+      ref={boxRef}
+      tabIndex={-1}
+      role="dialog"
+      aria-label="Send while busy"
+      data-busy-send
+      data-state="open"
+      onBlur={(e) => {
+        const next = e.relatedTarget as HTMLElement | null;
+        if (!next || (!e.currentTarget.contains(next) && !next.closest("[data-busy-send]"))) onClose();
+      }}
+      onKeyDown={(e) => {
+        if (composing(e)) return;
+        // Holding Enter in the composer repeats into the chooser: that must not pick for you.
+        if (e.repeat) return e.preventDefault();
+        const k = e.key.toLowerCase();
+        // Browser/OS chords (Ctrl+R reload, Ctrl+Q quit, ...) are not choices; only Enter takes a modifier.
+        if ((e.metaKey || e.ctrlKey || e.altKey) && e.key !== "Enter") return;
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          onClose();
+        } else if (k === "q") {
+          e.preventDefault();
+          onChoose("queue", remember);
+        } else if ((k === "h" && helperAllowed) || (e.key === "Enter" && (e.metaKey || e.ctrlKey) && helperAllowed)) {
+          e.preventDefault();
+          onChoose("helper", remember);
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          onChoose(active, remember);
+        } else if (k === "r") {
+          e.preventDefault();
+          setRemember((v) => !v);
+        } else if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Tab") {
+          e.preventDefault();
+          if (options.length > 1) setActive((a) => (a === "queue" ? "helper" : "queue"));
+        }
+      }}
+      className="anim-pop absolute bottom-full right-0 z-20 mb-2 w-[min(400px,100%)] overflow-hidden rounded-xl border border-line-strong bg-raised/95 shadow-[0_16px_48px_-8px_rgba(0,0,0,0.55)] outline-none backdrop-blur-xl edge"
+    >
+      <div className="flex items-center justify-between border-b border-line px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-steel">
+        <span>{name} is working</span>
+        <span className="flex items-center gap-1 font-normal normal-case tracking-normal">
+          <Kbd>Esc</Kbd> keeps your draft
+        </span>
+      </div>
+      <ul
+        role="listbox"
+        aria-label="What should happen to this message?"
+        aria-activedescendant={`busy-send-${active}`}
+        className="p-1"
+      >
+        {options.map((o) => (
+          <li
+            key={o.id}
+            id={`busy-send-${o.id}`}
+            role="option"
+            aria-selected={o.id === active}
+            onMouseEnter={() => setActive(o.id)}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onChoose(o.id, remember);
+            }}
+            className={cn(
+              "flex cursor-default items-center gap-3 rounded-lg px-2.5 py-2",
+              o.id === active && "bg-gunmetal/80",
+            )}
+          >
+            <span
+              className={cn(
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border",
+                o.id === "helper"
+                  ? "border-accent/35 bg-accent/10 text-accent"
+                  : "border-line-strong bg-card text-muted",
+              )}
+            >
+              {o.icon}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] font-medium text-fg">{o.title}</span>
+              <span className="block truncate text-[11.5px] text-steel">{o.detail}</span>
+            </span>
+            <span className="flex shrink-0 items-center gap-0.5">
+              {o.keys.map((k) => (
+                <Kbd key={k}>{k}</Kbd>
+              ))}
+              {o.id === active && o.id === "queue" && <Kbd className="ml-1">⏎</Kbd>}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <label
+        className="flex cursor-pointer items-center gap-2 border-t border-line px-3 py-2 text-[12px] text-muted hover:text-fg"
+        onMouseDown={(e) => e.preventDefault()}
+      >
+        <input
+          type="checkbox"
+          tabIndex={-1}
+          checked={remember}
+          onChange={(e) => setRemember(e.target.checked)}
+          className="h-3.5 w-3.5 accent-[var(--accent)]"
+        />
+        Remember my choice
+        <Kbd className="ml-auto">R</Kbd>
+      </label>
     </div>
   );
 }

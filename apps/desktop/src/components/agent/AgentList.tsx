@@ -5,6 +5,7 @@ import {
   CalendarClock,
   Download,
   Gauge,
+  GitFork,
   Repeat,
   ChevronRight,
   PanelLeftClose,
@@ -18,9 +19,10 @@ import {
   X,
 } from "lucide-react";
 import { m, AnimatePresence } from "motion/react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { archiveAgent, exportConversation, renameAgent, resumeAgent, stopAgent } from "@/lib/actions";
 import { groupAgents, orderedAgents, type AgentGroupId } from "@/lib/agents";
+import { nestHelpers, syncPresentation } from "@/lib/helpers";
 import { relativeTime, relativeTimeLong } from "@/lib/format";
 import { DONE_META, STATUS } from "@/lib/providers";
 import { useIsDone } from "@/store/completion";
@@ -74,7 +76,10 @@ export function AgentList({
   const now = useNow();
 
   const agents = useMemo(() => Object.values(agentsMap), [agentsMap]);
-  const groups = useMemo(() => groupAgents(agents, query), [agents, query]);
+  // Helpers nest under their main agent, except while filtering (then every match is its own row).
+  const searchingNow = query.trim().length > 0;
+  const nesting = useMemo(() => (searchingNow ? null : nestHelpers(agents)), [agents, searchingNow]);
+  const groups = useMemo(() => groupAgents(nesting ? nesting.roots : agents, query), [nesting, agents, query]);
   const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   const total = agents.filter((a) => !a.archived).length;
   const searching = query.trim().length > 0;
@@ -212,10 +217,9 @@ export function AgentList({
                       transition={{ duration: 0.12 }}
                       className="space-y-px"
                     >
-                      {g.agents.map((a) => {
-                        return (
+                      {g.agents.map((a) => (
+                        <Fragment key={a.id}>
                           <AgentRow
-                            key={a.id}
                             agent={a}
                             account={accountMap.get(a.accountId)}
                             selected={a.id === selected}
@@ -223,8 +227,20 @@ export function AgentList({
                             hotkey={hotkeys.get(a.id) ?? null}
                             onNavigate={onNavigate}
                           />
-                        );
-                      })}
+                          {nesting?.children.get(a.id)?.map((h) => (
+                            <AgentRow
+                              key={h.id}
+                              nested
+                              agent={h}
+                              account={accountMap.get(h.accountId)}
+                              selected={h.id === selected}
+                              now={now}
+                              hotkey={hotkeys.get(h.id) ?? null}
+                              onNavigate={onNavigate}
+                            />
+                          ))}
+                        </Fragment>
+                      ))}
                     </m.ul>
                   )}
                 </AnimatePresence>
@@ -266,6 +282,18 @@ function SubagentBadge({ agentId }: { agentId: string }) {
   );
 }
 
+/** Tiny sync state on a helper's row: only the states worth a glance. */
+function SyncHint({ sync }: { sync: NonNullable<Agent["helperSync"]> }) {
+  if (sync.state === "inSync") return null;
+  const v = syncPresentation(sync, "the main agent");
+  const label = sync.state === "conflict" ? "Conflict" : sync.state === "merging" ? "Merging" : "Syncing";
+  return (
+    <Tooltip content={sync.detail ?? v.label} side="right">
+      <span className={cn("shrink-0 text-[11px]", v.tone === "warn" ? "text-warn" : "text-steel")}>{label}</span>
+    </Tooltip>
+  );
+}
+
 /** "#12" + CI glyph for agents with an open PR. Nothing otherwise, so most rows stay clean. */
 function PrIndicator({ agentId }: { agentId: string }) {
   const pr = usePr((s) => listIndicator(s.byAgent[agentId]));
@@ -290,7 +318,9 @@ const AgentRow = memo(function AgentRow({
   now,
   hotkey,
   onNavigate,
+  nested = false,
 }: {
+  nested?: boolean;
   agent: Agent;
   account: Account | undefined;
   selected: boolean;
@@ -344,7 +374,7 @@ const AgentRow = memo(function AgentRow({
   };
 
   return (
-    <li>
+    <li className={nested ? "relative ml-[22px] border-l border-line pl-1.5" : undefined}>
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
@@ -385,7 +415,11 @@ const AgentRow = memo(function AgentRow({
                   aria-hidden
                 />
               )}
-              <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="md" />
+              <ProviderGlyph
+                provider={agent.provider}
+                customAgentId={agent.customAgentId}
+                size={nested ? "sm" : "md"}
+              />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
@@ -419,6 +453,13 @@ const AgentRow = memo(function AgentRow({
                   >
                     {agent.title}
                   </span>
+                )}
+                {agent.parentId && (
+                  <Tooltip content="Helper agent" side="right">
+                    <span className="flex shrink-0 items-center text-accent" aria-label="Helper agent">
+                      <GitFork className="h-3 w-3" />
+                    </span>
+                  </Tooltip>
                 )}
                 {agent.unread && !selected && (
                   <span
@@ -469,6 +510,7 @@ const AgentRow = memo(function AgentRow({
                     </span>
                   </Tooltip>
                 )}
+                {agent.helperSync && <SyncHint sync={agent.helperSync} />}
                 <SubagentBadge agentId={agent.id} />
                 <PrIndicator agentId={agent.id} />
                 <span className="text-line-strong">·</span>
@@ -476,7 +518,7 @@ const AgentRow = memo(function AgentRow({
                   {agent.provider === "custom" ? identity.name : (account?.name ?? "—")} · {basename(agent.projectPath)}
                 </span>
               </div>
-              {agent.lastMessage && (
+              {agent.lastMessage && !nested && (
                 <p className="mt-1 line-clamp-1 text-[12px] leading-snug text-muted/90">{agent.lastMessage}</p>
               )}
               {resumable && (

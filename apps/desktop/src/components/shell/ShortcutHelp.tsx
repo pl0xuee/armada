@@ -47,7 +47,9 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
   {
     title: "Agent view",
     rows: [
-      { keys: ["⏎"], label: "Send (queues if the agent is busy)" },
+      { keys: ["⏎"], label: "Send (while the agent works: queue, start a helper, or ask, per Settings)" },
+      { keys: [modKey, "⏎"], label: "While the agent works: start a helper agent with this message" },
+      { keys: [modKey, "⌥", "←/→"], label: "Move focus between tiled helper agents" },
       { keys: ["⇧", "⏎"], label: "New line" },
       { keys: [modKey, "⇧", "D"], label: "Dictate: start or stop (⏎ stops and transcribes, Esc cancels)" },
       { keys: ["/"], label: "Slash commands (at the start of the message)" },

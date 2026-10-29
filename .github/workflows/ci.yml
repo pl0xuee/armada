@@ -7,17 +7,11 @@ name: CI
 on:
   push:
     branches: [main]
+  # No `paths-ignore` here: a workflow that never starts leaves required checks pending
+  # forever. The `changes` job below skips the heavy jobs on docs-only PRs instead (a
+  # skipped job counts as passing for branch protection). Pushes to main always run
+  # everything: release.yml requires CI runs on the tagged commit.
   pull_request:
-    # Docs-only PRs skip CI. Not applied to pushes to main: release.yml requires CI runs
-    # on the tagged commit, so every commit on main must have them.
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "LICENSE"
-      - ".github/dependabot.yml"
-      - "**/*.png"
-      - "**/*.jpg"
-      - "**/*.gif"
   workflow_dispatch:
     inputs:
       only:
@@ -39,9 +33,42 @@ env:
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
+  # Cheap gate: did anything other than docs/images change? Always true off pull requests.
+  changes:
+    name: changes
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Detect code changes
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          code=true
+          if [ "$EVENT" = "pull_request" ]; then
+            # Captured first so a failed diff fails the job instead of skipping CI.
+            changed=$(git diff --name-only "$BASE_SHA" HEAD)
+            # Docs-only: markdown, docs/, LICENSE, dependabot config, images.
+            if [ -z "$(grep -Ev '(\.md|\.png|\.jpg|\.gif)$|^docs/|^LICENSE$|^\.github/dependabot\.yml$' <<< "$changed" || true)" ]; then
+              code=false
+            fi
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "code changed: $code"
+
   checks:
     name: checks (linux)
-    if: github.event_name != 'workflow_dispatch' || inputs.only == 'all'
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'workflow_dispatch' || inputs.only == 'all')
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
@@ -102,6 +129,17 @@ jobs:
           npm run test --if-present
           npm run build
 
+      # The Preview page script is committed prebuilt (src-tauri embeds it); it must match
+      # its source.
+      - name: Preview page script is up to date
+        working-directory: apps/desktop
+        run: |
+          npm run build:preview-agent
+          git diff --exit-code -- src-tauri/assets/preview-agent.js || {
+            echo "::error::src-tauri/assets/preview-agent.js is stale: run npm run build:preview-agent and commit it"
+            exit 1
+          }
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
@@ -111,9 +149,10 @@ jobs:
   # cfg(target_os) code paths only: no frontend tests, no bundles.
   native:
     name: ${{ matrix.name }}
-    needs: checks
-    # After checks pass, or straight away for a single-platform manual run.
-    if: ${{ !cancelled() && (needs.checks.result == 'success' || (needs.checks.result == 'skipped' && inputs.only != 'all')) }}
+    needs: [changes, checks]
+    # After checks pass, or straight away for a single-platform manual run. Skipped
+    # entirely on docs-only PRs.
+    if: ${{ !cancelled() && needs.changes.outputs.code == 'true' && (needs.checks.result == 'success' || (needs.checks.result == 'skipped' && inputs.only != 'all')) }}
     strategy:
       fail-fast: false
       matrix:
@@ -183,14 +222,18 @@ jobs:
         run: cargo check -p armada-desktop --target x86_64-apple-darwin --locked
 
   # Catches bundler misconfiguration (targets, deb dependencies, icons, CSP) before a
-  # release does. Main only: release.yml builds the real installers on every OS.
+  # release does, then launches the debug binary this build produced and drives it with
+  # WebDriver (apps/desktop/e2e): the only thing that catches runtime wiring bugs such as a
+  # command asking for managed state that was never registered. One job so the app is
+  # compiled once. Main and manual runs only (a manual run on a branch tries it before a merge):
+  # release.yml builds the real installers on every OS.
   # Updater artifacts need the signing key, which CI doesn't have.
   bundle-smoke:
-    name: deb bundle smoke (linux)
-    if: github.event_name == 'push'
+    name: deb bundle + e2e smoke (linux)
+    if: ${{ !cancelled() && needs.checks.result == 'success' && github.event_name != 'pull_request' }}
     needs: checks
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -202,7 +245,8 @@ jobs:
           sudo apt-get install -y \
             build-essential pkg-config \
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
-            libxdo-dev libssl-dev libasound2-dev libdbus-1-dev libclang-dev patchelf
+            libxdo-dev libssl-dev libasound2-dev libdbus-1-dev libclang-dev patchelf \
+            webkit2gtk-driver xvfb dbus-x11
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -211,11 +255,13 @@ jobs:
           cache-dependency-path: |
             apps/desktop/package-lock.json
             apps/remote/package-lock.json
+            apps/desktop/e2e/package-lock.json
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
 
+      # Also caches ~/.cargo/bin, so tauri-driver below is only compiled on a cold cache.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: ". -> target"
@@ -230,6 +276,18 @@ jobs:
       - name: Bundle (deb, debug)
         working-directory: apps/desktop
         run: npm run tauri build -- --ci --debug --bundles deb --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      # Pinned for reproducibility; bump together with the e2e/ test.
+      - name: Install tauri-driver
+        run: command -v tauri-driver >/dev/null && tauri-driver --version | grep -q 2.1.0 || cargo install tauri-driver --version 2.1.0 --locked
+
+      # Fresh HOME/XDG dirs, Xvfb and a private session bus; see apps/desktop/e2e/run.sh.
+      - name: E2E smoke (real app, WebDriver)
+        timeout-minutes: 10
+        working-directory: apps/desktop/e2e
+        run: |
+          npm ci
+          ./run.sh
 
   # The release profile (LTO, codegen settings, no debug assertions) compiles differently
   # from the debug builds above; build it before a tag does. Main only.

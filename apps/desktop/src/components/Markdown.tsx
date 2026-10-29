@@ -40,9 +40,9 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
   const shown = hidden ? revealHidden(code) : code;
   const runFn = useRef<() => void>(() => {});
   return (
-    <div className="group/code my-3 overflow-hidden rounded-xl border border-line bg-code edge">
-      <div className="flex h-8 items-center justify-between border-b border-line bg-panel/60 pl-3 pr-1.5">
-        <span className="font-mono text-[11px] lowercase tracking-wide text-steel">{lang ?? "text"}</span>
+    <div className="group/code my-3 overflow-hidden rounded-xl border border-line bg-code">
+      <div className="flex h-8 items-center justify-between border-b border-line/70 bg-panel/50 pl-3.5 pr-1.5">
+        <span className="font-mono text-[11px] lowercase tracking-wide text-steel/90">{lang ?? "text"}</span>
         <div className="flex items-center gap-0.5">
           {runAgent && command && (
             <RunButton
@@ -73,7 +73,7 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
               },
             }
           : {})}
-        className="selectable overflow-x-auto px-3.5 py-3 font-mono text-[12.5px] leading-[1.6] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/50"
+        className="selectable overflow-x-auto px-3.5 py-3 font-mono text-[12.5px] leading-[1.65] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/50"
       >
         <code>
           {isDiff ? (
@@ -139,6 +139,11 @@ const components: Components = {
     if (!block) return <code>{children}</code>;
     return <CodeBlock lang={match ? match[1] : null} code={text} />;
   },
+  table: ({ children }) => (
+    <div className="md-table">
+      <table>{children}</table>
+    </div>
+  ),
   a: ({ href, children }) => (
     <a
       href={href}

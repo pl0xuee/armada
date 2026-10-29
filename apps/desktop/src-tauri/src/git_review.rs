@@ -29,6 +29,9 @@ pub struct ChangedFile {
     pub status: ChangeStatus,
     pub additions: i64,
     pub deletions: i64,
+    /// Stored with Git LFS: judged against its committed pointer, so no textual patch.
+    #[serde(default)]
+    pub lfs: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -47,6 +50,19 @@ pub struct AgentDiff {
     /// `patch` was cut short (at a file boundary) because it exceeded
     /// [`MAX_PATCH_BYTES`]; `files` still lists every changed file.
     pub truncated: bool,
+    /// Set when the diff involves Git LFS paths (None otherwise).
+    pub lfs: Option<LfsSummary>,
+}
+
+/// Git LFS facts about a diff. Armada never runs LFS (or any repository-configured
+/// filter) to view a diff: LFS files are compared against their committed pointers.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LfsSummary {
+    /// The repository uses LFS but no `git-lfs` executable is on PATH.
+    pub tool_missing: bool,
+    /// LFS files left out of the diff because their content matches the committed pointer.
+    pub hidden: i64,
 }
 
 /// What a commit took.
@@ -744,12 +760,32 @@ pub async fn revert_patch(agent: &Agent, patch: &str) -> anyhow::Result<()> {
 
 pub async fn get_diff(agent: &Agent) -> anyhow::Result<AgentDiff> {
     let cwd = agent_cwd(agent)?;
-    diff_worktree(cwd, agent.base_commit.as_deref()).await
+    let started = (agent.created_at > 0)
+        .then(|| SystemTime::UNIX_EPOCH + Duration::from_millis(agent.created_at as u64));
+    diff_worktree_with(cwd, agent.base_commit.as_deref(), started, None).await
 }
 
 /// Changes in `cwd`'s working tree (tracked, deleted and untracked files) since `base`
 /// (default HEAD), without touching the repository's index.
+#[cfg(test)]
 async fn diff_worktree(cwd: &Path, base: Option<&str>) -> anyhow::Result<AgentDiff> {
+    diff_worktree_with(cwd, base, None, None).await
+}
+
+/// Every LFS-tracked path (attribute `filter=lfs`), as a pathspec relative to the
+/// repository root whatever directory git runs in.
+const LFS_SPEC: &str = ":(top,attr:filter=lfs)";
+/// Everything except LFS-tracked paths.
+const NOT_LFS_SPEC: &str = ":(top,exclude,attr:filter=lfs)";
+
+/// [`get_diff`] with the pieces tests need to control: `started` is when the agent's
+/// work began (see [`lfs_scan`]), `path_env` the PATH searched for `git-lfs`.
+async fn diff_worktree_with(
+    cwd: &Path,
+    base: Option<&str>,
+    started: Option<SystemTime>,
+    path_env: Option<&OsStr>,
+) -> anyhow::Result<AgentDiff> {
     let mut git = ReadOnlyGit::new(cwd).await?;
     git.run(&["rev-parse", "--is-inside-work-tree"])
         .await
@@ -763,14 +799,41 @@ async fn diff_worktree(cwd: &Path, base: Option<&str>) -> anyhow::Result<AgentDi
         None => git.empty_tree().await?,
     };
 
+    // LFS files are judged here, never by git: it would hash every (huge) asset several
+    // times, and viewing must not run the repository's LFS filters.
+    let lfs = lfs_scan(&git, &base, started).await?;
+    let pathspec: Vec<&str> = if lfs.any {
+        vec!["--", ":(top)", NOT_LFS_SPEC]
+    } else {
+        Vec::new()
+    };
+
     let index = TempIndex::copy_of(&git).await?;
     git.index = Some(index.0.clone());
     // Intent-to-add (in the private index) so brand-new files show up in `git diff <base>`.
-    git.run(&["add", "-A", "-N"]).await?;
+    // Only the untracked files: `add -A` would also hash every modified tracked file and
+    // write it into the object database.
+    let untracked = &lfs.untracked_plain;
+    if !untracked.is_empty() {
+        git.run_input(
+            &[
+                "--literal-pathspecs",
+                "add",
+                "-N",
+                "--pathspec-from-file=-",
+                "--pathspec-file-nul",
+            ],
+            Some(nul_joined(untracked)),
+        )
+        .await?;
+    }
 
-    let name_status = git.diff(&["--name-status", "-z", &base]).await?;
-    let numstat = git.diff(&["--numstat", "-z", &base]).await?;
-    let (patch, truncated) = git.patch(&[&base], MAX_PATCH_BYTES).await?;
+    let mut meta_args = vec!["--raw", "--numstat", "-z", &base];
+    meta_args.extend(&pathspec);
+    let meta = git.diff(&meta_args).await?;
+    let mut patch_args = vec![base.as_str()];
+    patch_args.extend(&pathspec);
+    let (patch, truncated) = git.patch(&patch_args, MAX_PATCH_BYTES).await?;
     drop(index);
     git.index = None;
     let ahead = if base == "HEAD" || !has_head {
@@ -784,20 +847,26 @@ async fn diff_worktree(cwd: &Path, base: Option<&str>) -> anyhow::Result<AgentDi
     };
 
     // Filter-free like the diff: see `AgentDiff::uncommitted`.
+    let mut status_args = vec![
+        "status",
+        "--porcelain",
+        "-z",
+        "--untracked-files=normal",
+        "--ignore-submodules=dirty",
+    ];
+    if lfs.any {
+        status_args.extend(["--", ":(top)", NOT_LFS_SPEC]);
+    }
     let uncommitted = git
-        .run(&[
-            "status",
-            "--porcelain",
-            "-z",
-            "--untracked-files=normal",
-            "--ignore-submodules=dirty",
-        ])
+        .run(&status_args)
         .await
         .map(|s| count_porcelain(&s))
-        .unwrap_or(0);
+        .unwrap_or(0)
+        + lfs.files.len() as i64;
 
-    let counts = parse_numstat(&numstat);
-    let files = parse_name_status(&name_status)
+    let (entries, numstat) = split_raw_numstat(&meta);
+    let counts = parse_numstat(numstat);
+    let mut files: Vec<ChangedFile> = parse_raw(entries)
         .into_iter()
         .map(|(path, status)| {
             let (additions, deletions) = counts.get(&path).copied().unwrap_or((0, 0));
@@ -806,16 +875,485 @@ async fn diff_worktree(cwd: &Path, base: Option<&str>) -> anyhow::Result<AgentDi
                 status,
                 additions,
                 deletions,
+                lfs: false,
             }
         })
         .collect();
+    let summary = lfs.any.then(|| LfsSummary {
+        tool_missing: !lfs_tool_on_path(path_env),
+        hidden: lfs.hidden,
+    });
+    if !lfs.files.is_empty() {
+        files.extend(lfs.files);
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+    }
     Ok(AgentDiff {
         files,
         patch,
         ahead,
         uncommitted,
         truncated,
+        lfs: summary,
     })
+}
+
+/// Whether a `git-lfs` executable is on PATH (`path_env`, or the process's own). Looked
+/// up, never run.
+fn lfs_tool_on_path(path_env: Option<&OsStr>) -> bool {
+    match path_env {
+        Some(path) => {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            which::which_in("git-lfs", Some(path), cwd).is_ok()
+        }
+        None => which::which("git-lfs").is_ok(),
+    }
+}
+
+const LFS_REFUSAL: &str =
+    "This repository stores files with Git LFS, but Git LFS isn't installed. \
+Install it (e.g. `sudo pacman -S git-lfs`, `brew install git-lfs`, or Git for Windows includes it) \
+and run `git lfs install`, then try again.";
+
+/// Refuses (before any `git add`/`git commit`) when LFS-tracked files changed but
+/// `git-lfs` isn't installed: git would commit the raw binaries as ordinary blobs,
+/// where the repository expects small pointers. `only` limits the check to those
+/// repository-relative paths (an agent sharing the user's checkout). Repositories
+/// without LFS are never blocked.
+async fn ensure_lfs_commit_safe(
+    agent: &Agent,
+    cwd: &Path,
+    only: Option<&[String]>,
+    path_env: Option<&OsStr>,
+) -> anyhow::Result<()> {
+    if lfs_tool_on_path(path_env) {
+        return Ok(());
+    }
+    let git = ReadOnlyGit::new(cwd).await?;
+    let base = if git.has_head().await? {
+        "HEAD".to_string()
+    } else {
+        git.empty_tree().await?
+    };
+    let started = (agent.created_at > 0)
+        .then(|| SystemTime::UNIX_EPOCH + Duration::from_millis(agent.created_at as u64));
+    let scan = lfs_scan(&git, &base, started).await?;
+    let hit = scan
+        .files
+        .iter()
+        .any(|f| only.is_none_or(|paths| paths.iter().any(|p| path_key(p) == path_key(&f.path))));
+    if hit {
+        bail!("{LFS_REFUSAL}");
+    }
+    Ok(())
+}
+
+/// A Git LFS pointer file's target.
+#[derive(Debug, PartialEq, Eq)]
+struct LfsPointer {
+    oid: String,
+    size: u64,
+}
+
+/// Parses `version https://git-lfs.github.com/spec/v1` pointer text.
+fn parse_lfs_pointer(blob: &[u8]) -> Option<LfsPointer> {
+    let text = std::str::from_utf8(blob).ok()?;
+    let mut lines = text.lines();
+    if !lines
+        .next()?
+        .starts_with("version https://git-lfs.github.com/spec/")
+    {
+        return None;
+    }
+    let (mut oid, mut size) = (None, None);
+    for line in lines {
+        if let Some(v) = line.strip_prefix("oid sha256:") {
+            oid = Some(v.trim().to_ascii_lowercase());
+        } else if let Some(v) = line.strip_prefix("size ") {
+            size = v.trim().parse().ok();
+        }
+    }
+    Some(LfsPointer {
+        oid: oid.filter(|o| o.len() == 64 && o.bytes().all(|b| b.is_ascii_hexdigit()))?,
+        size: size?,
+    })
+}
+
+/// LFS pointer blobs are ~130 bytes; anything bigger isn't one.
+const MAX_POINTER_BYTES: u64 = 1024;
+
+/// What `lfs_scan` found.
+#[derive(Default)]
+struct LfsScan {
+    /// The repository has LFS-tracked paths at all (they are left out of git's passes).
+    any: bool,
+    /// LFS files that differ from the base (`lfs: true`, no patch).
+    files: Vec<ChangedFile>,
+    /// Untracked, not ignored, non-LFS files (to intent-to-add for the patch).
+    untracked_plain: Vec<String>,
+    /// LFS files whose content matches the committed pointer.
+    hidden: i64,
+}
+
+/// How a tracked LFS file's worktree copy compares with its committed version.
+#[derive(Debug, PartialEq, Eq)]
+enum Lfs {
+    Same,
+    Changed,
+    Gone,
+}
+
+/// The committed side of an LFS path.
+enum LfsBase {
+    Pointer(LfsPointer),
+    /// A regular blob of this size (committed before LFS was adopted).
+    Raw(u64),
+    Missing,
+}
+
+/// Untracked, not-ignored files → (LFS-tracked, others).
+async fn split_untracked_lfs(git: &ReadOnlyGit<'_>) -> anyhow::Result<(Vec<String>, Vec<String>)> {
+    let all = list(
+        git,
+        &[
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            "--full-name",
+            "--",
+            ":(top)",
+        ],
+    )
+    .await?;
+    if all.is_empty() {
+        return Ok((Vec::new(), all));
+    }
+    let attrs = git
+        .run_input(
+            &["check-attr", "-z", "--stdin", "filter"],
+            Some(nul_joined(&all)),
+        )
+        .await?;
+    // "<path>\0filter\0<value>\0"…
+    let mut lfs: HashSet<&str> = HashSet::new();
+    let mut tokens = attrs.split('\0');
+    while let (Some(path), Some(_attr), Some(value)) = (tokens.next(), tokens.next(), tokens.next())
+    {
+        if value == "lfs" {
+            lfs.insert(path);
+        }
+    }
+    let (lfs_paths, plain): (Vec<String>, Vec<String>) =
+        all.into_iter().partition(|p| lfs.contains(p.as_str()));
+    Ok((lfs_paths, plain))
+}
+
+async fn list(git: &ReadOnlyGit<'_>, args: &[&str]) -> anyhow::Result<Vec<String>> {
+    let out = git.run(args).await?;
+    Ok(nul_split(&out).map(str::to_string).collect())
+}
+
+/// Finds the LFS-tracked files that changed since `base`, without git hashing them.
+///
+/// A file is judged from its committed pointer (oid, size): missing → deleted; a
+/// different size → changed; the same size and last modified before `started` (the
+/// agent hasn't touched it) → unchanged, unread; otherwise the file is streamed through
+/// SHA-256, remembered in a process-wide cache keyed by path, size, mtime and inode.
+async fn lfs_scan(
+    git: &ReadOnlyGit<'_>,
+    base: &str,
+    started: Option<SystemTime>,
+) -> anyhow::Result<LfsScan> {
+    let mut tracked = list(git, &["ls-files", "-z", "--full-name", "--", LFS_SPEC]).await?;
+    tracked.dedup();
+    // Untracked files are told apart with `check-attr`: an attribute pathspec doesn't
+    // see inside untracked directories.
+    let (untracked, plain_untracked) = split_untracked_lfs(git).await?;
+    // Removed from the index (`git rm`) or deleted by a commit since `base`.
+    let removed = list(
+        git,
+        &[
+            "diff-index",
+            "--cached",
+            "--raw",
+            "-z",
+            "--no-renames",
+            "--diff-filter=D",
+            base,
+            "--",
+            LFS_SPEC,
+        ],
+    )
+    .await?
+    .into_iter()
+    .filter(|t| !t.starts_with(':'))
+    .collect::<Vec<_>>();
+    let mut scan = LfsScan {
+        any: !(tracked.is_empty() && untracked.is_empty() && removed.is_empty()),
+        untracked_plain: plain_untracked,
+        ..LfsScan::default()
+    };
+    if !scan.any {
+        return Ok(scan);
+    }
+    let top = git
+        .run(&["rev-parse", "--show-toplevel"])
+        .await?
+        .trim_end_matches(['\r', '\n'])
+        .to_string();
+    let top = PathBuf::from(top);
+
+    let bases = lfs_bases(git, base, &tracked).await?;
+    let work: Vec<(String, LfsBase)> = tracked.into_iter().zip(bases).collect();
+    let top2 = top.clone();
+    let verdicts = tokio::task::spawn_blocking(move || lfs_verdicts(&top2, work, started))
+        .await
+        .map_err(|e| anyhow!("checking LFS files: {e}"))?;
+
+    for (path, base, verdict) in verdicts {
+        let status = match (verdict, base) {
+            (Lfs::Same, _) => {
+                scan.hidden += 1;
+                continue;
+            }
+            (Lfs::Gone, LfsBase::Missing) => continue,
+            (Lfs::Gone, _) => ChangeStatus::Deleted,
+            (Lfs::Changed, LfsBase::Missing) => ChangeStatus::Added,
+            (Lfs::Changed, _) => ChangeStatus::Modified,
+        };
+        scan.files.push(lfs_file(path, status));
+    }
+    for path in untracked {
+        scan.files.push(lfs_file(path, ChangeStatus::Added));
+    }
+    for path in removed {
+        scan.files.push(lfs_file(path, ChangeStatus::Deleted));
+    }
+    Ok(scan)
+}
+
+fn lfs_file(path: String, status: ChangeStatus) -> ChangedFile {
+    ChangedFile {
+        path,
+        status,
+        additions: 0,
+        deletions: 0,
+        lfs: true,
+    }
+}
+
+/// The committed side of each of `paths` at `base`, in order. Two cheap `cat-file`
+/// calls; only small blobs (pointers) are ever read.
+async fn lfs_bases(
+    git: &ReadOnlyGit<'_>,
+    base: &str,
+    paths: &[String],
+) -> anyhow::Result<Vec<LfsBase>> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    // One "<base>:<path>" per line; a path with a newline can't be asked about.
+    let asked: Vec<usize> = (0..paths.len())
+        .filter(|&i| !paths[i].contains('\n'))
+        .collect();
+    let mut input = String::new();
+    for &i in &asked {
+        input.push_str(&format!("{base}:{}\n", paths[i]));
+    }
+    let checked = git
+        .output(
+            &["cat-file", "--batch-check"],
+            Some(input.clone().into_bytes()),
+            None,
+        )
+        .await?;
+    check("git", &["cat-file"], &checked.output)?;
+    let text = String::from_utf8_lossy(&checked.output.stdout).into_owned();
+    let mut sizes: Vec<Option<u64>> = vec![None; paths.len()];
+    let mut missing: Vec<bool> = vec![false; paths.len()];
+    let mut small = String::new();
+    let mut small_idx = Vec::new();
+    for (&i, line) in asked.iter().zip(text.lines()) {
+        let mut parts = line.rsplitn(3, ' ');
+        let (size, kind) = (parts.next(), parts.next());
+        if line.ends_with(" missing") {
+            missing[i] = true;
+        } else if kind == Some("blob") {
+            sizes[i] = size.and_then(|s| s.parse().ok());
+            if sizes[i].is_some_and(|s| s <= MAX_POINTER_BYTES) {
+                small.push_str(&format!("{base}:{}\n", paths[i]));
+                small_idx.push(i);
+            }
+        }
+    }
+    let mut pointers: HashMap<usize, LfsPointer> = HashMap::new();
+    if !small_idx.is_empty() {
+        let out = git
+            .output(&["cat-file", "--batch"], Some(small.into_bytes()), None)
+            .await?;
+        check("git", &["cat-file"], &out.output)?;
+        let bytes = out.output.stdout;
+        let mut pos = 0;
+        for &i in &small_idx {
+            let Some(nl) = bytes[pos..].iter().position(|&b| b == b'\n') else {
+                break;
+            };
+            let header = String::from_utf8_lossy(&bytes[pos..pos + nl]).into_owned();
+            pos += nl + 1;
+            let Some(len) = header
+                .rsplit(' ')
+                .next()
+                .and_then(|s| s.parse::<usize>().ok())
+            else {
+                continue;
+            };
+            let Some(body) = bytes.get(pos..pos + len) else {
+                break;
+            };
+            if let Some(p) = parse_lfs_pointer(body) {
+                pointers.insert(i, p);
+            }
+            pos += len + 1;
+        }
+    }
+    Ok((0..paths.len())
+        .map(|i| {
+            if let Some(p) = pointers.remove(&i) {
+                LfsBase::Pointer(p)
+            } else if missing[i] {
+                LfsBase::Missing
+            } else if let Some(size) = sizes[i] {
+                LfsBase::Raw(size)
+            } else {
+                // Unknown (odd path): never claim it is unchanged.
+                LfsBase::Raw(u64::MAX)
+            }
+        })
+        .collect())
+}
+
+fn lfs_verdicts(
+    top: &Path,
+    work: Vec<(String, LfsBase)>,
+    started: Option<SystemTime>,
+) -> Vec<(String, LfsBase, Lfs)> {
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let results: parking_lot::Mutex<Vec<Option<Lfs>>> =
+        parking_lot::Mutex::new(work.iter().map(|_| None).collect());
+    let threads = std::thread::available_parallelism()
+        .map_or(2, |n| n.get())
+        .clamp(1, 8);
+    std::thread::scope(|scope| {
+        for _ in 0..threads {
+            scope.spawn(|| loop {
+                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some((path, base)) = work.get(i) else {
+                    break;
+                };
+                let verdict = lfs_verdict(top, path, base, started);
+                results.lock()[i] = Some(verdict);
+            });
+        }
+    });
+    let results = results.into_inner();
+    work.into_iter()
+        .zip(results)
+        .map(|((path, base), v)| (path, base, v.unwrap_or(Lfs::Changed)))
+        .collect()
+}
+
+fn lfs_verdict(top: &Path, rel: &str, base: &LfsBase, started: Option<SystemTime>) -> Lfs {
+    let file = top.join(rel);
+    let Ok(meta) = file.symlink_metadata() else {
+        return Lfs::Gone;
+    };
+    if !meta.is_file() {
+        return Lfs::Changed;
+    }
+    let untouched = || matches!((meta.modified(), started), (Ok(m), Some(s)) if m < s);
+    match base {
+        LfsBase::Missing => Lfs::Changed,
+        LfsBase::Raw(size) => {
+            if meta.len() == *size && untouched() {
+                Lfs::Same
+            } else {
+                Lfs::Changed
+            }
+        }
+        LfsBase::Pointer(p) => {
+            // A checkout made without git-lfs leaves the pointer text itself in the worktree.
+            if meta.len() <= MAX_POINTER_BYTES
+                && std::fs::read(&file)
+                    .ok()
+                    .and_then(|b| parse_lfs_pointer(&b))
+                    .is_some_and(|w| w == *p)
+            {
+                Lfs::Same
+            } else if meta.len() != p.size {
+                Lfs::Changed
+            } else if untouched() || cached_sha256(&file, &meta).is_some_and(|h| h == p.oid) {
+                Lfs::Same
+            } else {
+                Lfs::Changed
+            }
+        }
+    }
+}
+
+type HashKey = (PathBuf, u64, Option<SystemTime>, u64);
+
+fn hash_cache() -> &'static parking_lot::Mutex<HashMap<HashKey, String>> {
+    static CACHE: OnceLock<parking_lot::Mutex<HashMap<HashKey, String>>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+#[cfg(unix)]
+fn inode(meta: &std::fs::Metadata) -> u64 {
+    std::os::unix::fs::MetadataExt::ino(meta)
+}
+
+/// Windows has no cheap stable file id on stable Rust; path + size + mtime key it.
+#[cfg(not(unix))]
+fn inode(_meta: &std::fs::Metadata) -> u64 {
+    0
+}
+
+/// SHA-256 (lowercase hex) of the file, streamed; remembered while its path, size,
+/// mtime and inode stay the same, so reopening a review doesn't read the file again.
+fn cached_sha256(path: &Path, meta: &std::fs::Metadata) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let key: HashKey = (
+        path.to_path_buf(),
+        meta.len(),
+        meta.modified().ok(),
+        inode(meta),
+    );
+    if let Some(hit) = hash_cache().lock().get(&key) {
+        return Some(hit.clone());
+    }
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1024 * 1024];
+    loop {
+        let n = file.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let hex: String = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let mut cache = hash_cache().lock();
+    if cache.len() > 50_000 {
+        cache.clear();
+    }
+    cache.insert(key, hex.clone());
+    Some(hex)
 }
 
 /// Entries in `git status --porcelain -z` output. A rename or copy, in the index (X)
@@ -852,6 +1390,49 @@ async fn count_changes(cwd: &Path) -> i64 {
     .await
     .map(|s| count_porcelain(&s))
     .unwrap_or(0)
+}
+
+/// Splits `git diff --raw --numstat -z` output into the raw records (before the first
+/// token that isn't `:<modes> <ids> <status>`) and the numstat text after them.
+fn split_raw_numstat(out: &str) -> (&str, &str) {
+    let mut pos = 0;
+    let mut tokens = out.split('\0');
+    while let Some(tok) = tokens.next() {
+        if tok.starts_with(':') {
+            // The record's path(s) follow: one, or two for a rename/copy.
+            let status = tok.rsplit(' ').next().unwrap_or("");
+            let paths = if status.starts_with(['R', 'C']) { 2 } else { 1 };
+            pos += tok.len() + 1;
+            for _ in 0..paths {
+                if let Some(p) = tokens.next() {
+                    pos += p.len() + 1;
+                }
+            }
+        } else {
+            break;
+        }
+    }
+    out.split_at(pos.min(out.len()))
+}
+
+/// Raw records from [`split_raw_numstat`] → (path, status); same results as
+/// [`parse_name_status`] on the equivalent `--name-status -z` output.
+fn parse_raw(entries: &str) -> Vec<(String, ChangeStatus)> {
+    let mut tokens = entries.split('\0').filter(|t| !t.is_empty());
+    let mut flat = String::new();
+    while let Some(tok) = tokens.next() {
+        let status = tok.rsplit(' ').next().unwrap_or("M");
+        flat.push_str(status);
+        flat.push('\0');
+        let paths = if status.starts_with(['R', 'C']) { 2 } else { 1 };
+        for _ in 0..paths {
+            if let Some(p) = tokens.next() {
+                flat.push_str(p);
+                flat.push('\0');
+            }
+        }
+    }
+    parse_name_status(&flat)
 }
 
 /// `git diff --name-status -z` → (path, status). Renames/copies carry two paths.
@@ -935,8 +1516,16 @@ pub async fn commit_excluding(
         bail!("Commit message is empty");
     }
     if agent.worktree {
+        ensure_lfs_commit_safe(agent, cwd, None, None).await?;
         commit_all(cwd, message, exclude).await
     } else {
+        let top = PathBuf::from(
+            git(cwd, &["rev-parse", "--show-toplevel"])
+                .await?
+                .trim_end_matches(['\r', '\n']),
+        );
+        let rel = repo_relative_paths(cwd, &top, touched);
+        ensure_lfs_commit_safe(agent, cwd, Some(&rel), None).await?;
         let touched: Vec<String> = touched
             .iter()
             .filter(|t| !exclude.contains(t))
@@ -2793,5 +3382,419 @@ mod tests {
         git(&repo.dir, &["add", "."]).await.unwrap();
         git(&repo.dir, &["commit", "-q", "-m", "a"]).await.unwrap();
         assert!(!marker.exists());
+    }
+
+    // ---- Git LFS ----
+
+    fn pointer_for(content: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let hex: String = Sha256::digest(content)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        format!(
+            "version https://git-lfs.github.com/spec/v1\noid sha256:{hex}\nsize {}\n",
+            content.len()
+        )
+    }
+
+    /// A repository tracking `*.bin` with LFS (no git-lfs installed or configured): each
+    /// `(name, content)` is committed as a pointer while the worktree holds the content.
+    fn lfs_repo(files: &[(&str, &str)]) -> Repo {
+        let repo = Repo::new();
+        repo.write(
+            ".gitattributes",
+            "*.bin filter=lfs diff=lfs merge=lfs -text\n",
+        );
+        repo.write("t.txt", "one\n");
+        for (name, content) in files {
+            repo.write(name, &pointer_for(content.as_bytes()));
+        }
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+        for (name, content) in files {
+            repo.write(name, content);
+        }
+        repo
+    }
+
+    /// A PATH directory with no `git-lfs` in it.
+    fn empty_path() -> (PathBuf, std::ffi::OsString) {
+        let dir = std::env::temp_dir().join(format!("armada-path-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = std::env::join_paths([&dir]).unwrap();
+        (dir, path)
+    }
+
+    async fn lfs_diff(repo: &Repo, path_env: &OsStr) -> AgentDiff {
+        diff_worktree_with(&repo.dir, None, None, Some(path_env))
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn lfs_file_matching_its_pointer_is_hidden() {
+        let repo = lfs_repo(&[("a.bin", "real asset bytes"), ("b.bin", "other asset")]);
+        repo.write("t.txt", "two\n");
+        let (dir, path) = empty_path();
+        let before = repo.index_bytes();
+
+        let diff = lfs_diff(&repo, &path).await;
+        let paths: Vec<_> = diff.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["t.txt"]);
+        assert!(!diff.files[0].lfs);
+        let lfs = diff.lfs.expect("repository uses LFS");
+        assert_eq!(lfs.hidden, 2);
+        assert!(lfs.tool_missing);
+        assert!(diff.patch.contains("+two"), "{}", diff.patch);
+        assert!(!diff.patch.contains("bin"), "{}", diff.patch);
+        // Only the intended file is "uncommitted"; the hidden assets don't count.
+        assert_eq!(diff.uncommitted, 1);
+        assert_eq!(repo.index_bytes(), before);
+        assert!(repo.leftover_temp_indexes().is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn lfs_file_with_other_content_is_shown_without_a_patch() {
+        let repo = lfs_repo(&[
+            ("same.bin", "aaaa"),
+            ("size.bin", "short"),
+            ("gone.bin", "x"),
+        ]);
+        // Same size, different bytes; a different size; a deletion.
+        repo.write("same.bin", "bbbb");
+        repo.write("size.bin", "much longer content");
+        std::fs::remove_file(repo.dir.join("gone.bin")).unwrap();
+        let (dir, path) = empty_path();
+
+        let diff = lfs_diff(&repo, &path).await;
+        let got: Vec<_> = diff
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), f.status, f.lfs))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("gone.bin", ChangeStatus::Deleted, true),
+                ("same.bin", ChangeStatus::Modified, true),
+                ("size.bin", ChangeStatus::Modified, true),
+            ]
+        );
+        assert_eq!(diff.lfs.unwrap().hidden, 0);
+        assert!(diff.patch.is_empty(), "{}", diff.patch);
+        assert_eq!(diff.uncommitted, 3);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn new_lfs_files_show_as_added_and_other_changes_are_unaffected() {
+        let repo = lfs_repo(&[("a.bin", "kept")]);
+        repo.write("sub/new.bin", "brand new asset");
+        repo.write("new.txt", "fresh\n");
+        std::fs::remove_file(repo.dir.join("t.txt")).unwrap();
+        let (dir, path) = empty_path();
+
+        let diff = lfs_diff(&repo, &path).await;
+        let got: Vec<_> = diff
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), f.status, f.lfs))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("new.txt", ChangeStatus::Added, false),
+                ("sub/new.bin", ChangeStatus::Added, true),
+                ("t.txt", ChangeStatus::Deleted, false),
+            ]
+        );
+        assert_eq!(diff.files[0].additions, 1);
+        assert_eq!(diff.lfs.as_ref().unwrap().hidden, 1);
+        assert!(diff.patch.contains("+fresh"), "{}", diff.patch);
+        assert!(!diff.patch.contains("new.bin"), "{}", diff.patch);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn lfs_is_found_from_a_subfolder_and_staged_removals() {
+        let repo = lfs_repo(&[("a.bin", "kept"), ("rm.bin", "removed")]);
+        repo.git(&["rm", "-q", "--cached", "rm.bin"]);
+        std::fs::remove_file(repo.dir.join("rm.bin")).unwrap();
+        let (dir, path) = empty_path();
+        let diff = diff_worktree_with(&repo.dir.join("sub-missing"), None, None, Some(&path)).await;
+        assert!(diff.is_err());
+        std::fs::create_dir_all(repo.dir.join("sub")).unwrap();
+        let diff = diff_worktree_with(&repo.dir.join("sub"), None, None, Some(&path))
+            .await
+            .unwrap();
+        let got: Vec<_> = diff
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), f.status))
+            .collect();
+        assert_eq!(got, vec![("rm.bin", ChangeStatus::Deleted)]);
+        assert_eq!(diff.lfs.unwrap().hidden, 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn untouched_since_the_agent_started_is_not_read() {
+        let repo = lfs_repo(&[("a.bin", "aaaa")]);
+        // Same size, different bytes, but older than the agent: trusted without hashing.
+        repo.write("a.bin", "bbbb");
+        let later = SystemTime::now() + Duration::from_secs(3600);
+        let (dir, path) = empty_path();
+        let diff = diff_worktree_with(&repo.dir, None, Some(later), Some(&path))
+            .await
+            .unwrap();
+        assert!(diff.files.is_empty());
+        assert_eq!(diff.lfs.unwrap().hidden, 1);
+        // Started before the edit: the content is checked (and the verdict cached).
+        let earlier = SystemTime::now() - Duration::from_secs(3600);
+        for _ in 0..2 {
+            let diff = diff_worktree_with(&repo.dir, None, Some(earlier), Some(&path))
+                .await
+                .unwrap();
+            assert_eq!(diff.files.len(), 1);
+            assert!(diff.files[0].lfs);
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn unsmudged_pointer_files_in_the_worktree_are_unchanged() {
+        // A checkout made without git-lfs leaves the pointer text in the worktree.
+        let repo = lfs_repo(&[("a.bin", "real asset bytes")]);
+        repo.write("a.bin", &pointer_for(b"real asset bytes"));
+        let (dir, path) = empty_path();
+        let diff = lfs_diff(&repo, &path).await;
+        assert!(diff.files.is_empty(), "{:?}", diff.files);
+        assert_eq!(diff.lfs.unwrap().hidden, 1);
+        assert_eq!(diff.uncommitted, 0);
+        // A pointer to different content is a real change.
+        repo.write("a.bin", &pointer_for(b"other bytes"));
+        let diff = lfs_diff(&repo, &path).await;
+        assert_eq!(diff.files.len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn lfs_in_odd_paths_and_untracked_folders() {
+        let repo = lfs_repo(&[("my dir/\u{fc}ber file.bin", "asset one")]);
+        repo.write("newdir/deep/x.bin", "fresh asset");
+        repo.write("newdir/note.txt", "hi\n");
+        let (dir, path) = empty_path();
+        let diff = lfs_diff(&repo, &path).await;
+        let got: Vec<_> = diff
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), f.status, f.lfs))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("newdir/deep/x.bin", ChangeStatus::Added, true),
+                ("newdir/note.txt", ChangeStatus::Added, false),
+            ]
+        );
+        assert_eq!(diff.lfs.as_ref().unwrap().hidden, 1);
+        // One LFS asset and one plain file: two, not three (the folder counted twice).
+        assert_eq!(diff.uncommitted, 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn diff_edge_cases_unborn_renamed_detached_crlf() {
+        // No commits yet: untracked files with spaces and non-ASCII names.
+        let repo = Repo::new();
+        repo.write("sp ace/\u{fc}ber.txt", "one\r\ntwo\r\n");
+        let diff = diff_worktree(&repo.dir, None).await.unwrap();
+        let f = diff
+            .files
+            .iter()
+            .find(|f| f.path.contains("ber.txt"))
+            .unwrap();
+        assert_eq!(f.path, "sp ace/\u{fc}ber.txt");
+        assert_eq!(f.additions, 2);
+        assert!(diff.patch.contains("+one\r\n"), "{:?}", diff.patch);
+
+        // Renamed (unstaged) and detached HEAD.
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+        repo.git(&["checkout", "-q", "--detach"]);
+        std::fs::rename(
+            repo.dir.join("sp ace/\u{fc}ber.txt"),
+            repo.dir.join("moved.txt"),
+        )
+        .unwrap();
+        let diff = diff_worktree(&repo.dir, None).await.unwrap();
+        let got: Vec<_> = diff
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), f.status))
+            .collect();
+        assert_eq!(
+            got,
+            vec![("moved.txt", ChangeStatus::Renamed)],
+            "{:?}",
+            diff.patch
+        );
+        assert_eq!(diff.uncommitted, 2);
+    }
+
+    #[tokio::test]
+    async fn repositories_without_lfs_report_none() {
+        let repo = Repo::new();
+        repo.write("a.txt", "one\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+        repo.write("a.txt", "two\n");
+        let diff = diff_worktree(&repo.dir, None).await.unwrap();
+        assert!(diff.lfs.is_none());
+        assert_eq!(diff.files.len(), 1);
+        assert!(!diff.files[0].lfs);
+    }
+
+    #[test]
+    fn lfs_tool_lookup_uses_the_given_path() {
+        let (dir, path) = empty_path();
+        assert!(!lfs_tool_on_path(Some(&path)));
+        let name = if cfg!(windows) {
+            "git-lfs.exe"
+        } else {
+            "git-lfs"
+        };
+        let exe = dir.join(name);
+        std::fs::write(&exe, "").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert!(lfs_tool_on_path(Some(&path)));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn parses_lfs_pointers() {
+        let ptr = pointer_for(b"hello");
+        let p = parse_lfs_pointer(ptr.as_bytes()).unwrap();
+        assert_eq!(p.size, 5);
+        assert_eq!(
+            p.oid,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+        // CRLF checkouts parse too.
+        assert!(parse_lfs_pointer(ptr.replace('\n', "\r\n").as_bytes()).is_some());
+        assert!(parse_lfs_pointer(b"just text\n").is_none());
+        assert!(parse_lfs_pointer(
+            b"version https://git-lfs.github.com/spec/v1\noid sha256:zz\nsize 1\n"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn splits_raw_and_numstat_output() {
+        let out = ":100644 100644 aaa bbb M\0a.txt\0:100644 100644 aaa bbb R90\0old.txt\0new.txt\0\
+                   :000000 100644 000 bbb A\0n.txt\0\
+                   1\t2\ta.txt\0\x30\t0\t\0old.txt\0new.txt\0\x33\t0\tn.txt\0";
+        let (raw, num) = split_raw_numstat(out);
+        assert_eq!(
+            parse_raw(raw),
+            vec![
+                ("a.txt".to_string(), ChangeStatus::Modified),
+                ("new.txt".to_string(), ChangeStatus::Renamed),
+                ("n.txt".to_string(), ChangeStatus::Added),
+            ]
+        );
+        let counts = parse_numstat(num);
+        assert_eq!(counts["a.txt"], (1, 2));
+        assert_eq!(counts["new.txt"], (0, 0));
+        assert_eq!(counts["n.txt"], (3, 0));
+    }
+
+    #[tokio::test]
+    async fn commit_is_refused_for_changed_lfs_files_without_git_lfs() {
+        let repo = lfs_repo(&[("a.bin", "aaaa")]);
+        let agent = worktree_agent(&repo, &repo.dir, "main", "main");
+        let (dir, path) = empty_path();
+
+        // Only unchanged assets (and a text edit): nothing to protect.
+        repo.write("t.txt", "two\n");
+        ensure_lfs_commit_safe(&agent, &repo.dir, None, Some(&path))
+            .await
+            .unwrap();
+
+        repo.write("a.bin", "bbbb");
+        let err = ensure_lfs_commit_safe(&agent, &repo.dir, None, Some(&path))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Git LFS isn't installed"), "{err}");
+        // An agent sharing the user's checkout is only held to the files it touched.
+        ensure_lfs_commit_safe(&agent, &repo.dir, Some(&["t.txt".to_string()]), Some(&path))
+            .await
+            .unwrap();
+        let err = commit_excluding(&agent, "msg", &[], &[]).await;
+        // (The real PATH may or may not have git-lfs; if not, the commit is refused.)
+        if which::which("git-lfs").is_err() {
+            assert!(err.unwrap_err().to_string().contains("Git LFS"));
+            assert_eq!(repo.lines(&["rev-list", "--count", "HEAD"]), vec!["1"]);
+        }
+        let _ = std::fs::remove_dir_all(dir);
+
+        // Repositories without LFS are never blocked.
+        let plain = Repo::new();
+        plain.write("a.txt", "x\n");
+        let agent = worktree_agent(&plain, &plain.dir, "main", "main");
+        let (dir, path) = empty_path();
+        ensure_lfs_commit_safe(&agent, &plain.dir, None, Some(&path))
+            .await
+            .unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Timing probe: `ARMADA_DIFF_PROBE=<repo> cargo test --lib probe_diff -- --ignored
+    /// --nocapture`. Read-only on the probed repository (objects are redirected to a
+    /// scratch directory so even the intent-to-add of untracked files writes nowhere).
+    #[tokio::test]
+    #[ignore]
+    async fn probe_diff() {
+        let Ok(target) = std::env::var("ARMADA_DIFF_PROBE") else {
+            return;
+        };
+        let target = PathBuf::from(target);
+        let scratch = std::env::temp_dir().join(format!("armada-probe-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&scratch).unwrap();
+        let common = git(
+            &target,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        )
+        .await
+        .unwrap();
+        let objects = Path::new(common.trim()).join("objects");
+        std::env::set_var("GIT_OBJECT_DIRECTORY", &scratch);
+        std::env::set_var("GIT_ALTERNATE_OBJECT_DIRECTORIES", &objects);
+        // Like `get_diff`, with the agent starting an hour ago unless told otherwise.
+        let started = std::env::var("ARMADA_PROBE_STARTED_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(|ms| SystemTime::UNIX_EPOCH + Duration::from_millis(ms));
+        for run in 1..=2 {
+            let t = std::time::Instant::now();
+            let diff = diff_worktree_with(&target, None, started, None)
+                .await
+                .unwrap();
+            println!(
+                "run {run}: {:?}, {} files, {} patch bytes, uncommitted {}, lfs {:?}",
+                t.elapsed(),
+                diff.files.len(),
+                diff.patch.len(),
+                diff.uncommitted,
+                diff.lfs
+            );
+        }
+        let _ = std::fs::remove_dir_all(scratch);
     }
 }

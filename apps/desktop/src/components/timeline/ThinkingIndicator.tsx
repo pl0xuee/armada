@@ -34,7 +34,7 @@ export function ThinkingIndicator({ agent, since }: { agent: Agent; since: numbe
   const elapsed = now - since;
 
   return (
-    <div role="status" aria-label={`${name} is working`} className="flex items-center gap-2.5 px-1 pb-2 pt-1">
+    <div role="status" aria-label={`${name} is working`} className="flex items-center gap-2.5 pb-2 pt-1">
       <span className="relative inline-flex h-6 w-6 shrink-0 items-center justify-center" aria-hidden>
         <span className="absolute inset-0 animate-spin-slow rounded-full border border-transparent border-t-accent/70" />
         <ProviderGlyph

@@ -2,7 +2,9 @@ import { ChevronDown, SlidersHorizontal } from "lucide-react";
 import { attempt } from "@/lib/actions";
 import { api } from "@/lib/api";
 import type { Agent, ConfigOption } from "@/lib/types";
+import { isRememberableOption } from "@/lib/configMemory";
 import { cn } from "@/lib/utils";
+import { useIdentity } from "@/hooks/useIdentity";
 import {
   DropdownMenu,
   DropdownMenuCheckItem,
@@ -27,6 +29,8 @@ export function ConfigSelect({
   compact?: boolean;
 }) {
   const current = option.options.find((o) => o.value === option.currentValue);
+  const identity = useIdentity(agent.provider, agent.customAgentId);
+  const remembered = agent.provider !== "local" && isRememberableOption(option);
   const warn = option.currentValue === "bypassPermissions" || option.currentValue === "never";
   return (
     <DropdownMenu>
@@ -63,6 +67,11 @@ export function ConfigSelect({
             {o.name}
           </DropdownMenuCheckItem>
         ))}
+        {remembered && (
+          <p className="border-t border-line-strong px-2.5 pb-1 pt-2 text-[11px] leading-snug text-steel">
+            New {identity.short} agents start with your last choice
+          </p>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

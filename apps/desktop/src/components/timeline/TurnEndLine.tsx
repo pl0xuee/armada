@@ -18,7 +18,7 @@ export function TurnEndLine({ end, lastActivityAt }: { end: TurnEnd; lastActivit
   const [fresh] = useState(() => Date.now() - lastActivityAt < 10_000);
   const tone = TONE[end.tone];
   return (
-    <div role="status" className="flex items-center gap-2.5 px-1 pb-2 pt-1">
+    <div role="status" className="flex items-center gap-2.5 pb-2 pt-1">
       <span
         aria-hidden
         className={cn("inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border", tone.ring)}

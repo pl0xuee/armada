@@ -106,7 +106,7 @@ type SnapshotCache = parking_lot::Mutex<HashMap<PathBuf, (Vec<u8>, String)>>;
 static SNAPSHOTS: std::sync::LazyLock<SnapshotCache> = std::sync::LazyLock::new(Default::default);
 
 /// One checkpoint operation at a time per agent.
-async fn lock_agent(agent_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
+pub(crate) async fn lock_agent(agent_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
     type Locks = parking_lot::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>;
     static LOCKS: OnceLock<Locks> = OnceLock::new();
     let lock = {
@@ -123,13 +123,13 @@ fn ref_prefix(agent_id: &str) -> String {
 
 // ---- git ---------------------------------------------------------------------
 
-struct Git<'a> {
-    cwd: &'a Path,
+pub(crate) struct Git<'a> {
+    pub(crate) cwd: &'a Path,
     flags: Vec<String>,
 }
 
 impl<'a> Git<'a> {
-    async fn new(cwd: &'a Path) -> anyhow::Result<Git<'a>> {
+    pub(crate) async fn new(cwd: &'a Path) -> anyhow::Result<Git<'a>> {
         let mut flags: Vec<String> = [
             "core.fsmonitor=false",
             "core.autocrlf=false",
@@ -173,7 +173,7 @@ impl<'a> Git<'a> {
         Ok(git)
     }
 
-    async fn exec(
+    pub(crate) async fn exec(
         &self,
         pre: &[&str],
         args: &[&str],
@@ -221,7 +221,7 @@ impl<'a> Git<'a> {
             .context("running git")
     }
 
-    async fn run(
+    pub(crate) async fn run(
         &self,
         args: &[&str],
         stdin: Option<Vec<u8>>,
@@ -234,7 +234,7 @@ impl<'a> Git<'a> {
         Ok(out.stdout)
     }
 
-    async fn text(&self, args: &[&str]) -> anyhow::Result<String> {
+    pub(crate) async fn text(&self, args: &[&str]) -> anyhow::Result<String> {
         Ok(String::from_utf8_lossy(&self.run(args, None, &[]).await?)
             .trim()
             .to_string())
@@ -242,7 +242,7 @@ impl<'a> Git<'a> {
 
     /// A git work tree whose root is the folder itself (a subfolder of a repository
     /// would snapshot, and restore, files outside it).
-    async fn available(&self) -> bool {
+    pub(crate) async fn available(&self) -> bool {
         match self
             .run(
                 &["rev-parse", "--is-inside-work-tree", "--show-prefix"],
@@ -260,7 +260,7 @@ impl<'a> Git<'a> {
         }
     }
 
-    async fn head(&self) -> Option<String> {
+    pub(crate) async fn head(&self) -> Option<String> {
         self.text(&["rev-parse", "--verify", "-q", "HEAD^{commit}"])
             .await
             .ok()
@@ -406,7 +406,7 @@ impl<'a> Git<'a> {
     /// The tree of the folder's current contents (tracked + untracked, not ignored).
     /// `prev` is the previous checkpoint's tree: when the folder provably hasn't
     /// changed since it was taken, that tree is reused without re-adding every file.
-    async fn snapshot_tree(&self, prev: Option<&str>) -> anyhow::Result<String> {
+    pub(crate) async fn snapshot_tree(&self, prev: Option<&str>) -> anyhow::Result<String> {
         // One directory walk for the untracked list (shared by the size check and
         // the secret exclusions) alongside the change fingerprint.
         let (untracked, fp) = tokio::join!(self.untracked(), self.fingerprint());
@@ -433,10 +433,22 @@ impl<'a> Git<'a> {
             specs.extend_from_slice(raw);
             specs.push(0);
         }
+        // Files are stored byte for byte: .gitattributes (text/eol/ident) must not
+        // normalise line endings, or a snapshot would differ from the files on disk
+        // and a merge built on it would rewrite them. Needs git >= 2.43; older gits
+        // ignore the variable.
+        let empty = self
+            .text(&["hash-object", "-t", "tree", "--stdin"])
+            .await
+            .unwrap_or_default();
+        let mut add_env: Vec<(&str, &OsStr)> = env.to_vec();
+        if !empty.is_empty() {
+            add_env.push(("GIT_ATTR_SOURCE", OsStr::new(&empty)));
+        }
         self.run(
             &["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
             Some(specs),
-            &env,
+            &add_env,
         )
         .await?;
         let tree = self.run(&["write-tree"], None, &env).await?;
@@ -455,7 +467,11 @@ impl<'a> Git<'a> {
         Ok(tree)
     }
 
-    async fn commit_tree(&self, tree: &str, parent: Option<&str>) -> anyhow::Result<String> {
+    pub(crate) async fn commit_tree(
+        &self,
+        tree: &str,
+        parent: Option<&str>,
+    ) -> anyhow::Result<String> {
         let mut args = vec!["commit-tree", tree, "-m", "Armada checkpoint"];
         if let Some(p) = parent {
             args.extend(["-p", p]);
@@ -526,7 +542,7 @@ fn is_secret_bytes(raw: &[u8]) -> bool {
         || (name.starts_with("service-account") && name.ends_with(".json"))
 }
 
-fn stderr_of(out: &std::process::Output) -> String {
+pub(crate) fn stderr_of(out: &std::process::Output) -> String {
     String::from_utf8_lossy(&out.stderr).trim().to_string()
 }
 
@@ -559,7 +575,7 @@ impl Drop for TempIndex {
     }
 }
 
-fn agent_dir(agent: &Agent) -> Option<&Path> {
+pub(crate) fn agent_dir(agent: &Agent) -> Option<&Path> {
     let cwd = Path::new(&agent.cwd);
     cwd.is_dir().then_some(cwd)
 }
@@ -933,7 +949,7 @@ pub(crate) async fn restore(
 }
 
 /// A repository-relative path from git, only if it stays inside the folder.
-fn rel_path(raw: &[u8]) -> Option<PathBuf> {
+pub(crate) fn rel_path(raw: &[u8]) -> Option<PathBuf> {
     let s = std::str::from_utf8(raw).ok()?;
     let p = PathBuf::from(s);
     p.components()

@@ -103,7 +103,7 @@ dependencies = [
 
 [[package]]
 name = "armada-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -128,17 +128,21 @@ dependencies = [
 
 [[package]]
 name = "armada-desktop"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "arboard",
  "armada-core",
  "axum",
  "base64 0.22.1",
+ "brotli-decompressor",
+ "bytes",
  "chrono",
  "cpal",
  "dirs 7.0.0",
+ "flate2",
  "futures-util",
+ "http-body-util",
  "hyper",
  "hyper-util",
  "libc",

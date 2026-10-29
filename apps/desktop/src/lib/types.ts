@@ -153,6 +153,33 @@ export interface Agent {
   permissionMode: string | null;
   /** Backend-internal (handoff briefing pending); not shown in the UI. */
   needsBriefing: boolean;
+  /** The user's last choice per composer option (model, effort, …); re-applied on restart. */
+  configChoices: Record<string, string>;
+  /** Set on a helper agent: the main agent it was started from. */
+  parentId: string | null;
+  /** Merge state with the main agent; only present on helpers. */
+  helperSync: HelperSync | null;
+}
+
+export type HelperSyncState = "inSync" | "pendingToMain" | "pendingFromMain" | "merging" | "conflict";
+
+export interface HelperSync {
+  state: HelperSyncState;
+  lastSyncAt: number | null;
+  detail: string | null;
+  /** Files differing from (or merged with) the main agent. */
+  files: number;
+}
+
+/** What Enter does while the agent is busy. */
+export type BusySend = "ask" | "queue" | "helper";
+
+/** Where new helpers run; null = same as the main agent. */
+export interface HelperDefaults {
+  provider: Provider | null;
+  accountId: string | null;
+  customAgentId: string | null;
+  model: string | null;
 }
 
 export interface QueuedPrompt {
@@ -383,6 +410,9 @@ export interface Settings {
   remote: RemoteSettings;
   voice: VoiceSettings;
   voiceAssistant: VoiceAssistantSettings;
+  /** Sending while an agent works: ask each time, queue it, or start a helper agent. */
+  busySend: BusySend;
+  helperDefaults: HelperDefaults;
 }
 
 /** The OpenAI Realtime voice assistant (off by default; audio is sent to OpenAI). */
@@ -607,6 +637,16 @@ export interface ChangedFile {
   status: "added" | "modified" | "deleted" | "renamed";
   additions: number;
   deletions: number;
+  /** Tracked by Git LFS (a pointer file in git; the real content is a large asset). */
+  lfs: boolean;
+}
+
+/** Git LFS state of the repository behind a diff. */
+export interface LfsInfo {
+  /** The repo uses LFS but `git-lfs` isn't installed, so asset files can't be compared reliably. */
+  toolMissing: boolean;
+  /** Files that only looked changed (LFS pointers vs. content) and were left out of the list. */
+  hidden: number;
 }
 
 export interface AgentDiff {
@@ -616,6 +656,8 @@ export interface AgentDiff {
   uncommitted: number; // dirty (uncommitted) files in the worktree
   /** The patch was cut at 8 MB (the file list is still complete). */
   truncated: boolean;
+  /** Set when the repo uses Git LFS; null otherwise. */
+  lfs: LfsInfo | null;
 }
 
 /** A snapshot of the agent's folder taken before a message ("turn") or before a restore ("safety"). */

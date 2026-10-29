@@ -35,6 +35,7 @@ export function stressAgents(base: Agent): Agent[] {
     queue: [],
     queuedPrompts: 0,
     queuePaused: false,
+    configChoices: {},
     lastActivityAt: Date.now(),
   }));
 }

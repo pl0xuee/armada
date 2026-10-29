@@ -116,42 +116,44 @@ export const ActivityGroup = memo(function ActivityGroup({
   }
 
   return (
-    <div
-      className={cn(
-        "overflow-hidden rounded-xl border bg-card/70 transition-colors focus-within:border-line-strong",
-        open ? "border-line-strong" : "border-line hover:border-line-strong",
-      )}
-    >
+    <div>
       <button
         type="button"
         onClick={() => onToggle(groupId)}
         aria-expanded={open}
         aria-controls={bodyId}
-        className="flex h-9 w-full items-center gap-2.5 px-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
+        className="group/trace -mx-1.5 flex h-7 w-[calc(100%+0.75rem)] items-center gap-2 rounded-lg px-1.5 text-left text-steel transition-colors hover:bg-raised/40 hover:text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
       >
-        <span
-          className={cn(
-            "flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-raised text-steel",
-            live && "border-accent/30 text-accent",
+        <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+          {live ? (
+            <Spinner className="h-3.5 w-3.5" />
+          ) : failed > 0 ? (
+            <CircleX className="h-3.5 w-3.5 text-err/80" aria-hidden />
+          ) : (
+            <Icon className="h-3.5 w-3.5 text-ok/60" aria-hidden />
           )}
-        >
-          {live ? <Spinner className="h-3.5 w-3.5" /> : <Icon className="h-3.5 w-3.5 text-ok/80" />}
         </span>
-        <span className={cn("min-w-0 flex-1 truncate text-[12.5px] text-fg/90", mono && "font-mono text-[12px]")}>
+        <span
+          className={cn("min-w-0 truncate text-[12.5px]", live && "text-muted", mono && "font-mono text-[12px]")}
+          title={text}
+        >
           {text}
         </span>
-        {failed > 0 && (
-          <span className="flex shrink-0 items-center gap-1 text-[11.5px] text-err">
-            <CircleX className="h-3.5 w-3.5" aria-hidden />
-            <span aria-label={`${failed} failed`}>{failed}</span>
+        {!live && failed > 0 && (
+          <span className="shrink-0 text-[11.5px] text-err/90" aria-label={`${failed} failed`}>
+            · {failed} failed
           </span>
         )}
-        <span className="shrink-0 text-[11.5px] tabular-nums text-steel">{pluralize(items.length, "step")}</span>
+        <span className="shrink-0 text-[11.5px] tabular-nums text-steel">
+          · {pluralize(items.length, "step")}
+        </span>
         <ChevronRight
-          className={cn("h-3.5 w-3.5 shrink-0 text-steel transition-transform duration-150", open && "rotate-90")}
+          className={cn(
+            "h-3 w-3 shrink-0 text-steel/70 transition-transform duration-150 group-hover/trace:text-muted",
+            open && "rotate-90",
+          )}
         />
       </button>
-      {live && !open && <div className="shimmer-bar h-px bg-accent/10" />}
       <AnimatePresence initial={false}>
         {open && (
           <m.div
@@ -160,9 +162,9 @@ export const ActivityGroup = memo(function ActivityGroup({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.12 }}
-            className="border-t border-line px-2.5 py-2.5"
+            className="pb-1 pt-1"
           >
-            <div className="ml-[7px] space-y-2 border-l border-line-strong pl-3.5">
+            <div className="ml-[7px] space-y-1 border-l border-line pl-3">
               {items.map((it, i) => {
                 const tail = live && i === items.length - 1;
                 switch (it.kind) {
@@ -173,7 +175,7 @@ export const ActivityGroup = memo(function ActivityGroup({
                   case "thought":
                     return <ThoughtBlock key={it.id} item={it} live={tail} agentId={agent.id} />;
                   case "agent_message":
-                    return <AgentMessage key={it.id} item={it} agent={agent} showHeader={false} streaming={tail} />;
+                    return <AgentMessage key={it.id} item={it} agent={agent} interim streaming={tail} />;
                   default:
                     return null;
                 }

@@ -1211,6 +1211,11 @@ impl AgentCtx {
             self.notice(NoticeLevel::Info, paused_notice(dropped));
             self.publish_queue();
         }
+        // The agent is idle now: helpers merge into it, or it merges into its main.
+        if let (Some(core), Ok(rt)) = (self.core.upgrade(), tokio::runtime::Handle::try_current()) {
+            let id = self.agent_id.clone();
+            rt.spawn(async move { core.on_turn_idle(&id).await });
+        }
         match &outcome {
             TurnOutcome::Completed | TurnOutcome::CompletedWithNote(_) => {
                 let agent = self.update_agent_settled(|a, active| {

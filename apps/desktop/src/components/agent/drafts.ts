@@ -1,5 +1,6 @@
 // Per-agent composer drafts (text only). Kept in memory for instant switching and
 // persisted to localStorage (debounced) so they survive restarts. Bounded and pruned.
+import type { Attachment } from "@/lib/types";
 import { isSuppressed, useApp } from "@/store/app";
 
 const KEY = "armada.drafts";
@@ -78,4 +79,27 @@ export function insertIntoDraft(agentId: string, text: string) {
   }
   const cur = getDraft(agentId);
   setDraft(agentId, cur.trim() ? `${cur.trimEnd()}\n\n${text}` : text);
+}
+
+// Images sent in from elsewhere (e.g. Preview screenshots): the mounted composer owns its attachments
+// and subscribes, like it does for text.
+type AttachListener = (attachments: Attachment[]) => void;
+const attachListeners = new Map<string, Set<AttachListener>>();
+
+export function onAttachmentsInsert(agentId: string, fn: AttachListener): () => void {
+  let set = attachListeners.get(agentId);
+  if (!set) attachListeners.set(agentId, (set = new Set()));
+  set.add(fn);
+  return () => {
+    set.delete(fn);
+    if (set.size === 0) attachListeners.delete(agentId);
+  };
+}
+
+/** Adds images to the agent's composer. False when no composer is showing (nothing was attached). */
+export function insertAttachments(agentId: string, attachments: Attachment[]): boolean {
+  const subs = attachListeners.get(agentId);
+  if (!subs || subs.size === 0) return false;
+  for (const fn of subs) fn(attachments);
+  return true;
 }
