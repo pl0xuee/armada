@@ -106,7 +106,7 @@ name = "armada-core"
 version = "0.1.5"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "flate2",
  "keyring",
@@ -134,7 +134,7 @@ dependencies = [
  "arboard",
  "armada-core",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "brotli-decompressor",
  "bytes",
  "chrono",
@@ -419,12 +419,6 @@ name = "base64"
 version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
-
-[[package]]
-name = "base64"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "base64"
