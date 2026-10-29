@@ -178,8 +178,9 @@ pub async fn send_queued_now(
     core: State<'_, Core>,
     agent_id: String,
     queued_id: String,
+    interrupt: Option<bool>,
 ) -> CmdResult<()> {
-    core.send_queued_now(&agent_id, &queued_id)
+    core.send_queued_now(&agent_id, &queued_id, interrupt.unwrap_or(false))
         .await
         .map_err(err)
 }

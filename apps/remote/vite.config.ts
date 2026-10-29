@@ -39,7 +39,7 @@ function cspMeta(): Plugin {
           `script-src ${scripts.join(" ")}`,
           `style-src ${styles.join(" ") || "'none'"}`,
           "connect-src 'self'",
-          "img-src 'self' data:",
+          "img-src 'self' data: blob:",
           "manifest-src 'self'",
           "base-uri 'none'",
           "form-action 'none'",

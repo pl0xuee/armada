@@ -5,6 +5,7 @@ import { cancelTurn, resumeAgent } from "@/lib/actions";
 import { api } from "@/lib/api";
 import { MAX_ATTACHMENTS } from "@/lib/attachments";
 import { canStartHelper, decideBusySend, type BusyIntent } from "@/lib/helpers";
+import { commandRank, expandCommandShortcut } from "@/lib/slashCommands";
 import type { Agent, SlashCommand, Attachment } from "@/lib/types";
 import { cn, errorMessage, modKey } from "@/lib/utils";
 import { useDebounced } from "@/hooks/useDebounced";
@@ -103,11 +104,12 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
   const query = slashQuery(text);
   const matches = useMemo(() => {
     if (query === null) return [];
+    // Names first, then initials ("rc" finds remote-control), then anywhere in the name.
     return agent.availableCommands
-      .filter((c) => c.name.toLowerCase().includes(query))
-      .sort(
-        (a, b) => Number(!a.name.toLowerCase().startsWith(query)) - Number(!b.name.toLowerCase().startsWith(query)),
-      );
+      .map((c) => ({ c, rank: commandRank(c.name, query) }))
+      .filter((m): m is { c: SlashCommand; rank: number } => m.rank !== null)
+      .sort((a, b) => a.rank - b.rank)
+      .map((m) => m.c);
   }, [agent.availableCommands, query]);
   const mention = slashQuery(text) === null ? mentionQuery(text, caret) : null;
   const debouncedMention = useDebounced(mention, 120);
@@ -360,7 +362,7 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
   /** Queue behind the current turn (or send, when the agent is idle). */
   const sendNow = async () => {
     if (!canSend) return;
-    const value = text.trim();
+    const value = expandCommandShortcut(text.trim(), agent.availableCommands);
     const images = attach.attachments;
     setSending(true);
     update("");
@@ -380,7 +382,7 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
   /** Run the message in a new helper agent, in parallel with this one. */
   const startHelper = async () => {
     if (!canSend || !helperAllowed) return;
-    const value = text.trim();
+    const value = expandCommandShortcut(text.trim(), agent.availableCommands);
     const images = attach.attachments;
     setSending(true);
     update("");

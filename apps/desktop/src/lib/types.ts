@@ -132,6 +132,8 @@ export interface Agent {
   lastMessage: string | null; // short preview of the latest agent text
   pendingPermissions: number;
   configOptions: ConfigOption[];
+  /** The running agent takes messages into its current turn ("Send now" doesn't stop it). */
+  steerable?: boolean;
   availableCommands: SlashCommand[];
   /** Last turn failed on a usage/rate limit. */
   rateLimited: boolean;

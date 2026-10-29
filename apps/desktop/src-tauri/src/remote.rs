@@ -1961,7 +1961,7 @@ async fn index(headers: HeaderMap) -> Response {
         header::CONTENT_SECURITY_POLICY,
         HeaderValue::from_static(
             "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; \
-             img-src 'self' data:; connect-src 'self'; manifest-src 'self'; \
+             img-src 'self' data: blob:; connect-src 'self'; manifest-src 'self'; \
              base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
         ),
     );
@@ -2234,9 +2234,9 @@ fn idem_key(headers: &HeaderMap, route: &str) -> Option<String> {
 }
 
 /// Runs `work` at most once per Idempotency-Key; a retry gets the first result.
-async fn once<F>(remote: &Remote, key: Option<String>, work: F) -> Result<Response, ApiError>
+async fn once<F>(remote: &Arc<Remote>, key: Option<String>, work: F) -> Result<Response, ApiError>
 where
-    F: std::future::Future<Output = Result<(StatusCode, String), ApiError>>,
+    F: std::future::Future<Output = Result<(StatusCode, String), ApiError>> + Send + 'static,
 {
     let Some(key) = key else {
         return work.await.map(json_response);
@@ -2251,9 +2251,21 @@ where
         }
         IdemBegin::New => {}
     }
-    let result = work.await;
-    remote.idem_finish(&key, result.as_ref().ok().cloned());
-    result.map(json_response)
+    // Its own task: a phone that gives up and disconnects mustn't cancel the work
+    // halfway or leave the key "in flight" for the TTL; its retry gets this result.
+    let remote = remote.clone();
+    let task = tauri::async_runtime::spawn(async move {
+        let result = work.await;
+        remote.idem_finish(&key, result.as_ref().ok().cloned());
+        result
+    });
+    match task.await {
+        Ok(result) => result.map(json_response),
+        Err(e) => Err(ApiError(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("That request failed: {e}"),
+        )),
+    }
 }
 
 fn json_response((status, body): (StatusCode, String)) -> Response {
@@ -2529,6 +2541,21 @@ async fn archive(
 /// Patch text sent to the phone at most (the file list is always complete).
 const MAX_REMOTE_PATCH: usize = 1024 * 1024;
 
+/// Where to cut a patch longer than `MAX_REMOTE_PATCH`: before the last file that
+/// doesn't fit whole (mid-file only when the first file alone is too big, then at a
+/// line end).
+fn remote_patch_cut(patch: &str) -> usize {
+    let mut cap = MAX_REMOTE_PATCH.min(patch.len());
+    while !patch.is_char_boundary(cap) {
+        cap -= 1;
+    }
+    let head = &patch[..cap];
+    match head.rfind("\ndiff --git ") {
+        Some(at) => at + 1,
+        None => head.rfind('\n').map_or(cap, |at| at + 1),
+    }
+}
+
 /// What changed: file list, counts, and the patch (capped) for reviewing on the phone.
 async fn diff_summary(
     State(c): State<Ctx>,
@@ -2540,14 +2567,13 @@ async fn diff_summary(
     let agent = c.remote.core().agent(&id)?;
     let diff = crate::git_review::get_diff(&agent).await?;
     let mut patch = diff.patch;
-    let truncated = patch.len() > MAX_REMOTE_PATCH;
-    if truncated {
-        let mut cut = MAX_REMOTE_PATCH;
-        while !patch.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        patch.truncate(cut);
+    // The desktop may have cut it already (at a file boundary); the phone's own cap
+    // also ends at a file boundary, so the last file shown isn't half a hunk.
+    let over = patch.len() > MAX_REMOTE_PATCH;
+    if over {
+        patch.truncate(remote_patch_cut(&patch));
     }
+    let truncated = diff.truncated || over;
     Ok(Json(json!({
         "files": diff.files,
         "ahead": diff.ahead,
@@ -2683,14 +2709,26 @@ async fn remove_queued(
     })))
 }
 
+#[derive(Deserialize)]
+struct SendNowQuery {
+    /// Stop the running turn and run the message next ("Stop & send").
+    #[serde(default)]
+    interrupt: bool,
+}
+
 async fn send_queued_now(
     State(c): State<Ctx>,
     ConnectInfo(peer): Peer,
     headers: HeaderMap,
     Path((id, qid)): Path<(String, String)>,
+    Query(q): Query<SendNowQuery>,
 ) -> Result<StatusCode, ApiError> {
     owner(&c.auth(&peer, &headers)?)?;
-    c.remote.core().send_queued_now(&id, &qid).await?;
+    // Into the running turn when the agent can take it, unless asked to interrupt.
+    c.remote
+        .core()
+        .send_queued_now(&id, &qid, q.interrupt)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -3059,6 +3097,25 @@ mod tests {
         );
         let in_on = "-A ufw-user-input -i tailscale0 -p tcp --dport 47821 -j ACCEPT";
         assert!(ufw_allows(in_on, 47821));
+    }
+
+    #[test]
+    fn remote_patches_are_cut_between_files() {
+        let file = |name: &str, lines: usize| {
+            let mut f = format!("diff --git a/{name} b/{name}\n@@ -1 +1 @@\n");
+            for i in 0..lines {
+                f.push_str(&format!("+line {i} of {name}\n"));
+            }
+            f
+        };
+        // Two files that fit, then one that would cross the cap: the cut is before it.
+        let small = file("a.rs", 10) + &file("b.rs", 10);
+        let patch = small.clone() + &file("huge.rs", MAX_REMOTE_PATCH / 10);
+        assert_eq!(remote_patch_cut(&patch), small.len());
+        // One file bigger than the cap on its own: cut at a line end inside it.
+        let one = file("huge.rs", MAX_REMOTE_PATCH / 10);
+        let cut = remote_patch_cut(&one);
+        assert!(cut <= MAX_REMOTE_PATCH && one[..cut].ends_with('\n'));
     }
 
     /// What this machine would pick (run with --ignored --nocapture to see).

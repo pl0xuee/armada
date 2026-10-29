@@ -14,7 +14,7 @@ use crate::codex::{self, CodexDriver};
 use crate::config_memory;
 use crate::db::Db;
 use crate::model::*;
-use crate::session::{AgentCtx, ExitIntent, Prompt, StartCancelled, TurnOutcome};
+use crate::session::{AgentCtx, ExitIntent, Prompt, StartCancelled, Steer, TurnOutcome};
 use crate::{accounts, git, local, providers, EventSink, Result};
 
 mod helper_sync;
@@ -65,6 +65,18 @@ impl Driver {
         match self {
             Driver::Acp(d) => d.cancel().await,
             Driver::Codex(d) => d.cancel().await,
+        }
+    }
+    fn steerable(&self) -> bool {
+        match self {
+            Driver::Acp(d) => d.steerable(),
+            Driver::Codex(d) => d.steerable(),
+        }
+    }
+    async fn steer(&self, prompt: &Prompt) -> Result<Steer> {
+        match self {
+            Driver::Acp(d) => d.steer(prompt).await,
+            Driver::Codex(d) => d.steer(prompt).await,
         }
     }
     async fn respond_permission(&self, request_id: &str, option_id: &str) -> Result<()> {
@@ -1640,6 +1652,7 @@ impl Core {
             config_options: Vec::new(),
             config_choices: Default::default(),
             available_commands: Vec::new(),
+            steerable: false,
             rate_limited: false,
             schedule_id,
             custom_agent_id,
@@ -2109,9 +2122,52 @@ impl Core {
     }
 
     /// Runs a queued message now, interrupting the current turn if there is one.
-    pub async fn send_queued_now(&self, agent_id: &str, queued_id: &str) -> Result<()> {
+    /// Runs a queued message now. While a turn is running it goes into that turn
+    /// (steering: the agent keeps working and reads it at its next step) when the
+    /// agent supports that; with `interrupt`, or when it doesn't, the turn is
+    /// stopped and the message runs next.
+    pub async fn send_queued_now(
+        &self,
+        agent_id: &str,
+        queued_id: &str,
+        interrupt: bool,
+    ) -> Result<()> {
         self.agent(agent_id)?;
         let ctx = self.ctx(agent_id);
+        if !interrupt {
+            if let Some(driver) = self.live_driver(agent_id) {
+                // A slash command only works at the start of a turn (steered in, the model
+                // would get it as text): it goes first in line instead.
+                if driver.steerable()
+                    && ctx.is_turn_active()
+                    && ctx
+                        .queued_text(queued_id)
+                        .is_some_and(|t| t.trim_start().starts_with('/'))
+                {
+                    if ctx.move_queued_to_front(queued_id) {
+                        return Ok(());
+                    }
+                    bail!("That message is no longer queued");
+                }
+                if let Some((pos, prompt)) = ctx.take_queued_for_steer(queued_id) {
+                    match driver.steer(&prompt).await {
+                        Ok(Steer::Injected) => {
+                            ctx.record_steered(&prompt);
+                            return Ok(());
+                        }
+                        // The turn ended meanwhile (runs it next below), or this agent
+                        // can't steer (stops the turn below, as before).
+                        Ok(Steer::NotRunning | Steer::Unsupported) => {
+                            ctx.put_back_queued(pos, queued_id, prompt);
+                        }
+                        Err(e) => {
+                            ctx.put_back_queued(pos, queued_id, prompt);
+                            return Err(e.context("Couldn't add it to the running turn"));
+                        }
+                    }
+                }
+            }
+        }
         match ctx.send_queued_now(queued_id) {
             None => bail!("That message is no longer queued"),
             Some((Some(prompt), _)) => {

@@ -120,6 +120,10 @@ export interface RequestOptions {
   idempotencyKey?: string;
   /** Upload progress, 0..1 (uses XHR, which reports it; fetch doesn't). */
   onProgress?: (fraction: number) => void;
+  /** Instead of the usual 15 s, for work that legitimately takes long (git hooks). */
+  timeoutMs?: number;
+  /** Let the request finish after the page is hidden or closed (iOS suspends it fast). */
+  keepalive?: boolean;
 }
 
 /**
@@ -251,11 +255,14 @@ export const api = {
     agentId: string,
     requestId: string,
     optionId: string,
+    keepalive = false,
   ) =>
-    b.request("POST", agentPath(agentId, "/permission"), {
-      requestId,
-      optionId,
-    }) as Promise<void>,
+    b.request(
+      "POST",
+      agentPath(agentId, "/permission"),
+      { requestId, optionId },
+      { keepalive },
+    ) as Promise<void>,
   cancel: (b: Backend, agentId: string) =>
     b.request("POST", agentPath(agentId, "/cancel")) as Promise<void>,
   resume: (b: Backend, agentId: string) =>
@@ -291,19 +298,21 @@ export const api = {
     b.request("DELETE", agentPath(agentId, "/queue")) as Promise<
       { removed?: number } | undefined
     >,
-  sendQueuedNow: (b: Backend, agentId: string, qid: string) =>
+  /** Into the running turn when the agent can take it; `interrupt` stops the turn and runs it next. */
+  sendQueuedNow: (b: Backend, agentId: string, qid: string, interrupt = false) =>
     b.request(
       "POST",
-      agentPath(agentId, `/queue/${encodeURIComponent(qid)}/send`),
+      agentPath(agentId, `/queue/${encodeURIComponent(qid)}/send${interrupt ? "?interrupt=true" : ""}`),
     ) as Promise<void>,
+  // Git work (a big diff, commit hooks, a merge) can take well over 15 s.
   diff: (b: Backend, agentId: string) =>
-    b.request("GET", agentPath(agentId, "/diff")) as Promise<AgentDiffSummary>,
+    b.request("GET", agentPath(agentId, "/diff"), undefined, { timeoutMs: GIT_TIMEOUT_MS }) as Promise<AgentDiffSummary>,
   commit: (b: Backend, agentId: string, message: string) =>
-    b.request("POST", agentPath(agentId, "/commit"), { message }) as Promise<
+    b.request("POST", agentPath(agentId, "/commit"), { message }, { timeoutMs: GIT_TIMEOUT_MS }) as Promise<
       { result?: CommitSummary | string } | undefined
     >,
   ship: (b: Backend, agentId: string, message: string) =>
-    b.request("POST", agentPath(agentId, "/ship"), { message }) as Promise<
+    b.request("POST", agentPath(agentId, "/ship"), { message }, { timeoutMs: GIT_TIMEOUT_MS }) as Promise<
       ShipResult | undefined
     >,
   image: (b: Backend, agentId: string, path: string) =>
@@ -314,6 +323,8 @@ export const api = {
 };
 
 const REQUEST_TIMEOUT_MS = 15_000;
+/** Commit (pre-commit hooks), merge and large diffs. */
+const GIT_TIMEOUT_MS = 180_000;
 /** Just under the server's 150 s upload deadline, so the client reports it first. */
 const UPLOAD_TIMEOUT_MS = 140_000;
 /** How long to wait for the event stream's response headers. */
@@ -423,12 +434,12 @@ export class HttpBackend implements Backend {
         path,
         headers,
         encoded,
-        large ? UPLOAD_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+        large ? UPLOAD_TIMEOUT_MS : (opts.timeoutMs ?? REQUEST_TIMEOUT_MS),
         opts.onProgress,
       );
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? REQUEST_TIMEOUT_MS);
     let res: Response;
     try {
       res = await fetch(path, {
@@ -438,6 +449,7 @@ export class HttpBackend implements Backend {
         cache: "no-store",
         credentials: "omit",
         signal: controller.signal,
+        keepalive: opts.keepalive,
       });
     } catch {
       throw controller.signal.aborted

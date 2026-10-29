@@ -49,6 +49,17 @@ pub struct Prompt {
     pub token: u64,
 }
 
+/// What became of a message sent into the running turn (steering).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Steer {
+    /// The agent got it in its current turn and keeps working.
+    Injected,
+    /// No turn was running by the time it arrived: send it as a normal prompt.
+    NotRunning,
+    /// This agent can't take messages mid-turn.
+    Unsupported,
+}
+
 #[derive(Debug, Clone)]
 pub enum TurnOutcome {
     Completed,
@@ -995,6 +1006,69 @@ impl AgentCtx {
         Some(result)
     }
 
+    /// Takes a queued message out to steer it into the running turn, with its place
+    /// in the queue (for `put_back_queued`). `None` when it isn't queued or no turn
+    /// is running.
+    pub fn take_queued_for_steer(&self, id: &str) -> Option<(usize, Prompt)> {
+        let taken = {
+            let mut st = self.st.lock();
+            if !st.turn_active {
+                return None;
+            }
+            let pos = st.queue.iter().position(|(qid, _)| qid == id)?;
+            let (_, prompt) = st.queue.remove(pos)?;
+            (pos, prompt)
+        };
+        self.publish_queue();
+        Some(taken)
+    }
+
+    /// The text of a queued message.
+    pub fn queued_text(&self, id: &str) -> Option<String> {
+        let st = self.st.lock();
+        st.queue
+            .iter()
+            .find(|(qid, _)| qid == id)
+            .map(|(_, p)| p.text.clone())
+    }
+
+    /// Moves a queued message to the front, to run as soon as the current turn ends.
+    pub fn move_queued_to_front(&self, id: &str) -> bool {
+        let moved = {
+            let mut st = self.st.lock();
+            match st.queue.iter().position(|(qid, _)| qid == id) {
+                Some(pos) => {
+                    if let Some(item) = st.queue.remove(pos) {
+                        st.queue.push_front(item);
+                    }
+                    st.queue_paused = false;
+                    true
+                }
+                None => false,
+            }
+        };
+        if moved {
+            self.publish_queue();
+        }
+        moved
+    }
+
+    /// Returns a message whose steer didn't land to its place in the queue.
+    pub fn put_back_queued(&self, pos: usize, id: &str, prompt: Prompt) {
+        {
+            let mut st = self.st.lock();
+            let pos = pos.min(st.queue.len());
+            st.queue.insert(pos, (id.to_string(), prompt));
+        }
+        self.publish_queue();
+    }
+
+    /// Shows a message the running turn took in (steering) where it was sent.
+    pub fn record_steered(&self, prompt: &Prompt) {
+        let mut st = self.st.lock();
+        self.record_prompt_locked(&mut st, prompt);
+    }
+
     /// Pauses the queue after an abnormal end so nothing runs unexpectedly.
     fn pause_queue_locked(st: &mut CtxState) -> usize {
         if !st.queue.is_empty() {
@@ -1527,6 +1601,11 @@ impl AgentCtx {
 
     pub fn set_commands(&self, commands: Vec<SlashCommand>) {
         self.update_agent(|a| a.available_commands = commands);
+    }
+
+    /// Whether the running agent takes messages into its current turn.
+    pub fn set_steerable(&self, steerable: bool) {
+        self.update_agent(|a| a.steerable = steerable);
     }
 
     pub fn set_config_options(&self, options: Vec<ConfigOption>) {

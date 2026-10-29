@@ -73,10 +73,14 @@ export function Sheet({
         aria-labelledby={titleId}
         tabIndex={-1}
         className={cn(
-          "absolute inset-x-0 bottom-0 mx-auto flex max-h-[88dvh] w-full max-w-[560px] flex-col rounded-t-[22px] border border-b-0 border-line-strong bg-panel edge-strong outline-none",
+          "absolute inset-x-0 mx-auto flex w-full max-w-[560px] flex-col rounded-t-[22px] border border-b-0 border-line-strong bg-panel edge-strong outline-none",
           !closing && drag === 0 && "animate-sheet",
         )}
         style={{
+          // Above the iOS keyboard (which doesn't resize the page), so fields and the
+          // buttons under them stay visible while typing.
+          bottom: "var(--kb, 0px)",
+          maxHeight: "calc(88dvh - var(--kb, 0px))",
           transform: closing ? "translateY(100%)" : drag ? `translateY(${drag}px)` : undefined,
           transition: closing ? `transform ${CLOSE_MS}ms var(--ease-out)` : dragStart.current === null ? "transform 160ms var(--ease-out)" : "none",
         }}
@@ -120,7 +124,7 @@ export function Sheet({
             </button>
           </div>
         </div>
-        <div className="min-h-0 overflow-y-auto overscroll-contain px-5 pt-1 pb-[max(20px,calc(var(--safe-bottom)+12px))]">
+        <div className="min-h-0 overflow-y-auto overscroll-contain px-5 pt-1 pb-[max(20px,calc(var(--safe-bottom-kb)+12px))]">
           {children}
         </div>
       </div>

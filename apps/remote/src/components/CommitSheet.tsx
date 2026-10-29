@@ -16,9 +16,13 @@ export function commitBlocked(agent: Agent): string | null {
 export function CommitSheet({ agent, mode, onClose, onDone }: { agent: Agent; mode: "commit" | "ship" | null; onClose: () => void; onDone?: () => void }) {
   const [message, setMessage] = useState(agent.title);
   const busy = useStore((s) => !!s.busy[`commit:${agent.id}`]);
+  // Prefilled with the title each time the sheet opens; a rename while it's open
+  // (e.g. the agent's auto-title) mustn't overwrite what you typed.
+  const title = agent.title;
   useEffect(() => {
-    if (mode) setMessage(agent.title);
-  }, [mode, agent.title]);
+    if (mode) setMessage(title);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on open
+  }, [mode]);
   const blocked = commitBlocked(agent);
   const ship = mode === "ship";
   return (
