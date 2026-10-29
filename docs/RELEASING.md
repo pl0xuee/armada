@@ -12,7 +12,7 @@ Every release has notes, written in [`CHANGELOG.md`](../CHANGELOG.md). Add user-
 - the GitHub release body (followed by install instructions and a "Full changelog" compare link), and
 - the notes shown by the in-app updater ("Release notes" on the update pill), via `latest.json`.
 
-`scripts/release_notes.py` enforces this. CI runs `release_notes.py --check`, which fails when the version in `Cargo.toml` has no non-empty section. The release job fails before building anything when the tag has none. Preview a release body with `python3 scripts/release_notes.py v0.2.0`.
+`scripts/release_notes.py` enforces this. CI runs `release_notes.py --check`, which fails when the version in `Cargo.toml` has no non-empty section. A release fails before building anything when its version has none. Preview a release body with `python3 scripts/release_notes.py v0.2.0`.
 
 ## How CI works
 
@@ -21,27 +21,25 @@ There is one workflow, `.github/workflows/ci.yml`, and it does the same thing on
 1. **linux**: release notes check, command contract, formatting, phone and desktop UI tests and builds, clippy, Rust tests.
 2. **macOS** and **Windows**: clippy and Rust tests, once linux passes.
 3. **e2e**: builds the real app and drives it headless with WebDriver (`apps/desktop/e2e`), once linux passes.
-4. **release**: only for a version tag, and only if 1–3 passed. Builds and signs the installers into a draft release.
+4. **release**: on a push to `main`, once 1–3 pass, if the version in `Cargo.toml` hasn't been tagged yet. Creates a draft release for it, then builds and signs the installers into that draft.
 
-Changes are pushed straight to `main`; every push runs 1–3. Dependabot's pull requests run 1–3 too. A weekly `audit.yml` checks dependencies for known vulnerabilities.
+Changes are pushed straight to `main`; every push runs 1–3. Runs on `main` queue rather than cancel each other, so a release is never cut off half-way. Dependabot's pull requests run 1–3 too. A weekly `audit.yml` checks dependencies for known vulnerabilities.
 
 Run the e2e test locally with `apps/desktop/e2e/run.sh` after `npm run tauri build -- --debug --no-bundle` (needs `tauri-driver`, `WebKitWebDriver`, `xvfb`).
 
 ## Cutting a release
 
-1. Bump the version everywhere (the release job refuses to build if they differ from the tag):
+There's no tag to push: bumping the version on `main` is the release.
+
+1. Bump the version everywhere (the release fails if they differ):
    - `Cargo.toml` → `[workspace.package] version` (then `cargo check` to update `Cargo.lock`)
    - `apps/desktop/package.json` and `apps/remote/package.json` → `version` (then `npm install` in each to update the lock files)
    - `tauri.conf.json` has no version on purpose: Tauri takes it from `Cargo.toml`.
 2. In `CHANGELOG.md`, rename `## Unreleased` to `## v0.2.0 — <date>` and review the notes.
-3. Commit, push to `main`, then tag and push the tag:
-   ```bash
-   git push origin main
-   git tag v0.2.0
-   git push origin v0.2.0
-   ```
-4. The tag's CI run checks everything again and, only if it all passes, builds macOS (universal), Windows and Linux installers, signs the update bundles and uploads everything plus `latest.json` to a **draft** release with the notes as its body.
-5. Review the draft on GitHub and press **Publish**. Edits to the draft's notes change the GitHub page only: the in-app updater reads the copy already baked into `latest.json`, so fix notes in `CHANGELOG.md` before tagging. Only published releases are visible to the updater, so this is the moment the update rolls out.
+3. Commit and push to `main`. Once every check passes, CI creates a **draft** release `v0.2.0` with the notes as its body, builds macOS (universal), Windows and Linux installers, signs the update bundles and uploads everything plus `latest.json` to it.
+4. Review the draft on GitHub and press **Publish**. Publishing creates the `v0.2.0` tag on the commit the draft was built from. Edits to the draft's notes change the GitHub page only: the in-app updater reads the copy already baked into `latest.json`, so fix notes in `CHANGELOG.md` and push. Only published releases are visible to the updater, so this is the moment the update rolls out.
+
+Pushing more commits to `main` before publishing replaces the draft with a fresh one built from the newest commit. Once the version is tagged (published), later pushes don't release until the version is bumped again. If a release build fails for a flaky reason, re-run the failed jobs; for a real bug, push the fix and the draft is rebuilt.
 
 ## Signing key
 

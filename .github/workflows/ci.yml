@@ -6,23 +6,24 @@ name: CI
 #   2. macOS/Windows  clippy + Rust tests (platform code), after linux passes
 #   3. e2e            builds the real app and drives it headless (catches runtime wiring bugs
 #                     unit tests can't, e.g. a command whose state was never registered)
-#   4. release        only for a version tag (v1.2.3), only if 1-3 passed: builds and signs
-#                     the installers into a draft GitHub release
+#   4. release        pushes to main only, once 1-3 pass, and only while the version in
+#                     Cargo.toml has no tag yet: builds and signs the installers into a draft
+#                     GitHub release. Publishing the draft creates the tag.
 # Changes go straight to main; Dependabot's pull requests run steps 1-3.
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# A newer push to main replaces a running check; a release is never cancelled.
+# Runs on main queue up behind each other (never cancel a release half-way); a newer push to
+# a pull request replaces its running check.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -208,14 +209,70 @@ jobs:
           npm ci
           ./run.sh
 
+  # Decides whether this push releases, and if so (re)creates the draft for its version.
+  draft:
+    name: release draft
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [linux, native, e2e]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the draft release
+    outputs:
+      release: ${{ steps.draft.outputs.release }}
+      tag: ${{ steps.draft.outputs.tag }}
+      id: ${{ steps.draft.outputs.id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Draft release for this version
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          for pkg in apps/desktop/package.json apps/remote/package.json; do
+            v=$(node -p "require('./$pkg').version")
+            if [ "$v" != "$version" ]; then
+              echo "::error::$pkg is $v but Cargo.toml is $version"
+              exit 1
+            fi
+          done
+          tag="v$version"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+          # A published release owns its tag: bump the version to release again.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --silent 2>/dev/null; then
+            echo "$tag is already tagged: nothing to release (bump the version to cut a new one)"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # An unpublished draft for this version is from an older commit: replace it.
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                        --jq ".[] | select(.draft and .tag_name == \"$tag\") | .id"); do
+            echo "Replacing the older $tag draft ($id)"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done
+
+          python3 scripts/release_notes.py "$tag" > release-notes.md
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases" \
+                 -f tag_name="$tag" -f target_commitish="$GITHUB_SHA" -f name="Armada $tag" \
+                 -F draft=true -F body=@release-notes.md --jq .id)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "Draft $tag ($id) at $GITHUB_SHA"
+
   release:
     name: release (${{ matrix.name }})
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, native, e2e]
+    if: needs.draft.outputs.release == 'true'
+    needs: draft
     # Repository environment: add required reviewers there to approve every release.
     environment: release
     permissions:
-      contents: write # create the draft release and upload assets
+      contents: write # upload assets to the draft
     strategy:
       fail-fast: false
       matrix:
@@ -239,28 +296,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Tag matches the app version
-        shell: bash
-        run: |
-          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
-          for pkg in apps/desktop/package.json apps/remote/package.json; do
-            v=$(node -p "require('./$pkg').version")
-            if [ "$v" != "$version" ]; then
-              echo "::error::$pkg is $v but Cargo.toml is $version"
-              exit 1
-            fi
-          done
-          if [ "${GITHUB_REF_NAME}" != "v$version" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} doesn't match version $version (expected v$version)"
-            exit 1
-          fi
-
-      # The tag's CHANGELOG.md section: the GitHub release body and the updater's notes.
+      # The version's CHANGELOG.md section: the updater's notes in latest.json.
       - name: Release notes
         id: notes
         shell: bash
+        env:
+          TAG: ${{ needs.draft.outputs.tag }}
         run: |
-          python3 scripts/release_notes.py "${GITHUB_REF_NAME}" > release-notes.md
+          python3 scripts/release_notes.py "$TAG" > release-notes.md
           delim="EOF_$(openssl rand -hex 16)"
           {
             echo "body<<${delim}"
@@ -319,12 +362,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: Armada ${{ github.ref_name }}
-          releaseBody: ${{ steps.notes.outputs.body }}
           # Drafts are invisible to the updater: review the draft, then press Publish.
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.draft.outputs.id }}
+          releaseBody: ${{ steps.notes.outputs.body }}
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true
           args: ${{ matrix.args }}

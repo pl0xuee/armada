@@ -5,7 +5,7 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
-## v0.1.5 — 2026-10-28
+## v0.1.6 — 2026-10-28
 
 ### New
 
