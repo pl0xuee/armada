@@ -251,7 +251,7 @@ export function seedSettings(onboarded: boolean): Settings {
     defaultPermissionMode: "auto",
     busySend: "ask",
     helperDefaults: { provider: null, accountId: null, customAgentId: null, model: null },
-    remote: { enabled: false, lan: false, port: 47821 },
+    remote: { enabled: false, lan: false, port: 47821, lanAddress: null },
     voice: { inputDevice: null, model: "base.en", language: "auto", autoSend: false },
     voiceAssistant: {
       enabled: true,

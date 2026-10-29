@@ -1,10 +1,11 @@
-import { Eye, EyeOff, Link2, QrCode, RefreshCw, ShieldCheck, Smartphone, Trash2, Unplug } from "lucide-react";
+import { Eye, EyeOff, Link2, QrCode, RefreshCw, ShieldAlert, ShieldCheck, Smartphone, Trash2, Unplug } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CopyButton } from "@/components/CopyButton";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, type SelectOption } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/misc";
 import { Switch } from "@/components/ui/switch";
@@ -12,7 +13,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { useNow } from "@/hooks/useNow";
 import { api } from "@/lib/api";
 import { relativeTimeLong } from "@/lib/format";
-import type { RemoteDevice, RemoteSettings, RemoteStatus, Settings, ShareLink } from "@/lib/types";
+import type { LanAddress, RemoteDevice, RemoteSettings, RemoteStatus, Settings, ShareLink } from "@/lib/types";
 import { cn, errorMessage } from "@/lib/utils";
 import { useShallow } from "zustand/react/shallow";
 import { useApp } from "@/store/app";
@@ -24,6 +25,32 @@ import { SectionHeader, SettingGroup, SettingRow } from "./SettingRow";
 
 const SECURITY_COPY =
   "Off by default. On your local network, traffic between your phone and this computer is not encrypted (plain HTTP): anyone on the same Wi-Fi could read or tamper with it. Use it at home or on networks you trust, and use Tailscale (or another VPN) to reach Armada from anywhere else. The pairing code in the QR works once and expires after 5 minutes; each paired device gets its own key you can revoke below. Share links are read-only, limited to one agent, and expire.";
+
+const KIND_LABEL: Record<LanAddress["kind"], string> = {
+  lan: "Wi-Fi / Ethernet",
+  tailscale: "Tailscale",
+  vpn: "VPN",
+  virtual: "Virtual network",
+};
+
+const AUTO = "auto";
+
+/** "Automatic" plus each address; a saved pick this computer no longer has stays listed. */
+function networkOptions(addresses: LanAddress[], saved: string | null | undefined): SelectOption[] {
+  const best = addresses[0];
+  const options: SelectOption[] = [
+    {
+      value: AUTO,
+      label: "Automatic",
+      description: best ? `${KIND_LABEL[best.kind]} · ${best.ip}` : "Wi-Fi or Ethernet when connected",
+    },
+    ...addresses.map((a) => ({ value: a.ip, label: `${KIND_LABEL[a.kind]} · ${a.ip}`, description: a.interface })),
+  ];
+  if (saved && !addresses.some((a) => a.ip === saved)) {
+    options.push({ value: saved, label: saved, description: "Not connected right now", disabled: true });
+  }
+  return options;
+}
 
 function validPort(raw: string): number | null {
   if (!/^\d+$/.test(raw.trim())) return null;
@@ -202,6 +229,23 @@ export function RemoteSection({ settings }: { settings: Settings }) {
               <FieldError field="port" />
             </div>
           </SettingRow>
+          {remote.lan && status && (status.lanAddresses.length > 1 || remote.lanAddress) && (
+            <SettingRow
+              title="Network"
+              description={networkDescription(status, remote.lanAddress)}
+              htmlFor="remote-network"
+            >
+              <Select
+                id="remote-network"
+                aria-label="Network"
+                className="h-8 w-[240px]"
+                disabled={applying}
+                value={remote.lanAddress ?? AUTO}
+                onValueChange={(v) => void apply({ lanAddress: v === AUTO ? null : v })}
+                options={networkOptions(status.lanAddresses, remote.lanAddress)}
+              />
+            </SettingRow>
+          )}
         </SettingGroup>
 
         {loadError ? (
@@ -218,6 +262,7 @@ export function RemoteSection({ settings }: { settings: Settings }) {
         ) : (
           <>
             <StatusCard status={status} starting={starting} />
+            {status.running && status.firewall && <FirewallCard firewall={status.firewall} />}
             {status.running && status.pairingUrl && (
               <PairingCard
                 status={status}
@@ -270,6 +315,41 @@ export function RemoteSection({ settings }: { settings: Settings }) {
   );
 }
 
+/** The address in use, warning when phones on the Wi-Fi can't reach it. */
+function networkDescription(status: RemoteStatus, saved: string | null | undefined): string {
+  const host = status.url ? new URL(status.url).hostname : null;
+  const current = status.lanAddresses.find((a) => a.ip === host);
+  if (current && (current.kind === "vpn" || current.kind === "virtual")) {
+    return "Phones on your Wi-Fi can't reach this address. Pick Wi-Fi / Ethernet, or connect the phone to the same VPN.";
+  }
+  if (saved && !status.lanAddresses.some((a) => a.ip === saved)) {
+    return "The address you picked isn't connected, so Armada is using the best one available.";
+  }
+  return "Which of this computer's addresses phones connect to. Pick Tailscale to reach Armada away from home.";
+}
+
+/** Linux firewalls drop the phone's connections silently: Safari just shows a blank page. */
+function FirewallCard({ firewall }: { firewall: NonNullable<RemoteStatus["firewall"]> }) {
+  return (
+    <div role="note" className="flex gap-3 rounded-xl border border-warn/30 bg-warn/[0.06] px-4 py-3">
+      <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-medium">This computer's firewall may block your phone</div>
+        <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted">
+          {firewall.name} is on and doesn't allow Armada's port, so a phone that scans the code waits on a blank page.
+          Allow devices on your network by running this in a terminal:
+        </p>
+        <div className="mt-2 flex items-center gap-2">
+          <code className="selectable min-w-0 flex-1 truncate rounded-lg border border-line bg-base/60 px-2.5 py-1.5 font-mono text-[12px] text-fg/90">
+            {firewall.command}
+          </code>
+          <CopyButton text={firewall.command} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StatusCard({ status, starting }: { status: RemoteStatus; starting: boolean }) {
   if (!status.enabled) {
     return (
@@ -311,9 +391,15 @@ function StatusCard({ status, starting }: { status: RemoteStatus; starting: bool
         {status.running ? "Running" : "Starting…"}
       </span>
       {status.url && <span className="selectable min-w-0 truncate font-mono text-[12px] text-fg/90">{status.url}</span>}
-      <span className="ml-auto text-[12px] text-steel">{status.lan ? "LAN" : "This computer only"}</span>
+      <span className="ml-auto text-[12px] text-steel">{status.lan ? lanLabel(status) : "This computer only"}</span>
     </div>
   );
+}
+
+function lanLabel(status: RemoteStatus): string {
+  const host = status.url ? new URL(status.url).hostname : null;
+  const current = status.lanAddresses.find((a) => a.ip === host);
+  return current ? `${KIND_LABEL[current.kind]} (${current.interface})` : "LAN";
 }
 
 function PairingCard({

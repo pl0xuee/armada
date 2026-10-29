@@ -35,6 +35,7 @@ import type {
   AppState,
   ArmadaEvent,
   Attachment,
+  LanAddress,
   LocalKind,
   LocalModel,
   LocalProbe,
@@ -2465,9 +2466,21 @@ const remote = {
   }[],
 };
 
+/** A laptop on home Wi-Fi with Tailscale and a full-tunnel VPN connected. */
+const MOCK_LAN_ADDRESSES: LanAddress[] = [
+  { ip: "192.168.1.42", interface: "wlan0", kind: "lan", prefixLen: 24 },
+  { ip: "100.101.12.7", interface: "tailscale0", kind: "tailscale", prefixLen: 32 },
+  { ip: "10.2.0.2", interface: "proton0", kind: "vpn", prefixLen: 32 },
+];
+
+function lanIp(): string {
+  const want = db.settings.remote.lanAddress;
+  return MOCK_LAN_ADDRESSES.find((a) => a.ip === want)?.ip ?? MOCK_LAN_ADDRESSES[0].ip;
+}
+
 function baseUrl(): string {
   const r = db.settings.remote;
-  return `http://${r.lan ? "192.168.1.42" : "127.0.0.1"}:${r.port}`;
+  return `http://${r.lan ? lanIp() : "127.0.0.1"}:${r.port}`;
 }
 
 /** Deterministic QR-looking SVG (placeholder; the backend returns a real QR code). */
@@ -2508,6 +2521,11 @@ function remoteStatus() {
     error: r.enabled ? remote.error : null,
     shares: remote.shares,
     devices: remote.devices,
+    lanAddresses: r.lan ? MOCK_LAN_ADDRESSES : [],
+    firewall:
+      running && r.lan && lanIp().startsWith("192.168.")
+        ? { name: "ufw", command: `sudo ufw allow from 192.168.1.0/24 to any port ${r.port} proto tcp` }
+        : null,
   });
 }
 

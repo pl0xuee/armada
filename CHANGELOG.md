@@ -5,6 +5,13 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## Unreleased
+
+### Fixed
+
+- **Pairing your phone with a VPN on.** With a VPN connected (Proton VPN, WireGuard, …), the pairing QR code pointed at the VPN's address, so the phone sat on a blank page. Armada now listens on your Wi-Fi or Ethernet address, and Settings → Remote & mobile has a **Network** picker to choose another one (for example Tailscale, to reach Armada away from home).
+- **Firewall hint.** On Linux, when ufw blocks Armada's port, Remote & mobile shows the one command that lets devices on your network in.
+
 ## v0.1.6 — 2026-10-28
 
 ### New

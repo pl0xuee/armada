@@ -950,6 +950,9 @@ pub struct RemoteSettings {
     /// Listen on all interfaces (LAN) instead of only this computer.
     pub lan: bool,
     pub port: u16,
+    /// The network address to listen on for LAN access (one of this computer's own);
+    /// `None` picks automatically (Wi-Fi/Ethernet before Tailscale before other VPNs).
+    pub lan_address: Option<String>,
 }
 
 impl Default for RemoteSettings {
@@ -958,6 +961,7 @@ impl Default for RemoteSettings {
             enabled: false,
             lan: false,
             port: 47821,
+            lan_address: None,
         }
     }
 }
@@ -1121,6 +1125,11 @@ impl Settings {
         }
         if self.remote.port == 0 {
             return Err("The remote control port must be between 1 and 65535".into());
+        }
+        if let Some(addr) = &self.remote.lan_address {
+            if addr.parse::<std::net::IpAddr>().is_err() {
+                return Err(format!("\u{201c}{addr}\u{201d} isn't a network address"));
+            }
         }
         crate::voice::validate_voice(&self.voice.model, &self.voice.language)?;
         Ok(())

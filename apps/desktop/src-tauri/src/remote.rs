@@ -400,6 +400,10 @@ pub struct RemoteStatus {
     pub error: Option<String>,
     pub shares: Vec<ShareLink>,
     pub devices: Vec<DeviceInfo>,
+    /// Addresses LAN access can listen on, best first (empty while LAN access is off).
+    pub lan_addresses: Vec<LanAddress>,
+    /// A firewall that blocks the running LAN server, and how to open it.
+    pub firewall: Option<FirewallHint>,
 }
 
 pub struct Remote {
@@ -496,12 +500,216 @@ fn lan_refresh_target(
     }
 }
 
-/// The machine's primary LAN address (no packets are sent).
-fn lan_ip() -> Option<IpAddr> {
+/// What kind of network one of this computer's addresses is on. Ordered by preference:
+/// phones on the same Wi-Fi reach a `Lan` address; a full-tunnel VPN's address (which
+/// is also where the default route points) is useless to them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NetworkKind {
+    Lan,
+    Tailscale,
+    Vpn,
+    /// Container and virtual machine bridges (Docker, libvirt, …).
+    Virtual,
+}
+
+/// One of this computer's private IPv4 addresses the LAN server could listen on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LanAddress {
+    pub ip: IpAddr,
+    /// The interface's name (`eno1`, `Wi-Fi`, `tailscale0`, …).
+    pub interface: String,
+    pub kind: NetworkKind,
+    pub prefix_len: u8,
+}
+
+/// Classifies an interface by its name and flags; `None` for addresses a phone can never
+/// use (loopback, link-local, public).
+fn classify(name: &str, ip: Ipv4Addr, prefix_len: u8, p2p: bool) -> Option<NetworkKind> {
+    if ip.is_loopback() || ip.is_link_local() || !is_private_address(IpAddr::V4(ip)) {
+        return None;
+    }
+    let lower = name.to_ascii_lowercase();
+    let starts = |prefixes: &[&str]| prefixes.iter().any(|p| lower.starts_with(p));
+    let has = |parts: &[&str]| parts.iter().any(|p| lower.contains(p));
+    let cgnat = ip.octets()[0] == 100 && (ip.octets()[1] & 0xc0) == 64;
+    if starts(&[
+        "docker", "br-", "veth", "virbr", "vmnet", "vboxnet", "lxc", "lxd", "podman", "cni",
+        "flannel", "cali", "kube", "incus",
+    ]) || has(&["virtualbox", "vmware", "hyper-v", "(wsl"])
+    {
+        return Some(NetworkKind::Virtual);
+    }
+    if has(&["tailscale"]) || (cgnat && starts(&["utun"])) {
+        return Some(NetworkKind::Tailscale);
+    }
+    // Tunnels: point-to-point links, a lone /32, well-known VPN interface names, and
+    // anything else in the carrier-grade NAT range (Proton's kill switch uses it).
+    if p2p
+        || prefix_len == 32
+        || cgnat
+        || starts(&[
+            "tun", "tap", "wg", "utun", "ppp", "ipsec", "zt", "nordlynx", "pvpn",
+        ])
+        || has(&[
+            "vpn",
+            "wireguard",
+            "proton",
+            "mullvad",
+            "tunnel",
+            "openconnect",
+            "zerotier",
+        ])
+    {
+        return Some(NetworkKind::Vpn);
+    }
+    Some(NetworkKind::Lan)
+}
+
+/// This computer's private IPv4 addresses, best first.
+fn lan_addresses() -> Vec<LanAddress> {
+    let mut list: Vec<LanAddress> = if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|i| i.oper_status != if_addrs::IfOperStatus::Down)
+        .filter_map(|i| match i.addr {
+            if_addrs::IfAddr::V4(v4) => Some(LanAddress {
+                kind: classify(&i.name, v4.ip, v4.prefixlen, i.is_p2p)?,
+                ip: IpAddr::V4(v4.ip),
+                interface: i.name,
+                prefix_len: v4.prefixlen,
+            }),
+            if_addrs::IfAddr::V6(_) => None,
+        })
+        .collect();
+    rank_lan_addresses(&mut list, route_ip());
+    list.dedup_by(|a, b| a.ip == b.ip);
+    list
+}
+
+/// Best first: by kind, then the address the default route uses (the right one on a
+/// computer with several networks and no VPN), then home-network ranges first.
+fn rank_lan_addresses(list: &mut [LanAddress], route: Option<IpAddr>) {
+    let range = |ip: IpAddr| match ip {
+        IpAddr::V4(v4) => match v4.octets() {
+            [192, 168, ..] => 0,
+            [172, b, ..] if (16..32).contains(&b) => 1,
+            [10, ..] => 2,
+            _ => 3,
+        },
+        IpAddr::V6(_) => 4,
+    };
+    list.sort_by_key(|a| {
+        (
+            a.kind,
+            Some(a.ip) != route,
+            range(a.ip),
+            a.interface.clone(),
+        )
+    });
+}
+
+/// The address the default route goes out of (no packets are sent). With a full-tunnel
+/// VPN this is the VPN's own address, so it only breaks ties within a kind.
+fn route_ip() -> Option<IpAddr> {
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("192.0.2.1:80").ok()?;
     let ip = socket.local_addr().ok()?.ip();
     (!ip.is_unspecified() && !ip.is_loopback()).then_some(ip)
+}
+
+/// The address to listen on: the user's choice while this computer still has it,
+/// otherwise the best one.
+fn choose_lan(list: &[LanAddress], preferred: Option<&str>) -> Option<IpAddr> {
+    let preferred: Option<IpAddr> = preferred.and_then(|p| p.parse().ok());
+    preferred
+        .filter(|p| list.iter().any(|a| a.ip == *p))
+        .or_else(|| list.first().map(|a| a.ip))
+}
+
+fn lan_ip(settings: &RemoteSettings) -> Option<IpAddr> {
+    choose_lan(&lan_addresses(), settings.lan_address.as_deref())
+}
+
+/// Linux: a firewall that drops the phone's connections, and the command that lets them
+/// in. (Windows and macOS ask the user themselves the first time Armada listens.)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirewallHint {
+    pub name: String,
+    pub command: String,
+}
+
+#[cfg(target_os = "linux")]
+fn firewall_hint(addr: &LanAddress, port: u16) -> Option<FirewallHint> {
+    let conf = std::fs::read_to_string("/etc/ufw/ufw.conf").ok()?;
+    if !conf.lines().any(|l| l.trim() == "ENABLED=yes") {
+        return None;
+    }
+    // The rules file is world-readable on stock installs; if it isn't, show the hint.
+    if std::fs::read_to_string("/etc/ufw/user.rules").is_ok_and(|r| ufw_allows(&r, port)) {
+        return None;
+    }
+    Some(FirewallHint {
+        name: "ufw".into(),
+        command: ufw_command(addr, port),
+    })
+}
+
+/// Lets in TCP to `port` from the address's own network; a Tailscale/VPN address is a
+/// single host (/32), so there it's whatever arrives on that interface instead.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn ufw_command(addr: &LanAddress, port: u16) -> String {
+    match addr.kind {
+        NetworkKind::Lan => format!(
+            "sudo ufw allow from {} to any port {port} proto tcp",
+            network_cidr(addr)
+        ),
+        _ => format!(
+            "sudo ufw allow in on {} to any port {port} proto tcp",
+            addr.interface
+        ),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn firewall_hint(_addr: &LanAddress, _port: u16) -> Option<FirewallHint> {
+    None
+}
+
+/// Whether ufw's user rules accept TCP connections to `port` (from anywhere or a subnet).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn ufw_allows(rules: &str, port: u16) -> bool {
+    rules.lines().any(|line| {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        if !line.starts_with("-A ufw-user-input") || !words.ends_with(&["-j", "ACCEPT"]) {
+            return false;
+        }
+        let after = |flag: &str| words.iter().position(|w| *w == flag).and_then(|i| words.get(i + 1));
+        if after("-p").is_some_and(|p| *p != "tcp") {
+            return false;
+        }
+        let Some(ports) = after("--dport").or_else(|| after("--dports")) else {
+            return false;
+        };
+        ports.split(',').any(|p| match p.split_once(':') {
+            Some((lo, hi)) => matches!((lo.parse::<u16>(), hi.parse::<u16>()), (Ok(lo), Ok(hi)) if (lo..=hi).contains(&port)),
+            None => p.parse() == Ok(port),
+        })
+    })
+}
+
+/// `192.168.1.0/24` for 192.168.1.107/24.
+fn network_cidr(addr: &LanAddress) -> String {
+    match addr.ip {
+        IpAddr::V4(v4) => {
+            let len = addr.prefix_len.min(32);
+            let mask = if len == 0 { 0 } else { u32::MAX << (32 - len) };
+            format!("{}/{len}", Ipv4Addr::from(u32::from(v4) & mask))
+        }
+        IpAddr::V6(v6) => format!("{v6}"),
+    }
 }
 
 /// Removes fields a read-only viewer shouldn't see from a serialized agent, and
@@ -805,7 +1013,17 @@ impl Remote {
     pub fn status(&self) -> RemoteStatus {
         let settings = self.core().settings().map(|s| s.remote).unwrap_or_default();
         let base = self.base_url();
-        let running = self.running.lock().is_some();
+        let listening = self.running.lock().as_ref().map(|r| r.addr);
+        let running = listening.is_some();
+        let lan_addresses = if settings.lan {
+            lan_addresses()
+        } else {
+            Vec::new()
+        };
+        let firewall = listening
+            .filter(|_| settings.lan)
+            .and_then(|addr| lan_addresses.iter().find(|a| a.ip == addr.ip()))
+            .and_then(|a| firewall_hint(a, settings.port));
         // Forget expired share links (they no longer authenticate anyway).
         let pruned = {
             let mut tokens = self.tokens.lock();
@@ -865,6 +1083,8 @@ impl Remote {
                 .or_else(|| self.tokens_problem.lock().clone()),
             shares,
             devices,
+            lan_addresses,
+            firewall,
         }
     }
 
@@ -932,10 +1152,11 @@ impl Remote {
             return;
         }
         *self.wanted.lock() = settings.enabled.then(|| settings.clone());
-        let unchanged =
-            self.running.lock().as_ref().is_some_and(|r| {
-                r.settings.lan == settings.lan && r.settings.port == settings.port
-            });
+        let unchanged = self.running.lock().as_ref().is_some_and(|r| {
+            r.settings.lan == settings.lan
+                && r.settings.port == settings.port
+                && r.settings.lan_address == settings.lan_address
+        });
         if settings.enabled && unchanged {
             return;
         }
@@ -986,7 +1207,12 @@ impl Remote {
                 .as_ref()
                 .map(|r| (r.settings.clone(), r.addr.ip()));
             let wanted = this.wanted.lock().clone();
-            lan_refresh_target(running, wanted, lan_ip())
+            let current = running
+                .as_ref()
+                .map(|(s, _)| s)
+                .or(wanted.as_ref())
+                .and_then(lan_ip);
+            lan_refresh_target(running, wanted, current)
         };
         let Some(settings) = check(self) else {
             return;
@@ -1018,13 +1244,14 @@ impl Remote {
             return Err(format!("Choose a port between {MIN_PORT} and 65535"));
         }
         let ip = if settings.lan {
-            let ip = lan_ip().ok_or_else(|| {
-                "No network connection found for LAN access. Connect to a network, or turn LAN access off.".to_string()
-            })?;
-            if !is_private_address(ip) {
-                return Err(PUBLIC_ADDRESS_MESSAGE.to_string());
-            }
-            ip
+            // Only private addresses are candidates: online with none means a public one.
+            lan_ip(settings).ok_or_else(|| {
+                if route_ip().is_some() {
+                    PUBLIC_ADDRESS_MESSAGE.to_string()
+                } else {
+                    "No network connection found for LAN access. Connect to a network, or turn LAN access off.".to_string()
+                }
+            })?
         } else {
             IpAddr::V4(Ipv4Addr::LOCALHOST)
         };
@@ -2545,6 +2772,7 @@ mod tests {
             enabled,
             lan,
             port: 7000,
+            ..Default::default()
         };
         let a: IpAddr = "192.168.1.5".parse().unwrap();
         let b: IpAddr = "192.168.1.9".parse().unwrap();
@@ -2562,6 +2790,148 @@ mod tests {
         assert!(lan_refresh_target(None, None, Some(b)).is_none());
         assert!(lan_refresh_target(None, Some(rs(false, true)), Some(b)).is_none());
         assert!(lan_refresh_target(None, Some(rs(true, false)), Some(b)).is_none());
+    }
+
+    #[test]
+    fn lan_address_kinds() {
+        let kind = |name, ip: &str, prefix, p2p| classify(name, ip.parse().unwrap(), prefix, p2p);
+        use NetworkKind::*;
+        assert_eq!(kind("eno1", "192.168.1.107", 24, false), Some(Lan));
+        assert_eq!(kind("wlan0", "10.0.0.12", 8, false), Some(Lan));
+        assert_eq!(kind("Wi-Fi", "172.20.10.3", 28, false), Some(Lan));
+        assert_eq!(kind("en0", "192.168.0.4", 24, false), Some(Lan));
+        // Proton VPN: the WireGuard tunnel and its kill-switch dummy (100.85.0.1/24).
+        assert_eq!(kind("proton0", "10.2.0.2", 32, true), Some(Vpn));
+        assert_eq!(kind("pvpnksintrf0", "100.85.0.1", 24, false), Some(Vpn));
+        assert_eq!(kind("ProtonVPN", "10.2.0.2", 32, false), Some(Vpn));
+        assert_eq!(kind("wg0", "10.8.0.2", 24, false), Some(Vpn));
+        assert_eq!(kind("tun0", "10.8.0.6", 24, false), Some(Vpn));
+        assert_eq!(kind("tailscale0", "100.101.1.2", 32, true), Some(Tailscale));
+        assert_eq!(kind("Tailscale", "100.101.1.2", 10, false), Some(Tailscale));
+        assert_eq!(kind("utun4", "100.101.1.2", 32, true), Some(Tailscale));
+        assert_eq!(kind("docker0", "172.17.0.1", 16, false), Some(Virtual));
+        assert_eq!(
+            kind(
+                "vEthernet (WSL (Hyper-V firewall))",
+                "172.29.0.1",
+                20,
+                false
+            ),
+            Some(Virtual)
+        );
+        assert_eq!(kind("eno1", "8.8.8.8", 24, false), None);
+        assert_eq!(kind("lo", "127.0.0.1", 8, false), None);
+        assert_eq!(kind("eno1", "169.254.3.4", 16, false), None);
+    }
+
+    #[test]
+    fn lan_address_choice_skips_the_vpn() {
+        let a = |interface: &str, ip: &str, kind| LanAddress {
+            ip: ip.parse().unwrap(),
+            interface: interface.into(),
+            kind,
+            prefix_len: 24,
+        };
+        let mut list = vec![
+            a("pvpnksintrf0", "100.85.0.1", NetworkKind::Vpn),
+            a("proton0", "10.2.0.2", NetworkKind::Vpn),
+            a("docker0", "172.17.0.1", NetworkKind::Virtual),
+            a("tailscale0", "100.101.1.2", NetworkKind::Tailscale),
+            a("eno1", "192.168.1.107", NetworkKind::Lan),
+        ];
+        // The default route goes through the VPN; the Wi-Fi/Ethernet address still wins.
+        rank_lan_addresses(&mut list, Some("10.2.0.2".parse().unwrap()));
+        let order: Vec<&str> = list.iter().map(|a| a.interface.as_str()).collect();
+        assert_eq!(
+            order,
+            ["eno1", "tailscale0", "proton0", "pvpnksintrf0", "docker0"]
+        );
+        let eno1: IpAddr = "192.168.1.107".parse().unwrap();
+        assert_eq!(choose_lan(&list, None), Some(eno1));
+        // The user's pick, while it still exists.
+        assert_eq!(
+            choose_lan(&list, Some("100.101.1.2")),
+            Some("100.101.1.2".parse().unwrap())
+        );
+        assert_eq!(choose_lan(&list, Some("192.168.9.9")), Some(eno1));
+        assert_eq!(choose_lan(&list, Some("nonsense")), Some(eno1));
+        assert_eq!(choose_lan(&[], None), None);
+
+        // Two real networks: the one the default route uses.
+        let mut two = vec![
+            a("eth0", "192.168.1.5", NetworkKind::Lan),
+            a("wlan0", "192.168.50.7", NetworkKind::Lan),
+        ];
+        rank_lan_addresses(&mut two, Some("192.168.50.7".parse().unwrap()));
+        assert_eq!(two[0].interface, "wlan0");
+    }
+
+    #[test]
+    fn ufw_rules_and_subnets() {
+        let rules = "\
+### tuple ### allow tcp 53317 0.0.0.0/0 any 0.0.0.0/0 in
+-A ufw-user-input -p tcp --dport 53317 -j ACCEPT
+-A ufw-user-input -p udp --dport 47821 -j ACCEPT
+-A ufw-user-input -p tcp --dport 47900 -s 192.168.1.0/24 -j DROP
+-A ufw-user-input -p tcp -m multiport --dports 8000:8100,9000 -j ACCEPT
+";
+        assert!(ufw_allows(rules, 53317));
+        assert!(!ufw_allows(rules, 47821), "udp only");
+        assert!(!ufw_allows(rules, 47900), "denied");
+        assert!(ufw_allows(rules, 8050) && ufw_allows(rules, 9000));
+        assert!(!ufw_allows(rules, 8101));
+        let subnet_rule =
+            "-A ufw-user-input -p tcp -d 192.168.1.107 --dport 47821 -s 192.168.1.0/24 -j ACCEPT\n";
+        assert!(ufw_allows(subnet_rule, 47821));
+        assert!(
+            ufw_allows("-A ufw-user-input --dport 47821 -j ACCEPT", 47821),
+            "any protocol"
+        );
+
+        let cidr = |ip: &str, prefix_len| {
+            network_cidr(&LanAddress {
+                ip: ip.parse().unwrap(),
+                interface: "x".into(),
+                kind: NetworkKind::Lan,
+                prefix_len,
+            })
+        };
+        assert_eq!(cidr("192.168.1.107", 24), "192.168.1.0/24");
+        assert_eq!(cidr("10.20.30.40", 8), "10.0.0.0/8");
+        assert_eq!(cidr("172.20.10.3", 28), "172.20.10.0/28");
+        assert_eq!(cidr("100.101.1.2", 32), "100.101.1.2/32");
+
+        let lan = LanAddress {
+            ip: "192.168.1.107".parse().unwrap(),
+            interface: "eno1".into(),
+            kind: NetworkKind::Lan,
+            prefix_len: 24,
+        };
+        assert_eq!(
+            ufw_command(&lan, 47821),
+            "sudo ufw allow from 192.168.1.0/24 to any port 47821 proto tcp"
+        );
+        let ts = LanAddress {
+            ip: "100.101.1.2".parse().unwrap(),
+            interface: "tailscale0".into(),
+            kind: NetworkKind::Tailscale,
+            prefix_len: 32,
+        };
+        assert_eq!(
+            ufw_command(&ts, 47821),
+            "sudo ufw allow in on tailscale0 to any port 47821 proto tcp"
+        );
+        let in_on = "-A ufw-user-input -i tailscale0 -p tcp --dport 47821 -j ACCEPT";
+        assert!(ufw_allows(in_on, 47821));
+    }
+
+    /// What this machine would pick (run with --ignored --nocapture to see).
+    #[test]
+    #[ignore]
+    fn print_lan_addresses() {
+        for a in lan_addresses() {
+            println!("{a:?}");
+        }
     }
 
     use super::*;
@@ -2727,6 +3097,7 @@ mod tests {
                     enabled: true,
                     lan: false,
                     port,
+                    ..Default::default()
                 })
                 .await;
             if remote.status().running {
@@ -3279,6 +3650,7 @@ mod tests {
                 enabled: true,
                 lan: false,
                 port: port2,
+                ..Default::default()
             })
             .await;
         assert!(remote.status().running, "{:?}", remote.status().error);
@@ -3334,6 +3706,7 @@ mod tests {
                 enabled: false,
                 lan: false,
                 port: taken,
+                ..Default::default()
             })
             .await;
         let started = Instant::now();
@@ -3342,6 +3715,7 @@ mod tests {
                 enabled: true,
                 lan: false,
                 port: taken,
+                ..Default::default()
             })
             .await;
         let st = remote.status();
@@ -3359,6 +3733,7 @@ mod tests {
                 enabled: true,
                 lan: false,
                 port: 80,
+                ..Default::default()
             })
             .await;
         let st = remote.status();
@@ -3369,6 +3744,7 @@ mod tests {
                 enabled: false,
                 lan: false,
                 port: 80,
+                ..Default::default()
             })
             .await;
         assert!(!remote.status().running);
@@ -3380,6 +3756,7 @@ mod tests {
                 enabled: true,
                 lan: false,
                 port: port2,
+                ..Default::default()
             })
             .await;
         assert!(!remote.status().running);

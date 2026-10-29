@@ -509,6 +509,17 @@ export interface RemoteSettings {
   enabled: boolean;
   lan: boolean;
   port: number;
+  /** The address LAN access listens on; null picks automatically (Wi-Fi/Ethernet first). */
+  lanAddress?: string | null;
+}
+
+/** One of this computer's network addresses LAN access can listen on. */
+export interface LanAddress {
+  ip: string;
+  /** Interface name (eno1, Wi-Fi, tailscale0, …). */
+  interface: string;
+  kind: "lan" | "tailscale" | "vpn" | "virtual";
+  prefixLen: number;
 }
 
 export interface ShareLink {
@@ -547,6 +558,10 @@ export interface RemoteStatus {
   error: string | null;
   shares: ShareLink[];
   devices: RemoteDevice[];
+  /** Addresses LAN access can listen on, best first (empty while LAN access is off). */
+  lanAddresses: LanAddress[];
+  /** Linux: a firewall blocking the LAN server, and the command that opens it. */
+  firewall: { name: string; command: string } | null;
 }
 
 /** `body` may contain {{placeholders}}. */
