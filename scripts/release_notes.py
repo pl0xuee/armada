@@ -97,6 +97,8 @@ def cargo_version() -> str:
 
 
 def main(argv: list[str]) -> None:
+    # Windows runners default stdout to a legacy code page that can't encode notes like "⌘".
+    sys.stdout.reconfigure(encoding="utf-8")
     if argv == ["--check"]:
         tag = "v" + cargo_version()
         notes_for(tag)
