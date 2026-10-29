@@ -1,31 +1,28 @@
 name: CI
 
-# Cost model: one cheap Linux job runs everything frontend/lint related and gates the
-# slower macOS/Windows jobs, which only run clippy + cargo test (the cfg(target_os) code
-# paths). Installers are built by release.yml; the debug bundle and release-profile builds
-# run on pushes to main only. Dependency audit lives in audit.yml.
+# One pipeline, the same on every run:
+#   1. linux          everything: release notes, command contract, format, phone + desktop
+#                     UI tests and builds, clippy, Rust tests
+#   2. macOS/Windows  clippy + Rust tests (platform code), after linux passes
+#   3. e2e            builds the real app and drives it headless (catches runtime wiring bugs
+#                     unit tests can't, e.g. a command whose state was never registered)
+#   4. release        only for a version tag (v1.2.3), only if 1-3 passed: builds and signs
+#                     the installers into a draft GitHub release
+# Changes go straight to main; Dependabot's pull requests run steps 1-3.
 on:
   push:
     branches: [main]
-  # No `paths-ignore` here: a workflow that never starts leaves required checks pending
-  # forever. The `changes` job below skips the heavy jobs on docs-only PRs instead (a
-  # skipped job counts as passing for branch protection). Pushes to main always run
-  # everything: release.yml requires CI runs on the tagged commit.
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
-    inputs:
-      only:
-        description: "Run just one platform's job (skips the Linux checks), e.g. to retry a Windows fix"
-        type: choice
-        options: [all, windows, macos]
-        default: all
 
 permissions:
   contents: read
 
+# A newer push to main replaces a running check; a release is never cancelled.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -33,51 +30,16 @@ env:
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
-  # Cheap gate: did anything other than docs/images change? Always true off pull requests.
-  changes:
-    name: changes
+  linux:
+    name: linux
     runs-on: ubuntu-22.04
-    timeout-minutes: 5
-    outputs:
-      code: ${{ steps.diff.outputs.code }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name == 'pull_request'
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-
-      - name: Detect code changes
-        id: diff
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          code=true
-          if [ "$EVENT" = "pull_request" ]; then
-            # Captured first so a failed diff fails the job instead of skipping CI.
-            changed=$(git diff --name-only "$BASE_SHA" HEAD)
-            # Docs-only: markdown, docs/, LICENSE, dependabot config, images.
-            if [ -z "$(grep -Ev '(\.md|\.png|\.jpg|\.gif)$|^docs/|^LICENSE$|^\.github/dependabot\.yml$' <<< "$changed" || true)" ]; then
-              code=false
-            fi
-          fi
-          echo "code=$code" >> "$GITHUB_OUTPUT"
-          echo "code changed: $code"
-
-  checks:
-    name: checks (linux)
-    needs: changes
-    if: needs.changes.outputs.code == 'true' && (github.event_name != 'workflow_dispatch' || inputs.only == 'all')
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # Bumping the version needs a CHANGELOG.md section for it (the release notes);
-      # catch a missing one here instead of when the tag is pushed.
+      # Bumping the version needs a CHANGELOG.md section for it (the release notes).
       - name: Release notes for this version
         run: python3 scripts/release_notes.py --check
 
@@ -109,13 +71,13 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: ". -> target"
-          shared-key: ci-linux
+          shared-key: linux
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Formatting
         run: cargo fmt --all --check
 
-      - name: Test mobile companion
+      - name: Test and build mobile companion
         working-directory: apps/remote
         run: |
           npm ci
@@ -129,9 +91,8 @@ jobs:
           npm run test --if-present
           npm run build
 
-      # The Preview page script is committed prebuilt (src-tauri embeds it); it must match
-      # its source.
-      - name: Preview page script is up to date
+      # The Preview page script is committed prebuilt (src-tauri embeds it).
+      - name: Preview page script matches its source
         working-directory: apps/desktop
         run: |
           npm run build:preview-agent
@@ -146,53 +107,26 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
-  # cfg(target_os) code paths only: no frontend tests, no bundles.
   native:
     name: ${{ matrix.name }}
-    needs: [changes, checks]
-    # After checks pass, or straight away for a single-platform manual run. Skipped
-    # entirely on docs-only PRs.
-    if: ${{ !cancelled() && needs.changes.outputs.code == 'true' && (needs.checks.result == 'success' || (needs.checks.result == 'skipped' && inputs.only != 'all')) }}
+    needs: linux
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.only == 'windows' && '[{"name":"Windows","os":"windows-latest"}]' || inputs.only == 'macos' && '[{"name":"macOS","os":"macos-latest"}]' || '[{"name":"macOS","os":"macos-latest"},{"name":"Windows","os":"windows-latest"}]') }}
+        include:
+          - name: macOS
+            os: macos-latest
+          - name: Windows
+            os: windows-latest
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          # Full history only where the x86_64 gate below diffs against the PR base.
-          # (`cond && 0 || 1` would always give 1: 0 is falsy in expressions.)
-          fetch-depth: ${{ (matrix.os != 'macos-latest' || github.event_name != 'pull_request') && 1 || 0 }}
 
-      # The macOS release is a universal binary (arm64 + x86_64) but this runner is arm64;
-      # type-check the Intel half too, but only when Rust/dependency code could have changed.
-      - name: Decide on x86_64 check
-        id: x86
-        if: runner.os == 'macOS'
-        shell: bash
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          run=false
-          if [ "$EVENT" != "pull_request" ]; then
-            run=true
-          else
-            # Captured first so a failed diff fails the job instead of skipping the check.
-            changed=$(git diff --name-only "$BASE_SHA" HEAD)
-            if grep -Eq '^(Cargo\.lock|apps/desktop/src-tauri/)|(^|/)Cargo\.toml$' <<< "$changed"; then
-              run=true
-            fi
-          fi
-          echo "run=$run" >> "$GITHUB_OUTPUT"
-          echo "x86_64 check: $run"
-
-      # tauri::generate_context! needs frontendDist (apps/desktop/dist) to exist, and
-      # build.rs falls back to a placeholder for the mobile app in debug builds. Neither
-      # needs real content to compile or test the Rust code, so skip npm entirely.
+      # The Rust code only needs the frontend folder to exist to compile and test (debug
+      # builds embed a placeholder phone app), so skip npm here.
       - name: Stub frontend dist
         shell: bash
         run: |
@@ -203,12 +137,11 @@ jobs:
         with:
           toolchain: stable
           components: clippy
-          targets: ${{ steps.x86.outputs.run == 'true' && 'x86_64-apple-darwin' || '' }}
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: ". -> target"
-          shared-key: ci-${{ matrix.os }}
+          shared-key: ${{ matrix.os }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Clippy
@@ -217,23 +150,11 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
-      - name: Check (x86_64-apple-darwin)
-        if: runner.os == 'macOS' && steps.x86.outputs.run == 'true'
-        run: cargo check -p armada-desktop --target x86_64-apple-darwin --locked
-
-  # Catches bundler misconfiguration (targets, deb dependencies, icons, CSP) before a
-  # release does, then launches the debug binary this build produced and drives it with
-  # WebDriver (apps/desktop/e2e): the only thing that catches runtime wiring bugs such as a
-  # command asking for managed state that was never registered. One job so the app is
-  # compiled once. Main and manual runs only (a manual run on a branch tries it before a merge):
-  # release.yml builds the real installers on every OS.
-  # Updater artifacts need the signing key, which CI doesn't have.
-  bundle-smoke:
-    name: deb bundle + e2e smoke (linux)
-    if: ${{ !cancelled() && needs.checks.result == 'success' && github.event_name != 'pull_request' }}
-    needs: checks
+  e2e:
+    name: e2e
+    needs: linux
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -261,48 +182,94 @@ jobs:
         with:
           toolchain: stable
 
-      # Also caches ~/.cargo/bin, so tauri-driver below is only compiled on a cold cache.
+      # Also caches ~/.cargo/bin, so tauri-driver is only compiled on a cold cache.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: ". -> target"
-          shared-key: ci-linux-bundle
+          shared-key: e2e
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install frontend dependencies
+      - name: Build the app (debug)
         run: |
-          (cd apps/desktop && npm ci)
           (cd apps/remote && npm ci)
+          cd apps/desktop
+          npm ci
+          npm run tauri build -- --ci --debug --no-bundle
 
-      - name: Bundle (deb, debug)
-        working-directory: apps/desktop
-        run: npm run tauri build -- --ci --debug --bundles deb --config '{"bundle":{"createUpdaterArtifacts":false}}'
-
-      # Pinned for reproducibility; bump together with the e2e/ test.
+      # Pinned for reproducibility; bump together with apps/desktop/e2e.
       - name: Install tauri-driver
         run: command -v tauri-driver >/dev/null && tauri-driver --version | grep -q 2.1.0 || cargo install tauri-driver --version 2.1.0 --locked
 
       # Fresh HOME/XDG dirs, Xvfb and a private session bus; see apps/desktop/e2e/run.sh.
-      - name: E2E smoke (real app, WebDriver)
+      - name: Drive the real app
         timeout-minutes: 10
         working-directory: apps/desktop/e2e
         run: |
           npm ci
           ./run.sh
 
-  # The release profile (LTO, codegen settings, no debug assertions) compiles differently
-  # from the debug builds above; build it before a tag does. Main only.
-  release-build:
-    name: release build (linux)
-    if: github.event_name == 'push'
-    needs: checks
-    runs-on: ubuntu-22.04
+  release:
+    name: release (${{ matrix.name }})
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, native, e2e]
+    # Repository environment: add required reviewers there to approve every release.
+    environment: release
+    permissions:
+      contents: write # create the draft release and upload assets
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS universal
+            platform: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin -- --locked
+          - name: Linux
+            platform: ubuntu-22.04
+            rust-targets: ""
+            args: "-- --locked"
+          - name: Windows
+            platform: windows-latest
+            rust-targets: ""
+            args: "-- --locked"
+    runs-on: ${{ matrix.platform }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      - name: Tag matches the app version
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          for pkg in apps/desktop/package.json apps/remote/package.json; do
+            v=$(node -p "require('./$pkg').version")
+            if [ "$v" != "$version" ]; then
+              echo "::error::$pkg is $v but Cargo.toml is $version"
+              exit 1
+            fi
+          done
+          if [ "${GITHUB_REF_NAME}" != "v$version" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} doesn't match version $version (expected v$version)"
+            exit 1
+          fi
+
+      # The tag's CHANGELOG.md section: the GitHub release body and the updater's notes.
+      - name: Release notes
+        id: notes
+        shell: bash
+        run: |
+          python3 scripts/release_notes.py "${GITHUB_REF_NAME}" > release-notes.md
+          delim="EOF_$(openssl rand -hex 16)"
+          {
+            echo "body<<${delim}"
+            cat release-notes.md
+            echo "${delim}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -321,17 +288,43 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
+          targets: ${{ matrix.rust-targets }}
 
+      # Own key: release builds never restore caches written by check runs.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: ". -> target"
-          shared-key: ci-linux-release
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          key: release-${{ matrix.platform }}
 
-      - name: Build frontends
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      # The phone app is embedded into the binary (src-tauri/build.rs refuses to build a
+      # release without it).
+      - name: Build mobile companion
+        working-directory: apps/remote
         run: |
-          (cd apps/desktop && npm ci && npm run build)
-          (cd apps/remote && npm ci && npm run build)
+          npm ci
+          npm run build
 
-      - name: Build (release profile)
-        run: cargo build --release -p armada-desktop --locked
+      # Signing secrets are passed to this step only.
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS signing/notarization and Windows code signing: add the APPLE_* /
+          # WINDOWS_CERTIFICATE* secrets here once certificates exist.
+          # Updater signing: signs the update bundles and produces latest.json.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: Armada ${{ github.ref_name }}
+          releaseBody: ${{ steps.notes.outputs.body }}
+          # Drafts are invisible to the updater: review the draft, then press Publish.
+          releaseDraft: true
+          prerelease: false
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+          args: ${{ matrix.args }}
