@@ -671,7 +671,19 @@ impl TempIndex {
         let mut last_err = None;
         for tmp in candidates {
             match tokio::fs::copy(&real, &tmp).await {
-                Ok(_) => return Ok(TempIndex(tmp)),
+                Ok(_) => {
+                    // Keep the real index's mtime: git treats entries whose mtime is at
+                    // or after the index's as "racily clean" and compares their content.
+                    // A fresh copy is newer, so a same-size edit made in the same second
+                    // as the last commit/add would otherwise look unchanged.
+                    if let Ok(mtime) = std::fs::metadata(&real).and_then(|m| m.modified()) {
+                        let _ = std::fs::OpenOptions::new()
+                            .write(true)
+                            .open(&tmp)
+                            .and_then(|f| f.set_modified(mtime));
+                    }
+                    return Ok(TempIndex(tmp));
+                }
                 // No index yet (fresh repository): git starts from an empty one.
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound && !real.exists() => {
                     if tmp.parent().is_some_and(Path::is_dir) {
