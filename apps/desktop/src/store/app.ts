@@ -485,7 +485,8 @@ export const useApp = create<AppStore>((set, get) => ({
           if (loading) buffered.get(agentId)?.push(e);
           if (!items[agentId] && !working.has(agentId)) {
             // Not loaded: permissions must reach the Inbox, everything else loads lazily.
-            if (!loading && e.type === "item_upserted" && e.item.kind === "permission") toLoad.add(agentId);
+            if (!loading && e.type === "item_upserted" && (e.item.kind === "permission" || e.item.kind === "question"))
+              toLoad.add(agentId);
             break;
           }
           let list = working.get(agentId);
@@ -597,6 +598,37 @@ export function usePendingPermissions(): PendingPermission[] {
     const out: PendingPermission[] = [];
     for (let i = 0; i < flat.length; i += 2) {
       out.push({ agent: flat[i] as Agent, item: flat[i + 1] as PendingPermission["item"] });
+    }
+    return out;
+  }, [flat]);
+}
+
+export interface PendingQuestion {
+  agent: Agent;
+  item: Extract<TimelineItem, { kind: "question" }>;
+}
+
+/** All unanswered questions across loaded agents, oldest first. */
+export function collectPendingQuestions(s: Pick<AppStore, "agents" | "items">): PendingQuestion[] {
+  const out: PendingQuestion[] = [];
+  for (const agent of Object.values(s.agents)) {
+    if (agent.pendingPermissions <= 0) continue;
+    const list = s.items[agent.id];
+    if (!list) continue;
+    for (const item of list) {
+      if (item.kind === "question" && item.resolution === null) out.push({ agent, item });
+    }
+  }
+  return out.sort((a, b) => a.item.ts - b.item.ts);
+}
+
+/** Pending questions, re-rendering only when an agent or question item actually changes. */
+export function usePendingQuestions(): PendingQuestion[] {
+  const flat = useApp(useShallow((s) => collectPendingQuestions(s).flatMap((p) => [p.agent, p.item])));
+  return useMemo(() => {
+    const out: PendingQuestion[] = [];
+    for (let i = 0; i < flat.length; i += 2) {
+      out.push({ agent: flat[i] as Agent, item: flat[i + 1] as PendingQuestion["item"] });
     }
     return out;
   }, [flat]);

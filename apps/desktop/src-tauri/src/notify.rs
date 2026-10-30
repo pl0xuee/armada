@@ -117,6 +117,19 @@ fn request_body(title: &str, command: Option<&str>) -> (String, bool) {
     }
 }
 
+/// Whether `request_id` is an approval (questions get no Approve/Deny buttons).
+#[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
+fn is_approval(app: &AppHandle, agent_id: &str, request_id: &str) -> bool {
+    let Some(core) = app.try_state::<Core>() else {
+        return false;
+    };
+    core.items(agent_id).is_ok_and(|items| {
+        items.iter().rev().any(|item| {
+            matches!(&item.body, ItemBody::Permission { request_id: r, .. } if r == request_id)
+        })
+    })
+}
+
 /// The command of pending permission request `request_id`, from the transcript.
 #[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
 fn request_command(app: &AppHandle, agent_id: &str, request_id: &str) -> Option<String> {
@@ -161,7 +174,7 @@ mod xdg {
     use tracing::{debug, warn};
     use zbus::zvariant::Variant;
 
-    use super::{request_body, request_command, respond_in_background, Toast};
+    use super::{is_approval, request_body, request_command, respond_in_background, Toast};
     use crate::window;
 
     const DEST: &str = "org.freedesktop.Notifications";
@@ -466,8 +479,11 @@ mod xdg {
         let Some(bus) = bus() else {
             return;
         };
-        let is_request =
-            toast.reason == Some(AttentionReason::Permission) && toast.request_id.is_some();
+        let is_request = toast.reason == Some(AttentionReason::Permission)
+            && match (&toast.agent_id, &toast.request_id) {
+                (Some(agent_id), Some(request_id)) => is_approval(&app, agent_id, request_id),
+                _ => false,
+            };
         // Approve must never be pressed on a cut-off command: show all of it, or (when it is
         // too long for a notification) offer only "Open" and review it in the app.
         let (body, actionable) = match (&toast.agent_id, &toast.request_id) {

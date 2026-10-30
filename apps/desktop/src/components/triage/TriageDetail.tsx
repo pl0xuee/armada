@@ -27,7 +27,8 @@ import { parseFileDiff } from "@/lib/diff";
 import { formatCost, formatTokens } from "@/lib/format";
 import type { PermissionOption, TimelineItem } from "@/lib/types";
 import { basename, cn } from "@/lib/utils";
-import { useApp, usePendingPermissions } from "@/store/app";
+import { useApp, usePendingPermissions, usePendingQuestions } from "@/store/app";
+import { QuestionCard } from "@/components/timeline/QuestionCard";
 import { useUi } from "@/store/ui";
 import { REASON_LABEL, REASON_TONE, type TriageEntry } from "./useTriage";
 import { CodeText } from "../CodeText";
@@ -78,10 +79,15 @@ export function TriageDetail({
   const items = useApp((s) => s.items[agent.id]);
   const loading = useApp((s) => s.itemsLoading[agent.id] ?? false);
   const pending = usePendingPermissions().find((p) => p.agent.id === agent.id)?.item;
+  const question = usePendingQuestions().find((p) => p.agent.id === agent.id)?.item;
   const openAgent = useUi((s) => s.openAgent);
 
   return (
-    <article data-agent-id={agent.id} aria-label={`${agent.title}: ${REASON_LABEL[reason]}`} className="flex min-h-0 flex-1 flex-col">
+    <article
+      data-agent-id={agent.id}
+      aria-label={`${agent.title}: ${REASON_LABEL[reason]}`}
+      className="flex min-h-0 flex-1 flex-col"
+    >
       <header className="flex items-start gap-3 border-b border-line px-5 py-4">
         <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="lg" />
         <div className="min-w-0 flex-1">
@@ -124,6 +130,8 @@ export function TriageDetail({
         ) : reason === "permission" ? (
           pending ? (
             <PermissionPanel agentId={agent.id} item={pending} provider={identity.short} alwaysArmed={alwaysArmed} />
+          ) : question ? (
+            <QuestionCard item={question} agent={agent} compact />
           ) : (
             <p className="text-[13px] text-muted">The request was answered elsewhere. Mark this done to move on.</p>
           )
@@ -201,7 +209,13 @@ export function TriageDetail({
             onClick={onDone}
             // An approval is still blocking the agent: answer it rather than marking it done.
             aria-disabled={reason === "permission" || undefined}
-            title={reason === "permission" ? "Answer the approval first (A / D)" : undefined}
+            title={
+              reason === "permission"
+                ? question && !pending
+                  ? "Answer the question first"
+                  : "Answer the approval first (A / D)"
+                : undefined
+            }
             className={cn(reason === "permission" && "cursor-not-allowed opacity-45")}
           >
             <CircleCheck className="!h-3.5 !w-3.5" /> Done

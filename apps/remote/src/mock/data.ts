@@ -198,6 +198,16 @@ export function buildAgents(now: number): Agent[] {
       lastMessage: "pgvector is the simplest fit up to ~5M rows; past that Qdrant's filtering wins.",
       configOptions: providerConfig("grok"),
     }),
+    agent(now, "a11", "Pick a database for the new service", "claude", "acc-work", "needs_permission", {
+      agoMin: 3,
+      projectPath: "/home/dev/code/acme-api",
+      pendingPermissions: 1,
+      costUsd: 0.09,
+      tokensUsed: 11_400,
+      lastMessage: "I need a couple of decisions before scaffolding the service.",
+      configOptions: providerConfig("claude", "claude-opus"),
+      availableCommands: slashCommands,
+    }),
     agent(now, "a9", "Summarize open PRs", "custom", "custom-gemini", "starting", {
       agoMin: 0,
       projectPath: "/home/dev/code/acme-web",
@@ -576,6 +586,46 @@ export function buildTimelines(now: number): Record<string, TimelineItem[]> {
     tool("a4", at(1), "fetch", "Fetch lancedb.github.io/lancedb/concepts", { status: "in_progress" }),
   ];
 
+  tl.a11 = [
+    { ...base("a11", at(5)), kind: "user_message", text: "Scaffold the new notifications service. Ask me whatever you need to know first." },
+    {
+      ...base("a11", at(3)),
+      kind: "question",
+      requestId: "req-a11-ask",
+      message: "A couple of decisions before I scaffold the notifications service.",
+      source: null,
+      fields: [
+        {
+          id: "question_0",
+          title: "Database",
+          description: "Which database should the service use for queued notifications?",
+          kind: "single",
+          required: true,
+          options: [
+            { value: "postgres", label: "PostgreSQL", description: "Reuse the existing cluster; transactional outbox, no new infrastructure." },
+            { value: "redis", label: "Redis", description: "Fast and simple, but notifications are lost if it restarts without persistence." },
+            { value: "sqlite", label: "SQLite", description: "A single file per instance; easiest locally, awkward to scale out." },
+          ],
+        },
+        { id: "question_0_custom", title: "Database", description: null, kind: "text", otherFor: "question_0" },
+        {
+          id: "question_1",
+          title: "Channels",
+          description: "Which delivery channels should it support at launch?",
+          kind: "multi",
+          options: [
+            { value: "email", label: "Email", description: "Transactional email through the existing provider." },
+            { value: "push", label: "Push", description: "APNs and FCM." },
+            { value: "sms", label: "SMS" },
+            { value: "webhook", label: "Webhooks", description: "Signed HTTP callbacks for customers." },
+          ],
+        },
+        { id: "question_1_custom", title: "Channels", description: null, kind: "text", otherFor: "question_1" },
+      ],
+      resolution: null,
+    },
+  ];
+
   tl.a9 = [
     {
       ...base("a9", at(0.3)),
@@ -591,6 +641,28 @@ export function buildTimelines(now: number): Record<string, TimelineItem[]> {
       command: "npx playwright test e2e/checkout.spec.ts",
       output: "Running 14 tests using 4 workers\n\n  14 passed (38.2s)",
     }),
+    {
+      ...base("a5", at(36)),
+      kind: "question",
+      requestId: "req-a5-ask",
+      message: "Which browsers should the checkout tests run in?",
+      source: null,
+      fields: [
+        {
+          id: "question_0",
+          title: null,
+          description: null,
+          kind: "single",
+          options: [
+            { value: "chromium", label: "Chromium only", description: "Fastest; covers most traffic." },
+            { value: "all", label: "Chromium, Firefox and WebKit", description: "Triple the CI time." },
+          ],
+        },
+        { id: "question_0_custom", title: null, description: null, kind: "text", otherFor: "question_0" },
+      ],
+      resolution: "answered",
+      answers: { question_0: "chromium" },
+    },
     { ...base("a5", at(25)), kind: "notice", level: "info", text: "Context compacted to free up space" },
     {
       ...base("a5", at(18)),

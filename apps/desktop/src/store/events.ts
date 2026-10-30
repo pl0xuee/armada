@@ -38,7 +38,7 @@ function handleUiEvent(e: ArmadaEvent) {
     }
     case "item_upserted":
       // Drop the approval toast once the request is answered (here or elsewhere).
-      if (e.item.kind === "permission" && e.item.resolution !== null) toast.dismiss(`perm-${e.item.requestId}`);
+      if ((e.item.kind === "permission" || e.item.kind === "question") && e.item.resolution !== null) toast.dismiss(`perm-${e.item.requestId}`);
       break;
     case "schedule_updated":
       publishScheduleEvent({ type: "updated", schedule: e.schedule });

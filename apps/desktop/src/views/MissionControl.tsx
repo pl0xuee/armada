@@ -14,7 +14,13 @@ import { isMac, modKey } from "@/lib/utils";
 import { AgentRowCompact } from "@/components/mission/AgentRowCompact";
 import { EMPTY_SUMMARY, useTileSummaries } from "@/components/mission/useTileSummaries";
 import { Tooltip } from "@/components/ui/tooltip";
-import { useApp, usePendingPermissions, type PendingPermission } from "@/store/app";
+import {
+  useApp,
+  usePendingPermissions,
+  usePendingQuestions,
+  type PendingPermission,
+  type PendingQuestion,
+} from "@/store/app";
 import { useUi } from "@/store/ui";
 
 type Density = "comfortable" | "compact";
@@ -54,6 +60,7 @@ function matches(a: Agent, f: Filter) {
 export function MissionControlView() {
   const agentsMap = useApp((s) => s.agents);
   const pending = usePendingPermissions();
+  const questions = usePendingQuestions();
   const summaries = useTileSummaries();
   const accounts = useApp((s) => s.accounts);
   const openAgent = useUi((s) => s.openAgent);
@@ -86,6 +93,14 @@ export function MissionControlView() {
     }
     return map;
   }, [pending]);
+
+  const questionByAgent = useMemo(() => {
+    const map = new Map<string, PendingQuestion["item"]>();
+    for (const p of questions) {
+      if (!map.has(p.agent.id)) map.set(p.agent.id, p.item);
+    }
+    return map;
+  }, [questions]);
 
   // Lazily load timelines for live agents so tiles can show their last action.
   const liveIds = agents
@@ -240,6 +255,7 @@ export function MissionControlView() {
                   account={accountMap.get(a.accountId)}
                   summary={summaries.get(a.id) ?? EMPTY_SUMMARY}
                   pending={pendingByAgent.get(a.id) ?? null}
+                  question={questionByAgent.get(a.id) ?? null}
                   onOpen={openAgent}
                 />
               ))}
@@ -264,6 +280,7 @@ export function MissionControlView() {
                     account={accountMap.get(a.accountId)}
                     summary={summaries.get(a.id) ?? EMPTY_SUMMARY}
                     pending={pendingByAgent.get(a.id) ?? null}
+                    question={questionByAgent.get(a.id) ?? null}
                     onOpen={openAgent}
                   />
                 </m.div>

@@ -48,7 +48,8 @@ while True:
         answers["input"] = ask(502, "item/tool/requestUserInput", {"itemId": "q1", "threadId": "th1", "turnId": "t1",
              "isBlocking": True, "questions": [{"id": "q", "header": "Pick", "question": "Which database?"}]})
         answers["elicit"] = ask(503, "mcpServer/elicitation/request", {"serverName": "srv", "threadId": "th1",
-             "turnId": "t1", "message": "Need a token", "mode": "form", "requestedSchema": {"type": "object", "properties": {}}})
+             "turnId": "t1", "message": "Need a token", "mode": "form", "requestedSchema": {"type": "object",
+             "required": ["token"], "properties": {"token": {"type": "string", "title": "Token", "format": "password"}}}})
         text = "policy=%s answers=%s" % (policy, json.dumps(answers, sort_keys=True))
         note("item/completed", {"threadId": "th1", "item": {"id": "m1", "type": "agentMessage", "text": text}})
         note("turn/completed", {"threadId": "th1", "turn": {"id": "t1", "status": "completed"}})

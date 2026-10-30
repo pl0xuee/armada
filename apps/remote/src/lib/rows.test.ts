@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRows, isSubagentNode, latestChild, runningSubagents } from "./rows";
+import { buildRows, estimateRow, isSubagentNode, latestChild, runningSubagents } from "./rows";
 import type { TimelineItem, ToolCallItem } from "./types";
 
 let seq = 0;
@@ -84,5 +84,14 @@ describe("row identity and estimates", () => {
     expect(sameRow(r1[0], changed[0])).toBe(false);
     expect(sameRow(r1[1], changed[1])).toBe(true);
     for (const r of r1) expect(estimateRow(r)).toBeGreaterThan(30);
+  });
+});
+
+describe("question rows", () => {
+  it("renders a question as its own item row between tool stacks", () => {
+    const q: TimelineItem = { id: "q", agentId: "a", seq: ++seq, ts: seq, kind: "question", requestId: "r", message: "?", fields: [], resolution: null };
+    const rows = buildRows([call("a"), q, call("b")]);
+    expect(rows.map((r) => r.kind)).toEqual(["tools", "item", "tools"]);
+    expect(estimateRow(rows[1])).toBeGreaterThan(estimateRow({ kind: "item", key: "q", item: { ...q, resolution: "skipped" } as TimelineItem }));
   });
 });

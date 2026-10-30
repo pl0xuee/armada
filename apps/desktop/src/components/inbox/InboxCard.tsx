@@ -1,4 +1,13 @@
-import { ArrowUpRight, Clock, FilePen, Globe, ShieldAlert, SquareTerminal, Trash2 } from "lucide-react";
+import {
+  ArrowUpRight,
+  Clock,
+  FilePen,
+  Globe,
+  MessageCircleQuestion,
+  ShieldAlert,
+  SquareTerminal,
+  Trash2,
+} from "lucide-react";
 import { forwardRef, memo, useMemo } from "react";
 import { AccountAvatar } from "@/components/AccountAvatar";
 import { DiffList } from "@/components/DiffView";
@@ -8,11 +17,13 @@ import { Kbd } from "@/components/ui/kbd";
 import { parseFileDiff } from "@/lib/diff";
 import { relativeTime } from "@/lib/format";
 import { useIdentity } from "@/hooks/useIdentity";
+import { questionGroups } from "@/lib/question";
 import type { Account, Agent, PermissionOption, TimelineItem, ToolKind } from "@/lib/types";
 import { basename, cn } from "@/lib/utils";
 import { CodeText } from "../CodeText";
 
 type PermissionItem = Extract<TimelineItem, { kind: "permission" }>;
+type QuestionItem = Extract<TimelineItem, { kind: "question" }>;
 
 const KIND_ICON: Partial<Record<ToolKind, typeof SquareTerminal>> = {
   execute: SquareTerminal,
@@ -45,7 +56,7 @@ export const InboxCard = memo(
     HTMLDivElement,
     {
       agent: Agent;
-      item: PermissionItem;
+      item: PermissionItem | QuestionItem;
       account: Account | undefined;
       selected: boolean;
       busy: boolean;
@@ -55,9 +66,12 @@ export const InboxCard = memo(
       onRespond: (agent: Agent, item: PermissionItem, option: PermissionOption) => void;
     }
   >(function InboxCard({ agent, item, account, selected, busy, now, onSelect, onOpen, onRespond }, ref) {
-    const Icon = (item.toolKind && KIND_ICON[item.toolKind]) || ShieldAlert;
+    const perm = item.kind === "permission" ? item : null;
+    const asking = item.kind === "question";
+    const Icon = asking ? MessageCircleQuestion : (item.toolKind && KIND_ICON[item.toolKind]) || ShieldAlert;
     const identity = useIdentity(agent.provider, agent.customAgentId);
-    const files = useMemo(() => (selected ? item.diffs.flatMap(parseFileDiff) : []), [item.diffs, selected]);
+    const diffs = item.kind === "permission" ? item.diffs : null;
+    const files = useMemo(() => (selected && diffs ? diffs.flatMap(parseFileDiff) : []), [diffs, selected]);
     const waitingMins = (now - item.ts) / 60_000;
 
     return (
@@ -66,7 +80,7 @@ export const InboxCard = memo(
         data-agent-id={agent.id}
         role="listitem"
         aria-current={selected ? "true" : undefined}
-        aria-label={`${item.title} · ${agent.title}`}
+        aria-label={`${item.kind === "question" ? item.message : item.title} · ${agent.title}`}
         // Roving focus: the selected card is the list's single tab stop; arrows move between cards.
         tabIndex={selected ? 0 : -1}
         onClick={() => onSelect(item.id)}
@@ -91,7 +105,9 @@ export const InboxCard = memo(
             <Icon />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[13.5px] font-medium text-fg">{item.title}</div>
+            <div className="truncate text-[13.5px] font-medium text-fg">
+              {item.kind === "question" ? item.message : item.title}
+            </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11.5px] text-steel">
               <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="xs" />
               <span className="truncate text-muted">{agent.title}</span>
@@ -118,7 +134,8 @@ export const InboxCard = memo(
 
         {selected && (
           <div className="space-y-3 px-3.5 pb-3.5 @md/card:px-4 @md/card:pb-4" onClick={(e) => e.stopPropagation()}>
-            {item.command && (
+            {item.kind === "question" && <QuestionPreview item={item} />}
+            {item.kind === "permission" && item.command && (
               <div className="overflow-hidden rounded-lg border border-line bg-code">
                 <div className="flex h-7 items-center gap-1.5 border-b border-line bg-panel/60 px-3 text-[10.5px] uppercase tracking-wider text-steel">
                   <SquareTerminal className="h-3 w-3" /> Command
@@ -135,15 +152,20 @@ export const InboxCard = memo(
             {files.length > 0 && <DiffList files={files} maxHeight={280} />}
 
             <div className="flex flex-wrap items-center gap-2 pt-1">
-              {item.options.map((o) => {
-                const sc = shortcutFor(item, o);
+              {item.kind === "question" && (
+                <Button size="sm" variant="warn" onClick={() => onOpen(agent.id)}>
+                  Answer <ArrowUpRight />
+                </Button>
+              )}
+              {(perm?.options ?? []).map((o) => {
+                const sc = perm ? shortcutFor(perm, o) : null;
                 return (
                   <Button
                     key={o.id}
                     size="sm"
                     variant={VARIANT[o.kind]}
                     disabled={busy}
-                    onClick={() => onRespond(agent, item, o)}
+                    onClick={() => perm && onRespond(agent, perm, o)}
                   >
                     {o.name}
                     {sc && (
@@ -171,3 +193,25 @@ export const InboxCard = memo(
     );
   }),
 );
+
+/** The questions a waiting agent asks, as a glanceable list (answering happens in the agent). */
+function QuestionPreview({ item }: { item: QuestionItem }) {
+  const groups = questionGroups(item.fields);
+  return (
+    <div className="space-y-1.5">
+      {item.source && <div className="text-[11.5px] text-steel">{item.source}</div>}
+      {groups.map(({ field }) => (
+        <div key={field.id} className="flex min-w-0 items-baseline gap-2 text-[12.5px]">
+          {field.title && (
+            <span className="shrink-0 rounded-md border border-warn/30 bg-warn/10 px-1.5 py-px text-[10.5px] font-semibold uppercase tracking-[0.06em] text-warn">
+              {field.title}
+            </span>
+          )}
+          <span className="min-w-0 truncate text-muted">
+            {field.description ?? (field.options ?? []).map((o) => o.label).join(" · ")}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}

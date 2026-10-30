@@ -5,6 +5,16 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.1.9 — 2026-10-29
+
+### New
+
+- **Agents can ask you questions.** When Claude asks you to choose (its multiple-choice questions, like in Claude Code), Codex asks for input, or an MCP server needs details, the question now appears as a card in the conversation: pick options (one or several), type your own answer under "Other", fill in text, yes/no or number fields, then Submit or Skip. On the desktop, number keys pick, arrows move and Enter submits. The agent waits for you like it does for an approval: it shows **Needs you**, lands in the Inbox, Triage and Mission Control, and notifies you. It works from the phone too. Before, Claude's question tool was switched off in Armada and Codex's questions were answered with nothing.
+
+### Changed
+
+- An agent waiting on you now shows **Needs you** (it may be an approval or a question).
+
 ## v0.1.8 — 2026-10-29
 
 ### Changed

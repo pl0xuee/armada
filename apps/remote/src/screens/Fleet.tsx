@@ -12,7 +12,7 @@ import { basename, plainPreview, plural, relativeTime, relativeTimeLong } from "
 import { useNow } from "@/lib/hooks";
 import { agentIdentity, safeColor, statusMeta } from "@/lib/meta";
 import { navigate } from "@/lib/router";
-import { accountOf, filterAgents, groupFleet, useAgentPending, useInbox } from "@/lib/selectors";
+import { accountOf, filterAgents, groupFleet, useAgentPending, useInbox, waitingLabel } from "@/lib/selectors";
 import { useStore } from "@/lib/store";
 import type { Agent } from "@/lib/types";
 import { InstallTip, installTipApplies } from "@/components/InstallTip";
@@ -84,7 +84,7 @@ export function Fleet() {
           </div>
         )}
         {query && !filtered.length && <p className="px-1 text-[14px] text-muted">No agents match "{query}".</p>}
-        {!query && inbox.count > 0 && <InboxCallout count={inbox.count} />}
+        {!query && inbox.count > 0 && <InboxCallout count={inbox.count} questions={inbox.questions} />}
         {groups.map((g) => {
           if (!g.agents.length) return null;
           const archived = g.id === "archived";
@@ -172,7 +172,7 @@ export function Fleet() {
   );
 }
 
-function InboxCallout({ count }: { count: number }) {
+function InboxCallout({ count, questions }: { count: number; questions: number }) {
   return (
     <button
       type="button"
@@ -184,7 +184,7 @@ function InboxCallout({ count }: { count: number }) {
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-[15px] font-semibold text-fg">
-          {count === 1 ? "1 approval waiting" : `${count} approvals waiting`}
+          {waitingLabel(count, questions)}
         </span>
         <span className="block truncate text-[13px] text-muted">Agents are paused until you respond</span>
       </span>
@@ -248,7 +248,7 @@ const AgentRow = memo(function AgentRow({ agent, now }: { agent: Agent; now: num
         {(preview || pending > 0) && (
           <span className="mt-1 flex items-start gap-2">
             <span className="line-clamp-2 min-w-0 flex-1 text-[13.5px] leading-[1.4] text-muted">
-              {preview ?? (pending > 0 ? "Waiting for your approval" : "")}
+              {preview ?? (pending > 0 ? "Waiting for you" : "")}
             </span>
             {pending > 0 && (
               <span className="mt-px inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full bg-warn px-2 text-[12px] font-bold text-warn-fg tabular">

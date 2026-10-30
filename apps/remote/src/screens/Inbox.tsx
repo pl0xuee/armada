@@ -25,10 +25,11 @@ import {
   safeColor,
   swipeable,
 } from "@/lib/meta";
+import { primaryFields } from "@/lib/question";
 import { goBack, navigate } from "@/lib/router";
 import { accountOf, useInbox, type InboxEntry } from "@/lib/selectors";
 import { useStore } from "@/lib/store";
-import type { PermissionOption } from "@/lib/types";
+import type { Agent, PermissionItem, PermissionOption, QuestionItem } from "@/lib/types";
 import { EmptyState, ErrorState } from "./States";
 
 const EXIT_MS = 170;
@@ -51,28 +52,32 @@ export function Inbox() {
 
   const devSheet = devParam("sheet") === "options";
   useEffect(() => {
-    if (devSheet && entries[0] && optionsFor === null) setOptionsFor(entries[0].item.requestId);
+    const first = entries.find((e) => e.item.kind === "permission");
+    if (devSheet && first && optionsFor === null) setOptionsFor(first.item.requestId);
   }, [devSheet, entries, optionsFor]);
 
-  const sheetEntry = entries.find((e) => e.item.requestId === optionsFor) ?? null;
+  const sheetEntry = useMemo(() => {
+    for (const e of entries) if (e.item.kind === "permission" && e.item.requestId === optionsFor) return { agent: e.agent, item: e.item };
+    return null;
+  }, [entries, optionsFor]);
 
   let body;
   if (stateStatus !== "ready" && !entries.length) {
-    body = stateStatus === "error" ? <ErrorState title="Couldn't load approvals" body={stateError} onRetry={retryState} /> : <InboxSkeleton count={2} />;
+    body = stateStatus === "error" ? <ErrorState title="Couldn't load requests" body={stateError} onRetry={retryState} /> : <InboxSkeleton count={2} />;
   } else if (!entries.length && !inbox.loading && !inbox.failed) {
     body = (
       <EmptyState
         icon="shieldCheck"
         tone="ok"
         title="You're all caught up"
-        body="When an agent needs permission to run a command or edit a file, it shows up here."
+        body="When an agent needs permission or has a question for you, it shows up here."
         action={{ label: "Back to agents", onClick: () => navigate({ name: "fleet" }, { replace: true }) }}
       />
     );
   } else {
     body = (
       <div className="space-y-3">
-        {entries.some((e) => swipeable(e.item) && (allowOnce(e.item) || rejectOnce(e.item))) && (
+        {entries.some((e) => e.item.kind === "permission" && swipeable(e.item) && (allowOnce(e.item) || rejectOnce(e.item))) && (
           <p className="flex items-center justify-center gap-1.5 pb-1 text-center text-[12.5px] text-steel [@media(pointer:fine)]:hidden">
             Swipe right to approve, left to deny
           </p>
@@ -84,7 +89,7 @@ export function Inbox() {
         {inbox.failed && (
           <div className="flex items-center gap-3 rounded-2xl border border-err/30 bg-err/[0.06] p-3" role="alert">
             <Icon name="alertCircle" size={18} className="shrink-0 text-err" />
-            <p className="min-w-0 flex-1 text-[13.5px] text-fg">Couldn't load the approval requests.</p>
+            <p className="min-w-0 flex-1 text-[13.5px] text-fg">Couldn't load the requests.</p>
             <Button size="sm" variant="secondary" onClick={() => void loadPermissions()}>
               Retry
             </Button>
@@ -125,8 +130,103 @@ function useExit(): [boolean, (fn: () => void) => void] {
 
 const InboxCard = memo(function InboxCard({ entry, now, onMore }: { entry: InboxEntry; now: number; onMore: () => void }) {
   const { agent, item } = entry;
+  return item.kind === "question" ? (
+    <QuestionInboxCard agent={agent} item={item} now={now} />
+  ) : (
+    <PermissionInboxCard agent={agent} item={item} now={now} onMore={onMore} />
+  );
+});
+
+/** Who is waiting and for how long: the tappable top row shared by both card kinds. */
+function CardHeader({ agent, ts, now }: { agent: Agent; ts: number; now: number }) {
   const account = useStore((s) => accountOf(s.accounts, agent));
   const customAgents = useStore((s) => s.customAgents);
+  const waitingMin = (now - ts) / 60_000;
+  return (
+    <button
+      type="button"
+      onClick={() => navigate({ name: "agent", agentId: agent.id })}
+      className="press-row flex w-full items-center gap-3 border-b border-line/70 px-4 py-3 text-left"
+    >
+      <ProviderBadge agent={agent} size={34} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[14.5px] font-semibold text-fg">{agent.title}</span>
+        <span className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-muted">
+          {account ? (
+            <>
+              <AccountDot color={safeColor(account.color)} size={7} />
+              <span className="truncate">{account.name}</span>
+            </>
+          ) : (
+            <span className="truncate">{agentIdentity(agent, customAgents).short}</span>
+          )}
+          {agent.projectPath && (
+            <>
+              <span className="text-line-strong">·</span>
+              <span className="truncate text-steel">{basename(agent.projectPath)}</span>
+            </>
+          )}
+        </span>
+      </span>
+      <span
+        className={cn("inline-flex shrink-0 items-center gap-1 text-[12.5px] tabular", waitingMin >= 5 ? "text-warn" : "text-steel")}
+        aria-label={`Waiting ${relativeTime(ts, now)}`}
+      >
+        <Icon name="clock" size={14} />
+        {relativeTime(ts, now)}
+      </span>
+    </button>
+  );
+}
+
+/** A question isn't swipe-approvable: it shows what's asked and opens the agent to answer. */
+function QuestionInboxCard({ agent, item, now }: { agent: Agent; item: QuestionItem; now: number }) {
+  const fields = primaryFields(item.fields);
+  const titles = fields.map((f) => f.title || f.description).filter(Boolean);
+  const message = item.message || (fields.length === 1 ? (fields[0].description ?? fields[0].title) : null) || "Your agent has a question";
+  return (
+    <div className="animate-enter">
+      <article
+        aria-label={`${agent.title}: ${message}`}
+        className="overflow-hidden rounded-2xl border border-line-strong bg-card shadow-[0_12px_32px_-20px_rgba(0,0,0,0.9)] edge-strong"
+      >
+        <CardHeader agent={agent} ts={item.ts} now={now} />
+        <div className="space-y-3 p-4">
+          <div className="flex items-start gap-2.5">
+            <span className="mt-px inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-warn/12 text-warn">
+              <Icon name="sparkle" size={16} />
+            </span>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <h2 className="text-[15.5px] leading-snug font-semibold break-words text-fg">{message}</h2>
+              {(item.source || fields.length > 1) && (
+                <p className="mt-0.5 truncate text-[12.5px] text-muted">
+                  {[item.source, fields.length > 1 ? (titles.length === fields.length ? titles.join(" · ") : plural(fields.length, "question")) : null]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              )}
+            </div>
+          </div>
+          <Button size="lg" variant="primary" icon="chevronRight" className="w-full" onClick={() => navigate({ name: "agent", agentId: agent.id })}>
+            Answer
+          </Button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+const PermissionInboxCard = memo(function PermissionInboxCard({
+  agent,
+  item,
+  now,
+  onMore,
+}: {
+  agent: Agent;
+  item: PermissionItem;
+  now: number;
+  onMore: () => void;
+}) {
   const [leaving, exit] = useExit();
   const [showDiff, setShowDiff] = useState(false);
   // Generic "Approve"/"Deny" (and swipes) only ever mean the one-shot options.
@@ -136,7 +236,6 @@ const InboxCard = memo(function InboxCard({ entry, now, onMore }: { entry: Inbox
   const allow = allowSafe ?? primaryAllow(item);
   const reject = rejectSafe ?? primaryReject(item);
   const extra = item.options.length - (allow ? 1 : 0) - (reject ? 1 : 0);
-  const waitingMin = (now - item.ts) / 60_000;
   const stats = useMemo(() => (item.diffs.length ? diffStats(item.diffs) : null), [item.diffs]);
   const respond = async (o: PermissionOption) => {
     if (await confirmOption(o)) void respondToPermission(agent.id, item.requestId, o.id);
@@ -156,39 +255,7 @@ const InboxCard = memo(function InboxCard({ entry, now, onMore }: { entry: Inbox
           aria-label={`${agent.title}: ${item.title}`}
           className="overflow-hidden rounded-2xl border border-line-strong bg-card shadow-[0_12px_32px_-20px_rgba(0,0,0,0.9)] edge-strong"
         >
-          <button
-            type="button"
-            onClick={() => navigate({ name: "agent", agentId: agent.id })}
-            className="press-row flex w-full items-center gap-3 border-b border-line/70 px-4 py-3 text-left"
-          >
-            <ProviderBadge agent={agent} size={34} />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[14.5px] font-semibold text-fg">{agent.title}</span>
-              <span className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-muted">
-                {account ? (
-                  <>
-                    <AccountDot color={safeColor(account.color)} size={7} />
-                    <span className="truncate">{account.name}</span>
-                  </>
-                ) : (
-                  <span className="truncate">{agentIdentity(agent, customAgents).short}</span>
-                )}
-                {agent.projectPath && (
-                  <>
-                    <span className="text-line-strong">·</span>
-                    <span className="truncate text-steel">{basename(agent.projectPath)}</span>
-                  </>
-                )}
-              </span>
-            </span>
-            <span
-              className={cn("inline-flex shrink-0 items-center gap-1 text-[12.5px] tabular", waitingMin >= 5 ? "text-warn" : "text-steel")}
-              aria-label={`Waiting ${relativeTime(item.ts, now)}`}
-            >
-              <Icon name="clock" size={14} />
-              {relativeTime(item.ts, now)}
-            </span>
-          </button>
+          <CardHeader agent={agent} ts={item.ts} now={now} />
 
           <div className="space-y-3 p-4">
             <div className="flex items-start gap-2.5">
@@ -269,7 +336,7 @@ const InboxCard = memo(function InboxCard({ entry, now, onMore }: { entry: Inbox
   );
 });
 
-function OptionsSheet({ entry, onClose }: { entry: InboxEntry | null; onClose: () => void }) {
+function OptionsSheet({ entry, onClose }: { entry: { agent: Agent; item: PermissionItem } | null; onClose: () => void }) {
   // Keep showing the last entry while the sheet animates closed.
   const [shown, setShown] = useState(entry);
   useEffect(() => {

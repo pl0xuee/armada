@@ -4,7 +4,7 @@
  * owner/viewer split, so the real code paths are exercised.
  */
 import { ApiError, type Backend, type HttpMethod, type RequestOptions, type StreamHandlers } from "@/lib/api";
-import type { Agent, Attachment, AttentionReason, CreateAgentRequest, RemoteEvent, Session, TimelineItem } from "@/lib/types";
+import type { Agent, Attachment, AttentionReason, CreateAgentRequest, QuestionAnswers, RemoteEvent, Session, TimelineItem } from "@/lib/types";
 import { CHECKOUT_PNG, ORDERS_PNG } from "./images";
 import { mockDiff } from "./diff";
 import { streamChunk, stressAgent, stressTimeline } from "./stress";
@@ -72,7 +72,7 @@ function projectItem(item: TimelineItem): TimelineItem | null {
     case "turn_summary":
       return { ...i, files: [] };
     default:
-      return null; // thought, permission, plan, notice
+      return i.kind === "question" ? i : null; // thought, permission, plan, notice
   }
 }
 
@@ -211,7 +211,7 @@ export class MockBackend implements Backend {
       const out: TimelineItem[] = [];
       for (const [id, list] of this.items) {
         if ((this.agents.get(id)?.pendingPermissions ?? 0) <= 0) continue;
-        for (const i of list) if (i.kind === "permission" && i.resolution === null) out.push(structuredClone(i));
+        for (const i of list) if ((i.kind === "permission" || i.kind === "question") && i.resolution === null) out.push(structuredClone(i));
       }
       return out;
     }
@@ -247,7 +247,7 @@ export class MockBackend implements Backend {
       return this.queueAction(agent, decodeURIComponent(q[2]), method === "POST" && !!q[3], interrupt);
     }
     const [pathOnly, query = ""] = path.split("?");
-    const m = /^\/api\/agents\/([^/]+)\/(items|prompt|permission|cancel|resume|stop|config|account|archive|read|diff|commit|ship|image)$/.exec(pathOnly);
+    const m = /^\/api\/agents\/([^/]+)\/(items|prompt|permission|question|cancel|resume|stop|config|account|archive|read|diff|commit|ship|image)$/.exec(pathOnly);
     if (!m) throw new ApiError(404, "not found");
     const id = decodeURIComponent(m[1]);
     const action = m[2];
@@ -325,6 +325,8 @@ export class MockBackend implements Backend {
         return;
       case "permission":
         return this.permission(agent, body as { requestId: string; optionId: string });
+      case "question":
+        return this.question(agent, body as { requestId: string; answers: QuestionAnswers | null });
       case "cancel":
         return this.cancel(agent);
       case "resume":
@@ -525,9 +527,25 @@ export class MockBackend implements Backend {
     }, 400);
   }
 
+  private question(agent: Agent, { requestId, answers }: { requestId: string; answers: QuestionAnswers | null }) {
+    const list = this.items.get(agent.id) ?? [];
+    const item = list.find((i) => i.kind === "question" && i.requestId === requestId);
+    if (!item || item.kind !== "question" || item.resolution !== null) throw new ApiError(404, "no such pending request");
+    this.push(answers ? { ...item, resolution: "answered", answers } : { ...item, resolution: "skipped", answers: null });
+    const pending = Math.max(0, agent.pendingPermissions - 1);
+    this.update(agent.id, { pendingPermissions: pending, status: pending ? "needs_permission" : "working" });
+    if (pending) return;
+    setTimeout(() => {
+      const text = answers ? "Thanks, that's what I needed. Scaffolding it now." : "No problem, I'll go with sensible defaults.";
+      this.push(this.newItem<"agent_message">(agent.id, { kind: "agent_message", text }));
+      this.update(agent.id, { status: "idle", lastMessage: text });
+      this.attention(agent.id, "done");
+    }, 1500);
+  }
+
   private cancel(agent: Agent) {
     for (const i of this.items.get(agent.id) ?? []) {
-      if (i.kind === "permission" && i.resolution === null) this.push({ ...i, resolution: "cancelled" });
+      if ((i.kind === "permission" || i.kind === "question") && i.resolution === null) this.push({ ...i, resolution: "cancelled" });
     }
     this.push(this.newItem<"notice">(agent.id, { kind: "notice", level: "info", text: "Turn cancelled" }));
     this.update(agent.id, { status: "idle", pendingPermissions: 0, queuePaused: (agent.queue ?? []).length > 0 });

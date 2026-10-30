@@ -11,7 +11,7 @@ describe("windowTitle", () => {
   });
   it("reflects working, approval and done", () => {
     expect(windowTitle({ ...a, status: "working" }, false)).toBe("● Working — Fix login · Armada");
-    expect(windowTitle({ ...a, status: "needs_permission" }, false)).toBe("⚠ Needs approval — Fix login · Armada");
+    expect(windowTitle({ ...a, status: "needs_permission" }, false)).toBe("⚠ Needs you — Fix login · Armada");
     expect(windowTitle({ ...a, status: "idle" }, true)).toBe("✓ Done — Fix login · Armada");
   });
 });

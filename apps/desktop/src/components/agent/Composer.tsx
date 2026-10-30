@@ -484,7 +484,7 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
   const name = useIdentity(agent.provider, agent.customAgentId).short;
   const justDone = useIsDone(agent);
   const placeholder = blocked
-    ? `Waiting for your approval above. Queue a message to run after this turn…`
+    ? `Waiting for you above. Queue a message to run after this turn…`
     : working
       ? `${name} is working. Queue a follow-up message…`
       : justDone
@@ -616,7 +616,7 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
                       <span className={cn("relative h-2 w-2 rounded-full", blocked ? "bg-warn" : "bg-accent")} />
                     </span>
                     <span className={cn("whitespace-nowrap", width > 0 && width < 600 && "sr-only")}>
-                      {blocked ? "Waiting for approval" : "Working…"}
+                      {blocked ? "Waiting for you" : "Working…"}
                     </span>
                   </>
                 ) : (

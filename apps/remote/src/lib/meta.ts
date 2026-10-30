@@ -51,7 +51,7 @@ export interface StatusMeta {
 export const STATUS: Record<AgentStatus, StatusMeta> = {
   starting: { label: "Starting", color: "var(--accent)", live: true },
   working: { label: "Working", color: "var(--accent)", live: true },
-  needs_permission: { label: "Needs approval", color: "var(--warn)", live: true },
+  needs_permission: { label: "Needs you", color: "var(--warn)", live: true },
   idle: { label: "Idle", color: "var(--steel)", live: false },
   error: { label: "Error", color: "var(--err)", live: false },
   interrupted: { label: "Interrupted", color: "var(--violet)", live: false },

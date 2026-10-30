@@ -1,4 +1,4 @@
-import { CalendarClock, Check, Gauge, GitBranch, ShieldAlert, Workflow, X } from "lucide-react";
+import { CalendarClock, Check, Gauge, GitBranch, MessageCircleQuestion, ShieldAlert, Workflow, X } from "lucide-react";
 import { memo, useState } from "react";
 import { AccountAvatar } from "@/components/AccountAvatar";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { findOption, respondPermission } from "@/lib/actions";
 import { RelTime } from "@/components/RelTime";
 import { agentCostText, formatTokens } from "@/lib/format";
+import type { QuestionItem } from "@/lib/question";
 import { DONE_META, STATUS } from "@/lib/providers";
 import { useIsDone } from "@/store/completion";
 import type { Account, Agent, PermissionOption, TimelineItem } from "@/lib/types";
@@ -36,12 +37,15 @@ export const AgentTile = memo(function AgentTile({
   account,
   summary,
   pending,
+  question = null,
   onOpen,
 }: {
   agent: Agent;
   account: Account | undefined;
   summary: TileSummary;
   pending: PermissionItem | null;
+  /** A question waiting for an answer (answered in the agent, not here). */
+  question?: QuestionItem | null;
   onOpen: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -169,7 +173,7 @@ export const AgentTile = memo(function AgentTile({
       </div>
 
       <div className="relative mt-3 flex min-h-0 flex-1 flex-col gap-2 px-3.5">
-        {(tail ?? action) && !pending && (
+        {(tail ?? action) && !pending && !question && (
           <div
             className={cn(
               "flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[11px]",
@@ -225,6 +229,24 @@ export const AgentTile = memo(function AgentTile({
                 <span className="truncate">{denyOpt.kind === "reject_once" ? "Deny" : denyOpt.name}</span>
               </Button>
             )}
+          </div>
+        </div>
+      )}
+
+      {question && !pending && (
+        <div
+          className="relative mx-3 mt-3 rounded-lg border border-warn/35 bg-warn/[0.07] p-2"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <div className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-warn">
+            <MessageCircleQuestion className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate font-medium">{question.message}</span>
+          </div>
+          <div className="mt-2 flex gap-1.5">
+            <Button size="xs" variant="warn" className="min-w-0 flex-1" onClick={() => onOpen(agent.id)}>
+              <span className="truncate">Answer</span>
+            </Button>
           </div>
         </div>
       )}

@@ -620,6 +620,21 @@ export function seedAgents(): Agent[] {
       lastMessage: "I'll add a sliding-window limiter as Express middleware.",
     }),
     makeAgent({
+      id: "a-question",
+      title: "Set up the orders data layer",
+      provider: "claude",
+      accountId: "acc-claude-sys",
+      project: "storefront",
+      branch: "armada/orders-data-layer",
+      status: "needs_permission",
+      minsAgo: 2,
+      cost: 0.18,
+      tokens: 41_300,
+      context: [22_400, 200_000],
+      pending: 1,
+      lastMessage: "Before I scaffold it, I have a couple of questions.",
+    }),
+    makeAgent({
       id: "a-research",
       title: "Research: vector DB options",
       provider: "grok",
@@ -968,6 +983,15 @@ export async function rateLimit(req: Request, res: Response, next: NextFunction)
 }
 `;
 
+/** Review convenience: ?question=mcp seeds an MCP-style form instead of Claude's AskUserQuestion. */
+function questionVariant(): string | null {
+  try {
+    return new URLSearchParams(location.search).get("question");
+  } catch {
+    return null;
+  }
+}
+
 export function seedItems(): Record<string, TimelineItem[]> {
   const out: Record<string, TimelineItem[]> = {};
 
@@ -976,7 +1000,10 @@ export function seedItems(): Record<string, TimelineItem[]> {
       kind: "user_message",
       text: "While you fix the race, write a test for the logout-on-refresh-failure path.",
     },
-    { kind: "agent_message", text: "On it. I'll start from your current `session.ts` and write the failing test first." },
+    {
+      kind: "agent_message",
+      text: "On it. I'll start from your current `session.ts` and write the failing test first.",
+    },
   ]);
   out["a-token-h2"] = build("a-token-h2", 5, [
     { kind: "user_message", text: "Update docs/auth.md to describe the single-flight refresh." },
@@ -1231,6 +1258,134 @@ export function seedItems(): Record<string, TimelineItem[]> {
       resolution: null,
       at: NOW - 3 * 60_000,
     },
+  ]);
+
+  out["a-question"] = build("a-question", 5, [
+    {
+      kind: "user_message",
+      text: "Add a persistent store for orders. Pick whatever fits; ask me if it matters.",
+    },
+    {
+      kind: "tool_call",
+      toolCallId: "q-1",
+      title: "Read package.json",
+      toolKind: "read",
+      status: "completed",
+      locations: ["package.json"],
+      diffs: [],
+      output: "",
+      command: null,
+    },
+    {
+      kind: "question",
+      requestId: "ask-orders-0",
+      message: "Which database should the orders service use?",
+      fields: [
+        {
+          id: "question_0",
+          title: "Database",
+          description: "Which database should the orders service use?",
+          kind: "single",
+          options: [
+            {
+              value: "postgres",
+              label: "Postgres",
+              description: "Relational, transactions, what the rest of the stack uses.",
+            },
+            { value: "sqlite", label: "SQLite", description: "Zero setup and a single file; fine for a prototype." },
+            {
+              value: "dynamodb",
+              label: "DynamoDB",
+              description: "Managed key-value, scales without ops, awkward for reports.",
+            },
+          ],
+          required: true,
+        },
+        { id: "question_0_custom", kind: "text", otherFor: "question_0" },
+      ],
+      resolution: "answered",
+      answers: { question_0: "postgres" },
+      at: NOW - 4 * 60_000,
+    },
+    {
+      kind: "agent_message",
+      text: "Postgres it is. I'll check what the migrations setup looks like and then scaffold the layer.",
+    },
+    ...(questionVariant() === "mcp"
+      ? [
+          {
+            kind: "question" as const,
+            requestId: "ask-github-form",
+            message: "Create a GitHub issue for the migration work?",
+            source: "github",
+            fields: [
+              { id: "title", title: "Title", description: "Issue title", kind: "text" as const, required: true },
+              {
+                id: "token",
+                title: "Token",
+                description: "Personal access token",
+                kind: "text" as const,
+                secret: true,
+              },
+              { id: "milestone", title: "Milestone", kind: "number" as const },
+              { id: "assign", title: "Assign to me", kind: "boolean" as const },
+              {
+                id: "label",
+                title: "Label",
+                kind: "single" as const,
+                options: [
+                  { value: "bug", label: "bug" },
+                  { value: "chore", label: "chore" },
+                  { value: "feature", label: "feature" },
+                ],
+              },
+            ],
+            resolution: null,
+          },
+        ]
+      : [
+          {
+            kind: "question" as const,
+            requestId: "ask-orders-1",
+            message: "I need two decisions before I scaffold the orders layer.",
+            fields: [
+              {
+                id: "question_0",
+                title: "ORM",
+                description: "Which data-access approach should I use?",
+                kind: "single" as const,
+                options: [
+                  {
+                    value: "prisma",
+                    label: "Prisma",
+                    description: "Schema-first with generated types; already used in atlas-api.",
+                  },
+                  {
+                    value: "drizzle",
+                    label: "Drizzle",
+                    description: "Thin, SQL-like and fully typed; no codegen step.",
+                  },
+                  { value: "raw", label: "Raw SQL", description: "Hand-written queries through the pg driver." },
+                ],
+              },
+              { id: "question_0_custom", kind: "text" as const, otherFor: "question_0" },
+              {
+                id: "question_1",
+                title: "Extras",
+                description: "Which extras should I set up while I'm at it?",
+                kind: "multi" as const,
+                options: [
+                  { value: "migrations", label: "Migrations", description: "Versioned schema changes run in CI." },
+                  { value: "seed", label: "Seed script", description: "Fixture orders for local development." },
+                  { value: "tests", label: "Integration tests", description: "Run against a throwaway container." },
+                  { value: "pool", label: "Connection pooling", description: "PgBouncer-style pooling settings." },
+                ],
+              },
+              { id: "question_1_custom", kind: "text" as const, otherFor: "question_1" },
+            ],
+            resolution: null,
+          },
+        ]),
   ]);
 
   out["a-research"] = build("a-research", 4, [

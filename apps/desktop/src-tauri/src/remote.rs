@@ -1444,6 +1444,7 @@ impl Remote {
             .route("/api/state", get(state))
             .route("/api/agents/{id}/items", get(items))
             .route("/api/agents/{id}/permission", post(permission))
+            .route("/api/agents/{id}/question", post(answer_question))
             .route("/api/agents/{id}/cancel", post(cancel))
             .route("/api/agents/{id}/resume", post(resume))
             .route("/api/agents/{id}/stop", post(stop))
@@ -2385,7 +2386,7 @@ async fn permissions(
     headers: HeaderMap,
 ) -> Result<Json<Vec<armada_core::TimelineItem>>, ApiError> {
     let scope = c.auth(&peer, &headers)?;
-    // Viewers never see approval requests (they hold raw commands and paths).
+    // Viewers never see approval requests or questions (they hold raw commands and paths).
     if scope != Scope::Owner {
         return Ok(Json(Vec::new()));
     }
@@ -2396,10 +2397,14 @@ async fn permissions(
             if agent.pending_permissions == 0 || !scope.can_see(&agent.id) {
                 continue;
             }
+            // Questions wait the same way, so they're listed with the approvals.
             out.extend(core.items(&agent.id)?.into_iter().filter(|i| {
                 matches!(
                     i.body,
                     armada_core::ItemBody::Permission {
+                        resolution: None,
+                        ..
+                    } | armada_core::ItemBody::Question {
                         resolution: None,
                         ..
                     }
@@ -2431,6 +2436,30 @@ async fn permission(
     c.remote
         .core()
         .respond_permission(&id, &body.request_id, &body.option_id)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QuestionBody {
+    request_id: String,
+    /// `null` skips the question.
+    #[serde(default)]
+    answers: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+async fn answer_question(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<QuestionBody>,
+) -> Result<StatusCode, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    c.remote
+        .core()
+        .answer_question(&id, &body.request_id, body.answers)
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }

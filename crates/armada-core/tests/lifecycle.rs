@@ -643,6 +643,151 @@ async fn send_now_steers_into_the_running_turn() {
     env.core.shutdown().await;
 }
 
+/// A question the agent asks (Claude's AskUserQuestion via a form elicitation) shows
+/// as a question item with its fields; the agent waits ("needs you") until it is
+/// answered, gets the answers in the form's shape, and a skip reaches it as declined.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn questions_are_shown_and_answered() {
+    let mut env = setup("question", mode("normal")).await;
+    let agent = env
+        .core
+        .create_agent(request(&env, "ASK one"))
+        .await
+        .unwrap();
+    let question = |e: &ArmadaEvent| matches!(e, ArmadaEvent::ItemUpserted { item } if matches!(item.body, ItemBody::Question { resolution: None, .. }));
+    let ev = wait_for(&mut env.rx, 15, question).await.expect("question");
+    let ArmadaEvent::ItemUpserted { item } = ev else {
+        unreachable!()
+    };
+    let ItemBody::Question {
+        request_id,
+        fields,
+        message,
+        ..
+    } = item.body
+    else {
+        unreachable!()
+    };
+    assert_eq!(message, "Please answer the following questions.");
+    // The alert comes once the agent is marked as waiting on you.
+    wait_for(&mut env.rx, 15, |e| {
+        is_attention(e, AttentionReason::Permission)
+    })
+    .await
+    .expect("a needs-you alert");
+    let ids: Vec<&str> = fields.iter().map(|f| f.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        [
+            "question_0",
+            "question_0_custom",
+            "question_1",
+            "question_1_custom"
+        ]
+    );
+    let a = env.core.agent(&agent.id).unwrap();
+    assert_eq!(a.status, AgentStatus::NeedsPermission);
+    assert_eq!(a.pending_permissions, 1);
+
+    // Wrong answers are refused and the question keeps waiting.
+    let bad: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_value(serde_json::json!({ "question_0": "MySQL" })).unwrap();
+    assert!(env
+        .core
+        .answer_question(&agent.id, &request_id, Some(bad))
+        .await
+        .is_err());
+
+    let answers: serde_json::Map<String, serde_json::Value> = serde_json::from_value(
+        serde_json::json!({ "question_0": "SQLite", "question_1": ["Auth"], "question_1_custom": "Billing" }),
+    )
+    .unwrap();
+    env.core
+        .answer_question(&agent.id, &request_id, Some(answers))
+        .await
+        .unwrap();
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
+        .await
+        .expect("the turn finishes");
+    let texts = agent_texts(&env, &agent.id);
+    assert_eq!(
+        texts.last().map(String::as_str),
+        Some(
+            r#"reply to ASK one action=accept content={"question_0": "SQLite", "question_1": ["Auth"], "question_1_custom": "Billing"}"#
+        ),
+        "{texts:?}"
+    );
+    let a = env.core.agent(&agent.id).unwrap();
+    assert_eq!(a.pending_permissions, 0);
+    let answered = env
+        .core
+        .items(&agent.id)
+        .unwrap()
+        .into_iter()
+        .find_map(|i| match i.body {
+            ItemBody::Question {
+                resolution,
+                answers,
+                ..
+            } => Some((resolution, answers)),
+            _ => None,
+        });
+    let (resolution, answers) = answered.unwrap();
+    assert_eq!(resolution.as_deref(), Some("answered"));
+    assert_eq!(answers.unwrap()["question_0"], "SQLite");
+    assert!(
+        env.core
+            .answer_question(&agent.id, &request_id, None)
+            .await
+            .is_err(),
+        "answered once"
+    );
+
+    // Skip: the agent hears the question was declined.
+    env.core
+        .send_prompt(&agent.id, "ASK two", vec![])
+        .await
+        .unwrap();
+    let ev = wait_for(&mut env.rx, 15, question)
+        .await
+        .expect("second question");
+    let ArmadaEvent::ItemUpserted { item } = ev else {
+        unreachable!()
+    };
+    let ItemBody::Question { request_id, .. } = item.body else {
+        unreachable!()
+    };
+    env.core
+        .answer_question(&agent.id, &request_id, None)
+        .await
+        .unwrap();
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
+        .await
+        .expect("the second turn finishes");
+    let texts = agent_texts(&env, &agent.id);
+    assert_eq!(
+        texts.last().map(String::as_str),
+        Some("reply to ASK two action=decline content=null"),
+        "{texts:?}"
+    );
+
+    // Stopping the turn while a question waits closes it as cancelled.
+    env.core
+        .send_prompt(&agent.id, "ASK three", vec![])
+        .await
+        .unwrap();
+    wait_for(&mut env.rx, 15, question)
+        .await
+        .expect("third question");
+    env.core.cancel_turn(&agent.id).await.unwrap();
+    let cancelled = wait_for(&mut env.rx, 15, |e| {
+        matches!(e, ArmadaEvent::ItemUpserted { item } if matches!(&item.body, ItemBody::Question { resolution: Some(r), .. } if r == "cancelled"))
+    })
+    .await;
+    assert!(cancelled.is_some(), "the waiting question is closed");
+    env.core.shutdown().await;
+}
+
 fn user_texts(env: &Env, agent_id: &str) -> Vec<String> {
     env.core
         .items(agent_id)

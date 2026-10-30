@@ -36,6 +36,7 @@ export function shouldShowThinking(
     case "tool_call":
       return last.status !== "pending" && last.status !== "in_progress";
     case "permission":
+    case "question":
       return last.resolution !== null; // pending: the approval card is the call to action
     default:
       return true; // user_message, plan, notice, turn_summary

@@ -1,6 +1,7 @@
 import type {
   Agent,
   Attachment,
+  QuestionAnswers,
   CreateAgentRequest,
   Session,
   StateSnapshot,
@@ -263,6 +264,8 @@ export const api = {
       { requestId, optionId },
       { keepalive },
     ) as Promise<void>,
+  answerQuestion: (b: Backend, agentId: string, requestId: string, answers: QuestionAnswers | null) =>
+    b.request("POST", agentPath(agentId, "/question"), { requestId, answers }) as Promise<void>,
   cancel: (b: Backend, agentId: string) =>
     b.request("POST", agentPath(agentId, "/cancel")) as Promise<void>,
   resume: (b: Backend, agentId: string) =>

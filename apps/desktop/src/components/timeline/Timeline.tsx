@@ -28,7 +28,9 @@ import { ThinkingIndicator } from "./ThinkingIndicator";
 import { shouldShowThinking, turnEndOf, turnStart, waitingStatus } from "./thinking";
 import { TurnEndLine } from "./TurnEndLine";
 import { TurnSummaryCard, TurnSummaryLine } from "./TurnSummaryCard";
+import { QuestionCard } from "./QuestionCard";
 import { latestPending, usePermissionKeys } from "./usePermissionKeys";
+import { latestPendingQuestion } from "@/lib/question";
 
 /** Within this distance of the bottom counts as "following" the stream. */
 const STICK_THRESHOLD = 24;
@@ -49,6 +51,8 @@ function estimateSize(it: TimelineItem | undefined): number {
       return it.subagent ? 150 : it.images?.length ? 380 : 48;
     case "permission":
       return it.resolution === null ? 220 : 48;
+    case "question":
+      return it.resolution === null ? 120 + it.fields.length * 150 : 48 + it.fields.length * 22;
     case "plan":
       return 60 + it.entries.length * 24;
     case "notice":
@@ -342,6 +346,7 @@ export function Timeline({
   useEffect(() => setReasonFor(null), [agent.id]);
   usePermissionKeys(agent, items, setReasonFor);
   const pendingId = latestPending(items)?.requestId ?? null;
+  const questionId = latestPendingQuestion(items)?.requestId ?? null;
 
   // Stable per-request callbacks so permission cards don't re-render on every frame.
   const reasonHandlers = useRef(new Map<string, (open: boolean) => void>());
@@ -449,6 +454,7 @@ export function Timeline({
                         bgRunningIds,
                         lastPrompt: lastPrompt?.kind === "user_message" ? lastPrompt : null,
                         pendingId,
+                        questionId,
                         reasonFor,
                         reasonHandler,
                       })
@@ -721,6 +727,7 @@ function renderItem(
     bgRunningIds: ReadonlySet<string>;
     lastPrompt: UserItem | null;
     pendingId: string | null;
+    questionId: string | null;
     reasonFor: string | null;
     reasonHandler: (requestId: string) => (open: boolean) => void;
   },
@@ -762,6 +769,8 @@ function renderItem(
           onReasonOpenChange={ctx.reasonHandler(it.requestId)}
         />
       );
+    case "question":
+      return <QuestionCard item={it} agent={agent} keyboard={it.requestId === ctx.questionId} />;
     case "plan":
       return <PlanCard item={it} />;
     case "notice":
@@ -806,7 +815,7 @@ function LiveAnnouncer({ agent, items }: { agent: Agent; items: TimelineItem[] |
   const lastKind = items?.[items.length - 1]?.kind;
   const lastTitle = (() => {
     const it = items?.[items.length - 1];
-    return it && (it.kind === "permission" || it.kind === "tool_call") ? it.title : "";
+    return it && (it.kind === "permission" || it.kind === "tool_call") ? it.title : it?.kind === "question" ? it.message : "";
   })();
   const seen = useRef<string | undefined>(lastId);
   const status = useRef(agent.status);
@@ -816,6 +825,7 @@ function LiveAnnouncer({ agent, items }: { agent: Agent; items: TimelineItem[] |
       seen.current = lastId;
       if (lastKind === "agent_message") setMessage(`${name} replied`);
       else if (lastKind === "permission") setMessage(`${name} needs approval: ${lastTitle}`);
+      else if (lastKind === "question") setMessage(`${name} asks: ${lastTitle}`);
       else if (lastKind === "tool_call") setMessage(`${name}: ${lastTitle}`);
     }
   }, [lastId, lastKind, lastTitle, name]);

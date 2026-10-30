@@ -36,6 +36,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  MessageCircleQuestion,
   ShieldX,
   Users,
   Volume2,
@@ -63,7 +64,7 @@ import { launchAgent, resolveLaunch } from "@/lib/launchDefaults";
 import { useIdentity } from "@/hooks/useIdentity";
 import { toast } from "sonner";
 import { useDebounced } from "@/hooks/useDebounced";
-import { useApp, usePendingPermissions } from "@/store/app";
+import { useApp, usePendingPermissions, usePendingQuestions } from "@/store/app";
 import { useUi, type SettingsSection } from "@/store/ui";
 import { previewOf, togglePreview, usePreview } from "@/store/preview";
 import { openTerminal } from "@/store/workspace";
@@ -163,6 +164,7 @@ function Palette({ onClose }: { onClose: () => void }) {
   const agents = useMemo(() => orderedAgents(Object.values(agentsMap)), [agentsMap]);
   const archived = useMemo(() => Object.values(agentsMap).filter((a) => a.archived), [agentsMap]);
   const pending = usePendingPermissions();
+  const questions = usePendingQuestions();
   const current = ui.view === "agents" && ui.selectedAgentId ? agentsMap[ui.selectedAgentId] : undefined;
   const previewOpen = usePreview((s) => (current ? previewOf(s, current.id).open : false));
 
@@ -633,6 +635,28 @@ function Palette({ onClose }: { onClose: () => void }) {
                     <span className="truncate text-[11.5px] text-steel">{agent.title}</span>
                   </Command.Item>,
                 ])}
+              </Command.Group>
+            )}
+
+            {questions.length > 0 && (
+              <Command.Group heading="Waiting for an answer" className={groupClass}>
+                {questions.slice(0, 6).map(({ agent, item }) => (
+                  <Command.Item
+                    key={item.id}
+                    value={`answer:${item.id}`}
+                    keywords={["answer", "question", "reply", item.message, agent.title]}
+                    onSelect={() => run(() => ui.openAgent(agent.id))}
+                    className={itemClass}
+                  >
+                    <IconBox>
+                      <MessageCircleQuestion className="!text-warn" />
+                    </IconBox>
+                    <span className="min-w-0 flex-1 truncate">
+                      Answer <span className="text-muted">· {item.message}</span>
+                    </span>
+                    <span className="truncate text-[11.5px] text-steel">{agent.title}</span>
+                  </Command.Item>
+                ))}
               </Command.Group>
             )}
 

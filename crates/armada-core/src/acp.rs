@@ -38,6 +38,8 @@ pub struct AcpDriver {
     session_id: Mutex<String>,
     /// our request id → JSON-RPC id of the agent's `session/request_permission`
     perms: Mutex<HashMap<String, Value>>,
+    /// our request id → (JSON-RPC id, requested schema) of an `elicitation/create`
+    questions: Mutex<HashMap<String, (Value, Value)>>,
     accepts_images: std::sync::atomic::AtomicBool,
     /// The agent takes `_session/steering` (see `steer`).
     steering: std::sync::atomic::AtomicBool,
@@ -105,6 +107,7 @@ impl AcpDriver {
             generation,
             session_id: Mutex::new(String::new()),
             perms: Mutex::default(),
+            questions: Mutex::default(),
             accepts_images: std::sync::atomic::AtomicBool::new(false),
             steering: std::sync::atomic::AtomicBool::new(false),
             barriers: Mutex::default(),
@@ -126,7 +129,10 @@ impl AcpDriver {
                     "protocolVersion": PROTOCOL_VERSION,
                     "clientCapabilities": {
                         "fs": { "readTextFile": false, "writeTextFile": false },
-                        "terminal": false
+                        "terminal": false,
+                        // Questions (Claude's AskUserQuestion, MCP servers' forms) as
+                        // forms in the timeline; without this the adapter turns them off.
+                        "elicitation": { "form": true }
                     },
                     "clientInfo": { "name": "armada", "title": "Armada", "version": opts.version }
                 }),
@@ -387,11 +393,13 @@ impl AcpDriver {
                     Some(next) => {
                         // Approvals from the finished turn can't be answered anymore.
                         me.perms.lock().clear();
+                        me.questions.lock().clear();
                         prompt = next;
                     }
                     None => {
                         // Requests from the finished turn can't be answered anymore.
                         me.perms.lock().clear();
+                        me.questions.lock().clear();
                         break;
                     }
                 }
@@ -477,9 +485,58 @@ impl AcpDriver {
                 .await;
             self.ctx.permission_resolved(&req, "cancelled");
         }
+        let questions: Vec<(String, (Value, Value))> = self.questions.lock().drain().collect();
+        for (req, (rpc_id, _)) in questions {
+            let _ = self
+                .peer
+                .respond(rpc_id, json!({ "action": "cancel" }))
+                .await;
+            self.ctx.question_resolved(&req, "cancelled", None);
+        }
         self.peer
             .notify("session/cancel", json!({ "sessionId": self.session_id() }))
             .await
+    }
+
+    /// Answers a question (`None` skips it: the agent hears you didn't answer).
+    pub async fn respond_question(
+        &self,
+        request_id: &str,
+        answers: Option<serde_json::Map<String, Value>>,
+    ) -> anyhow::Result<()> {
+        let fields = self
+            .ctx
+            .pending_question_fields(request_id)
+            .ok_or_else(|| anyhow!("This question is no longer waiting for an answer."))?;
+        if let Some(a) = &answers {
+            crate::questions::validate(&fields, a).map_err(|e| anyhow!(e))?;
+        }
+        let (rpc_id, schema) = self
+            .questions
+            .lock()
+            .remove(request_id)
+            .ok_or_else(|| anyhow!("This question is no longer waiting for an answer."))?;
+        let reply = match &answers {
+            Some(a) => json!({
+                "action": "accept",
+                "content": crate::questions::content_for_schema(&schema, a),
+            }),
+            None => json!({ "action": "decline" }),
+        };
+        if let Err(e) = self.peer.respond(rpc_id.clone(), reply).await {
+            // Still answerable if the write failed (e.g. a transient pipe error).
+            self.questions
+                .lock()
+                .insert(request_id.to_string(), (rpc_id, schema));
+            return Err(e);
+        }
+        let resolution = if answers.is_some() {
+            "answered"
+        } else {
+            "skipped"
+        };
+        self.ctx.question_resolved(request_id, resolution, answers);
+        Ok(())
     }
 
     pub async fn respond_permission(
@@ -639,6 +696,33 @@ impl AcpDriver {
 
     /// Shows the agent's permission request. Returns false if it can't be shown
     /// (no choices offered); the caller then declines it.
+    /// A form elicitation: Claude's AskUserQuestion (via claude-agent-acp) or an MCP
+    /// server's form. Returns false when it can't be shown (the caller declines it).
+    fn on_question(&self, rpc_id: Value, params: &Value) -> bool {
+        // Only forms were advertised; a URL elicitation has no fields to show.
+        if params["mode"].as_str().is_some_and(|m| m != "form") {
+            return false;
+        }
+        let schema = params["requestedSchema"].clone();
+        let fields = crate::questions::fields_from_schema(&schema);
+        if fields.is_empty() {
+            return false;
+        }
+        let message = params["message"]
+            .as_str()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .unwrap_or("The agent has a question")
+            .to_string();
+        let request_id = uuid::Uuid::new_v4().to_string();
+        self.questions
+            .lock()
+            .insert(request_id.clone(), (rpc_id, schema));
+        self.ctx
+            .question_requested(&request_id, message, None, fields);
+        true
+    }
+
     fn on_permission_request(&self, rpc_id: Value, params: &Value) -> bool {
         let tc = &params["toolCall"];
         let request_id = uuid::Uuid::new_v4().to_string();
@@ -720,6 +804,15 @@ async fn event_loop(
                         let _ = peer
                             .respond(id, json!({ "outcome": { "outcome": "cancelled" } }))
                             .await;
+                    }
+                }
+                "elicitation/create" => {
+                    let shown = match driver.upgrade() {
+                        Some(d) => d.on_question(id.clone(), &params),
+                        None => false,
+                    };
+                    if !shown {
+                        let _ = peer.respond(id, json!({ "action": "decline" })).await;
                     }
                 }
                 _ => {

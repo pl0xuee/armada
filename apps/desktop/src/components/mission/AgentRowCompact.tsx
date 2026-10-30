@@ -1,4 +1,4 @@
-import { Check, Gauge, ShieldAlert, Workflow, X } from "lucide-react";
+import { Check, Gauge, MessageCircleQuestion, ShieldAlert, Workflow, X } from "lucide-react";
 import { memo, useState } from "react";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { RelTime } from "@/components/RelTime";
@@ -8,6 +8,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { useIdentity } from "@/hooks/useIdentity";
 import { findOption, respondPermission } from "@/lib/actions";
 import { agentCostText } from "@/lib/format";
+import type { QuestionItem } from "@/lib/question";
 import { DONE_META, STATUS } from "@/lib/providers";
 import { useIsDone } from "@/store/completion";
 import type { Account, Agent, PermissionOption, TimelineItem } from "@/lib/types";
@@ -22,12 +23,14 @@ export const AgentRowCompact = memo(function AgentRowCompact({
   account,
   summary,
   pending,
+  question = null,
   onOpen,
 }: {
   agent: Agent;
   account: Account | undefined;
   summary: TileSummary;
   pending: PermissionItem | null;
+  question?: QuestionItem | null;
   onOpen: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -38,11 +41,14 @@ export const AgentRowCompact = memo(function AgentRowCompact({
   const allowOpt = pending ? (findOption(pending, ["allow_once"]) ?? findOption(pending, ["allow_always"])) : undefined;
   const denyOpt = pending ? findOption(pending, ["reject_once", "reject_always"]) : undefined;
 
+  const asking = !pending && question !== null;
   const line = pending
     ? pending.title
-    : working
-      ? (summary.tail ?? summary.action ?? "Working…")
-      : (agent.lastMessage ?? summary.action ?? "");
+    : question
+      ? question.message
+      : working
+        ? (summary.tail ?? summary.action ?? "Working…")
+        : (agent.lastMessage ?? summary.action ?? "");
 
   const respond = async (option: PermissionOption | undefined) => {
     if (!pending || !option || busy) return;
@@ -111,7 +117,7 @@ export const AgentRowCompact = memo(function AgentRowCompact({
             {line && (
               <>
                 {" · "}
-                <span className={cn(pending ? "text-warn" : working ? "text-fg/80" : "")}>{line}</span>
+                <span className={cn(pending || asking ? "text-warn" : working ? "text-fg/80" : "")}>{line}</span>
               </>
             )}
           </span>
@@ -121,15 +127,17 @@ export const AgentRowCompact = memo(function AgentRowCompact({
       <div
         className={cn(
           "hidden min-w-0 items-center gap-1.5 font-mono text-[11.5px] @3xl:flex",
-          pending ? "text-warn" : working ? "text-fg/85" : "text-muted",
+          pending || asking ? "text-warn" : working ? "text-fg/85" : "text-muted",
         )}
       >
         {pending ? (
           <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+        ) : asking ? (
+          <MessageCircleQuestion className="h-3.5 w-3.5 shrink-0" />
         ) : working ? (
           <span className="h-1 w-1 shrink-0 rounded-full bg-accent animate-breathe" />
         ) : null}
-        <span className={cn("truncate", !pending && !working && "font-sans")}>{line}</span>
+        <span className={cn("truncate", !pending && !asking && !working && "font-sans")}>{line}</span>
       </div>
 
       <div className="flex items-center justify-end gap-2.5">
@@ -166,6 +174,19 @@ export const AgentRowCompact = memo(function AgentRowCompact({
               </Button>
             )}
           </div>
+        ) : asking ? (
+          <Button
+            size="xs"
+            variant="warn"
+            aria-label={`Answer: ${question.message}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen(agent.id);
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            Answer
+          </Button>
         ) : (
           <span className="hidden w-14 text-right text-[11.5px] tabular text-steel @xl:inline">
             {agentCostText(agent)}

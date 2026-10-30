@@ -60,7 +60,7 @@ export function TriageView() {
     run(async () => {
       // An approval is still blocking; "Done" would just hide it.
       if (e.reason === "permission") {
-        toast("Answer the approval first (A / D)", { description: "Or open the agent to decide there." });
+        toast("Answer the request first", { description: "Approve or deny it (A / D), or open the agent to decide there." });
         return;
       }
       await attempt("Couldn't mark it done", () => api.acknowledgeAgent(e.agent.id));
