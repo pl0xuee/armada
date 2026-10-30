@@ -9,6 +9,7 @@ import { markdownImagePath } from "@/lib/localImages";
 import { cn } from "@/lib/cn";
 import { CopyButton } from "./CopyButton";
 import { Icon } from "./Icon";
+import { inlineImageSrc } from "@shared/inlineImage";
 import { LocalImage } from "./LocalImage";
 
 function Caret() {
@@ -57,6 +58,8 @@ function renderInline(nodes: Inline[], inLink = false): ReactNode[] {
           </code>
         );
       case "image": {
+        const inline = inlineImageSrc(n.src);
+        if (inline) return <img key={i} src={inline} alt={n.alt} loading="lazy" decoding="async" className="md-inline-img" />;
         const path = markdownImagePath(n.src);
         if (path) return <LocalImage key={i} path={path} alt={n.alt} />;
         return <RemoteImageChip key={i} url={n.src} alt={n.alt} plain={inLink} />;

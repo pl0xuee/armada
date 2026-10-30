@@ -243,6 +243,7 @@ impl CodexDriver {
                         "approvalPolicy": opts.approval_policy,
                         "sandbox": "workspace-write",
                         "serviceName": "armada",
+                        "developerInstructions": crate::guidance::AGENT_GUIDANCE,
                         "config": codex_config(opts.mcp_servers)
                     }),
                     Some(Duration::from_secs(60)),

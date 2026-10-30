@@ -13,6 +13,7 @@ import {
   resolveAgentId,
 } from "@/lib/external";
 import { cn } from "@/lib/utils";
+import { inlineImageSrc } from "@/lib/inlineImage";
 import { localImagePath } from "@/lib/images";
 import { CopyButton } from "./CopyButton";
 import { LocalImage } from "./LocalImage";
@@ -171,6 +172,7 @@ const components: Components = {
 /** Keep local file paths (incl. file:// and Windows drive paths) for images; everything else uses the default filter. */
 function urlTransform(url: string, key: string): string {
   if (key === "src" && (/^file:\/\//i.test(url) || /^[A-Za-z]:[\\/]/.test(url))) return url;
+  if (key === "src" && inlineImageSrc(url)) return url;
   return defaultUrlTransform(url);
 }
 
@@ -256,6 +258,8 @@ function useComponents(agentId: string | undefined): Components {
       // exfiltrate data through the URL). Local files load through the backend.
       img: ({ src, alt }) => {
         const url = typeof src === "string" ? src : "";
+        const inline = inlineImageSrc(url);
+        if (inline) return <img src={inline} alt={alt ?? ""} loading="lazy" decoding="async" className="my-1 block max-h-[28rem] max-w-full rounded-lg border border-line object-contain" />;
         const local = agentId ? localImagePath(url) : null;
         if (local && agentId) return <LocalImage agentId={agentId} path={local} alt={alt ?? ""} />;
         return <RemoteImageChip url={url} alt={alt ?? ""} />;
