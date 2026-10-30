@@ -719,7 +719,7 @@ pub async fn login_account(
             "Custom agents handle sign-in themselves; see the agent's own documentation."
                 .to_string()
         })?;
-    let exe = which::which(&program).map_err(|_| {
+    let exe = armada_core::providers::resolve_program(&program).ok_or_else(|| {
         format!(
             "{} is not installed (could not find `{program}` on PATH). Install it from Settings → Providers.",
             account.provider.display_name()
@@ -841,6 +841,48 @@ pub async fn install_missing(
     Ok(terminals.spawn_task(
         core.inner().clone(),
         move |log| async move { toolchain::install_missing(&data_dir, log).await },
+        move |code| after_install(app, code),
+    ))
+}
+
+/// Looks for newer releases of Armada's agent tools now (the background check runs every
+/// few hours) and returns the providers with what was found.
+#[tauri::command]
+pub async fn check_tool_updates(
+    core: State<'_, Core>,
+    shell: State<'_, Shell>,
+) -> CmdResult<Vec<ProviderInfo>> {
+    let log: toolchain::Log = std::sync::Arc::new(|_| {});
+    toolchain::check_updates(&log).await.map_err(err)?;
+    let providers = shell.refresh_providers().await;
+    core.emit(ArmadaEvent::ProvidersChanged {
+        providers: providers.clone(),
+    });
+    Ok(providers)
+}
+
+/// Installs the newest release of a provider's agent tool (or, with `rollback`, the
+/// version this Armada was tested with), showing progress in a terminal like installs do.
+/// If the new version doesn't start, the previous one is put back.
+#[tauri::command]
+pub async fn update_tool(
+    app: AppHandle,
+    core: State<'_, Core>,
+    shell: State<'_, Shell>,
+    terminals: State<'_, Terminals>,
+    provider: Provider,
+    rollback: Option<bool>,
+) -> CmdResult<String> {
+    let target = if rollback.unwrap_or(false) {
+        toolchain::UpdateTarget::Baseline
+    } else {
+        toolchain::UpdateTarget::Latest
+    };
+    info!(provider = provider.as_str(), ?target, "updating tool");
+    let data_dir = shell.data_dir.clone();
+    Ok(terminals.spawn_task(
+        core.inner().clone(),
+        move |log| async move { toolchain::update(provider, &data_dir, target, log).await },
         move |code| after_install(app, code),
     ))
 }

@@ -253,6 +253,7 @@ impl Core {
         std::fs::create_dir_all(&data_dir)
             .with_context(|| format!("creating {}", data_dir.display()))?;
         restrict_dir(&data_dir);
+        crate::providers::set_data_dir(&data_dir);
         // Agent process trees a crashed previous run left behind.
         let reaped = crate::jsonrpc::reap_orphans(&data_dir.join("children.json"));
         if reaped > 0 {

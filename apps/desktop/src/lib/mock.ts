@@ -768,11 +768,55 @@ async function runInstallMissing(t: MockTerminal) {
     p.installed = true;
     p.version = p.version ?? "1.0.3";
     p.path = `~/.local/share/armada/tools/bin/${p.cliName}`;
+    markManaged(p);
     if (p.adapterRequired) p.adapterInstalled = true;
     await out(`${C.green}✓${C.reset} ${p.displayName} ${p.version} ready`);
   }
   await out("");
   await out(`${C.green}✓ All agents installed.${C.reset}`);
+  emit({ type: "providers_changed", providers: clone(db.providers) });
+  await termExit(t, 0);
+}
+
+/** Armada's own copy is now the one in use. */
+function markManaged(p: ProviderInfo) {
+  p.managed = true;
+  p.managedVersion = p.managedVersion ?? p.testedVersion ?? p.version;
+  p.updateAvailable = !!p.latestVersion && !!p.managedVersion && p.latestVersion !== p.managedVersion;
+}
+
+async function runToolUpdate(t: MockTerminal, rollback: boolean) {
+  const p = db.providers.find((x) => x.provider === t.provider);
+  if (!p) return termExit(t, 1);
+  const target = (rollback ? p.testedVersion : p.latestVersion) ?? p.managedVersion ?? "1.0.3";
+  const pkg =
+    p.provider === "claude"
+      ? "@agentclientprotocol/claude-agent-acp"
+      : p.provider === "codex"
+        ? "@openai/codex"
+        : "@xai-org/grok-build";
+  await sleep(300);
+  termOut(t.id, `${C.dim}$ npm install --prefix ~/.local/share/armada/tools ${pkg}@${target}${C.reset}\r\n\r\n`);
+  for (const s of [
+    "npm http fetch GET 200 https://registry.npmjs.org/" + pkg.replace("/", "%2f") + " 96ms",
+    "npm http fetch GET 200 https://registry.npmjs.org/" + pkg.replace("/", "%2f") + "/-/" + target + ".tgz 214ms",
+    "",
+    "changed 12 packages in 5s",
+    "",
+  ]) {
+    termOut(t.id, `${s}\r\n`);
+    await sleep(rand(200, 600));
+  }
+  termOut(t.id, `${C.cyan}▸${C.reset} Checking that ${p.displayName} ${target} starts…\r\n`);
+  await sleep(700);
+  p.installed = true;
+  p.managed = true;
+  p.managedVersion = target;
+  p.updateAvailable = !!p.latestVersion && p.latestVersion !== target;
+  if (p.provider === "claude") p.version = "2.1.310";
+  else p.version = target;
+  p.path = `~/.local/share/armada/tools/node_modules/.bin/${p.cliName}`;
+  termOut(t.id, `${C.green}✔ ${p.displayName} ${rollback ? "rolled back to" : "updated to"} ${target}.${C.reset}\r\n`);
   emit({ type: "providers_changed", providers: clone(db.providers) });
   await termExit(t, 0);
 }
@@ -796,7 +840,8 @@ async function runInstall(t: MockTerminal) {
   }
   p.installed = true;
   p.version = p.version ?? "1.0.3";
-  p.path = `/usr/local/bin/${p.cliName}`;
+  p.path = `~/.local/share/armada/tools/node_modules/.bin/${p.cliName}`;
+  markManaged(p);
   if (p.adapterRequired) p.adapterInstalled = true;
   termOut(t.id, `${C.green}✔ ${p.displayName} installed (${p.version}).${C.reset}\r\n`);
   emit({ type: "providers_changed", providers: clone(db.providers) });
@@ -1030,9 +1075,7 @@ export const mockApi: ArmadaApi = {
       configChoices: {},
       permissionMode: req.permissionMode ?? db.settings.defaultPermissionMode,
       parentId: helperOf?.id ?? null,
-      helperSync: helperOf
-        ? { state: "pendingToMain", lastSyncAt: null, detail: null, files: 0 }
-        : null,
+      helperSync: helperOf ? { state: "pendingToMain", lastSyncAt: null, detail: null, files: 0 } : null,
     };
     db.agents.unshift(agent);
     db.items[id] = [];
@@ -1222,7 +1265,11 @@ export const mockApi: ArmadaApi = {
     const item = itemsOf(agentId).find((i) => i.kind === "question" && i.requestId === requestId);
     if (!item || item.kind !== "question") throw new Error("Unknown question");
     if (item.resolution !== null) throw new Error("Already answered");
-    updateItem(agentId, item.id, answers ? { resolution: "answered", answers } : { resolution: "skipped", answers: null });
+    updateItem(
+      agentId,
+      item.id,
+      answers ? { resolution: "answered", answers } : { resolution: "skipped", answers: null },
+    );
     const a = getAgent(agentId);
     const pending = Math.max(0, a.pendingPermissions - 1);
     patchAgent(agentId, { pendingPermissions: pending, status: pending ? "needs_permission" : "working" });
@@ -1967,6 +2014,21 @@ export const mockApi: ArmadaApi = {
     const t: MockTerminal = { id: newId("term"), kind: "install", provider, buffer: "", stage: 0, done: false };
     terminals.set(t.id, t);
     void runInstall(t);
+    return delay(t.id, 80);
+  },
+
+  async checkToolUpdates(): Promise<ProviderInfo[]> {
+    await sleep(900);
+    const now = Date.now();
+    for (const p of db.providers) p.updatesCheckedAt = now;
+    emit({ type: "providers_changed", providers: clone(db.providers) });
+    return clone(db.providers);
+  },
+
+  async updateTool(provider, rollback) {
+    const t: MockTerminal = { id: newId("term"), kind: "install", provider, buffer: "", stage: 0, done: false };
+    terminals.set(t.id, t);
+    void runToolUpdate(t, !!rollback);
     return delay(t.id, 80);
   },
 

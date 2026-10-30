@@ -16,7 +16,7 @@ pub const CLAUDE_ADAPTER_VERSION: &str = "0.98.0";
 pub const CLAUDE_CODE_PKG: &str = "@anthropic-ai/claude-code";
 pub const CLAUDE_CODE_VERSION: &str = "2.1.312";
 pub const CODEX_PKG: &str = "@openai/codex";
-pub const CODEX_VERSION: &str = "0.165.0";
+pub const CODEX_VERSION: &str = "0.166.0";
 pub const GROK_PKG: &str = "@xai-official/grok";
 pub const GROK_VERSION: &str = "1.0.70";
 
@@ -59,11 +59,13 @@ pub fn claude_adapter_version(data_dir: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The adapter is installed *and* is the version this Armada build is pinned to.
-/// Anything else (missing, older, newer) is reinstalled by the installer.
+/// The adapter is installed *and* at least the version this Armada build was tested
+/// with (a newer one, from the update check, is fine). Missing or older is reinstalled.
 pub fn claude_adapter_current(data_dir: &Path) -> bool {
     claude_adapter_entry(data_dir).is_some()
-        && claude_adapter_version(data_dir).as_deref() == Some(CLAUDE_ADAPTER_VERSION)
+        && claude_adapter_version(data_dir).is_some_and(|v| {
+            crate::toolchain::version_cmp(&v, CLAUDE_ADAPTER_VERSION) != std::cmp::Ordering::Less
+        })
 }
 
 /// How long the login shell may take to report its PATH.
@@ -271,8 +273,115 @@ pub fn expand_home(path: &str) -> PathBuf {
     }
 }
 
+static DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Tells this module where Armada's own tools live (set once at startup), so
+/// [`find_cli`] can prefer Armada's copies of the agent CLIs.
+pub fn set_data_dir(dir: &Path) {
+    let _ = DATA_DIR.set(dir.to_path_buf());
+}
+
+/// Armada's own copy of a provider's CLI, installed by Armada into its data folder
+/// (see `toolchain::install`): Claude Code ships inside the Claude Agent SDK package,
+/// Codex and Grok are their pinned npm packages. `None` until it is installed.
+pub fn managed_cli_in(provider: Provider, data_dir: &Path) -> Option<PathBuf> {
+    match provider {
+        Provider::Claude => bundled_claude(data_dir),
+        Provider::Codex | Provider::Grok => {
+            let bin = crate::toolchain::tools_bin_dir(data_dir);
+            which::which_in(cli_name(provider), Some(&bin), data_dir).ok()
+        }
+        Provider::Local | Provider::Custom => None,
+    }
+}
+
+/// The version of Armada's installed copy of an npm-installed CLI package (`None` when
+/// it isn't installed). The pinned version is what Armada was tested against.
+pub fn managed_pkg_version(data_dir: &Path, pkg: &str) -> Option<String> {
+    let manifest = adapter_dir(data_dir)
+        .join("node_modules")
+        .join(pkg)
+        .join("package.json");
+    let json: serde_json::Value = serde_json::from_slice(&std::fs::read(manifest).ok()?).ok()?;
+    json["version"].as_str().map(str::to_string)
+}
+
+/// The CLI to run for `provider`: Armada's own copy when it has one, otherwise
+/// whatever is installed on the system (never a launcher script, see [`resolve_program`]).
+/// Armada's copy comes first so agents, sign-in and status don't depend on the system's
+/// PATH, wrappers or versions.
 pub fn find_cli(provider: Provider) -> Option<PathBuf> {
-    which::which(cli_name(provider)).ok()
+    DATA_DIR
+        .get()
+        .and_then(|d| managed_cli_in(provider, d))
+        .or_else(|| resolve_program(cli_name(provider)))
+}
+
+/// Whether the CLI [`find_cli`] returns is Armada's own copy.
+pub fn is_managed(provider: Provider) -> bool {
+    DATA_DIR
+        .get()
+        .is_some_and(|d| managed_cli_in(provider, d).is_some())
+}
+
+/// Whether `path` is one of those tiny launcher scripts that run `mise` (to install or
+/// update the tool) before every start, e.g. Omarchy's `~/.local/bin/claude`:
+/// `mise use -g claude && exec mise x claude -- claude "$@"`. They re-check the network
+/// each time, so a command through one can take a minute or hang, and a sign-in window
+/// stays blank meanwhile.
+fn is_mise_wrapper(path: &Path) -> bool {
+    use std::io::Read;
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut head = [0u8; 512];
+    let n = file.read(&mut head).unwrap_or(0);
+    let text = String::from_utf8_lossy(&head[..n]);
+    text.starts_with("#!")
+        && (text.contains("mise use") || text.contains("mise x ") || text.contains("mise exec"))
+}
+
+/// mise's shims folder (`mise` itself resolves the tool's real version, quickly).
+fn mise_shims_dir() -> Option<PathBuf> {
+    if let Some(d) = std::env::var_os("MISE_DATA_DIR").filter(|d| !d.is_empty()) {
+        return Some(PathBuf::from(d).join("shims"));
+    }
+    let data = std::env::var_os("XDG_DATA_HOME")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| home_dir().map(|h| h.join(".local").join("share")))?;
+    Some(data.join("mise").join("shims"))
+}
+
+/// Finds `name` on PATH like `which`, but never picks a mise launcher script (see
+/// [`is_mise_wrapper`]) when anything else is available: the next match on PATH, or the
+/// mise shim, is used instead. A launcher is only returned when it is all there is.
+pub fn resolve_program(name: &str) -> Option<PathBuf> {
+    // A full path (the bundled Claude Code) is used as given.
+    if Path::new(name).is_absolute() {
+        return Path::new(name).is_file().then(|| PathBuf::from(name));
+    }
+    let path = std::env::var_os("PATH")?;
+    let cwd = std::env::current_dir().unwrap_or_default();
+    resolve_program_in(name, &path, &cwd, mise_shims_dir().as_deref())
+}
+
+fn resolve_program_in(
+    name: &str,
+    path: &std::ffi::OsStr,
+    cwd: &Path,
+    shims: Option<&Path>,
+) -> Option<PathBuf> {
+    let all: Vec<PathBuf> = which::which_in_all(name, Some(path), cwd).ok()?.collect();
+    if let Some(good) = all.iter().find(|p| !is_mise_wrapper(p)) {
+        return Some(good.clone());
+    }
+    let first = all.first()?.clone();
+    // Only a launcher on PATH: the shim does the same job without the update check.
+    if let Some(shim) = shims.map(|d| d.join(name)).filter(|s| s.is_file()) {
+        return Some(shim);
+    }
+    Some(first)
 }
 
 /// The Claude Code binary that ships with the Claude Agent SDK under Armada's
@@ -443,6 +552,12 @@ pub async fn detect(data_dir: &Path) -> Vec<ProviderInfo> {
             display_name: provider.display_name().into(),
             cli_name: cli_name(provider).into(),
             installed: path.is_some(),
+            managed: is_managed(provider),
+            managed_version: crate::toolchain::installed_version(provider, data_dir),
+            tested_version: crate::toolchain::tool_package(provider).map(|(_, v)| v.to_string()),
+            latest_version: crate::toolchain::latest_known(provider),
+            update_available: crate::toolchain::update_available(provider, data_dir),
+            updates_checked_at: crate::toolchain::updates_checked_at(),
             version,
             path: path.map(|p| p.to_string_lossy().into_owned()),
             adapter_required,
@@ -460,6 +575,71 @@ pub async fn detect(data_dir: &Path) -> Vec<ProviderInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What this machine resolves (run with --ignored --nocapture to see).
+    #[test]
+    #[ignore]
+    fn print_resolved_programs() {
+        for name in ["codex", "claude", "grok", "gh", "git"] {
+            println!("{name}: {:?}", resolve_program(name));
+        }
+    }
+
+    #[cfg(unix)]
+    fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::create_dir_all(dir).unwrap();
+        let p = dir.join(name);
+        std::fs::write(&p, body).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p
+    }
+
+    /// Omarchy's `~/.local/bin/codex` runs `mise use -g codex` before every start (a
+    /// network check that can take a minute): a sign-in through it stays blank. It is
+    /// skipped in favour of the shim, or any other real executable on PATH.
+    #[cfg(unix)]
+    #[test]
+    fn mise_launcher_scripts_are_skipped() {
+        let root = std::env::temp_dir().join(format!("armada-wrap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let wrapper_body =
+            "#!/bin/bash\nexport MISE_MINIMUM_RELEASE_AGE=0\nmise use -g --quiet \"codex\" || exit 1\nexec mise x \"codex\" -- \"codex\" \"$@\"\n";
+        let local = root.join("local-bin");
+        let shims = root.join("shims");
+        let wrapper = script(&local, "codex", wrapper_body);
+        let shim = script(&shims, "codex", "#!/bin/sh\nexit 0\n");
+        let cwd = root.clone();
+        let both = std::env::join_paths([&local, &shims]).unwrap();
+        // The wrapper comes first on PATH, but the real one is chosen.
+        assert_eq!(
+            resolve_program_in("codex", &both, &cwd, Some(&shims)),
+            Some(shim.clone())
+        );
+        assert!(is_mise_wrapper(&wrapper) && !is_mise_wrapper(&shim));
+        // Only the wrapper on PATH: the mise shim folder is used.
+        let only = std::env::join_paths([&local]).unwrap();
+        assert_eq!(
+            resolve_program_in("codex", &only, &cwd, Some(&shims)),
+            Some(shim)
+        );
+        // Nothing else exists: the launcher is better than nothing.
+        assert_eq!(
+            resolve_program_in("codex", &only, &cwd, None),
+            Some(wrapper)
+        );
+        // A normal program is untouched, and a missing one is missing.
+        let other = script(&local, "tool", "#!/bin/sh\nexit 0\n");
+        assert_eq!(
+            resolve_program_in("tool", &only, &cwd, Some(&shims)),
+            Some(other)
+        );
+        assert_eq!(
+            resolve_program_in("nonexistent-xyz", &only, &cwd, Some(&shims)),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn finds_the_bundled_claude_code() {

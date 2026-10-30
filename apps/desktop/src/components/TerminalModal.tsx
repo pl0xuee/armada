@@ -351,6 +351,11 @@ async function afterExit(session: TerminalSession, code: number | null) {
         const p = providers.find((x) => x.provider === session.provider);
         if (code === 0 && p?.installed)
           toast.success(`${p.displayName} is ready`, { description: p.version ? `v${p.version}` : undefined });
+        else if (/^(Update|Roll back)/.test(session.title))
+          // An update that fails leaves the previous version in place (rolled back by the backend).
+          toast.error(`${session.title} didn't finish`, {
+            description: "Armada kept the version that was working. See the terminal for details.",
+          });
         else toast.error("Install didn't finish", { description: `Exit code ${code ?? "unknown"}` });
       } else {
         // "Install everything": report how many runtimes are now ready.

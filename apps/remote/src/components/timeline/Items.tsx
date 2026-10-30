@@ -258,7 +258,7 @@ export function OutputBlock({ text: raw, label = "Output", live = false }: { tex
           const el = e.currentTarget;
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
         }}
-        className="max-h-[22rem] overflow-auto px-3 py-2.5 font-mono text-[12px] leading-[1.55] whitespace-pre-wrap break-words text-muted"
+        className="max-h-[min(16rem,40dvh)] overflow-auto px-3 py-2.5 font-mono text-[12px] leading-[1.55] whitespace-pre-wrap break-words text-muted"
       >
         {dropped > 0 && !start && <span className="block select-none text-steel">… {dropped.toLocaleString()} earlier characters not shown</span>}
         {shown || " "}
@@ -271,7 +271,7 @@ export function CommandBlock({ command }: { command: string }) {
   return (
     <div className="overflow-hidden rounded-xl border border-line bg-code">
       <div className="flex items-start gap-1 py-1 pr-1 pl-3">
-        <pre className="min-w-0 flex-1 py-1.5 font-mono text-[12.5px] leading-[1.55] whitespace-pre-wrap break-words text-fg">
+        <pre className="max-h-32 min-w-0 flex-1 overflow-auto py-1.5 font-mono text-[12.5px] leading-[1.55] whitespace-pre-wrap break-words text-fg">
           <span className="text-ok select-none">$ </span>
           {command}
         </pre>
@@ -293,18 +293,17 @@ function DiffStat({ additions, deletions }: { additions: number; deletions: numb
   );
 }
 
-/**
- * Commands that opened themselves while running. Module-level (not a ref) so the row remembers it when the
- * virtual list unmounts and remounts it; bounded, oldest forgotten first.
- */
-const AUTO_OPENED_MAX = 500;
-const autoOpened = new Set<string>();
-export function rememberAutoOpened(id: string) {
-  if (autoOpened.has(id)) return;
-  if (autoOpened.size >= AUTO_OPENED_MAX) autoOpened.delete(autoOpened.values().next().value as string);
-  autoOpened.add(id);
+/** The newest line of a running command's output, for its collapsed row. */
+export function liveTail(output: string): string {
+  if (!output) return "";
+  const { text } = cleanTerminalOutput(output.slice(-2000));
+  const lines = text.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!.trim();
+    if (line) return line.slice(0, 160);
+  }
+  return "";
 }
-export const wasAutoOpened = (id: string) => autoOpened.has(id);
 
 export const ToolRow = memo(function ToolRow({ item, agentLive = true }: { item: ToolCallItem; agentLive?: boolean }) {
   const hasDetails = !!(item.command || item.output || item.diffs.length || item.locations.length);
@@ -314,10 +313,11 @@ export const ToolRow = memo(function ToolRow({ item, agentLive = true }: { item:
   const paused = unfinished && !agentLive;
   const failed = item.status === "failed";
   const isCmd = item.toolKind === "execute";
-  const [open, setOpen] = useState<boolean | null>(EXPAND_ALL && hasDetails ? true : null);
-  // A command that opened itself while running stays open when it finishes (no height jump).
-  if (running && isCmd) rememberAutoOpened(item.id);
-  const expanded = hasDetails && (open ?? (wasAutoOpened(item.id) || failed));
+  // Calls start collapsed, even failed or running ones: a long command or its output would fill the
+  // phone's screen. A running command shows its newest output line in the row instead.
+  const [open, setOpen] = useState(EXPAND_ALL);
+  const expanded = hasDetails && open;
+  const tail = running && isCmd && !expanded ? liveTail(item.output) : "";
   // Cheap counts for the header (no real diff until it is expanded).
   const stats = useMemo(() => cheapStatsAll(item.diffs), [item.diffs]);
   const exit = isCmd && failed ? exitCodeOf(item.output) : null;
@@ -345,8 +345,11 @@ export const ToolRow = memo(function ToolRow({ item, agentLive = true }: { item:
         >
           <Icon name={TOOL_ICON[item.toolKind] ?? "wrench"} size={15} />
         </span>
-        <span className={cn("min-w-0 flex-1 truncate text-[14px]", isCmd && "font-mono text-[13px]", failed ? "text-fg" : "text-fg/90")}>
-          {item.title}
+        <span className="min-w-0 flex-1">
+          <span className={cn("block truncate text-[14px]", isCmd && "font-mono text-[13px]", failed ? "text-fg" : "text-fg/90")}>
+            {item.title}
+          </span>
+          {tail && <span className="block truncate font-mono text-[11.5px] text-steel">{tail}</span>}
         </span>
         {item.diffs.length > 0 && <DiffStat additions={stats.additions} deletions={stats.deletions} />}
         {exit !== null && (

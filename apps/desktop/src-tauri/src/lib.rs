@@ -18,6 +18,7 @@ mod remote;
 mod sound;
 mod state;
 mod terminal;
+mod tools;
 mod tray;
 mod updater;
 mod voice_assistant;
@@ -129,6 +130,8 @@ macro_rules! handler {
             commands::detect_providers,
             commands::install_provider,
             commands::install_missing,
+            commands::check_tool_updates,
+            commands::update_tool,
             commands::terminal_write,
             commands::terminal_resize,
             commands::terminal_kill,
@@ -326,6 +329,8 @@ fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()>
             }
         });
     }
+    // Armada's own copies of the agent tools: install what's missing, keep them current.
+    tools::spawn_maintenance(app.clone());
     if autostart_launch() {
         // Launched at login: the window was built hidden (quietly in the tray). Without
         // a usable tray there'd be no way back to it, so show it then.
@@ -452,6 +457,11 @@ const DONE: u8 = 2;
 /// An update is being installed; it restarts the app itself.
 const UPDATING: u8 = 3;
 static EXIT_STATE: AtomicU8 = AtomicU8::new(RUNNING);
+
+/// Armada is quitting.
+pub(crate) fn exiting() -> bool {
+    EXIT_STATE.load(Ordering::SeqCst) != RUNNING
+}
 
 /// Claims the app's shutdown for an update install. `false` if the app is already
 /// quitting (or updating).
@@ -691,6 +701,8 @@ mod ipc_smoke {
     /// `commands_only_request_managed_state`.
     const SKIP: &[&str] = &[
         "install_missing",
+        "check_tool_updates",
+        "update_tool",
         "install_update",
         "check_for_update",
         "va_start",

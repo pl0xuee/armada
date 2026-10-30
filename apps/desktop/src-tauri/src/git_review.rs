@@ -207,7 +207,7 @@ async fn output_capped(
 ) -> anyhow::Result<Captured> {
     use tokio::io::AsyncReadExt;
 
-    let exe = which::which(program).map_err(|_| match program {
+    let exe = armada_core::providers::resolve_program(program).ok_or_else(|| match program {
         "gh" => anyhow!("The GitHub CLI (gh) is not installed. Get it from https://cli.github.com"),
         _ => anyhow!("{program} is not installed or not on PATH"),
     })?;
@@ -2306,7 +2306,7 @@ pub async fn create_pr(agent: &Agent, title: &str, body: &str) -> anyhow::Result
         bail!("{branch} has no commits that aren't already in {base}, so there's nothing to open a pull request for.");
     }
     // Fail fast with a friendly message before pushing anything.
-    which::which("gh").map_err(|_| {
+    armada_core::providers::resolve_program("gh").ok_or_else(|| {
         anyhow!("The GitHub CLI (gh) is not installed. Get it from https://cli.github.com")
     })?;
     let remote = push_remote(cwd, branch).await?;

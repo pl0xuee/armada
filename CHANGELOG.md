@@ -5,6 +5,21 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.1.10 — 2026-10-29
+
+### New
+
+- **Armada brings its own Claude Code, Codex and Grok.** It installs its own pinned copies in the background, uses them instead of whatever is on this computer, and keeps them up to date by itself (new releases come from the official npm registry, checked every few hours, and never wait for an Armada release). Signing in, checking an account and running agents no longer depend on your PATH, launcher scripts or installed versions. A new **Settings → Agent tools** page shows each tool's version, whether it is bundled or a system install, and has **Update**, **Check for updates**, **Roll back** to the version Armada was tested with, and an **Update automatically** switch. Every update is verified and rolled back if the tool no longer starts, and updates wait while an agent of that provider is mid-turn.
+
+### Changed
+
+- **Phone: tool calls are small.** Commands and edits start collapsed, even while running or after failing: a running command shows its newest output line in its row, a failed one an "exit N" badge, and tapping opens it. The opened command and its output have a height limit and scroll.
+- Command output no longer shows the markdown fence (` ```console `) the Bash tool wraps it in, on the phone and the desktop.
+
+### Fixed
+
+- **Codex sign-in showed a blank window.** Armada ran a launcher script that re-checks for updates over the network before every start (a minute or more, then nothing). Programs are now looked up so such launcher scripts are skipped, which also speeds up GitHub (`gh`) features.
+
 ## v0.1.9 — 2026-10-29
 
 ### New
