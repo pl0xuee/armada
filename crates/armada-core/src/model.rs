@@ -782,6 +782,25 @@ pub struct ProviderInfo {
     pub display_name: String,
     pub cli_name: String,
     pub installed: bool,
+    /// Armada's own copy is in use (not one found on the system's PATH).
+    #[serde(default)]
+    pub managed: bool,
+    /// Version of Armada's own copy of the agent package (Claude: the ACP adapter, which
+    /// brings Claude Code); `None` until it's installed.
+    #[serde(default)]
+    pub managed_version: Option<String>,
+    /// The version Armada was tested with: the way back from a bad update.
+    #[serde(default)]
+    pub tested_version: Option<String>,
+    /// The newest release found by the last update check.
+    #[serde(default)]
+    pub latest_version: Option<String>,
+    /// A newer release than Armada's own copy exists.
+    #[serde(default)]
+    pub update_available: bool,
+    /// When the last update check finished (unix ms).
+    #[serde(default)]
+    pub updates_checked_at: Option<i64>,
     pub version: Option<String>,
     pub path: Option<String>,
     pub adapter_required: bool,
@@ -927,6 +946,9 @@ pub struct Settings {
     pub quiet_hours: QuietHours,
     pub close_to_tray: bool,
     pub auto_resume: bool,
+    /// Keep Armada's own copies of the agent tools (Claude Code, Codex, Grok) up to date
+    /// by itself; otherwise updates wait for a click in Settings → Agent tools.
+    pub auto_update_tools: bool,
     pub default_worktree: bool,
     pub launch_at_login: bool,
     pub global_hotkey: String,
@@ -1282,6 +1304,7 @@ impl Default for Settings {
             quiet_hours: QuietHours::default(),
             close_to_tray: true,
             auto_resume: false,
+            auto_update_tools: true,
             default_worktree: true,
             launch_at_login: false,
             global_hotkey: "CmdOrCtrl+Shift+Space".into(),

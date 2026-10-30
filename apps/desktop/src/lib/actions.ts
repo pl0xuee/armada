@@ -83,6 +83,24 @@ export async function startInstall(provider: Provider) {
   }
 }
 
+/** Update an agent tool to the newest release, or (rollback) back to the version Armada was tested with. */
+export async function startToolUpdate(provider: Provider, rollback = false) {
+  const name = PROVIDERS[provider].short;
+  try {
+    const terminalId = await api.updateTool(provider, rollback);
+    useUi.getState().setTerminal({
+      terminalId,
+      kind: "install",
+      provider,
+      title: `${rollback ? "Roll back" : "Update"} ${name}`,
+    });
+  } catch (e) {
+    toast.error(rollback ? "Couldn't start the roll back" : "Couldn't start the update", {
+      description: errorMessage(e),
+    });
+  }
+}
+
 export async function checkAccount(account: Account) {
   try {
     const updated = await api.checkAccount(account.id);

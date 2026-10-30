@@ -1,3 +1,5 @@
+import { stripOutputFence } from "./outputFence";
+
 /** Only the tail of very long output is processed. */
 const OUTPUT_CAP = 200_000;
 
@@ -22,11 +24,13 @@ export function cleanTerminalOutput(raw: string): { text: string; hidden: number
       return cr >= 0 ? line.slice(cr + 1) : line;
     })
     .join("\n");
-  return { text, hidden };
+  return { text: stripOutputFence(text, hidden > 0), hidden };
 }
 
 /** "exit 1" from the end of a failed command's output, when it says so. */
 export function exitCodeOf(output: string): string | null {
-  const m = /(?:exit(?:ed)?(?: with)?(?: code| status)?|code)[:= ]+(-?\d+)\s*\)?\s*$/i.exec(output.trimEnd().slice(-200));
+  // The Bash tool's output comes inside a markdown fence: look at what is inside it.
+  const inner = stripOutputFence(output.slice(-400), output.length > 400).trimEnd();
+  const m = /(?:exit(?:ed)?(?: with)?(?: code| status)?|code)[:= ]+(-?\d+)\s*\)?\s*$/i.exec(inner.slice(-200));
   return m ? m[1] : null;
 }

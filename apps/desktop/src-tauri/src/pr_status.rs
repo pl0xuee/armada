@@ -662,7 +662,8 @@ pub fn review_prompt(number: u64, feedback: &str) -> String {
 // ---------------------------------------------------------------- gh plumbing
 
 async fn gh(cwd: &Path, args: &[&str]) -> Result<String, String> {
-    let exe = which::which("gh").map_err(|_| "gh_missing".to_string())?;
+    let exe =
+        armada_core::providers::resolve_program("gh").ok_or_else(|| "gh_missing".to_string())?;
     let mut cmd = tokio::process::Command::new(exe);
     armada_core::childenv::sanitize_child_env(&mut cmd);
     // gh spawns git: give it Armada's repo-config hardening, and refuse where the repo

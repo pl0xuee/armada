@@ -45,6 +45,7 @@ import { usePermissionUi } from "@/store/permissionUi";
 const NO_PARSED: ParsedFileDiff[] = [];
 import { attachmentSrc } from "@/lib/attachments";
 import { isImagePath } from "@/lib/images";
+import { stripOutputFence } from "@/lib/terminalOutput";
 import { ImageLightbox } from "../ImageLightbox";
 import { LocationThumb } from "../LocalImage";
 import { useIdentity } from "@/hooks/useIdentity";
@@ -271,7 +272,7 @@ export function cleanTerminalOutput(raw: string): { text: string; hidden: number
       return cr >= 0 ? line.slice(cr + 1) : line;
     })
     .join("\n");
-  return { text, hidden };
+  return { text: stripOutputFence(text, hidden > 0), hidden };
 }
 
 /** Plain text with loopback URLs (dev servers) as links; the navigation guard opens them in Preview. */
@@ -382,7 +383,7 @@ export function TerminalOutput({
 
 /** "exit 1" from the end of a failed command's output, when it says so. */
 function exitCodeOf(output: string): string | null {
-  const m = /(?:exit(?:ed)?(?: with)?(?: code| status)?|code)[:= ]+(-?\d+)\s*\)?\s*$/i.exec(output.trimEnd().slice(-200));
+  const m = /(?:exit(?:ed)?(?: with)?(?: code| status)?|code)[:= ]+(-?\d+)\s*\)?\s*$/i.exec(stripOutputFence(output.slice(-400), output.length > 400).trimEnd().slice(-200));
   return m ? m[1] : null;
 }
 

@@ -61,6 +61,7 @@ export function ProviderCard({
                 <CircleAlert /> Not installed
               </Badge>
             )}
+            {info.managed && <Badge tone="accent">Bundled</Badge>}
             {info.adapterRequired && (
               <Badge tone={info.adapterInstalled ? "neutral" : "warn"}>
                 ACP adapter {info.adapterInstalled ? "ready" : info.installed ? "needs update" : "missing"}

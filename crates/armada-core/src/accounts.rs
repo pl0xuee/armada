@@ -131,8 +131,14 @@ pub fn login_command(provider: Provider, data_dir: &Path) -> Option<(String, Vec
                 .map_or_else(|| "claude".into(), |p| p.to_string_lossy().into_owned()),
             vec!["auth".into(), "login".into()],
         )),
-        Provider::Codex => Some(("codex".into(), vec!["login".into()])),
-        Provider::Grok => Some(("grok".into(), vec!["login".into()])),
+        // Armada's own copy when it has one (see `providers::find_cli`).
+        Provider::Codex | Provider::Grok => Some((
+            providers::find_cli(provider).map_or_else(
+                || providers::cli_name(provider).into(),
+                |p| p.to_string_lossy().into_owned(),
+            ),
+            vec!["login".into()],
+        )),
         Provider::Custom | Provider::Local => None,
     }
 }
@@ -215,7 +221,13 @@ async fn run(
     args: &[&str],
     account: &Account,
 ) -> Result<(bool, String, String), RunError> {
-    let cli = which::which(program).map_err(|_| RunError::NotFound)?;
+    // `program` may be a bare name or a full path (the bundled Claude Code).
+    let program = program.as_ref();
+    let cli = if std::path::Path::new(program).is_absolute() {
+        which::which(program).map_err(|_| RunError::NotFound)?
+    } else {
+        providers::resolve_program(&program.to_string_lossy()).ok_or(RunError::NotFound)?
+    };
     let out = tokio::time::timeout(
         STATUS_TIMEOUT,
         account_command(cli, account, account_env(account))
@@ -305,7 +317,13 @@ pub async fn check_status(account: &Account, data_dir: &Path) -> AccountStatus {
             }
             Err(e) => status.error = Some(e.message("Claude Code")),
         },
-        Provider::Codex => match run("codex", &["login", "status"], account).await {
+        Provider::Codex => match run(
+            providers::find_cli(Provider::Codex).unwrap_or_else(|| "codex".into()),
+            &["login", "status"],
+            account,
+        )
+        .await
+        {
             Ok((ok, stdout, stderr)) => {
                 let text = format!("{stdout}{stderr}");
                 let t = text.trim();

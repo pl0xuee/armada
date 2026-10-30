@@ -400,6 +400,18 @@ export interface ProviderInfo {
   displayName: string; // "Claude", "ChatGPT (Codex)", "Grok"
   cliName: string; // "claude", "codex", "grok"
   installed: boolean;
+  /** Armada's own copy is the one in use (false = a system install, or none). */
+  managed: boolean;
+  /** Version of Armada's own copy of the agent package (Claude: the ACP adapter); null if not installed. */
+  managedVersion: string | null;
+  /** The version Armada was tested with: the way back from a bad update. */
+  testedVersion: string | null;
+  /** Newest release found by the last update check. */
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  /** When the last update check finished (unix ms). */
+  updatesCheckedAt: number | null;
+  /** The version the CLI reports (Claude: Claude Code's). */
   version: string | null;
   path: string | null;
   /** Claude needs the ACP adapter (npm package) in addition to the CLI. */
@@ -449,6 +461,8 @@ export interface Settings {
   quietHours: QuietHours;
   closeToTray: boolean;
   autoResume: boolean; // resume interrupted agents on launch
+  /** Install new releases of the agent tools in the background (checked every few hours). */
+  autoUpdateTools: boolean;
   defaultWorktree: boolean;
   launchAtLogin: boolean;
   globalHotkey: string; // e.g. "CmdOrCtrl+Shift+Space"

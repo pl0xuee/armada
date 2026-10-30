@@ -13,6 +13,7 @@ import {
   Send,
   SlidersHorizontal,
   Volume2,
+  Wrench,
   Mic,
   AudioLines,
   ExternalLink,
@@ -36,12 +37,13 @@ import { RemoteSection } from "@/components/settings/RemoteSection";
 import { VoiceSection } from "@/components/settings/VoiceSection";
 import { VoiceAssistantSection } from "@/components/settings/VoiceAssistantSection";
 import { SectionHeader, SettingGroup, SettingRow } from "@/components/settings/SettingRow";
+import { ToolsSection } from "@/components/settings/ToolsSection";
 import { TemplatesSection } from "@/components/settings/TemplatesSection";
 import { ThemeCard, THEMES } from "@/components/settings/ThemeCard";
 import { Button } from "@/components/ui/button";
 import { fieldClass, Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
-import { Spinner } from "@/components/ui/misc";
+import { CountBadge, Spinner } from "@/components/ui/misc";
 import { Segmented } from "@/components/ui/segmented";
 import { Select } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
@@ -54,6 +56,7 @@ import { FieldError } from "@/components/settings/FieldError";
 import { fieldErrorId, saveSettingsPatch, useFieldError } from "@/components/settings/settingsErrors";
 import { api } from "@/lib/api";
 import { relativeTimeLong } from "@/lib/format";
+import { updateCount } from "@/lib/toolVersions";
 import type { AttentionReason, Settings } from "@/lib/types";
 import { cn, errorMessage, modKey } from "@/lib/utils";
 import { MAX_SCALE, MIN_SCALE, DEFAULT_SCALE, SCALE_PRESETS, SCALE_STEP } from "@/lib/zoom";
@@ -68,6 +71,7 @@ const SECTIONS: { id: SettingsSection; label: string; icon: ComponentType<{ clas
   { id: "templates", label: "Templates", icon: BookText },
   { id: "mcp", label: "Tools (MCP)", icon: Plug },
   { id: "providers", label: "Providers", icon: Package },
+  { id: "tools", label: "Agent tools", icon: Wrench },
   { id: "agents", label: "Agents", icon: Bot },
   { id: "voice", label: "Voice", icon: Mic },
   { id: "assistant", label: "Voice assistant", icon: AudioLines },
@@ -114,6 +118,7 @@ export function SettingsView() {
           {section === "templates" && <TemplatesSection templates={settings.templates} />}
           {section === "mcp" && <McpSection servers={settings.mcpServers} />}
           {section === "providers" && <Providers />}
+          {section === "tools" && <ToolsSection settings={settings} />}
           {section === "agents" && <AgentsSection agents={settings.customAgents} />}
           {section === "voice" && <VoiceSection settings={settings} />}
           {section === "assistant" && <VoiceAssistantSection settings={settings} />}
@@ -131,6 +136,7 @@ export function SettingsView() {
  */
 function SettingsNav({ section, onSelect }: { section: SettingsSection; onSelect: (s: SettingsSection) => void }) {
   const stripRef = useRef<HTMLDivElement>(null);
+  const updates = useApp((s) => updateCount(s.providers));
 
   // Keep the active pill in view on the narrow strip (scroll only the strip itself).
   useEffect(() => {
@@ -185,6 +191,9 @@ function SettingsNav({ section, onSelect }: { section: SettingsSection; onSelect
               )}
               <Icon className={cn("relative h-4 w-4", active ? "text-accent" : "text-steel")} />
               <span className="relative">{s.label}</span>
+              {s.id === "tools" && updates > 0 && (
+                <CountBadge count={updates} className="relative ml-auto shadow-none max-[860px]:ml-0" />
+              )}
             </button>
           );
         })}

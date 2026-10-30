@@ -26,3 +26,12 @@ describe("exitCodeOf", () => {
     expect(exitCodeOf("all fine")).toBeNull();
   });
 });
+
+describe("cleanTerminalOutput: Bash output fence", () => {
+  it("drops the markdown fence around the output", () => {
+    expect(cleanTerminalOutput("```console\nhooks\n40 files\n```").text).toBe("hooks\n40 files");
+  });
+  it("drops a fence whose closing half has not arrived yet", () => {
+    expect(cleanTerminalOutput("```console\nline 1").text).toBe("line 1");
+  });
+});

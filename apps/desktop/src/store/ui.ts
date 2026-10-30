@@ -13,6 +13,7 @@ export type SettingsSection =
   | "templates"
   | "mcp"
   | "providers"
+  | "tools"
   | "agents"
   | "remote"
   | "voice"

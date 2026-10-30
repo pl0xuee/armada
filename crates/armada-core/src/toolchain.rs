@@ -416,18 +416,24 @@ fn download_node(data_dir: &Path, log: &Log) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// npm packages to install for a provider (only what's missing).
+/// `pkg@version` when Armada's own copy of `pkg` is missing, older than the version
+/// Armada was tested with, or has lost its launcher: the system's copy of the same tool
+/// doesn't count, so Armada never depends on it. A newer copy (from the update check) is
+/// left alone.
+fn managed_pkg(provider: Provider, pkg: &str, version: &str, data_dir: &Path) -> Option<String> {
+    let current = providers::managed_pkg_version(data_dir, pkg)
+        .is_some_and(|v| version_cmp(&v, version) != std::cmp::Ordering::Less)
+        && providers::managed_cli_in(provider, data_dir).is_some();
+    (!current).then(|| format!("{pkg}@{version}"))
+}
+
+/// npm packages to install for a provider (only what Armada's own copy lacks).
 fn packages_for(provider: Provider, data_dir: &Path) -> Vec<String> {
     let mut pkgs = Vec::new();
     match provider {
         Provider::Claude => {
-            if providers::find_cli(Provider::Claude).is_none() {
-                pkgs.push(format!(
-                    "{}@{}",
-                    providers::CLAUDE_CODE_PKG,
-                    providers::CLAUDE_CODE_VERSION
-                ));
-            }
+            // Claude Code itself comes with the adapter: it ships inside the Claude Agent
+            // SDK, one of its dependencies (`providers::bundled_claude`).
             // Missing, or not the pinned version: (re)install the pinned one.
             if !providers::claude_adapter_current(data_dir) {
                 pkgs.push(format!(
@@ -437,24 +443,18 @@ fn packages_for(provider: Provider, data_dir: &Path) -> Vec<String> {
                 ));
             }
         }
-        Provider::Codex => {
-            if providers::find_cli(Provider::Codex).is_none() {
-                pkgs.push(format!(
-                    "{}@{}",
-                    providers::CODEX_PKG,
-                    providers::CODEX_VERSION
-                ));
-            }
-        }
-        Provider::Grok => {
-            if providers::find_cli(Provider::Grok).is_none() {
-                pkgs.push(format!(
-                    "{}@{}",
-                    providers::GROK_PKG,
-                    providers::GROK_VERSION
-                ));
-            }
-        }
+        Provider::Codex => pkgs.extend(managed_pkg(
+            provider,
+            providers::CODEX_PKG,
+            providers::CODEX_VERSION,
+            data_dir,
+        )),
+        Provider::Grok => pkgs.extend(managed_pkg(
+            provider,
+            providers::GROK_PKG,
+            providers::GROK_VERSION,
+            data_dir,
+        )),
         Provider::Custom => {}
         Provider::Local => return packages_for(Provider::Codex, data_dir),
     }
@@ -649,6 +649,15 @@ async fn install_unlocked(provider: Provider, data_dir: &Path, log: Log) -> anyh
     log(&format!("▸ Installing {}…", pkgs.join(", ")));
     npm_install(&npm, data_dir, &pkgs, &log).await?;
 
+    let version = check_runs(provider, data_dir).await?;
+    log(&format!("✓ {name} is ready ({version})"));
+    Ok(())
+}
+
+/// Checks that the installed tool starts (`--version`) and, for Claude, that the adapter is
+/// in place. Returns the version line.
+async fn check_runs(provider: Provider, data_dir: &Path) -> anyhow::Result<String> {
+    let name = provider.display_name();
     let cli = providers::find_cli(provider).ok_or_else(|| {
         anyhow!(
             "{name} was installed but `{}` still can't be found",
@@ -667,21 +676,271 @@ async fn install_unlocked(provider: Provider, data_dir: &Path, log: Log) -> anyh
             String::from_utf8_lossy(&out.stderr).trim()
         );
     }
-    let version = String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_string();
     if provider == Provider::Claude && !providers::claude_adapter_current(data_dir) {
         bail!(
-            "The Claude ACP adapter didn't install correctly (expected version {}, found {})",
+            "The Claude ACP adapter didn't install correctly (expected at least version {}, found {})",
             providers::CLAUDE_ADAPTER_VERSION,
             providers::claude_adapter_version(data_dir).unwrap_or_else(|| "none".into())
         );
     }
-    log(&format!("✓ {name} is ready ({version})"));
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string())
+}
+
+// ---- keeping Armada's own copies up to date ----------------------------------------
+//
+// The versions in `providers.rs` are the baseline Armada was tested with, not a ceiling:
+// Armada checks the npm registry for newer releases and can install them on its own
+// schedule (no Armada release needed). Every update is verified and rolled back if the
+// tool no longer starts.
+
+/// Orders dotted numeric versions (`0.166.0` > `0.98.1`). A `-prerelease` or `+build`
+/// suffix is ignored; missing parts count as 0.
+pub fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    fn parts(v: &str) -> Vec<u64> {
+        v.trim()
+            .trim_start_matches('v')
+            .split(['-', '+'])
+            .next()
+            .unwrap_or("")
+            .split('.')
+            .map(|p| p.parse().unwrap_or(0))
+            .collect()
+    }
+    let (a, b) = (parts(a), parts(b));
+    for i in 0..a.len().max(b.len()) {
+        let ord = a.get(i).unwrap_or(&0).cmp(b.get(i).unwrap_or(&0));
+        if ord != std::cmp::Ordering::Equal {
+            return ord;
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
+/// The npm package that carries a provider's agent in Armada's own copy, with the oldest
+/// version Armada was tested with. (Claude: the ACP adapter, which brings Claude Code.)
+pub fn tool_package(provider: Provider) -> Option<(&'static str, &'static str)> {
+    match provider {
+        Provider::Claude => Some((
+            providers::CLAUDE_ADAPTER_PKG,
+            providers::CLAUDE_ADAPTER_VERSION,
+        )),
+        Provider::Codex => Some((providers::CODEX_PKG, providers::CODEX_VERSION)),
+        Provider::Grok => Some((providers::GROK_PKG, providers::GROK_VERSION)),
+        Provider::Local | Provider::Custom => None,
+    }
+}
+
+/// The version of Armada's own copy of a provider's agent package.
+pub fn installed_version(provider: Provider, data_dir: &Path) -> Option<String> {
+    let (pkg, _) = tool_package(provider)?;
+    providers::managed_pkg_version(data_dir, pkg)
+}
+
+static LATEST: std::sync::Mutex<Vec<(Provider, String)>> = std::sync::Mutex::new(Vec::new());
+static CHECKED_AT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// The newest version the last update check found on the registry.
+pub fn latest_known(provider: Provider) -> Option<String> {
+    LATEST
+        .lock()
+        .ok()?
+        .iter()
+        .find(|(p, _)| *p == provider)
+        .map(|(_, v)| v.clone())
+}
+
+/// When the last update check finished (unix ms), if one has.
+pub fn updates_checked_at() -> Option<i64> {
+    match CHECKED_AT.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => None,
+        t => Some(t),
+    }
+}
+
+/// A newer release than Armada's own copy exists (false when it has no copy yet).
+pub fn update_available(provider: Provider, data_dir: &Path) -> bool {
+    match (
+        installed_version(provider, data_dir),
+        latest_known(provider),
+    ) {
+        (Some(have), Some(latest)) => version_cmp(&latest, &have) == std::cmp::Ordering::Greater,
+        _ => false,
+    }
+}
+
+/// The `latest` release of an npm package, from the official registry.
+async fn registry_latest(pkg: &str) -> anyhow::Result<String> {
+    let url = format!(
+        "https://registry.npmjs.org/{}/latest",
+        pkg.replace('/', "%2f")
+    );
+    let pkg = pkg.to_string();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
+        let text = http()
+            .get(&url)
+            .header("Accept", "application/json")
+            .call()
+            .map_err(|e| anyhow!("couldn't reach the npm registry for {pkg}: {e}"))?
+            .body_mut()
+            .read_to_string()
+            .map_err(|e| anyhow!("unreadable registry answer for {pkg}: {e}"))?;
+        let body: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| anyhow!("unreadable registry answer for {pkg}: {e}"))?;
+        let v = body["version"].as_str().unwrap_or("").trim().to_string();
+        // Only plain releases (no `-beta`, `-rc`).
+        if v.is_empty() || v.contains('-') || !v.chars().all(|c| c.is_ascii_digit() || c == '.') {
+            bail!("the registry's latest version of {pkg} isn't a plain release: {v:?}");
+        }
+        Ok(v)
+    })
+    .await?
+}
+
+/// Looks up the newest release of each provider's agent package and remembers it
+/// ([`latest_known`]). A provider whose lookup fails keeps its earlier answer.
+pub async fn check_updates(log: &Log) -> anyhow::Result<()> {
+    let mut failed = 0;
+    for provider in Provider::ALL {
+        let Some((pkg, _)) = tool_package(provider) else {
+            continue;
+        };
+        match registry_latest(pkg).await {
+            Ok(v) => {
+                if let Ok(mut all) = LATEST.lock() {
+                    all.retain(|(p, _)| *p != provider);
+                    all.push((provider, v));
+                }
+            }
+            Err(e) => {
+                failed += 1;
+                log(&format!("✗ {}: {e:#}", provider.display_name()));
+            }
+        }
+    }
+    CHECKED_AT.store(crate::model::now_ms(), std::sync::atomic::Ordering::Relaxed);
+    if failed == Provider::ALL.len() {
+        bail!("couldn't check for updates (no answer from the npm registry)");
+    }
     Ok(())
+}
+
+/// A release the user rolled back from: automatic updates skip exactly that release (a
+/// newer one is fine; a manual update still works). Kept in a small file so it survives
+/// restarts and isn't tied to the app's settings.
+fn holds_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("tool-holds.json")
+}
+
+fn read_holds(data_dir: &Path) -> std::collections::BTreeMap<String, String> {
+    std::fs::read(holds_path(data_dir))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+/// Remembers that `version` of `provider`'s tool was rolled back (`None` forgets it).
+pub fn set_hold(data_dir: &Path, provider: Provider, version: Option<&str>) {
+    let mut holds = read_holds(data_dir);
+    match version {
+        Some(v) => holds.insert(provider.as_str().to_string(), v.to_string()),
+        None => holds.remove(provider.as_str()),
+    };
+    if let Ok(bytes) = serde_json::to_vec_pretty(&holds) {
+        let _ = std::fs::write(holds_path(data_dir), bytes);
+    }
+}
+
+/// Whether automatic updates should leave the newest release alone: it is the one the
+/// user rolled back from.
+pub fn is_held(data_dir: &Path, provider: Provider) -> bool {
+    match (
+        read_holds(data_dir).get(provider.as_str()),
+        latest_known(provider),
+    ) {
+        (Some(held), Some(latest)) => *held == latest,
+        _ => false,
+    }
+}
+
+/// Which version [`update`] installs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpdateTarget {
+    /// The newest release.
+    Latest,
+    /// The version this Armada was tested with (a way back from a bad update).
+    Baseline,
+    /// One specific release.
+    Exact(String),
+}
+
+/// Installs a different version of Armada's own copy of a provider's agent: the newest
+/// release, or the tested baseline. Afterwards the tool must start; if it doesn't, the
+/// previous version is put back and an error is returned.
+pub async fn update(
+    provider: Provider,
+    data_dir: &Path,
+    target: UpdateTarget,
+    log: Log,
+) -> anyhow::Result<()> {
+    let _guard = lock_installs(&log).await;
+    sweep_scratch(data_dir);
+    let name = provider.display_name();
+    let (pkg, baseline) =
+        tool_package(provider).ok_or_else(|| anyhow!("{name} has no tool that Armada installs"))?;
+    let previous = installed_version(provider, data_dir);
+    let wanted = match &target {
+        UpdateTarget::Baseline => baseline.to_string(),
+        UpdateTarget::Exact(v) => v.clone(),
+        UpdateTarget::Latest => match latest_known(provider) {
+            Some(v) => v,
+            None => registry_latest(pkg).await?,
+        },
+    };
+    if previous.as_deref() == Some(wanted.as_str())
+        && providers::managed_cli_in(provider, data_dir).is_some()
+    {
+        log(&format!("✓ {name} is already {wanted}."));
+        return Ok(());
+    }
+    let npm = ensure_npm(data_dir, &log).await?;
+    log(&format!(
+        "▸ {name}: {} → {wanted}",
+        previous.as_deref().unwrap_or("not installed")
+    ));
+    let spec = format!("{pkg}@{wanted}");
+    let result = match npm_install(&npm, data_dir, std::slice::from_ref(&spec), &log).await {
+        Ok(()) => check_runs(provider, data_dir).await,
+        Err(e) => Err(e),
+    };
+    match result {
+        Ok(version) => {
+            // Going back leaves the release you left alone until a newer one comes out; going
+            // forward clears any such note.
+            match (&target, previous.as_deref()) {
+                (UpdateTarget::Baseline, Some(from)) => set_hold(data_dir, provider, Some(from)),
+                _ => set_hold(data_dir, provider, None),
+            }
+            log(&format!("✓ {name} is ready ({version})"));
+            Ok(())
+        }
+        Err(e) => {
+            log(&format!("✗ {name} {wanted} didn't work: {e:#}"));
+            if let Some(prev) = previous {
+                log(&format!("▸ Putting back {name} {prev}…"));
+                let back = format!("{pkg}@{prev}");
+                match npm_install(&npm, data_dir, &[back], &log).await {
+                    Ok(()) => log(&format!("✓ {name} {prev} is back.")),
+                    Err(e2) => log(&format!("✗ Couldn't put {prev} back: {e2:#}")),
+                }
+            }
+            Err(e)
+        }
+    }
 }
 
 /// Installs everything missing for all providers; keeps going past failures.
@@ -714,6 +973,151 @@ pub async fn install_missing(data_dir: &Path, log: Log) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The real thing, against the npm registry (downloads Codex, ~150 MB): installs Armada's
+    /// own copy into a scratch folder, then tries to "update" to a version that doesn't
+    /// exist and checks the working copy is still there. Run with
+    /// `cargo test -p armada-core --lib -- real_install --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn real_install_and_failed_update_roll_back() {
+        let data = std::env::temp_dir().join(format!("armada-real-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        providers::set_data_dir(&data);
+        let log: Log = std::sync::Arc::new(|l| println!("  {l}"));
+        assert!(providers::managed_cli_in(Provider::Codex, &data).is_none());
+        install(Provider::Codex, &data, log.clone())
+            .await
+            .expect("install");
+        let cli = providers::managed_cli_in(Provider::Codex, &data).expect("managed codex");
+        assert_eq!(
+            providers::find_cli(Provider::Codex),
+            Some(cli.clone()),
+            "preferred over the system's"
+        );
+        assert_eq!(
+            installed_version(Provider::Codex, &data).as_deref(),
+            Some(providers::CODEX_VERSION)
+        );
+        println!("managed codex: {}", cli.display());
+        // A release that doesn't exist: the update fails and the working copy stays.
+        let r = update(
+            Provider::Codex,
+            &data,
+            UpdateTarget::Exact("999.0.0".into()),
+            log.clone(),
+        )
+        .await;
+        assert!(r.is_err(), "no such release");
+        assert_eq!(
+            installed_version(Provider::Codex, &data).as_deref(),
+            Some(providers::CODEX_VERSION)
+        );
+        check_runs(Provider::Codex, &data)
+            .await
+            .expect("still runs after the failed update");
+        // The registry check.
+        check_updates(&log).await.expect("check");
+        println!(
+            "latest codex: {:?}, update available: {}",
+            latest_known(Provider::Codex),
+            update_available(Provider::Codex, &data)
+        );
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    #[test]
+    fn versions_compare_numerically() {
+        use std::cmp::Ordering::*;
+        assert_eq!(version_cmp("0.166.0", "0.165.9"), Greater);
+        assert_eq!(
+            version_cmp("0.98.0", "0.166.0"),
+            Less,
+            "98 < 166, not a text compare"
+        );
+        assert_eq!(version_cmp("1.0", "1.0.0"), Equal);
+        assert_eq!(version_cmp("v2.1.314", "2.1.312"), Greater);
+        assert_eq!(
+            version_cmp("1.2.3-beta.1", "1.2.3"),
+            Equal,
+            "suffixes are ignored"
+        );
+        assert_eq!(version_cmp("0.164.0", "0.166.0"), Less);
+    }
+
+    /// Armada's own copy is kept when it's at least the tested version (an update from the
+    /// check is not undone), reinstalled when missing or older, whatever the system has.
+    /// Rolling back a release makes automatic updates skip exactly that release.
+    #[test]
+    fn a_rolled_back_release_is_not_installed_again_automatically() {
+        let data = std::env::temp_dir().join(format!("armada-holds-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        std::fs::create_dir_all(&data).unwrap();
+        let set_latest = |v: &str| {
+            let mut all = LATEST.lock().unwrap();
+            all.retain(|(p, _)| *p != Provider::Grok);
+            all.push((Provider::Grok, v.to_string()));
+        };
+        set_latest("2.0.0");
+        assert!(!is_held(&data, Provider::Grok));
+        set_hold(&data, Provider::Grok, Some("2.0.0"));
+        assert!(
+            is_held(&data, Provider::Grok),
+            "the release you left is skipped"
+        );
+        set_latest("2.0.1");
+        assert!(!is_held(&data, Provider::Grok), "a newer release is fine");
+        set_latest("2.0.0");
+        set_hold(&data, Provider::Grok, None);
+        assert!(!is_held(&data, Provider::Grok));
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    #[test]
+    fn managed_copies_are_installed_or_kept() {
+        let data = std::env::temp_dir().join(format!("armada-managed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        let pkg_dir = tools_dir(&data)
+            .join("node_modules")
+            .join("@openai")
+            .join("codex");
+        let bin = tools_bin_dir(&data);
+        let write = |version: &str| {
+            std::fs::create_dir_all(&pkg_dir).unwrap();
+            std::fs::write(
+                pkg_dir.join("package.json"),
+                format!(r#"{{"version":"{version}"}}"#),
+            )
+            .unwrap();
+        };
+        // Nothing installed.
+        assert_eq!(
+            packages_for(Provider::Codex, &data),
+            vec![format!("@openai/codex@{}", providers::CODEX_VERSION)]
+        );
+        // Package present but no launcher: reinstall.
+        write(providers::CODEX_VERSION);
+        assert!(!packages_for(Provider::Codex, &data).is_empty());
+        // Launcher present: nothing to do (also for a newer version).
+        std::fs::create_dir_all(&bin).unwrap();
+        let launcher = bin.join(if cfg!(windows) { "codex.cmd" } else { "codex" });
+        std::fs::write(&launcher, "x").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert!(packages_for(Provider::Codex, &data).is_empty());
+        write("99.0.0");
+        assert!(
+            packages_for(Provider::Codex, &data).is_empty(),
+            "a newer copy is kept"
+        );
+        // Older than the tested version: reinstalled.
+        write("0.1.0");
+        assert!(!packages_for(Provider::Codex, &data).is_empty());
+        let _ = std::fs::remove_dir_all(&data);
+    }
 
     #[test]
     fn sha256_hex_matches_known_digest() {
