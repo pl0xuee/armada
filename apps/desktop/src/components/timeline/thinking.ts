@@ -1,4 +1,5 @@
-import type { AgentStatus, TimelineItem } from "@/lib/types";
+import type { AgentStatus, ConfigOption, TimelineItem } from "@/lib/types";
+import { pluralize } from "@/lib/format";
 
 /** Friendly status verbs the indicator cycles through while the agent is busy. */
 export const THINKING_VERBS = [
@@ -13,34 +14,113 @@ export const THINKING_VERBS = [
 ] as const;
 
 /**
- * Whether to show the "thinking" indicator below the conversation. It fills the gap where the
- * agent is busy but nothing at the end of the timeline is visibly doing so.
- * `last` is the last top-level row's item (activity groups pass `lastIsGroup`). `messageSettled`:
- * the last agent message stopped growing a moment ago (the model is working out its next step).
+ * Whether to show the live status line below the conversation: the one place that says what a busy
+ * agent is doing right now. Always while it works, except when an approval or question is the call to
+ * action (the card says it).
  */
-export function shouldShowThinking(
-  status: AgentStatus,
-  last: TimelineItem | undefined,
-  lastIsGroup = false,
-  messageSettled = false,
-): boolean {
+export function shouldShowThinking(status: AgentStatus, last: TimelineItem | undefined): boolean {
   if (status !== "working" && status !== "starting") return false;
-  // A live activity group already shows its own spinner and current step.
-  if (lastIsGroup) return false;
   if (!last) return true;
-  switch (last.kind) {
-    case "agent_message": // streaming reply, unless it went quiet
-      return messageSettled;
-    case "thought": // live thought
-      return false;
-    case "tool_call":
-      return last.status !== "pending" && last.status !== "in_progress";
-    case "permission":
-    case "question":
-      return last.resolution !== null; // pending: the approval card is the call to action
+  if (last.kind === "permission" || last.kind === "question") return last.resolution !== null;
+  return true;
+}
+
+/** What the agent is doing right now, in plain words. `detail` follows `lead` (mono for a command). */
+export interface LiveStep {
+  lead: string;
+  detail: string | null;
+  mono: boolean;
+}
+
+export const stepText = (s: LiveStep): string => (s.detail ? `${s.lead} ${s.detail}` : s.lead);
+
+const unfinished = (it: TimelineItem): boolean =>
+  it.kind === "tool_call" && (it.status === "pending" || it.status === "in_progress");
+
+/** Tool titles read "Read src/a.ts", "Run npm test", "Search for `x`": drop the verb, quotes and backticks. */
+function stripVerb(title: string, verbs: RegExp): string {
+  return title.replace(verbs, "").replace(/[`"']/g, "").trim();
+}
+
+/** Long paths keep their last two segments. */
+function shortPath(p: string): string {
+  if (p.length <= 48) return p;
+  const parts = p.split("/").filter(Boolean);
+  return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : p;
+}
+
+type ToolItem = Extract<TimelineItem, { kind: "tool_call" }>;
+
+function stepOf(calls: ToolItem[]): LiveStep {
+  const c = calls[calls.length - 1];
+  const n = calls.length;
+  const plain = (lead: string, detail: string | null = null): LiveStep => ({ lead, detail, mono: false });
+  switch (c.toolKind) {
+    case "execute": {
+      if (n > 1) return plain(`Running ${pluralize(n, "command")}`);
+      const cmd = (c.command?.trim().split("\n")[0] ?? "") || stripVerb(c.title, /^(run(ning)?|bash|execute)\s+/i);
+      return cmd ? { lead: "Running", detail: cmd, mono: true } : plain("Running a command");
+    }
+    case "read":
+    case "edit":
+    case "delete":
+    case "move": {
+      const [ing, noun] =
+        c.toolKind === "read"
+          ? ["Reading", "file"]
+          : c.toolKind === "edit"
+            ? ["Editing", "file"]
+            : c.toolKind === "delete"
+              ? ["Deleting", "file"]
+              : ["Moving", "file"];
+      if (n > 1) return plain(`${ing} ${pluralize(n, noun)}`);
+      const path = c.locations[0] ?? stripVerb(c.title, /^(read(ing)?|edit(ing)?|create|write|delete|move)\s+/i);
+      return path ? plain(ing, shortPath(path)) : plain(`${ing} a file`);
+    }
+    case "search": {
+      if (n > 1) return plain(`Running ${pluralize(n, "search", "searches")}`);
+      const q = stripVerb(c.title, /^search(ing)?( for)?\s*/i);
+      return q ? plain("Searching for", `"${q}"`) : plain("Searching");
+    }
+    case "fetch": {
+      if (n > 1) return plain(`Fetching ${pluralize(n, "page")}`);
+      const url = stripVerb(c.title, /^fetch(ing)?\s*/i);
+      return url ? plain("Fetching", url) : plain("Fetching a page");
+    }
+    case "think":
+      return plain("Thinking…");
     default:
-      return true; // user_message, plan, notice, turn_summary
+      return plain(c.title.trim() || "Working…");
   }
+}
+
+/**
+ * The current step from the newest unfinished item at the end of the timeline, or null when nothing
+ * names one (the line then cycles friendly verbs). Sub-agents and their calls are not steps: the line
+ * says "Waiting on N sub-agents" for those. `messageSettled`: the last agent message stopped growing.
+ */
+export function liveStep(items: readonly TimelineItem[], messageSettled = false): LiveStep | null {
+  let i = items.length - 1;
+  const skip = (it: TimelineItem) => it.kind === "tool_call" && (!!it.parentToolCallId || !!it.subagent);
+  while (i >= 0 && skip(items[i])) i--;
+  const last = items[i];
+  if (!last) return null;
+  if (last.kind === "thought") return { lead: "Thinking…", detail: null, mono: false };
+  if (last.kind === "agent_message") {
+    return messageSettled ? null : { lead: "Writing…", detail: null, mono: false };
+  }
+  if (last.kind !== "tool_call") return null;
+  // The trailing run of tool calls (parallel calls overlap): its unfinished ones, newest kind first.
+  const open: ToolItem[] = [];
+  for (let j = i; j >= 0; j--) {
+    const it = items[j];
+    if (skip(it)) continue;
+    if (it.kind !== "tool_call") break;
+    if (unfinished(it)) open.unshift(it);
+  }
+  if (open.length === 0) return null;
+  const kind = open[open.length - 1].toolKind;
+  return stepOf(open.filter((c) => c.toolKind === kind));
 }
 
 /** Start of the current turn: the latest user message, else `fallback`. */
@@ -110,4 +190,53 @@ export const LONG_TURN_MS = 30_000;
 /** Statuses in which the "waiting on sub-agents" line may show (idle: the agent is just waiting too). */
 export function waitingStatus(status: AgentStatus): boolean {
   return status === "working" || status === "starting" || status === "idle";
+}
+
+/** What a sub-agent inherits from its parent: the parent's current model / reasoning effort (display names). */
+export interface Inherited {
+  model: string | null;
+  effort: string | null;
+}
+
+const NO_INHERIT: Inherited = { model: null, effort: null };
+
+function optionName(opt: ConfigOption | undefined): string | null {
+  if (!opt) return null;
+  return opt.options.find((o) => o.value === opt.currentValue)?.name ?? (opt.currentValue || null);
+}
+
+/** The agent's own model and effort from its config options (null for whatever it doesn't expose). */
+export function inheritedOf(options: readonly ConfigOption[] | undefined): Inherited {
+  if (!options?.length) return NO_INHERIT;
+  return {
+    model: optionName(options.find((o) => o.category === "model")),
+    effort: optionName(options.find((o) => o.category === "thought_level")),
+  };
+}
+
+export interface SubagentChip {
+  key: "model" | "effort";
+  text: string;
+  /** Not named by the launch: the parent's setting (or just "inherits"). */
+  inherited: boolean;
+}
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * Model and effort chips for a sub-agent. A value the launch named shows as is; otherwise "inherits <the
+ * parent's value>" when the parent exposes one, and nothing when it doesn't (never invented).
+ */
+export function subagentChips(
+  sub: { model?: string | null; effort?: string | null },
+  parent: Inherited = NO_INHERIT,
+): SubagentChip[] {
+  const chips: SubagentChip[] = [];
+  const model = sub.model?.trim();
+  const effort = sub.effort?.trim();
+  if (model) chips.push({ key: "model", text: model, inherited: false });
+  else if (parent.model) chips.push({ key: "model", text: `inherits ${parent.model}`, inherited: true });
+  if (effort) chips.push({ key: "effort", text: capitalize(effort), inherited: false });
+  else if (parent.effort) chips.push({ key: "effort", text: `inherits ${parent.effort}`, inherited: true });
+  return chips;
 }

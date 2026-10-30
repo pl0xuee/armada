@@ -11,51 +11,38 @@ export interface ActivityGrouping {
 export const MIN_GROUP = 2;
 
 /**
- * Collapse runs of consecutive "activity" rows (plain tool calls, thoughts, and agent messages
- * that aren't the final answer of their turn) into single group rows. Depends only on structure.
- * `top` are the top-level row indices, in order. `foldTail`: the agent is only waiting on
- * sub-agents, so the trailing run collapses even when it's a single row (calls that arrive
- * before the adapter attributes them to a sub-agent would otherwise pop in and out).
- * `keep`: ids of standalone rows that are on screen; they stay standalone (a barrier between runs)
- * instead of being folded into a group, so the visible content doesn't collapse under the reader.
+ * Collapse runs of consecutive plain tool calls and thoughts into single group rows. Agent messages
+ * are never folded: what the agent says stays where it is, so nothing the reader is looking at moves
+ * or disappears when the next step starts. Depends only on the items' kinds (never on what is on screen
+ * or whether the agent is still working), so a row never flips between standalone and folded: a run only
+ * ever grows. `top` are the top-level row indices, in order.
  */
-export function groupActivity(
-  items: TimelineItem[],
-  top: number[],
-  { foldTail = false, keep }: { foldTail?: boolean; keep?: ReadonlySet<string> } = {},
-): ActivityGrouping {
-  const answers = finalAnswers(items, top);
-
+export function groupActivity(items: TimelineItem[], top: number[]): ActivityGrouping {
   const isActivity = (i: number): boolean => {
     const it = items[i];
     if (!it) return false;
     if (it.kind === "tool_call") return !it.subagent;
-    if (it.kind === "thought") return true;
-    // A reply with a picture stays in view rather than folding into a group.
-    return it.kind === "agent_message" && !answers.has(i) && !it.images?.length;
+    return it.kind === "thought";
   };
 
   const rows: number[] = [];
   const groups = new Map<number, number[]>();
   let run: number[] = [];
-  const flush = (min = MIN_GROUP) => {
-    if (run.length >= min) {
+  const flush = () => {
+    if (run.length >= MIN_GROUP) {
       rows.push(run[0]);
       groups.set(run[0], run);
     } else rows.push(...run);
     run = [];
   };
   for (const i of top) {
-    if (keep?.has(items[i]?.id)) {
-      flush();
-      rows.push(i);
-    } else if (isActivity(i)) run.push(i);
+    if (isActivity(i)) run.push(i);
     else {
       flush();
       rows.push(i);
     }
   }
-  flush(foldTail ? 1 : MIN_GROUP);
+  flush();
   return { rows, groups };
 }
 
@@ -76,46 +63,4 @@ export function finalAnswers(items: TimelineItem[], top: number[]): Set<number> 
   }
   if (lastMsg >= 0) answers.add(lastMsg);
   return answers;
-}
-
-export interface KeepRow {
-  id: string;
-  /** Top-level row that isn't an activity group. */
-  standalone: boolean;
-  start: number;
-  end: number;
-}
-
-/** Rows shorter than this (one collapsed line) aren't worth keeping unfolded. */
-export const KEEP_MIN_HEIGHT = 40;
-/** A row this close to the viewport still counts as visible. */
-export const KEEP_MARGIN = 100;
-
-/**
- * Which standalone rows must stay unfolded: the tall ones in (or near) the viewport. A kept row is
- * released once it is fully outside the viewport, but only when that cannot move what is on screen:
- * the reader is pinned to the bottom, or the row sits below the viewport. Returns `prev` when unchanged.
- */
-export function nextKeep(
-  prev: ReadonlySet<string>,
-  visible: KeepRow[],
-  lookup: (id: string) => { start: number; end: number } | undefined,
-  view: { top: number; bottom: number },
-  pinned: boolean,
-): ReadonlySet<string> {
-  const near = (r: { start: number; end: number }) =>
-    r.end > view.top - KEEP_MARGIN && r.start < view.bottom + KEEP_MARGIN;
-  const next = new Set<string>();
-  for (const r of visible) {
-    if (r.standalone && r.end - r.start > KEEP_MIN_HEIGHT && near(r)) next.add(r.id);
-  }
-  for (const id of prev) {
-    if (next.has(id)) continue;
-    const r = lookup(id);
-    if (!r) continue;
-    if (near(r)) next.add(id);
-    else if (!pinned && r.end <= view.top - KEEP_MARGIN) next.add(id);
-  }
-  if (next.size === prev.size && [...next].every((id) => prev.has(id))) return prev;
-  return next;
 }

@@ -43,7 +43,7 @@ const VARIANT: Record<PermissionOption["kind"], ButtonVariant> = {
 export function shortcutFor(item: PermissionItem, option: PermissionOption): string | null {
   // "A" is allow-once only; it never falls back to an "always" option.
   const firstAllow = item.options.find((o) => o.kind === "allow_once");
-  const firstAlways = item.options.find((o) => o.kind === "allow_always");
+  const firstAlways = item.plan ? undefined : item.options.find((o) => o.kind === "allow_always");
   const firstReject = item.options.find((o) => o.kind === "reject_once" || o.kind === "reject_always");
   if (option === firstAllow) return "A";
   if (option === firstAlways) return "⇧A ×2";

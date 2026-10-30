@@ -4,6 +4,7 @@ import { devParam } from "@/lib/dev";
 import { basename, formatCost, formatDuration, formatTokens, plural } from "@/lib/format";
 import { isRunning, isSubagentNode, latestChild, type SubagentNode } from "@/lib/rows";
 import { setReviewFocus } from "@/lib/reviewFocus";
+import { subagentChips, type InheritedConfig } from "@/lib/subagents";
 import { noteUserLayoutChange } from "@/lib/scroll";
 import type { TurnSummaryItem } from "@/lib/types";
 import { Icon, Spinner } from "../Icon";
@@ -14,6 +15,7 @@ import { navigate } from "@/lib/router";
 import { useStore } from "@/lib/store";
 import { Markdown } from "../Markdown";
 import { ToolRow } from "./Items";
+import { SubagentChips } from "./SubagentChips";
 
 const EXPAND_ALL = devParam("expand") === "1";
 
@@ -67,6 +69,7 @@ export const SubagentCard = memo(function SubagentCard({
   node,
   agentLive = true,
   bgRunning,
+  inherited,
   depth = 0,
 }: {
   node: SubagentNode;
@@ -74,6 +77,8 @@ export const SubagentCard = memo(function SubagentCard({
   agentLive?: boolean;
   /** toolCallIds of background sub-agents that are still running after their launch call completed. */
   bgRunning?: ReadonlySet<string>;
+  /** The main agent's model and effort, shown for the ones this sub-agent doesn't name. */
+  inherited?: InheritedConfig;
   depth?: number;
 }) {
   const { call } = node;
@@ -88,6 +93,8 @@ export const SubagentCard = memo(function SubagentCard({
   const kind = call.subagent?.kind?.trim();
   const description = call.subagent?.description?.trim() || call.title;
   const prompt = call.subagent?.prompt?.trim();
+  // A nested sub-agent inherits from its parent sub-agent, whose values aren't known here: only named ones show.
+  const chips = subagentChips(call.subagent, depth === 0 ? inherited : undefined);
 
   return (
     <section
@@ -117,6 +124,7 @@ export const SubagentCard = memo(function SubagentCard({
             {kind ? <span className="truncate normal-case tracking-normal text-muted">· {kind}</span> : null}
           </span>
           <span className="mt-0.5 line-clamp-2 block text-[14.5px] leading-snug font-medium text-fg">{description}</span>
+          <SubagentChips chips={chips} className="mt-1" />
           {/* One line. The latest step is a wrapping flex item that needs ~6rem: when it can't fit beside the
               status it wraps onto a second line that is clipped, instead of showing as a stub ("· R…"). */}
           <span className="mt-1 flex h-[18px] min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 overflow-hidden text-[12.5px] leading-[18px] text-steel">
@@ -176,7 +184,7 @@ export const SubagentCard = memo(function SubagentCard({
               {node.children.map((c) =>
                 isSubagentNode(c) ? (
                   <div key={c.call.id} className="p-2 pl-3">
-                    <SubagentCard node={c} agentLive={agentLive} bgRunning={bgRunning} depth={depth + 1} />
+                    <SubagentCard node={c} agentLive={agentLive} bgRunning={bgRunning} inherited={inherited} depth={depth + 1} />
                   </div>
                 ) : (
                   <ToolRow key={c.id} item={c} agentLive={agentLive} />

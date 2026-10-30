@@ -1,22 +1,13 @@
-import { Brain, ChevronRight, CircleCheck, CircleX, MessageSquare } from "lucide-react";
+import { ChevronRight, CircleCheck, CircleX } from "lucide-react";
 import { m, AnimatePresence } from "motion/react";
 import { memo, useId } from "react";
 import type { Agent, TimelineItem } from "@/lib/types";
 import { pluralize } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Spinner } from "../ui/misc";
-import { AgentMessage, TOOL_ICON, ThoughtBlock, ToolCallCard } from "./items";
+import { AgentMessage, ThoughtBlock, ToolCallCard } from "./items";
 
 type ToolItem = Extract<TimelineItem, { kind: "tool_call" }>;
-
-function firstLine(text: string): string {
-  return (
-    text
-      .split("\n")
-      .map((l) => l.replace(/[*_`#>]/g, "").trim())
-      .find(Boolean) ?? ""
-  );
-}
 
 /** "Read 4 files, edited 2 files, ran 3 commands". */
 export function summarizeActivity(items: TimelineItem[]): { text: string; failed: number } {
@@ -73,7 +64,8 @@ export function summarizeActivity(items: TimelineItem[]): { text: string; failed
 
 /**
  * A run of consecutive activity (tool calls, thoughts, interim messages) collapsed into one line.
- * While live it shows the current step; expanded it lists every step.
+ * Always its static summary (a spinner marks an unfinished one); what is happening right now is said
+ * by the live status line under the conversation, never here. Expanded, it lists every step.
  */
 export const ActivityGroup = memo(function ActivityGroup({
   items,
@@ -94,26 +86,7 @@ export const ActivityGroup = memo(function ActivityGroup({
   groupId: string;
 }) {
   const bodyId = useId();
-  const last = items[items.length - 1];
-  const summary = live ? null : summarizeActivity(items);
-  const failed = items.filter((i) => i.kind === "tool_call" && i.status === "failed").length;
-
-  let Icon: React.ComponentType<{ className?: string }> = CircleCheck;
-  let text = summary?.text ?? "";
-  let mono = false;
-  if (live && last) {
-    if (last.kind === "tool_call") {
-      Icon = TOOL_ICON[last.toolKind];
-      text = last.title;
-      mono = last.toolKind === "execute";
-    } else if (last.kind === "thought") {
-      Icon = Brain;
-      text = "Thinking…";
-    } else if (last.kind === "agent_message") {
-      Icon = MessageSquare;
-      text = firstLine(last.text) || "Writing…";
-    }
-  }
+  const { text, failed } = summarizeActivity(items);
 
   return (
     <div>
@@ -130,13 +103,10 @@ export const ActivityGroup = memo(function ActivityGroup({
           ) : failed > 0 ? (
             <CircleX className="h-3.5 w-3.5 text-err/80" aria-hidden />
           ) : (
-            <Icon className="h-3.5 w-3.5 text-ok/60" aria-hidden />
+            <CircleCheck className="h-3.5 w-3.5 text-ok/60" aria-hidden />
           )}
         </span>
-        <span
-          className={cn("min-w-0 truncate text-[12.5px]", live && "text-muted", mono && "font-mono text-[12px]")}
-          title={text}
-        >
+        <span className={cn("min-w-0 truncate text-[12.5px]", live && "text-muted")} title={text}>
           {text}
         </span>
         {!live && failed > 0 && (
@@ -144,9 +114,7 @@ export const ActivityGroup = memo(function ActivityGroup({
             · {failed} failed
           </span>
         )}
-        <span className="shrink-0 text-[11.5px] tabular-nums text-steel">
-          · {pluralize(items.length, "step")}
-        </span>
+        <span className="shrink-0 text-[11.5px] tabular-nums text-steel">· {pluralize(items.length, "step")}</span>
         <ChevronRight
           className={cn(
             "h-3 w-3 shrink-0 text-steel/70 transition-transform duration-150 group-hover/trace:text-muted",

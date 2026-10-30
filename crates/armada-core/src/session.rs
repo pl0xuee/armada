@@ -686,6 +686,23 @@ impl AgentCtx {
         diffs: Vec<FileDiff>,
         options: Vec<PermissionOption>,
     ) {
+        self.permission_requested_with_plan(
+            request_id, title, tool_kind, command, diffs, options, None,
+        );
+    }
+
+    /// `permission_requested` for an approval that carries a plan to read first.
+    #[allow(clippy::too_many_arguments)]
+    pub fn permission_requested_with_plan(
+        &self,
+        request_id: &str,
+        title: String,
+        tool_kind: Option<ToolKind>,
+        command: Option<String>,
+        diffs: Vec<FileDiff>,
+        options: Vec<PermissionOption>,
+        plan: Option<String>,
+    ) {
         let pending = {
             let mut st = self.st.lock();
             self.end_stream_locked(&mut st);
@@ -699,6 +716,7 @@ impl AgentCtx {
                     diffs,
                     options,
                     resolution: None,
+                    plan,
                 },
             );
             st.ext.insert(format!("perm:{request_id}"), id);
@@ -1739,6 +1757,9 @@ impl AgentCtx {
                 a.cost_usd = c;
             }
         });
+        if let (Some(c), Some(core)) = (total, self.core.upgrade()) {
+            core.budget_cost(&self.agent_id, agent.cost_usd, c);
+        }
     }
 
     pub fn add_tokens(&self, tokens: i64) {

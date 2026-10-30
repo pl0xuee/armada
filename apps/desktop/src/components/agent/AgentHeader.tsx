@@ -1,4 +1,5 @@
 import {
+  FolderCog,
   Archive,
   ArchiveRestore,
   ArrowRightLeft,
@@ -41,10 +42,12 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { INSPECTOR_DOCK_QUERY } from "@/lib/layout";
 import { useApp } from "@/store/app";
 import { hasNewServer, previewOf, togglePreview, usePreview } from "@/store/preview";
+import { openProjectSettings } from "@/store/projectSettings";
 import { useUi } from "@/store/ui";
 import { AccountAvatar } from "../AccountAvatar";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { StatusDot, StatusPill } from "../StatusDot";
+import { BudgetChip } from "./BudgetChip";
 import { STATUS } from "@/lib/providers";
 import { useIsDone } from "@/store/completion";
 import { ConfirmDialog } from "../ui/alert-dialog";
@@ -220,6 +223,7 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
               {tier === "compact" ? "Limit" : "Usage limit"}
             </Chip>
           )}
+          <BudgetChip agent={agent} compact={tier !== "full"} />
           {tier === "full" && <PrChip agent={agent} />}
           {tier === "full" && agent.provider !== "custom" && agent.provider !== "local" && account && (
             <UsageChip account={account} compact={false} />
@@ -276,6 +280,9 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
                 onSelect={() => void attempt("Couldn't open the folder", () => api.openPath(agent.cwd))}
               >
                 <FolderOpen /> Open folder
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => openProjectSettings(agent.projectPath)}>
+                <FolderCog /> Project settings…
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void exportConversation(agent)}>
                 <Download /> Export conversation…

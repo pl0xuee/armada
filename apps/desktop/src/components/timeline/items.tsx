@@ -203,7 +203,7 @@ export const ThoughtBlock = memo(function ThoughtBlock({
         className="group flex max-w-full items-center gap-1.5 rounded-md py-0.5 pr-1.5 text-steel transition-colors hover:text-muted"
       >
         <Brain className={cn("h-3.5 w-3.5 shrink-0", live && "text-accent animate-breathe")} />
-        <span className={cn("font-medium", live && "text-muted")}>{live ? "Thinking…" : "Thought"}</span>
+        <span className={cn("font-medium", live && "text-muted")}>Thought</span>
         <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform duration-150", open && "rotate-90")} />
         {!open && <span className="min-w-0 truncate text-steel/80">{preview}</span>}
       </button>

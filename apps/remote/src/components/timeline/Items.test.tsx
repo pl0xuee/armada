@@ -45,8 +45,8 @@ describe("AgentMessage", () => {
     }
   });
 
-  it("still shows typing dots while an empty text message streams, and a note once it ended empty", () => {
-    expect(render(msg(""), true)).toContain("Agent is working");
+  it("shows nothing while an empty text message streams (the live status line says Writing), and a note once it ended empty", () => {
+    expect(render(msg(""), true)).toBe("");
     expect(render(msg(""), false)).toContain("No reply");
   });
 

@@ -128,7 +128,8 @@ export const AgentMessage = memo(function AgentMessage({
 }) {
   const images = item.images ?? [];
   if (!item.text && !images.length) {
-    if (streaming) return <TypingDots />;
+    // The live status line below the timeline already says "Writing…".
+    if (streaming) return null;
     return <p className="text-[12.5px] text-steel italic">No reply (the turn ended before any text).</p>;
   }
   return (
@@ -139,9 +140,13 @@ export const AgentMessage = memo(function AgentMessage({
   );
 });
 
-export function TypingDots({ label = "Agent is working" }: { label?: string }) {
+/** Three pulsing dots. `quiet`: decoration only (the text next to it carries the status). */
+export function TypingDots({ label = "Agent is working", quiet = false }: { label?: string; quiet?: boolean }) {
   return (
-    <span className="animate-dots inline-flex h-6 items-center gap-1 text-steel" role="status" aria-label={label}>
+    <span
+      className="animate-dots inline-flex h-6 items-center gap-1 text-steel"
+      {...(quiet ? { "aria-hidden": true } : { role: "status", "aria-label": label })}
+    >
       <span className="h-1.5 w-1.5 rounded-full bg-current" />
       <span className="h-1.5 w-1.5 rounded-full bg-current" />
       <span className="h-1.5 w-1.5 rounded-full bg-current" />
@@ -161,7 +166,7 @@ export const ThoughtRow = memo(function ThoughtRow({ item, streaming }: { item: 
         className="press-row flex min-h-11 w-full items-center gap-2 rounded-xl px-1 text-left text-[13.5px] text-steel"
       >
         <Icon name="sparkle" size={16} className={cn("shrink-0", streaming && "animate-breathe text-accent")} />
-        <span className="font-medium">{streaming ? "Thinking…" : "Thought"}</span>
+        <span className="font-medium">Thought</span>
         {!streaming && <span className="text-steel">· {words} {words === 1 ? "word" : "words"}</span>}
         <Icon name="chevronDown" size={16} className={cn("ml-auto shrink-0 transition-transform duration-150", !open && "-rotate-90")} />
       </button>

@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineItem } from "@/lib/types";
-import { formatElapsed, shouldShowThinking, turnEndOf, turnStart, waitingStatus } from "./thinking";
+import {
+  formatElapsed,
+  inheritedOf,
+  liveStep,
+  shouldShowThinking,
+  stepText,
+  subagentChips,
+  turnEndOf,
+  turnStart,
+  waitingStatus,
+} from "./thinking";
 
 const b = { id: "x", agentId: "a", seq: 0, ts: 100 };
 const user = { ...b, kind: "user_message", text: "hi" } as TimelineItem;
@@ -17,21 +27,91 @@ describe("shouldShowThinking", () => {
       expect(shouldShowThinking(s, user)).toBe(false);
     }
   });
-  it("shows for an empty timeline and after quiet items", () => {
+  it("shows for an empty timeline and under any live item", () => {
     expect(shouldShowThinking("starting", undefined)).toBe(true);
-    for (const it of [user, tool("completed"), tool("failed"), perm("allow"), plan, notice]) {
+    for (const it of [user, msg, thought, tool("in_progress"), tool("pending"), tool("completed"), plan, notice]) {
       expect(shouldShowThinking("working", it)).toBe(true);
     }
   });
-  it("hides while something is visibly streaming", () => {
-    for (const it of [msg, thought, tool("in_progress"), tool("pending"), perm(null)]) {
-      expect(shouldShowThinking("working", it)).toBe(false);
-    }
-    expect(shouldShowThinking("working", tool("completed"), true)).toBe(false);
+  it("leaves a pending approval to its card", () => {
+    expect(shouldShowThinking("working", perm(null))).toBe(false);
+    expect(shouldShowThinking("working", perm("allow"))).toBe(true);
   });
-  it("shows once the last agent message has gone quiet mid-turn", () => {
-    expect(shouldShowThinking("working", msg, false, true)).toBe(true);
-    expect(shouldShowThinking("idle", msg, false, true)).toBe(false);
+});
+
+describe("liveStep", () => {
+  const call = (toolKind: string, title: string, extra: Record<string, unknown> = {}) =>
+    ({
+      ...b,
+      id: `${toolKind}-${title}`,
+      kind: "tool_call",
+      toolCallId: title,
+      toolKind,
+      title,
+      status: "in_progress",
+      locations: [],
+      command: null,
+      ...extra,
+    }) as unknown as TimelineItem;
+  const text = (items: TimelineItem[], settled = false) => {
+    const s = liveStep(items, settled);
+    return s && stepText(s);
+  };
+
+  it("names a running command, in mono", () => {
+    const s = liveStep([user, call("execute", "Run npm test", { command: "npm test" })]);
+    expect(s).toEqual({ lead: "Running", detail: "npm test", mono: true });
+    expect(text([call("execute", "Run `pnpm build`")])).toBe("Running pnpm build");
+  });
+  it("describes file tools and counts parallel ones", () => {
+    expect(text([call("read", "Read src/foo.ts", { locations: ["src/foo.ts"] })])).toBe("Reading src/foo.ts");
+    expect(text([call("edit", "Edit src/a.ts")])).toBe("Editing src/a.ts");
+    expect(text([call("edit", "Edit a.ts"), call("edit", "Edit b.ts")])).toBe("Editing 2 files");
+    expect(text([call("search", "Search for `foo`")])).toBe('Searching for "foo"');
+    expect(text([call("read", "Read a"), call("read", "Read b"), call("read", "Read c")])).toBe("Reading 3 files");
+  });
+  it("uses the newest unfinished call, ignoring finished and nested ones", () => {
+    const done = call("read", "Read old.ts", { status: "completed" });
+    expect(text([call("edit", "Edit a.ts"), done])).toBe("Editing a.ts");
+    expect(liveStep([done])).toBeNull();
+    const child = call("execute", "Run ls", { parentToolCallId: "sub" });
+    const sub = call("other", "Explore", { subagent: { kind: "Explore" } });
+    expect(liveStep([sub, child])).toBeNull();
+    expect(text([call("read", "Read x.ts"), sub, child])).toBe("Reading x.ts");
+  });
+  it("says Thinking and Writing for a live thought and message, then falls back to the verbs", () => {
+    expect(text([user, thought])).toBe("Thinking…");
+    expect(text([user, msg])).toBe("Writing…");
+    expect(liveStep([user, msg], true)).toBeNull();
+    expect(liveStep([user])).toBeNull();
+    expect(liveStep([])).toBeNull();
+  });
+});
+
+describe("subagent chips", () => {
+  const opt = (category: string, currentValue: string, name: string) => ({
+    id: category,
+    name,
+    category,
+    currentValue,
+    options: [{ value: currentValue, name, description: null }],
+  });
+  it("reads the parent's model and effort from its config options", () => {
+    expect(inheritedOf([opt("model", "opus", "Opus"), opt("thought_level", "high", "High")])).toEqual({
+      model: "Opus",
+      effort: "High",
+    });
+    expect(inheritedOf([opt("mode", "default", "Ask")])).toEqual({ model: null, effort: null });
+    expect(inheritedOf(undefined)).toEqual({ model: null, effort: null });
+  });
+  it("shows what the launch named, else inherits what the parent exposes, else nothing", () => {
+    const parent = { model: "Opus", effort: null };
+    expect(subagentChips({ model: "Haiku", effort: "low" }, parent)).toEqual([
+      { key: "model", text: "Haiku", inherited: false },
+      { key: "effort", text: "Low", inherited: false },
+    ]);
+    expect(subagentChips({}, parent)).toEqual([{ key: "model", text: "inherits Opus", inherited: true }]);
+    expect(subagentChips({ model: " ", effort: null })).toEqual([]);
   });
 });
 

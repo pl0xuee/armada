@@ -14,7 +14,8 @@ export function permissionKeyOptions(item: PermissionItem): {
 } {
   return {
     allow: findOption(item, ["allow_once"]),
-    always: findOption(item, ["allow_always"]),
+    // A plan's "always" options switch the session's mode: only ever chosen by name.
+    always: item.plan ? undefined : findOption(item, ["allow_always"]),
     deny: findOption(item, ["reject_once", "reject_always"]),
   };
 }

@@ -270,6 +270,9 @@ export function seedSettings(onboarded: boolean): Settings {
     defaultPermissionMode: "auto",
     busySend: "ask",
     helperDefaults: { provider: null, accountId: null, customAgentId: null, model: null },
+    dailyBudgetUsd: 15,
+    agentBudgetUsd: 3,
+    budgetAction: "notify",
     remote: { enabled: false, lan: false, port: 47821, tailscale: false, lanAddress: null },
     voice: { inputDevice: null, model: "base.en", language: "auto", autoSend: false },
     voiceAssistant: {
@@ -652,6 +655,21 @@ export function seedAgents(): Agent[] {
       context: [22_400, 200_000],
       pending: 1,
       lastMessage: "Before I scaffold it, I have a couple of questions.",
+    }),
+    makeAgent({
+      id: "a-plan",
+      title: "Plan: cache product search",
+      provider: "claude",
+      accountId: "acc-claude-sys",
+      project: "storefront",
+      branch: "armada/search-cache",
+      status: "needs_permission",
+      minsAgo: 1,
+      cost: 0.22,
+      tokens: 52_800,
+      context: [31_400, 200_000],
+      pending: 1,
+      lastMessage: "I've written up a plan for caching product search.",
     }),
     makeAgent({
       id: "a-research",
@@ -1066,6 +1084,8 @@ export function seedItems(): Record<string, TimelineItem[]> {
       subagent: {
         kind: "Explore",
         description: "Find every caller of refreshToken() and how retries are queued",
+        model: "Haiku",
+        effort: "low",
         prompt:
           "Search the codebase for every call to refreshToken() and the HTTP interceptor that retries 401s. Report file:line for each call site and whether concurrent requests can trigger parallel refreshes. Do not edit files.",
       },
@@ -1276,6 +1296,44 @@ export function seedItems(): Record<string, TimelineItem[]> {
       ],
       resolution: null,
       at: NOW - 3 * 60_000,
+    },
+  ]);
+
+  out["a-plan"] = build("a-plan", 4, [
+    {
+      kind: "user_message",
+      text: "Product search is slow under load. Plan a cache for it before changing anything.",
+    },
+    {
+      kind: "tool_call",
+      toolCallId: "pl-1",
+      title: "Read src/search/query.ts",
+      toolKind: "read",
+      status: "completed",
+      locations: ["src/search/query.ts"],
+      diffs: [],
+      output: "",
+      command: null,
+    },
+    {
+      kind: "agent_message",
+      text: "Search hits the database on every keystroke. Here's the plan I'd like to run.",
+    },
+    {
+      kind: "permission",
+      requestId: "perm-plan-1",
+      title: "Ready to code?",
+      toolKind: "other",
+      command: null,
+      diffs: [],
+      options: [
+        { id: "exit-plan-accept-edits", name: "Yes, auto-accept edits", kind: "allow_always" },
+        { id: "exit-plan-default", name: "Yes, manually approve edits", kind: "allow_once" },
+        { id: "reject", name: "No, keep planning", kind: "reject_once" },
+      ],
+      resolution: null,
+      plan: "# Cache product search\n\nSearch queries hit Postgres on every keystroke. Put a short-lived cache in front of them.\n\n## Steps\n\n1. Add `src/search/cache.ts`: an LRU keyed on the normalised query, 60 s TTL, 500 entries.\n2. Wrap `runQuery()` in `src/search/query.ts` so a hit skips the database.\n3. Invalidate on product writes (`productUpdated`, `productDeleted`) through the existing event bus.\n4. Debounce the search box by 150 ms in `SearchBox.tsx`.\n5. Tests: cache hit and miss, TTL expiry, invalidation on write.\n\n## Risks\n\n- Stale results for up to 60 s if an event is dropped; the TTL bounds it.\n- Memory: about 2 MB at the entry limit.\n\n```ts\nexport const searchCache = new LruCache<string, SearchResult[]>({ max: 500, ttlMs: 60_000 });\n```\n",
+      at: NOW - 60_000,
     },
   ]);
 

@@ -797,8 +797,16 @@ impl AcpDriver {
         let command = raw_command(&tc["rawInput"]);
         let kind = tc["kind"].as_str().map(ToolKind::parse);
         self.perms.lock().insert(request_id.clone(), rpc_id);
-        self.ctx
-            .permission_requested(&request_id, title, kind, command, diffs, options);
+        let plan = crate::plan_approval::plan_from_tool_call(tc);
+        self.ctx.permission_requested_with_plan(
+            &request_id,
+            title,
+            kind,
+            command,
+            diffs,
+            options,
+            plan,
+        );
         true
     }
 }
@@ -1059,6 +1067,15 @@ fn apply_tool_fields(b: &mut ItemBody, u: &Value) {
         }
         if let Some(p) = input["prompt"].as_str() {
             sa.prompt = Some(p.to_string());
+        }
+        if let Some(model) = input["model"].as_str() {
+            sa.model = Some(model.to_string());
+        }
+        if let Some(effort) = input["effort"]
+            .as_str()
+            .or_else(|| input["reasoning_effort"].as_str())
+        {
+            sa.effort = Some(effort.to_string());
         }
         // The adapter completes a background launch at once; the sub-agent runs on.
         if input["run_in_background"].as_bool() == Some(true) {

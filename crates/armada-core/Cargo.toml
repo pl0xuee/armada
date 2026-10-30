@@ -8,7 +8,8 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+# preserve_order: settings files we edit keep their key order.
+serde_json = { workspace = true, features = ["preserve_order"] }
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true

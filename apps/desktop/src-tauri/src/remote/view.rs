@@ -286,6 +286,7 @@ mod tests {
                 diffs: vec![],
                 options: vec![],
                 resolution: None,
+                plan: None,
             },
             ItemBody::Question {
                 request_id: "q".into(),

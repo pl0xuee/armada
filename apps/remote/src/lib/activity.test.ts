@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { currentStep, groupActivity, nextKeep, openGroupKeys, summarizeActivity } from "./activity";
+import { groupActivity, openGroupKeys, summarizeActivity } from "./activity";
 import type { TimelineItem } from "./types";
 
 let n = 0;
@@ -25,14 +25,15 @@ describe("groupActivity", () => {
     expect(g.rows).toEqual([0, 1, 4]);
     expect(g.groups.get(1)).toEqual([1, 2, 3]);
   });
-  it("keeps the last agent message of the turn out, groups earlier ones", () => {
+  it("never folds agent messages: what the agent says stays where it is", () => {
     const g = run([user(), tool(), msg(), tool(), msg()]);
-    expect(g.groups.get(1)).toEqual([1, 2, 3]);
-    expect(g.rows).toEqual([0, 1, 4]);
+    expect(g.groups.size).toBe(0);
+    expect(g.rows).toEqual([0, 1, 2, 3, 4]);
   });
-  it("keeps the latest interim message visible while later tool calls stream in", () => {
+  it("a message splits runs, and each run keeps its own group while later calls stream in", () => {
     const g = run([user(), tool(), tool(), msg(), tool(), tool()]);
     expect(g.rows).toEqual([0, 1, 3, 4]);
+    expect(g.groups.get(1)).toEqual([1, 2]);
     expect(g.groups.get(4)).toEqual([4, 5]);
   });
   it("a pending permission breaks the run", () => {
@@ -49,56 +50,19 @@ describe("groupActivity", () => {
     expect(g.groups.size).toBe(0);
     expect(g.rows).toEqual([0, 1, 2]);
   });
-  it("pictures never fold into a group and don't replace the text as the turn's answer", () => {
+  it("a run only ever grows: the rows before it never change when more calls arrive", () => {
+    const items = [user(), tool(), tool(), msg(), tool()];
+    const before = run(items);
+    const after = run([...items, tool()]);
+    expect(before.rows).toEqual([0, 1, 3, 4]);
+    expect(after.rows).toEqual([0, 1, 3, 4]);
+    expect(after.groups.get(1)).toEqual(before.groups.get(1));
+    expect(after.groups.get(4)).toEqual([4, 5]);
+  });
+  it("keeps pictures and their text in view", () => {
     const g = run([user(), tool(), tool(), pic(), tool(), tool(), msg()]);
     expect(g.rows.includes(3)).toBe(true);
     for (const members of g.groups.values()) expect(members.includes(3)).toBe(false);
-    const g2 = run([user(), tool(), tool(), msg(), pic()]);
-    expect(g2.rows).toContain(3);
-    expect(g2.rows).toContain(4);
-  });
-  it("foldTail folds even a single trailing call while only waiting on sub-agents", () => {
-    const items = [user(), tool({ subagent: { kind: "Explore" } }), tool()];
-    const top = items.map((_, i) => i);
-    expect(groupActivity(items, top).groups.size).toBe(0);
-    expect(groupActivity(items, top, { foldTail: true }).groups.get(2)).toEqual([2]);
-  });
-  it("keeps a visible standalone row out of the group", () => {
-    const a = tool(), b = tool(), m = msg(), c = tool(), m2 = msg();
-    const items = [user(), a, b, m, c, m2];
-    const top = items.map((_, i) => i);
-    expect(groupActivity(items, top).groups.get(1)).toEqual([1, 2, 3, 4]);
-    const g = groupActivity(items, top, { keep: new Set([m.id, c.id]) });
-    expect(g.groups.get(1)).toEqual([1, 2]);
-    expect(g.rows).toEqual([0, 1, 3, 4, 5]);
-  });
-});
-
-describe("nextKeep", () => {
-  const view = { top: 1000, bottom: 1800 };
-  const row = (id: string, start: number, end: number, standalone = true) => ({ id, standalone, start, end });
-  const none = () => undefined;
-  it("adds tall visible standalone rows only", () => {
-    const k = nextKeep(new Set(), [row("a", 1100, 1300), row("b", 1300, 1330), row("g", 1330, 1500, false)], none, view, true);
-    expect([...k]).toEqual(["a"]);
-  });
-  it("releases rows fully above the viewport when pinned, holds them while the reader is scrolled up", () => {
-    const prev = new Set(["a"]);
-    const lookup = () => ({ start: 500, end: 700 });
-    expect(nextKeep(prev, [], lookup, view, true).size).toBe(0);
-    expect(nextKeep(prev, [], lookup, view, false)).toBe(prev);
-  });
-  it("treats rows within the margin as visible", () => {
-    const prev = new Set(["a"]);
-    expect(nextKeep(prev, [], () => ({ start: 800, end: 950 }), view, true)).toBe(prev);
-  });
-  it("releases rows below the viewport even when not pinned", () => {
-    expect(nextKeep(new Set(["a"]), [], () => ({ start: 2500, end: 2700 }), view, false).size).toBe(0);
-  });
-  it("holds an unmounted row (unknown position) unless pinned", () => {
-    const prev = new Set(["a"]);
-    expect(nextKeep(prev, [], none, view, false)).toBe(prev);
-    expect(nextKeep(prev, [], none, view, true).size).toBe(0);
   });
 });
 
@@ -115,16 +79,6 @@ describe("summarizeActivity", () => {
   it("describes groups without tool calls", () => {
     expect(summarizeActivity([thought(), msg()]).text).toBe("Thought for a moment");
     expect(summarizeActivity([msg(), msg()]).text).toBe("2 steps");
-  });
-});
-
-describe("currentStep", () => {
-  it("names what the agent is doing", () => {
-    expect(currentStep(tool({ title: "Run tests" }))).toEqual({ kind: "tool", text: "Run tests" });
-    expect(currentStep(thought())).toEqual({ kind: "thought", text: "Thinking…" });
-    expect(currentStep(msg("**Plan**: do it\nmore"))).toEqual({ kind: "message", text: "Plan: do it" });
-    expect(currentStep(msg(""))?.text).toBe("Writing…");
-    expect(currentStep(undefined)).toBeNull();
   });
 });
 

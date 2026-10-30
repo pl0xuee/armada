@@ -36,6 +36,7 @@ import type {
   Schedule,
   SearchHit,
   Settings,
+  BudgetStatus,
   ShareLink,
   ShipResult,
   BaseBranchStatus,
@@ -47,6 +48,14 @@ import type {
   VoiceStatus,
   VoiceTranscript,
 } from "./types";
+import type {
+  InstructionDoc,
+  InstructionFileName,
+  PermissionRules,
+  ProjectConfig,
+  SettingsFile,
+  SettingsScope,
+} from "./projectConfig";
 import { onVoiceBus } from "./voiceBus";
 import type { VaEvent } from "./voiceAssistant";
 
@@ -87,6 +96,14 @@ const tauriApi = {
     invoke<{ attachments: Attachment[]; problems: string[] }>("read_clipboard_images", { agentId: agentId ?? null }),
   /** Fuzzy file search in the agent's cwd: top 50 relative paths. */
   listFiles: (agentId: string, query: string) => invoke<string[]>("list_files", { agentId, query }),
+  // project settings: instruction files, permission rules, hooks, commands and skills of a project
+  projectConfig: (project: string) => invoke<ProjectConfig>("project_config", { project }),
+  /** Saves CLAUDE.md / AGENTS.md at the project root (created if missing). */
+  projectSaveInstruction: (project: string, file: InstructionFileName, content: string) =>
+    invoke<InstructionDoc>("project_save_instruction", { project, file, content }),
+  /** Replaces the allow/ask/deny lists in settings.json or settings.local.json, keeping all other keys. */
+  projectSaveRules: (project: string, scope: SettingsScope, rules: PermissionRules) =>
+    invoke<SettingsFile>("project_save_rules", { project, scope, rules }),
   /** Starts a helper agent beside a busy one: runs now, in parallel, on a copy of the main agent's files. */
   spawnHelper: (parentId: string, prompt: string, attachments?: Attachment[]) =>
     invoke<Agent>("spawn_helper", { parentId, prompt, attachments: attachments ?? [] }),
@@ -267,6 +284,8 @@ const tauriApi = {
 
   // settings & attention
   updateSettings: (settings: Settings) => invoke<Settings>("update_settings", { settings }),
+  /** Today's spend (since local midnight) against the daily budget cap. */
+  budgetStatus: () => invoke<BudgetStatus>("budget_status"),
   setInterfaceZoom: (percent: number) => invoke<void>("set_interface_zoom", { percent }),
   previewSound: (reason: AttentionReason) => invoke<void>("preview_sound", { reason }),
   /** Shows a test notification; also sends a phone push to `ntfyUrl` (or the saved one) when set. */

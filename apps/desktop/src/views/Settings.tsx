@@ -3,6 +3,7 @@ import {
   Bot,
   Smartphone,
   BookText,
+  FolderCog,
   Plug,
   Info,
   Keyboard,
@@ -13,6 +14,7 @@ import {
   Send,
   SlidersHorizontal,
   Volume2,
+  Wallet,
   Wrench,
   Mic,
   AudioLines,
@@ -30,8 +32,10 @@ import { InstallAllBanner } from "@/components/settings/InstallAllBanner";
 import { HelperSettings } from "@/components/settings/HelperSettings";
 import { RememberedChoicesRow } from "@/components/settings/RememberedChoicesRow";
 import { AgentsSection } from "@/components/settings/AgentsSection";
+import { BudgetsSection } from "@/components/settings/BudgetsSection";
 import { CustomSoundLine } from "@/components/settings/CustomSound";
 import { McpSection } from "@/components/settings/McpSection";
+import { ProjectSettingsSection } from "@/components/settings/ProjectSettingsSection";
 import { ProviderCard } from "@/components/settings/ProviderCard";
 import { RemoteSection } from "@/components/settings/RemoteSection";
 import { VoiceSection } from "@/components/settings/VoiceSection";
@@ -68,7 +72,9 @@ const SECTIONS: { id: SettingsSection; label: string; icon: ComponentType<{ clas
   { id: "sounds", label: "Sounds", icon: Volume2 },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "behavior", label: "Behavior", icon: SlidersHorizontal },
+  { id: "budgets", label: "Budgets", icon: Wallet },
   { id: "templates", label: "Templates", icon: BookText },
+  { id: "projects", label: "Projects", icon: FolderCog },
   { id: "mcp", label: "Tools (MCP)", icon: Plug },
   { id: "providers", label: "Providers", icon: Package },
   { id: "tools", label: "Agent tools", icon: Wrench },
@@ -115,7 +121,9 @@ export function SettingsView() {
           {section === "sounds" && <Sounds settings={settings} />}
           {section === "notifications" && <Notifications settings={settings} />}
           {section === "behavior" && <Behavior settings={settings} />}
+          {section === "budgets" && <BudgetsSection settings={settings} />}
           {section === "templates" && <TemplatesSection templates={settings.templates} />}
+          {section === "projects" && <ProjectSettingsSection />}
           {section === "mcp" && <McpSection servers={settings.mcpServers} />}
           {section === "providers" && <Providers />}
           {section === "tools" && <ToolsSection settings={settings} />}
