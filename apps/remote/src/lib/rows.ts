@@ -3,6 +3,7 @@
  * one card, and calls that ran under a sub-agent are nested under the call
  * that launched it (recursively), instead of interleaving with the main flow.
  */
+import { estimateQuestion, summarize } from "./question";
 import type { TimelineItem, ToolCallItem } from "./types";
 
 export interface SubagentNode {
@@ -132,6 +133,8 @@ export function estimateRow(r: Row): number {
       return 16 + 44;
     case "permission":
       return 16 + (it.resolution === null ? 330 : 52);
+    case "question":
+      return 16 + (it.resolution === null ? estimateQuestion(it) : 52 + 22 * summarize(it).length);
     case "plan":
       return 16 + 52 + 34 * it.entries.length;
     case "notice":

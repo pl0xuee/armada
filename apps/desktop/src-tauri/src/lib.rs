@@ -81,6 +81,7 @@ macro_rules! handler {
             commands::resume_queue,
             commands::clear_queue,
             commands::respond_permission,
+            commands::answer_question,
             commands::resume_agent,
             commands::stop_agent,
             commands::delete_agent,

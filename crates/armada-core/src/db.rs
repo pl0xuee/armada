@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS items (
 );
 CREATE INDEX IF NOT EXISTS items_agent_seq ON items(agent_id, seq);
 CREATE INDEX IF NOT EXISTS items_pending_perm ON items(agent_id) WHERE kind = 'permission';
+CREATE INDEX IF NOT EXISTS items_pending_question ON items(agent_id) WHERE kind = 'question';
 CREATE TABLE IF NOT EXISTS schedules (
     id   TEXT PRIMARY KEY,
     data TEXT NOT NULL
@@ -247,6 +248,18 @@ fn search_text(item: &TimelineItem) -> String {
             format!("{title} {}", command.as_deref().unwrap_or(""))
         }
         Permission { title, .. } => title.clone(),
+        Question {
+            message, fields, ..
+        } => {
+            let mut s = message.clone();
+            for f in fields {
+                for part in [&f.title, &f.description].into_iter().flatten() {
+                    s.push(' ');
+                    s.push_str(part);
+                }
+            }
+            s
+        }
         Notice { text, .. } => text.clone(),
         Thought { .. } | Plan { .. } | TurnSummary { .. } => String::new(),
     };
@@ -625,6 +638,25 @@ impl Db {
         for row in rows {
             if let Ok(item) = serde_json::from_str::<TimelineItem>(&row?) {
                 if let crate::model::ItemBody::Permission {
+                    resolution: None, ..
+                } = &item.body
+                {
+                    out.push(item);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Questions still waiting for an answer (served by items_pending_question).
+    pub fn unresolved_questions(&self) -> anyhow::Result<Vec<TimelineItem>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare("SELECT data FROM items WHERE kind = 'question'")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for row in rows {
+            if let Ok(item) = serde_json::from_str::<TimelineItem>(&row?) {
+                if let crate::model::ItemBody::Question {
                     resolution: None, ..
                 } = &item.body
                 {

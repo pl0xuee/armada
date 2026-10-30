@@ -1218,6 +1218,28 @@ export const mockApi: ArmadaApi = {
     return delay(undefined, 60);
   },
 
+  async answerQuestion(agentId, requestId, answers) {
+    const item = itemsOf(agentId).find((i) => i.kind === "question" && i.requestId === requestId);
+    if (!item || item.kind !== "question") throw new Error("Unknown question");
+    if (item.resolution !== null) throw new Error("Already answered");
+    updateItem(agentId, item.id, answers ? { resolution: "answered", answers } : { resolution: "skipped", answers: null });
+    const a = getAgent(agentId);
+    const pending = Math.max(0, a.pendingPermissions - 1);
+    patchAgent(agentId, { pendingPermissions: pending, status: pending ? "needs_permission" : "working" });
+    void runTurn(agentId, async (turn) => {
+      const msg = addItem(agentId, { kind: "agent_message", text: "" });
+      await streamField(
+        agentId,
+        msg.id,
+        "text",
+        answers ? "Thanks, got it. Going with that." : "No problem, I'll pick sensible defaults and keep going.",
+        turn,
+      );
+      finishTurn(agentId, answers ? "Going with your answers." : "Using defaults.");
+    });
+    return delay(undefined, 60);
+  },
+
   async respondPermission(agentId, requestId, optionId) {
     const item = itemsOf(agentId).find((i) => i.kind === "permission" && i.requestId === requestId);
     if (!item || item.kind !== "permission") throw new Error("Unknown permission request");

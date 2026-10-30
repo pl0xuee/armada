@@ -50,6 +50,33 @@ impl PermKind {
 }
 
 /// How the event loop should answer a server request.
+/// A question Codex is waiting on, and how its answer goes back.
+enum CodexQuestion {
+    /// `item/tool/requestUserInput`: answered per question id.
+    UserInput(Vec<QuestionField>),
+    /// `mcpServer/elicitation/request`: answered like an MCP form (its schema).
+    Form(Value),
+}
+
+impl CodexQuestion {
+    /// Codex's reply: the answers, or `None` for skipped (or `cancel`led).
+    fn reply(&self, answers: Option<&serde_json::Map<String, Value>>, cancel: bool) -> Value {
+        match (self, answers) {
+            (CodexQuestion::UserInput(fields), Some(a)) => {
+                crate::questions::codex_answers(fields, a)
+            }
+            (CodexQuestion::UserInput(_), None) => json!({ "answers": {} }),
+            (CodexQuestion::Form(schema), Some(a)) => json!({
+                "action": "accept",
+                "content": crate::questions::content_for_schema(schema, a),
+            }),
+            (CodexQuestion::Form(_), None) => {
+                json!({ "action": if cancel { "cancel" } else { "decline" }, "content": null })
+            }
+        }
+    }
+}
+
 enum RequestReply {
     /// Shown to the user; answered later.
     Deferred,
@@ -76,6 +103,8 @@ pub struct CodexDriver {
     /// Cancel was requested before Codex told us the turn id.
     cancel_requested: std::sync::atomic::AtomicBool,
     perms: Mutex<HashMap<String, (Value, PermKind)>>,
+    /// our request id → (JSON-RPC id, kind) of a question Codex asked
+    questions: Mutex<HashMap<String, (Value, CodexQuestion)>>,
     /// Items from a sub-agent thread we didn't know yet: thread id → item ids,
     /// re-parented once the collaborator call naming that thread shows up.
     orphans: Mutex<HashMap<String, Vec<String>>>,
@@ -237,6 +266,7 @@ impl CodexDriver {
             completed_turn: Mutex::new(None),
             cancel_requested: std::sync::atomic::AtomicBool::new(false),
             perms: Mutex::default(),
+            questions: Mutex::default(),
             orphans: Mutex::default(),
             approval_policy: Mutex::new(
                 resp["approvalPolicy"]
@@ -505,6 +535,12 @@ impl CodexDriver {
             let _ = self.peer.respond(rpc_id, kind.response("cancel")).await;
             self.ctx.permission_resolved(&req, "cancelled");
         }
+        let questions: Vec<(String, (Value, CodexQuestion))> =
+            self.questions.lock().drain().collect();
+        for (req, (rpc_id, q)) in questions {
+            let _ = self.peer.respond(rpc_id, q.reply(None, true)).await;
+            self.ctx.question_resolved(&req, "cancelled", None);
+        }
         if self.turn_id.lock().is_none() {
             // turn/start hasn't answered yet; interrupt as soon as it does.
             self.cancel_requested
@@ -525,6 +561,40 @@ impl CodexDriver {
                 )
                 .await?;
         }
+        Ok(())
+    }
+
+    /// Answers a question (`None` skips it).
+    pub async fn respond_question(
+        &self,
+        request_id: &str,
+        answers: Option<serde_json::Map<String, Value>>,
+    ) -> anyhow::Result<()> {
+        let fields = self
+            .ctx
+            .pending_question_fields(request_id)
+            .ok_or_else(|| anyhow!("This question is no longer waiting for an answer."))?;
+        if let Some(a) = &answers {
+            crate::questions::validate(&fields, a).map_err(|e| anyhow!(e))?;
+        }
+        let (rpc_id, question) = self
+            .questions
+            .lock()
+            .remove(request_id)
+            .ok_or_else(|| anyhow!("This question is no longer waiting for an answer."))?;
+        let reply = question.reply(answers.as_ref(), false);
+        if let Err(e) = self.peer.respond(rpc_id.clone(), reply).await {
+            self.questions
+                .lock()
+                .insert(request_id.to_string(), (rpc_id, question));
+            return Err(e);
+        }
+        let resolution = if answers.is_some() {
+            "answered"
+        } else {
+            "skipped"
+        };
+        self.ctx.question_resolved(request_id, resolution, answers);
         Ok(())
     }
 
@@ -1037,8 +1107,9 @@ impl CodexDriver {
                         }
                     });
                 }
-                // Approvals from the finished turn can't be answered anymore.
+                // Approvals and questions from the finished turn can't be answered anymore.
                 self.perms.lock().clear();
+                self.questions.lock().clear();
                 let turn = &p["turn"];
                 let outcome = match turn["status"].as_str() {
                     Some("interrupted") => TurnOutcome::Cancelled,
@@ -1214,33 +1285,59 @@ impl CodexDriver {
                 RequestReply::Deferred
             }
             "item/tool/requestUserInput" => {
-                let questions: Vec<String> = p["questions"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|q| q["question"].as_str().or_else(|| q["header"].as_str()))
-                    .map(|q| short(q, 200))
-                    .collect();
-                self.ctx.notice(
-                    NoticeLevel::Warn,
-                    format!(
-                        "Codex asked for input Armada can't show yet: {}. It was answered with no input; tell the agent in your next message.",
-                        if questions.is_empty() { "(no question text)".to_string() } else { questions.join(" / ") }
-                    ),
+                let questions = p["questions"].as_array().cloned().unwrap_or_default();
+                let fields = crate::questions::fields_from_codex(&questions);
+                if fields.is_empty() {
+                    return RequestReply::Now(json!({ "answers": {} }));
+                }
+                // One question reads as its own heading; several get an introduction.
+                let main: Vec<&QuestionField> =
+                    fields.iter().filter(|f| f.other_for.is_none()).collect();
+                let message = match main.as_slice() {
+                    [one] => one
+                        .description
+                        .clone()
+                        .or_else(|| one.title.clone())
+                        .unwrap_or_else(|| "Codex has a question".into()),
+                    _ => "Please answer the following questions.".into(),
+                };
+                let request_id = uuid::Uuid::new_v4().to_string();
+                self.questions.lock().insert(
+                    request_id.clone(),
+                    (rpc_id, CodexQuestion::UserInput(fields.clone())),
                 );
-                RequestReply::Now(json!({ "answers": {} }))
+                self.ctx
+                    .question_requested(&request_id, message, None, fields);
+                RequestReply::Deferred
             }
             "mcpServer/elicitation/request" => {
-                let server = p["serverName"].as_str().unwrap_or("an MCP server");
-                let message = p["message"].as_str().unwrap_or("");
-                self.ctx.notice(
-                    NoticeLevel::Warn,
-                    format!(
-                        "Codex asked for input Armada can't show yet: {server} wants {}. Armada declined it.",
-                        if message.is_empty() { "more information".to_string() } else { format!("\u{201c}{}\u{201d}", short(message, 200)) }
-                    ),
-                );
-                RequestReply::Now(json!({ "action": "decline", "content": null }))
+                let server = p["serverName"].as_str().map(str::to_string);
+                let schema = p["requestedSchema"].clone();
+                let fields = crate::questions::fields_from_schema(&schema);
+                if fields.is_empty() {
+                    // A URL elicitation (or an empty form): nothing Armada can show.
+                    self.ctx.notice(
+                        NoticeLevel::Warn,
+                        format!(
+                            "{} asked for input Armada can't show, so it was declined.",
+                            server.as_deref().unwrap_or("An MCP server")
+                        ),
+                    );
+                    return RequestReply::Now(json!({ "action": "decline", "content": null }));
+                }
+                let message = p["message"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|m| !m.is_empty())
+                    .unwrap_or("An MCP server needs some information")
+                    .to_string();
+                let request_id = uuid::Uuid::new_v4().to_string();
+                self.questions
+                    .lock()
+                    .insert(request_id.clone(), (rpc_id, CodexQuestion::Form(schema)));
+                self.ctx
+                    .question_requested(&request_id, message, server, fields);
+                RequestReply::Deferred
             }
             _ => RequestReply::Unsupported,
         }

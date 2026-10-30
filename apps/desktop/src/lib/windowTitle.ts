@@ -9,7 +9,7 @@ export function windowTitle(agent: Agent | undefined, done: boolean): string {
     case "starting":
       return `● Working — ${t} · Armada`;
     case "needs_permission":
-      return `⚠ Needs approval — ${t} · Armada`;
+      return `⚠ Needs you — ${t} · Armada`;
     case "error":
       return `⚠ Error — ${t} · Armada`;
     case "idle":

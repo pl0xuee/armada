@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { Agent, Attachment, AttentionReason, PermissionItem, PermissionMode, PromptTemplate, RemoteAccount, RemoteCustomAgent, Session, TimelineItem } from "./types";
+import type { Agent, Attachment, AttentionReason, PendingItem, PermissionMode, PromptTemplate, RemoteAccount, RemoteCustomAgent, Session, TimelineItem } from "./types";
 
 export type Phase =
   /** Checking the stored token. */
@@ -97,7 +97,7 @@ export interface State {
   /** Server's explanation when the stream is refused (shown in the banner). */
   connectionNote: string | null;
   /** Pending approvals across agents (GET /api/permissions), by requestId. */
-  permissions: Record<string, PermissionItem>;
+  permissions: Record<string, PendingItem>;
   permissionsStatus: "idle" | "loading" | "ready" | "error";
   /** When the connection last left the `live` state (for debouncing the banner). */
   disconnectedAt: number | null;

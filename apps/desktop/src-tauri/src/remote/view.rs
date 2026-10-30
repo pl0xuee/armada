@@ -109,6 +109,7 @@ pub fn project_item(item: &TimelineItem, roots: &[String]) -> Option<TimelineIte
         },
         ItemBody::Thought { .. }
         | ItemBody::Permission { .. }
+        | ItemBody::Question { .. }
         | ItemBody::Plan { .. }
         | ItemBody::Notice { .. } => return None,
     };
@@ -278,6 +279,14 @@ mod tests {
                 diffs: vec![],
                 options: vec![],
                 resolution: None,
+            },
+            ItemBody::Question {
+                request_id: "q".into(),
+                message: "Which API key should I use?".into(),
+                source: None,
+                fields: vec![],
+                resolution: None,
+                answers: None,
             },
             ItemBody::Plan { entries: vec![] },
             ItemBody::Notice {

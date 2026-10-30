@@ -666,6 +666,105 @@ impl AgentCtx {
         self.attention(AttentionReason::Permission, title, Some(request_id));
     }
 
+    /// The agent asks the user something (see `ItemBody::Question`). It waits like
+    /// an approval: counted in `pending_permissions`, "needs you", and an alert.
+    pub fn question_requested(
+        &self,
+        request_id: &str,
+        message: String,
+        source: Option<String>,
+        fields: Vec<QuestionField>,
+    ) {
+        let pending = {
+            let mut st = self.st.lock();
+            self.end_stream_locked(&mut st);
+            let id = self.push_locked(
+                &mut st,
+                ItemBody::Question {
+                    request_id: request_id.to_string(),
+                    message: message.clone(),
+                    source,
+                    fields,
+                    resolution: None,
+                    answers: None,
+                },
+            );
+            st.ext.insert(format!("question:{request_id}"), id);
+            st.pending_permissions.insert(request_id.to_string());
+            st.pending_permissions.len() as i64
+        };
+        self.update_agent(|a| {
+            a.status = AgentStatus::NeedsPermission;
+            a.pending_permissions = pending;
+            a.unread = true;
+            a.last_activity_at = now_ms();
+        });
+        self.attention(AttentionReason::Permission, message, Some(request_id));
+    }
+
+    /// Closes an approval or question that can't be answered anymore.
+    fn cancel_pending(&self, request_id: &str) {
+        let question = self
+            .st
+            .lock()
+            .ext
+            .contains_key(&format!("question:{request_id}"));
+        if question {
+            self.question_resolved(request_id, "cancelled", None);
+        } else {
+            self.permission_resolved(request_id, "cancelled");
+        }
+    }
+
+    /// The fields of a question still waiting for an answer.
+    pub fn pending_question_fields(&self, request_id: &str) -> Option<Vec<QuestionField>> {
+        let st = self.st.lock();
+        let id = st.ext.get(&format!("question:{request_id}"))?;
+        match &st.items.get(id)?.body {
+            ItemBody::Question { fields, .. } => Some(fields.clone()),
+            _ => None,
+        }
+    }
+
+    /// Records how a question ended: "answered" (with the answers), "skipped" or
+    /// "cancelled".
+    pub fn question_resolved(
+        &self,
+        request_id: &str,
+        resolution: &str,
+        answers: Option<serde_json::Map<String, serde_json::Value>>,
+    ) {
+        let pending = {
+            let mut st = self.st.lock();
+            if let Some(id) = st.ext.remove(&format!("question:{request_id}")) {
+                let resolution = resolution.to_string();
+                self.update_locked(&mut st, &id, |b| {
+                    if let ItemBody::Question {
+                        resolution: r,
+                        answers: a,
+                        ..
+                    } = b
+                    {
+                        *r = Some(resolution);
+                        *a = answers;
+                    }
+                });
+            }
+            st.pending_permissions.remove(request_id);
+            st.pending_permissions.len() as i64
+        };
+        self.update_agent_settled(|a, turn_active| {
+            a.pending_permissions = pending;
+            if pending == 0 && a.status == AgentStatus::NeedsPermission {
+                a.status = if turn_active {
+                    AgentStatus::Working
+                } else {
+                    AgentStatus::Idle
+                };
+            }
+        });
+    }
+
     pub fn permission_resolved(&self, request_id: &str, resolution: &str) {
         let pending = {
             let mut st = self.st.lock();
@@ -1133,11 +1232,15 @@ impl AgentCtx {
             self.end_stream_locked(&mut st);
             // Earlier turns are finished: drop their in-memory bookkeeping.
             let pending: HashSet<String> = st.pending_permissions.clone();
-            st.items.retain(|_, item| {
-                matches!(&item.body, ItemBody::Permission { request_id, .. } if pending.contains(request_id))
+            st.items.retain(|_, item| match &item.body {
+                ItemBody::Permission { request_id, .. } | ItemBody::Question { request_id, .. } => {
+                    pending.contains(request_id)
+                }
+                _ => false,
             });
             st.ext.retain(|k, _| {
                 k.strip_prefix("perm:")
+                    .or_else(|| k.strip_prefix("question:"))
                     .is_some_and(|req| pending.contains(req))
             });
             st.lens.clear();
@@ -1215,7 +1318,7 @@ impl AgentCtx {
             }
         }
         for id in &stale {
-            self.permission_resolved(id, "cancelled");
+            self.cancel_pending(id);
         }
         // What the finished turn did comes before whatever runs next.
         match &outcome {
@@ -1440,7 +1543,7 @@ impl AgentCtx {
             }
         });
         for id in stale {
-            self.permission_resolved(&id, "cancelled");
+            self.cancel_pending(&id);
         }
         if dropped > 0 {
             self.publish_queue();

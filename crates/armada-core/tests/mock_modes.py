@@ -1,10 +1,11 @@
 """Configurable ACP agent for lifecycle tests.
 Modes: normal, die, badstderr, slowinit, hanginit, replay, noresume, flood, steer.
-Prompt keywords: CRASH, PERM, HANG, CANCELERR, NOOPTS, EXITLATER, COST, ECHO."""
+Prompt keywords: CRASH, PERM, HANG, CANCELERR, NOOPTS, EXITLATER, COST, ECHO, ASK."""
 import json, sys, os, time
 MODE = sys.argv[1] if len(sys.argv) > 1 else "normal"
 next_id = 1000
 steered = []
+forms = False  # the client can show form elicitations (claude-agent-acp's AskUserQuestion)
 def send(m):
     sys.stdout.write(json.dumps(m) + "\n"); sys.stdout.flush()
 def update(sid, u):
@@ -21,6 +22,7 @@ if MODE == "badstderr":
 while True:
     msg = read(); method = msg.get("method"); mid = msg.get("id")
     if method == "initialize":
+        forms = bool(msg["params"].get("clientCapabilities", {}).get("elicitation", {}).get("form"))
         if MODE == "slowinit":
             time.sleep(3)
         if MODE == "hanginit":
@@ -77,6 +79,29 @@ while True:
                 if r.get("id") == pid and "method" not in r:
                     break
             text = text + " outcome=" + r["result"]["outcome"]["outcome"]
+        if "ASK" in text:
+            # Claude's AskUserQuestion as claude-agent-acp sends it; the tool is off
+            # unless the client said it can show forms.
+            if not forms:
+                text = text + " ask=unavailable"
+            else:
+                next_id += 1; qid = next_id
+                send({"jsonrpc": "2.0", "id": qid, "method": "elicitation/create", "params": {
+                    "mode": "form", "sessionId": sid, "message": "Please answer the following questions.",
+                    "requestedSchema": {"type": "object", "properties": {
+                        "question_0": {"type": "string", "title": "Database", "description": "Which database?",
+                                       "oneOf": [{"const": "Postgres", "title": "Postgres", "description": "Relational"},
+                                                 {"const": "SQLite", "title": "SQLite"}]},
+                        "question_0_custom": {"type": "string", "title": "Other"},
+                        "question_1": {"type": "array", "title": "Features", "description": "Which features?",
+                                       "items": {"anyOf": [{"const": "Auth", "title": "Auth"}, {"const": "Search", "title": "Search"}]}},
+                        "question_1_custom": {"type": "string", "title": "Other"}}}}})
+                while True:
+                    r = read()
+                    if r.get("id") == qid and "method" not in r:
+                        break
+                res = r["result"]
+                text = text + " action=" + res["action"] + " content=" + json.dumps(res.get("content"), sort_keys=True)
         if "COST" in text:
             update(sid, {"sessionUpdate": "usage_update", "used": 10, "size": 100, "cost": {"amount": 0.5, "currency": "USD"}})
         if "PERM" in text:

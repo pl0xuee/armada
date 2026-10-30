@@ -209,6 +209,19 @@ pub async fn respond_permission(
         .map_err(err)
 }
 
+/// Answers a question an agent asked; `answers: None` skips it.
+#[tauri::command]
+pub async fn answer_question(
+    core: State<'_, Core>,
+    agent_id: String,
+    request_id: String,
+    answers: Option<serde_json::Map<String, serde_json::Value>>,
+) -> CmdResult<()> {
+    core.answer_question(&agent_id, &request_id, answers)
+        .await
+        .map_err(err)
+}
+
 #[tauri::command]
 pub async fn resume_agent(
     core: State<'_, Core>,

@@ -12,9 +12,18 @@ import { relativeTimeLong } from "@/lib/format";
 import type { Agent, PermissionOption } from "@/lib/types";
 import { isEditableTarget } from "@/lib/utils";
 
-import { useApp, usePendingPermissions, type PendingPermission } from "@/store/app";
+import {
+  useApp,
+  usePendingPermissions,
+  usePendingQuestions,
+  type PendingPermission,
+  type PendingQuestion,
+} from "@/store/app";
 import { useUi } from "@/store/ui";
 import { approvalActionFor, createArm, shouldIgnoreApprovalKey } from "@/lib/approvalKeys";
+
+/** Something waiting on the user: an approval, or a question the agent asked. */
+type InboxEntry = { agent: Agent; item: PendingPermission["item"] | PendingQuestion["item"] };
 
 export function InboxView() {
   const agents = useApp((s) => s.agents);
@@ -22,7 +31,12 @@ export function InboxView() {
   const openAgent = useUi((s) => s.openAgent);
   const now = useNow();
 
-  const queue = usePendingPermissions();
+  const approvals = usePendingPermissions();
+  const questions = usePendingQuestions();
+  const queue = useMemo<InboxEntry[]>(
+    () => [...approvals, ...questions].sort((a, b) => a.item.ts - b.item.ts),
+    [approvals, questions],
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState<Set<string>>(() => new Set());
   // Re-entry guard for keyboard answers: a held key or a fast second press must not
@@ -54,7 +68,7 @@ export function InboxView() {
     }
   }, [queue, selectedIndex]);
 
-  const selected: PendingPermission | undefined = queue[selectedIndex];
+  const selected: InboxEntry | undefined = queue[selectedIndex];
 
   // Scroll only the list container (scrollIntoView would also scroll overflow-hidden ancestors).
   const listRef = useRef<HTMLDivElement>(null);
@@ -119,18 +133,24 @@ export function InboxView() {
         if (shouldIgnoreApprovalKey(e) || !selected || inFlight.current || busy.has(selected.item.id)) return;
         e.preventDefault();
         const it = selected.item;
+        // Questions are answered in the agent: A / D open it.
+        if (it.kind === "question") {
+          openAgent(selected.agent.id);
+          return;
+        }
         if (action === "deny_reason") {
           openAgent(selected.agent.id);
           return;
         }
         if (action === "allow_always") {
           const opt = findOption(it, ["allow_always"]);
-          if (opt && arm.current.press("always", setAlwaysArmed)) void respond(selected, opt);
+          if (opt && arm.current.press("always", setAlwaysArmed))
+            void respond({ agent: selected.agent, item: it }, opt);
           return;
         }
         const opt =
           action === "allow_once" ? findOption(it, ["allow_once"]) : findOption(it, ["reject_once", "reject_always"]);
-        if (opt) void respond(selected, opt);
+        if (opt) void respond({ agent: selected.agent, item: it }, opt);
         return;
       }
       if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented || e.repeat) return;
@@ -201,7 +221,7 @@ export function InboxView() {
             "Nothing waiting on you"
           ) : (
             <>
-              <span className="tabular text-warn">{queue.length}</span> waiting for approval
+              <span className="tabular text-warn">{queue.length}</span> waiting for you
               {oldest ? ` · oldest ${relativeTimeLong(oldest, now)}` : ""}
             </>
           )
@@ -214,7 +234,7 @@ export function InboxView() {
         ) : (
           <div
             role="list"
-            aria-label="Pending approvals"
+            aria-label="Pending approvals and questions"
             className="mx-auto max-w-3xl space-y-2 px-3 py-4 @md:px-4 @2xl:px-6 @2xl:py-5"
           >
             <AnimatePresence initial={false} mode="popLayout">

@@ -33,6 +33,7 @@ export type {
 };
 
 export type { TimelineItem };
+export type { QuestionAnswers, QuestionField, QuestionOption } from "@shared/types";
 export type { ConfigOption, ConfigOptionChoice, QueuedPrompt, SlashCommand, SubagentInfo } from "@shared/types";
 
 export type Provider = CoreProvider;
@@ -143,6 +144,9 @@ export interface StateSnapshot {
 }
 
 export type PermissionItem = Extract<TimelineItem, { kind: "permission" }>;
+export type QuestionItem = Extract<TimelineItem, { kind: "question" }>;
+/** Something that waits for the user: an approval or a question (GET /api/permissions lists both). */
+export type PendingItem = PermissionItem | QuestionItem;
 export type TextDeltaEvent = Extract<ArmadaEvent, { type: "text_delta" }>;
 
 type Pick_<T extends ArmadaEvent["type"]> = Extract<ArmadaEvent, { type: T }>;

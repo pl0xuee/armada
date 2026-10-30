@@ -121,3 +121,12 @@ describe("upsertItem", () => {
     expect(items.map((i) => i.id)).toEqual(["a", "b", "c"]);
   });
 });
+
+describe("question merge", () => {
+  const q = (resolution: string | null): TimelineItem => ({ id: "q", agentId: "a", seq: 1, ts: 1, kind: "question", requestId: "r", message: "?", fields: [], resolution });
+  it("a pending upsert never replaces a resolved snapshot copy", () => {
+    expect(isAtLeastAsComplete(q(null), q("answered"))).toBe(false);
+    expect(isAtLeastAsComplete(q("answered"), q(null))).toBe(true);
+    expect(mergeSnapshot([q("skipped")], [{ type: "item_upserted", item: q(null) }]).items[0]).toMatchObject({ resolution: "skipped" });
+  });
+});

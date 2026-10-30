@@ -202,6 +202,38 @@ export interface SubagentInfo {
   control?: boolean;
 }
 
+export type QuestionKind = "single" | "multi" | "text" | "boolean" | "number";
+
+/**
+ * One thing a question asks for. Answers are keyed by `id`: a string for `single`
+ * and `text`, a string array for `multi`, a boolean for `boolean`, a number for `number`.
+ */
+export interface QuestionField {
+  id: string;
+  /** A short label (e.g. "Database"), if any. */
+  title?: string | null;
+  /** The question itself when several are asked at once, or help text. */
+  description?: string | null;
+  kind: QuestionKind;
+  /** The choices of a `single` or `multi` field. */
+  options?: QuestionOption[];
+  /** A free-text "Other" box belonging to this choice field (its id): render it with that field. */
+  otherFor?: string | null;
+  required?: boolean;
+  /** Typed text shouldn't be shown (a password or key). */
+  secret?: boolean;
+}
+
+export interface QuestionOption {
+  /** What the answer records. */
+  value: string;
+  label: string;
+  description?: string | null;
+}
+
+/** Answers by field id (see QuestionField). Omitted fields are unanswered. */
+export type QuestionAnswers = Record<string, string | string[] | boolean | number>;
+
 export interface SlashCommand {
   name: string;
   description: string | null;
@@ -274,6 +306,23 @@ export type TimelineItem = ItemBase &
         options: PermissionOption[];
         /** optionId chosen, "cancelled", or null while pending */
         resolution: string | null;
+      }
+    | {
+        /**
+         * A question the agent (or one of its MCP servers) asks: Claude's AskUserQuestion,
+         * Codex's request_user_input, an MCP server's form. Waits like an approval.
+         */
+        kind: "question";
+        requestId: string;
+        /** The question (when there is one) or an introduction to the fields. */
+        message: string;
+        /** Who asks when it isn't the agent itself (an MCP server's name). */
+        source?: string | null;
+        fields: QuestionField[];
+        /** "answered", "skipped" or "cancelled"; null while waiting. */
+        resolution: string | null;
+        /** What was answered, by field id, once answered. */
+        answers?: QuestionAnswers | null;
       }
     | { kind: "plan"; entries: PlanEntry[] }
     | { kind: "notice"; level: "info" | "warn" | "error"; text: string }

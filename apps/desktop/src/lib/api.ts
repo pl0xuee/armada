@@ -9,6 +9,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   CheckpointList,
+  QuestionAnswers,
   RestorePreview,
   RestoreResult,
   Account,
@@ -150,6 +151,9 @@ const tauriApi = {
   /** Removes every queued message; returns how many were removed. */
   clearQueue: (agentId: string) => invoke<number>("clear_queue", { agentId }),
   /** Interrupts the running turn and runs this queued prompt next. */
+  /** Answer a question item; `answers: null` skips it (the agent is told you didn't answer). */
+  answerQuestion: (agentId: string, requestId: string, answers: QuestionAnswers | null) =>
+    invoke<void>("answer_question", { agentId, requestId, answers }),
   /** Into the running turn when the agent can take it; `interrupt` stops the turn and runs it next. */
   sendQueuedNow: (agentId: string, queuedId: string, interrupt = false) =>
     invoke<void>("send_queued_now", { agentId, queuedId, interrupt }),

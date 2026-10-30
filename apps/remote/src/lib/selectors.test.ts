@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { pendingCount, permissionIndex } from "./selectors";
-import type { Agent, PermissionItem, TimelineItem } from "./types";
+import { pendingCount, permissionIndex, waitingLabel } from "./selectors";
+import type { Agent, PendingItem, PermissionItem, TimelineItem } from "./types";
 
 const perm = (requestId: string, resolution: string | null): TimelineItem => ({
   id: requestId,
@@ -43,5 +43,22 @@ describe("permissionIndex", () => {
     const c = { ...perm("c", "allow"), ts: 0 } as PermissionItem;
     const index = permissionIndex({ a, b, c });
     expect(index.get("a")?.map((p) => p.requestId)).toEqual(["b", "a"]);
+  });
+});
+
+describe("questions in the pending list", () => {
+  const ask = (requestId: string): TimelineItem => ({ id: requestId, agentId: "a", seq: 1, ts: 0, kind: "question", requestId, message: "?", fields: [], resolution: null });
+  it("are grouped and counted with approvals", () => {
+    const a = ask("q1") as PendingItem;
+    const p = perm("r1", null) as PendingItem;
+    expect(permissionIndex({ q1: a, r1: p }).get("a")).toHaveLength(2);
+    expect(pendingCount(agent(2), [a, p], true, {})).toBe(2);
+    expect(pendingCount(agent(2), [a, p], true, { q1: "answered" })).toBe(1);
+  });
+  it("names what is waiting", () => {
+    expect(waitingLabel(1, 0)).toBe("1 approval waiting");
+    expect(waitingLabel(3, 0)).toBe("3 approvals waiting");
+    expect(waitingLabel(1, 1)).toBe("1 question waiting");
+    expect(waitingLabel(3, 1)).toBe("3 requests waiting");
   });
 });

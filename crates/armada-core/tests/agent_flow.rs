@@ -908,10 +908,11 @@ async fn subagent_calls_nest_under_their_task() {
     core.shutdown().await;
 }
 
-/// Codex: "ask" agents start with the untrusted policy; permission requests,
-/// legacy approvals, user-input and elicitation requests all get an answer of
-/// the right shape; a sub-agent item that arrives before its collaborator call
-/// is re-parented once the call is known.
+/// Codex: "ask" agents start with the untrusted policy; permission requests and
+/// legacy approvals get an answer of the right shape; user-input requests and MCP
+/// forms show as questions whose answers reach Codex in its shapes; a sub-agent
+/// item that arrives before its collaborator call is re-parented once the call is
+/// known.
 #[tokio::test]
 async fn codex_server_requests_and_ask_mode() {
     let mock = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/mock_codex_full.py");
@@ -943,9 +944,33 @@ async fn codex_server_requests_and_ask_mode() {
         .await
         .unwrap();
     let mut answered = Vec::new();
+    let mut asked = Vec::new();
     loop {
         match next_matching(&mut rx, |_| true).await {
             ArmadaEvent::ItemUpserted { item } => {
+                if let ItemBody::Question {
+                    request_id,
+                    message,
+                    source,
+                    fields,
+                    resolution: None,
+                    ..
+                } = &item.body
+                {
+                    asked.push((message.clone(), source.clone()));
+                    let answer = if fields[0].id == "token" {
+                        serde_json::json!({ "token": "abc" })
+                    } else {
+                        serde_json::json!({ "q": "Postgres" })
+                    };
+                    core.answer_question(
+                        &agent.id,
+                        request_id,
+                        Some(serde_json::from_value(answer).unwrap()),
+                    )
+                    .await
+                    .unwrap();
+                }
                 if let ItemBody::Permission {
                     request_id,
                     title,
@@ -997,22 +1022,20 @@ async fn codex_server_requests_and_ask_mode() {
         answers["exec"]["decision"]["denied"].is_object(),
         "{answers}"
     );
-    assert_eq!(answers["input"], serde_json::json!({ "answers": {} }));
-    assert_eq!(answers["elicit"]["action"], "decline");
-    let notices: Vec<&str> = items
-        .iter()
-        .filter_map(|i| match &i.body {
-            ItemBody::Notice { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect();
     assert_eq!(
-        notices
-            .iter()
-            .filter(|n| n.starts_with("Codex asked for input Armada can't show yet"))
-            .count(),
-        2,
-        "{notices:?}"
+        asked,
+        [
+            ("Which database?".to_string(), None),
+            ("Need a token".to_string(), Some("srv".to_string()))
+        ]
+    );
+    assert_eq!(
+        answers["input"],
+        serde_json::json!({ "answers": { "q": { "answers": ["Postgres"] } } })
+    );
+    assert_eq!(
+        answers["elicit"],
+        serde_json::json!({ "action": "accept", "content": { "token": "abc" } })
     );
     let orphan = items
         .iter()

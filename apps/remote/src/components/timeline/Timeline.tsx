@@ -9,6 +9,7 @@ import type { Agent, TimelineItem } from "@/lib/types";
 import { VirtualList } from "../VirtualList";
 import { AgentMessage, NoticeRow, PlanCard, ThoughtRow, ToolGroup, TypingDots, UserBubble } from "./Items";
 import { PermissionCard } from "./Permission";
+import { QuestionCard } from "./Question";
 import { SubagentCard, TurnSummaryCard } from "./Subagents";
 
 const rowKey = (r: Row) => r.key;
@@ -28,6 +29,8 @@ const TimelineRow = memo(
         return <ThoughtRow item={it} streaming={streaming} />;
       case "permission":
         return <PermissionCard item={it} readOnly={readOnly} />;
+      case "question":
+        return <QuestionCard item={it} readOnly={readOnly} />;
       case "plan":
         return <PlanCard item={it} />;
       case "notice":

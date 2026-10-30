@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useStore, type State } from "./store";
-import type { Agent, PermissionItem, RemoteAccount } from "./types";
+import type { Agent, PendingItem, RemoteAccount } from "./types";
 
 /** The agent's account, if known (share links don't include accounts). */
 export function accountOf(accounts: Record<string, RemoteAccount>, agent: Pick<Agent, "accountId">): RemoteAccount | undefined {
@@ -8,10 +8,10 @@ export function accountOf(accounts: Record<string, RemoteAccount>, agent: Pick<A
 }
 
 /** Pending approvals grouped by agent (memoised on the permissions slice). */
-let indexMemo: { permissions: State["permissions"]; index: Map<string, PermissionItem[]> } | null = null;
-export function permissionIndex(permissions: State["permissions"]): Map<string, PermissionItem[]> {
+let indexMemo: { permissions: State["permissions"]; index: Map<string, PendingItem[]> } | null = null;
+export function permissionIndex(permissions: State["permissions"]): Map<string, PendingItem[]> {
   if (indexMemo && indexMemo.permissions === permissions) return indexMemo.index;
-  const index = new Map<string, PermissionItem[]>();
+  const index = new Map<string, PendingItem[]>();
   for (const p of Object.values(permissions)) {
     if (p.resolution !== null) continue;
     const list = index.get(p.agentId);
@@ -30,7 +30,7 @@ export function permissionIndex(permissions: State["permissions"]): Map<string, 
  */
 export function pendingCount(
   agent: Agent,
-  items: PermissionItem[] | undefined,
+  items: PendingItem[] | undefined,
   loaded: boolean,
   resolving: Record<string, string>,
 ): number {
@@ -43,7 +43,7 @@ export function pendingCount(
 
 export interface InboxEntry {
   agent: Agent;
-  item: PermissionItem;
+  item: PendingItem;
 }
 
 export interface InboxData {
@@ -53,6 +53,14 @@ export interface InboxData {
   /** Loading the permissions list failed. */
   failed: boolean;
   count: number;
+  /** How many of the entries are questions (the rest are approvals). */
+  questions: number;
+}
+
+/** "2 approvals waiting", "1 question waiting", or "3 requests waiting" when mixed. */
+export function waitingLabel(count: number, questions: number): string {
+  const noun = questions === 0 ? "approval" : questions >= count ? "question" : "request";
+  return `${count} ${noun}${count === 1 ? "" : "s"} waiting`;
 }
 
 let countMemo: {
@@ -127,7 +135,8 @@ export function useInbox(): InboxData {
       for (const item of items ?? []) entries.push({ agent, item });
     }
     entries.sort((a, b) => a.item.ts - b.item.ts);
-    return { entries, loading: !loaded && status !== "error" && count > 0, failed: status === "error", count };
+    const questions = entries.filter((e) => e.item.kind === "question").length;
+    return { entries, loading: !loaded && status !== "error" && count > 0, failed: status === "error", count, questions };
   }, [agents, permissions, status, resolving]);
 }
 

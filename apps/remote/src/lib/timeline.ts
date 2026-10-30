@@ -101,6 +101,8 @@ export function isAtLeastAsComplete(candidate: TimelineItem, base: TimelineItem)
     }
     case "permission":
       return (base as typeof candidate).resolution === null || candidate.resolution !== null;
+    case "question":
+      return (base as typeof candidate).resolution === null || candidate.resolution !== null;
     case "plan": {
       const score = (e: typeof candidate.entries) => e.reduce((n, x) => n + (PLAN_RANK[x.status] ?? 0), 0);
       return score(candidate.entries) >= score((base as typeof candidate).entries);

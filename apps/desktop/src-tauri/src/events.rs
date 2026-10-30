@@ -167,6 +167,11 @@ fn dispatch(app: &AppHandle, event: ArmadaEvent) {
                         request_id,
                         resolution: Some(_),
                         ..
+                    }
+                    | armada_core::ItemBody::Question {
+                        request_id,
+                        resolution: Some(_),
+                        ..
                     } = &item.body
                     {
                         if let Some(att) = app.try_state::<Arc<Attention>>() {

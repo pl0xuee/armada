@@ -59,7 +59,8 @@ import type {
   Attachment,
   AttentionEvent,
   CreateAgentRequest,
-  PermissionItem,
+  PendingItem,
+  QuestionAnswers,
   RemoteAccount,
   RemoteEvent,
   StateSnapshot,
@@ -969,7 +970,7 @@ function scheduleRefetch(agentId: string) {
 let permsInFlight: number | null = null;
 let permsAgain = false;
 /** Approval events seen while /api/permissions is in flight (latest per request). */
-let permsJournal: Map<string, PermissionItem> | null = null;
+let permsJournal: Map<string, PendingItem> | null = null;
 let permsTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Load every pending approval (one request) for the inbox and badges. */
@@ -995,9 +996,9 @@ export async function loadPermissions() {
         null,
         "Armada sent a response this app couldn't read.",
       );
-    const permissions: Record<string, PermissionItem> = {};
+    const permissions: Record<string, PendingItem> = {};
     for (const it of raw)
-      if (it && it.kind === "permission" && it.resolution === null)
+      if (it && (it.kind === "permission" || it.kind === "question") && it.resolution === null)
         permissions[it.requestId] = it;
     for (const [id, it] of permsJournal) {
       if (it.resolution === null) permissions[id] = it;
@@ -1031,7 +1032,7 @@ function schedulePermissions() {
 }
 
 /** Keep the approvals list in step with timeline events. */
-function notePermission(item: PermissionItem) {
+function notePermission(item: PendingItem) {
   permsJournal?.set(item.requestId, item);
   setState((s) => {
     const has = !!s.permissions[item.requestId];
@@ -1132,7 +1133,7 @@ function handleEvent(ev: RemoteEvent) {
       const item = ev.item;
       if (!item || typeof item.id !== "string") return;
       itemBuffers.get(item.agentId)?.push({ type: "item_upserted", item });
-      if (item.kind === "permission" && getState().session?.scope === "owner")
+      if ((item.kind === "permission" || item.kind === "question") && getState().session?.scope === "owner")
         notePermission(item);
       const t = getState().timelines[item.agentId];
       if (t && t.status !== "error") {
@@ -1215,7 +1216,7 @@ function reconcile(agentId: string, items: TimelineItem[]) {
   let resolving = s.resolving;
   for (const it of items) {
     if (
-      it.kind === "permission" &&
+      (it.kind === "permission" || it.kind === "question") &&
       it.resolution !== null &&
       resolving[it.requestId]
     ) {
@@ -1378,6 +1379,62 @@ export async function respondToPermission(
       pushToast({
         tone: "info",
         title: "Request no longer pending",
+        body: "It was answered elsewhere or the agent moved on.",
+        agentId: null,
+        reason: null,
+        duration: 5_000,
+      });
+      void loadPermissions();
+      if (getState().timelines[agentId]) void loadTimeline(agentId);
+      void refreshState();
+    } else {
+      toastError("Couldn't send your answer", e);
+    }
+    return false;
+  }
+}
+
+/** Answer an agent's question (answers: null skips it). */
+export async function answerQuestion(
+  agentId: string,
+  requestId: string,
+  answers: QuestionAnswers | null,
+): Promise<boolean> {
+  const s = getState();
+  if (s.resolving[requestId]) return false;
+  const resolution = answers ? "answered" : "skipped";
+  setState((st) => ({ resolving: { ...st.resolving, [requestId]: resolution } }));
+  vibrate(12);
+  const settle = (drop: boolean) =>
+    setState((st) => {
+      const resolving = { ...st.resolving };
+      delete resolving[requestId];
+      if (!drop) return { resolving };
+      const permissions = { ...st.permissions };
+      delete permissions[requestId];
+      return { resolving, permissions };
+    });
+  try {
+    await api.answerQuestion(requireBackend(), agentId, requestId, answers);
+    // Reflect the answer locally right away; the server's upsert confirms it.
+    const t = getState().timelines[agentId];
+    if (t) {
+      const items = t.items.map((i) =>
+        i.kind === "question" && i.requestId === requestId && i.resolution === null
+          ? { ...i, resolution, answers }
+          : i,
+      );
+      setTimeline(agentId, { ...t, items });
+    }
+    settle(true);
+    return true;
+  } catch (e) {
+    settle(false);
+    if (handleAuthError(e)) return false;
+    if (e instanceof ApiError && (e.status === 404 || e.status === 409)) {
+      pushToast({
+        tone: "info",
+        title: "Question no longer pending",
         body: "It was answered elsewhere or the agent moved on.",
         agentId: null,
         reason: null,

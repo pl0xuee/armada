@@ -90,6 +90,7 @@ export function lastAction(items: TimelineItem[] | undefined): string | null {
     const it = items[i];
     if (it.kind === "tool_call") return it.title;
     if (it.kind === "permission" && it.resolution === null) return `Waiting: ${it.title}`;
+    if (it.kind === "question" && it.resolution === null) return `Asking: ${it.message}`;
   }
   return null;
 }
@@ -111,6 +112,7 @@ export function liveTail(items: TimelineItem[] | undefined): string | null {
       return it.subagent?.description ? `${it.subagent.kind ?? "Sub-agent"}: ${it.subagent.description}` : it.title;
     }
     if (it.kind === "permission" && it.resolution === null) return `Waiting for approval: ${it.title}`;
+    if (it.kind === "question" && it.resolution === null) return `Waiting for your answer: ${it.message}`;
     if (it.kind === "thought" && it.text.trim()) {
       const t = it.text
         .replace(/[*_`#>]/g, "")

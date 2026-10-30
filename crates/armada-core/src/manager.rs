@@ -79,6 +79,16 @@ impl Driver {
             Driver::Codex(d) => d.steer(prompt).await,
         }
     }
+    async fn respond_question(
+        &self,
+        request_id: &str,
+        answers: Option<serde_json::Map<String, serde_json::Value>>,
+    ) -> Result<()> {
+        match self {
+            Driver::Acp(d) => d.respond_question(request_id, answers).await,
+            Driver::Codex(d) => d.respond_question(request_id, answers).await,
+        }
+    }
     async fn respond_permission(&self, request_id: &str, option_id: &str) -> Result<()> {
         match self {
             Driver::Acp(d) => d.respond_permission(request_id, option_id).await,
@@ -411,9 +421,16 @@ impl Core {
                 },
             );
         }
-        // Approvals that were pending when the app closed can't be answered anymore.
+        // Approvals and questions that were pending when the app closed can't be
+        // answered anymore.
         for mut item in db.unresolved_permissions()? {
             if let ItemBody::Permission { resolution, .. } = &mut item.body {
+                *resolution = Some("cancelled".into());
+            }
+            db.put_item(&item)?;
+        }
+        for mut item in db.unresolved_questions()? {
+            if let ItemBody::Question { resolution, .. } = &mut item.body {
                 *resolution = Some("cancelled".into());
             }
             db.put_item(&item)?;
@@ -2021,6 +2038,19 @@ impl Core {
         driver.respond_permission(request_id, option_id).await
     }
 
+    /// Answers a question the agent asked (`None` skips it).
+    pub async fn answer_question(
+        &self,
+        agent_id: &str,
+        request_id: &str,
+        answers: Option<serde_json::Map<String, serde_json::Value>>,
+    ) -> Result<()> {
+        let driver = self
+            .live_driver(agent_id)
+            .ok_or_else(|| anyhow!("The agent isn't running anymore"))?;
+        driver.respond_question(request_id, answers).await
+    }
+
     /// Re-attaches to the provider session; with `auto_continue` it also sends
     /// "continue where you left off".
     pub async fn resume_agent(&self, agent_id: &str, auto_continue: bool) -> Result<()> {
@@ -2966,6 +2996,20 @@ fn transcript_markdown(agent: &Agent, items: &[TimelineItem]) -> String {
                 "> **Approval requested:** {title} \u{2192} {}\n\n",
                 resolution.as_deref().unwrap_or("pending")
             )),
+            ItemBody::Question {
+                message,
+                fields,
+                resolution,
+                answers,
+                ..
+            } => {
+                let answer = match (resolution.as_deref(), answers) {
+                    (Some("answered"), Some(a)) => crate::questions::summary(fields, a),
+                    (Some(r), _) => r.to_string(),
+                    (None, _) => "pending".into(),
+                };
+                md.push_str(&format!("> **Question:** {message} \u{2192} {answer}\n\n"));
+            }
             ItemBody::Plan { entries } => {
                 md.push_str("**Plan**\n\n");
                 for e in entries {

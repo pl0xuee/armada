@@ -553,6 +553,54 @@ pub struct PermissionOption {
     pub kind: PermissionOptionKind,
 }
 
+/// One thing a question asks for. Answers are keyed by `id`: a string for
+/// `single` and `text`, an array of strings for `multi`, a bool for `boolean`
+/// and a number for `number`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestionField {
+    pub id: String,
+    /// A short label (e.g. "Database"), if any.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// The question itself when several are asked at once, or help text.
+    #[serde(default)]
+    pub description: Option<String>,
+    pub kind: QuestionKind,
+    /// The choices of a `single` or `multi` field.
+    #[serde(default)]
+    pub options: Vec<QuestionOption>,
+    /// A free-text "Other" box belonging to this choice field (its id): shown
+    /// with that field rather than on its own.
+    #[serde(default)]
+    pub other_for: Option<String>,
+    #[serde(default)]
+    pub required: bool,
+    /// Typed text shouldn't be shown (a password or key).
+    #[serde(default)]
+    pub secret: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuestionKind {
+    Single,
+    Multi,
+    Text,
+    Boolean,
+    Number,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestionOption {
+    /// What the answer records.
+    pub value: String,
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlanStatus {
@@ -632,6 +680,23 @@ pub enum ItemBody {
         options: Vec<PermissionOption>,
         resolution: Option<String>,
     },
+    /// A question the agent (or one of its MCP servers) asks you: Claude's
+    /// AskUserQuestion, Codex's request_user_input, an MCP server's form. It waits
+    /// like an approval until answered or skipped.
+    Question {
+        request_id: String,
+        /// The question (when there is one) or an introduction to the fields.
+        message: String,
+        /// Who asks when it isn't the agent itself (an MCP server's name).
+        #[serde(default)]
+        source: Option<String>,
+        fields: Vec<QuestionField>,
+        /// "answered", "skipped" or "cancelled"; `None` while waiting.
+        resolution: Option<String>,
+        /// What was answered, by field id (see `QuestionField`), once answered.
+        #[serde(default)]
+        answers: Option<serde_json::Map<String, serde_json::Value>>,
+    },
     Plan {
         entries: Vec<PlanEntry>,
     },
@@ -658,6 +723,7 @@ impl ItemBody {
             ItemBody::Thought { .. } => "thought",
             ItemBody::ToolCall { .. } => "tool_call",
             ItemBody::Permission { .. } => "permission",
+            ItemBody::Question { .. } => "question",
             ItemBody::Plan { .. } => "plan",
             ItemBody::Notice { .. } => "notice",
             ItemBody::TurnSummary { .. } => "turn_summary",

@@ -86,7 +86,7 @@ export const DONE_META: StatusMeta = { label: "Done", colorVar: "var(--ok)", liv
 export const STATUS: Record<AgentStatus, StatusMeta> = {
   starting: { label: "Starting", colorVar: "var(--accent)", live: true },
   working: { label: "Working", colorVar: "var(--accent)", live: true },
-  needs_permission: { label: "Needs approval", colorVar: "var(--warn)", live: true },
+  needs_permission: { label: "Needs you", colorVar: "var(--warn)", live: true },
   idle: { label: "Idle", colorVar: "var(--steel)", live: false },
   error: { label: "Error", colorVar: "var(--err)", live: false },
   interrupted: { label: "Interrupted", colorVar: "var(--violet)", live: false },
