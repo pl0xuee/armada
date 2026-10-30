@@ -17,6 +17,7 @@ use crate::model::*;
 use crate::session::{AgentCtx, ExitIntent, Prompt, StartCancelled, Steer, TurnOutcome};
 use crate::{accounts, git, local, providers, EventSink, Result};
 
+mod budgets;
 mod helper_sync;
 
 /// Starts an agent as a helper of `parent_id`, from `commit` (a snapshot of the
@@ -154,6 +155,8 @@ struct Inner {
     shutting_down: AtomicBool,
     /// See `CANCEL_WATCHDOG_MS` (adjustable for tests).
     cancel_watchdog_ms: AtomicU64,
+    /// Spending-cap bookkeeping (see `budgets.rs`).
+    budget: Mutex<budgets::BudgetState>,
 }
 
 /// Marks a schedule as starting; released on drop.
@@ -284,6 +287,7 @@ impl Core {
             settings,
         } = loaded;
 
+        let budget_dir = data_dir.clone();
         let core = Core {
             inner: Arc::new(Inner {
                 data_dir,
@@ -300,6 +304,7 @@ impl Core {
                 running_schedules: Mutex::default(),
                 shutting_down: AtomicBool::new(false),
                 cancel_watchdog_ms: AtomicU64::new(CANCEL_WATCHDOG_MS),
+                budget: Mutex::new(budgets::BudgetState::load(&budget_dir)),
             }),
         };
         core.restore_queues();
@@ -507,7 +512,11 @@ impl Core {
             .agents
             .lock()
             .values()
-            .filter(|r| r.agent.status == AgentStatus::Interrupted && !r.agent.archived)
+            .filter(|r| {
+                r.agent.status == AgentStatus::Interrupted
+                    && !r.agent.archived
+                    && !self.budget_blocks_resume(r.agent.cost_usd)
+            })
             .map(|r| r.agent.id.clone())
             .collect();
         // A few at a time: starting every agent at once overwhelms the machine

@@ -196,6 +196,10 @@ export interface SubagentInfo {
   kind?: string | null;
   description?: string | null;
   prompt?: string | null;
+  /** The model it was asked to run on, when the launch names one (otherwise it inherits the agent's). */
+  model?: string | null;
+  /** Its reasoning effort, when the launch names one. */
+  effort?: string | null;
   /** Launched in the background: the call completes at launch, the sub-agent keeps running. */
   background?: boolean;
   /** A management call (Codex wait/close/send), not a sub-agent of its own: never counted. */
@@ -311,6 +315,8 @@ export type TimelineItem = ItemBase &
         options: PermissionOption[];
         /** optionId chosen, "cancelled", or null while pending */
         resolution: string | null;
+        /** Set when this approves a plan (Claude's ExitPlanMode): the plan markdown. */
+        plan?: string;
       }
     | {
         /**
@@ -483,6 +489,24 @@ export interface Settings {
   /** Sending while an agent works: ask each time, queue it, or start a helper agent. */
   busySend: BusySend;
   helperDefaults: HelperDefaults;
+  /** Cap on all agents' spend per local day, in USD; null = no cap. */
+  dailyBudgetUsd: number | null;
+  /** Cap on one agent's total spend, in USD; null = no cap. */
+  agentBudgetUsd: number | null;
+  /** What reaching a cap does: alert only, or also pause the agents. */
+  budgetAction: BudgetAction;
+}
+
+export type BudgetAction = "notify" | "pause";
+export type BudgetLevel = "under" | "warn" | "hit";
+
+/** Today's spend (since local midnight) against the daily cap. */
+export interface BudgetStatus {
+  /** Local date, YYYY-MM-DD. */
+  day: string;
+  todayUsd: number;
+  dailyBudgetUsd: number | null;
+  level: BudgetLevel;
 }
 
 /** The OpenAI Realtime voice assistant (off by default; audio is sent to OpenAI). */

@@ -86,13 +86,13 @@ describe("buildRows", () => {
 });
 
 describe("activity groups in rows", () => {
-  it("folds a finished turn's work and keeps its final answer", () => {
-    const items = [user("u"), call("r1"), msg("narration"), call("r2", { toolKind: "execute" }), msg("answer")];
+  it("folds runs of tool calls and keeps every message in view", () => {
+    const items = [user("u"), call("r1"), call("r2", { toolKind: "execute" }), msg("narration"), call("r3"), msg("answer")];
     const rows = buildRows(items);
-    expect(rows.map((r) => r.kind)).toEqual(["item", "group", "item"]);
+    expect(rows.map((r) => r.kind)).toEqual(["item", "group", "item", "tools", "item"]);
     const g = rows[1];
-    expect(g.kind === "group" && g.items.map((i) => i.id)).toEqual(["r1", "narration", "r2"]);
-    expect(rows[2].key).toBe("answer");
+    expect(g.kind === "group" && g.items.map((i) => i.id)).toEqual(["r1", "r2"]);
+    expect(rows[4].key).toBe("answer");
   });
 
   it("keeps a picture-only reply as its own row and never as the final answer", () => {
@@ -100,15 +100,6 @@ describe("activity groups in rows", () => {
     const rows = buildRows(items);
     expect(rows.map((r) => r.key)).toEqual(["u", "a", "answer", "p"]);
     expect(rows[1].kind).toBe("group");
-  });
-
-  it("keeps rows listed in `keep` out of groups, and can fold a lone trailing call while waiting", () => {
-    const items = [user("u"), call("a"), call("b"), msg("m"), call("c"), msg("answer")];
-    expect(buildRows(items).map((r) => r.key)).toEqual(["u", "a", "answer"]);
-    expect(buildRows(items, { keep: new Set(["m"]) }).map((r) => r.key)).toEqual(["u", "a", "m", "c", "answer"]);
-    const waiting = [user("u"), call("s", { subagent: { kind: "Explore" } }), call("lone")];
-    expect(buildRows(waiting).map((r) => r.kind)).toEqual(["item", "subagent", "tools"]);
-    expect(buildRows(waiting, { foldTail: true }).map((r) => r.kind)).toEqual(["item", "subagent", "group"]);
   });
 
   it("compares groups by their member objects", async () => {

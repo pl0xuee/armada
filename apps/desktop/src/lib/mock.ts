@@ -4,6 +4,8 @@
 
 import type { ArmadaApi } from "./api";
 import { emitVoiceBus } from "./voiceBus";
+import { budgetLevel } from "./budget";
+import { mockProjectConfig, mockSaveInstruction, mockSaveRules } from "./mock-project-config";
 import { configDefaultsKey, isRememberableOption } from "./configMemory";
 import { isStressMode, STRESS_AGENTS, STRESS_TICK_MS, stressAgents, stressItems, stressWords } from "./mock-stress";
 import {
@@ -556,6 +558,8 @@ function startLiveActivity() {
       subagent: {
         kind: "general-purpose",
         description: "Collect Qdrant filtered-search benchmarks at 1–10M vectors",
+        model: "Sonnet",
+        effort: "medium",
         prompt:
           "Find recent (2025+) public benchmarks for Qdrant filtered vector search between 1M and 10M vectors. Summarize p50/p95 latency, hardware, and recall settings. Cite sources.",
       },
@@ -583,7 +587,14 @@ function startLiveActivity() {
         diffs: [],
         output: "Async agent launched successfully.",
         command: null,
-        subagent: { kind, description, prompt: description, background: true },
+        subagent: {
+          kind,
+          description,
+          prompt: description,
+          background: true,
+          // The Explore one names a cheap model; the other inherits the main agent's.
+          ...(kind === "Explore" ? { model: "Haiku", effort: "low" } : {}),
+        },
       });
       const c = addItem("a-research", {
         kind: "tool_call",
@@ -2139,6 +2150,14 @@ export const mockApi: ArmadaApi = {
     if (t && !t.done) void termExit(t, 143);
   },
 
+  async budgetStatus() {
+    const midnight = new Date().setHours(0, 0, 0, 0);
+    const todayUsd = db.agents.filter((a) => a.lastActivityAt >= midnight).reduce((sum, a) => sum + a.costUsd, 0);
+    const cap = db.settings.dailyBudgetUsd;
+    const day = new Date().toLocaleDateString("en-CA");
+    return { day, todayUsd, dailyBudgetUsd: cap, level: budgetLevel(todayUsd, cap) };
+  },
+
   async updateSettings(settings: Settings) {
     const invalid = validateSettings(settings);
     if (invalid) {
@@ -2235,6 +2254,21 @@ export const mockApi: ArmadaApi = {
   async discoverProjects() {
     await sleep(500);
     return [...MOCK_PROJECTS];
+  },
+
+  async projectConfig(project) {
+    await sleep(rand(120, 300));
+    return mockProjectConfig(project);
+  },
+
+  async projectSaveInstruction(project, file, content) {
+    await sleep(rand(150, 350));
+    return mockSaveInstruction(project, file, content);
+  },
+
+  async projectSaveRules(project, scope, rules) {
+    await sleep(rand(150, 350));
+    return mockSaveRules(project, scope, rules);
   },
 
   async listFiles(agentId, query) {
@@ -2843,6 +2877,9 @@ const mockVoice = {
 let nextHelperParent: Agent | null = null;
 
 function validateSettings(s: Settings): string | null {
+  for (const cap of [s.dailyBudgetUsd, s.agentBudgetUsd]) {
+    if (cap != null && (!Number.isFinite(cap) || cap <= 0)) return "Budgets must be more than $0 (or empty for no cap)";
+  }
   if (!["ask", "queue", "helper"].includes(s.busySend)) return `Unknown busy-send setting “${s.busySend}”`;
   if (!["off", "ask", "auto"].includes(s.failover)) return `Unknown failover setting “${s.failover}”`;
   if (!["auto", "ask"].includes(s.defaultPermissionMode)) return `Unknown permission mode “${s.defaultPermissionMode}”`;

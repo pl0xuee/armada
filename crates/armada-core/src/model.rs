@@ -428,6 +428,12 @@ pub struct SubAgent {
     pub kind: Option<String>,
     pub description: Option<String>,
     pub prompt: Option<String>,
+    /// The model it was asked to run on, when the launch names one (otherwise it inherits the agent's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Its reasoning effort, when the launch names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     /// Launched in the background (Claude `run_in_background`): the call
     /// completes as soon as the sub-agent starts, but the sub-agent keeps
     /// running. The adapter reports no per-sub-agent end to us, so the UI treats
@@ -684,6 +690,9 @@ pub enum ItemBody {
         diffs: Vec<FileDiff>,
         options: Vec<PermissionOption>,
         resolution: Option<String>,
+        /// Set when this approves a plan (Claude's ExitPlanMode): the plan markdown.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        plan: Option<String>,
     },
     /// A question the agent (or one of its MCP servers) asks you: Claude's
     /// AskUserQuestion, Codex's request_user_input, an MCP server's form. It waits
@@ -979,6 +988,12 @@ pub struct Settings {
     pub busy_send: BusySend,
     /// Which agent a helper runs as (unset = same as the main agent).
     pub helper_defaults: HelperDefaults,
+    /// Cap on what all agents together spend per local day, in USD (None = no cap).
+    pub daily_budget_usd: Option<f64>,
+    /// Cap on what one agent spends in total, in USD (None = no cap).
+    pub agent_budget_usd: Option<f64>,
+    /// What reaching a cap does: alert only, or also pause the agents.
+    pub budget_action: crate::budget::BudgetAction,
 }
 
 /// The voice assistant: talk to Armada through OpenAI's Realtime API. Off by default;
@@ -1235,6 +1250,16 @@ impl Settings {
                 return Err(format!("\u{201c}{addr}\u{201d} isn't a network address"));
             }
         }
+        for (name, cap) in [
+            ("daily budget", self.daily_budget_usd),
+            ("agent budget", self.agent_budget_usd),
+        ] {
+            if cap.is_some_and(|c| !c.is_finite() || c <= 0.0) {
+                return Err(format!(
+                    "The {name} must be more than $0 (or empty for no cap)"
+                ));
+            }
+        }
         crate::voice::validate_voice(&self.voice.model, &self.voice.language)?;
         Ok(())
     }
@@ -1269,6 +1294,15 @@ impl Settings {
         {
             self.voice.input_device = None;
             reset.push("voice.inputDevice");
+        }
+        for (cap, name) in [
+            (&mut self.daily_budget_usd, "dailyBudgetUsd"),
+            (&mut self.agent_budget_usd, "agentBudgetUsd"),
+        ] {
+            if cap.is_some_and(|c| !c.is_finite() || c <= 0.0) {
+                *cap = None;
+                reset.push(name);
+            }
         }
         if crate::voice::model_spec(&self.voice.model).is_none() {
             self.voice.model = defaults.voice.model.clone();
@@ -1340,6 +1374,9 @@ impl Default for Settings {
             config_defaults: Default::default(),
             busy_send: BusySend::Ask,
             helper_defaults: HelperDefaults::default(),
+            daily_budget_usd: None,
+            agent_budget_usd: None,
+            budget_action: Default::default(),
         }
     }
 }

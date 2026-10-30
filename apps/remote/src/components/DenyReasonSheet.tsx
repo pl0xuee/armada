@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { denyWithReason } from "@/lib/controller";
+import { planTitle } from "@shared/planApproval";
 import { agentIdentity, confirmOption, primaryReject } from "@/lib/meta";
 import { useStore } from "@/lib/store";
 import type { PermissionItem } from "@/lib/types";
@@ -27,8 +28,8 @@ export function DenyReasonSheet({ item, onClose }: { item: PermissionItem | null
     <Sheet
       open={!!item}
       onClose={onClose}
-      title="Deny with reason"
-      description={current ? <span className="line-clamp-2 break-words">{current.title}</span> : undefined}
+      title={current?.plan ? "Keep planning" : "Deny with reason"}
+      description={current ? <span className="line-clamp-2 break-words">{current.plan ? planTitle(current.plan) : current.title}</span> : undefined}
     >
       {current && <ReasonForm key={current.requestId} item={current} name={name} open={!!item} onClose={onClose} />}
     </Sheet>
@@ -75,7 +76,7 @@ function ReasonForm({ item, name, open, onClose }: { item: PermissionItem; name:
       }}
     >
       <label htmlFor="deny-reason" className="mb-1.5 block text-[13px] font-medium text-muted">
-        Tell {name} what to do instead
+        {item.plan ? `What should ${name} change in the plan?` : `Tell ${name} what to do instead`}
       </label>
       <textarea
         id="deny-reason"
@@ -86,13 +87,15 @@ function ReasonForm({ item, name, open, onClose }: { item: PermissionItem; name:
         placeholder="e.g. Don't run migrations against the dev DB; generate the SQL file only."
         className="block w-full resize-y rounded-xl border border-line-strong bg-card px-3.5 py-3 text-[16px] leading-[22px] text-fg outline-none placeholder:text-steel focus:border-accent/60"
       />
-      <p className="mt-2 text-[12.5px] text-steel">Denies this request, then sends your note as the next message.</p>
+      <p className="mt-2 text-[12.5px] text-steel">
+        {item.plan ? "Sends the plan back, then your note as the next message." : "Denies this request, then sends your note as the next message."}
+      </p>
       <div className="mt-4 grid grid-cols-2 gap-2">
         <Button variant="secondary" size="lg" onClick={onClose} disabled={busy}>
           Cancel
         </Button>
         <Button type="submit" variant="danger" size="lg" icon="x" loading={busy} disabled={!deny || !reason}>
-          Deny & send
+          {item.plan ? "Keep planning & send" : "Deny & send"}
         </Button>
       </div>
     </form>

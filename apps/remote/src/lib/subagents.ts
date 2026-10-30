@@ -5,10 +5,11 @@
  * Sub-agent management calls (`subagent.control`: Codex wait/close/send) are never counted.
  */
 import { useEffect, useMemo, useState } from "react";
+import { choiceName } from "./config";
 import { isBusy } from "./meta";
 import { isLauncher } from "./rows";
 import { useStore } from "./store";
-import type { Agent, TimelineItem, ToolCallItem } from "./types";
+import type { Agent, ConfigOption, SubagentInfo, TimelineItem, ToolCallItem } from "./types";
 
 export interface SubagentRun {
   itemId: string;
@@ -151,6 +152,8 @@ const NO_IDS: ReadonlySet<string> = new Set();
 export interface SubagentState {
   /** Running sub-agents (not counting control calls). */
   running: number;
+  /** The sub-agents of this turn, running or finished (see `runningSubagents`). */
+  runs: SubagentRun[];
   /** toolCallIds of background sub-agents counted as running (their launch call already completed). */
   bgRunning: ReadonlySet<string>;
 }
@@ -164,7 +167,92 @@ export function useSubagentState(agent: Pick<Agent, "status">, items: TimelineIt
   const runs = useMemo(() => subagentRuns(items, busy, { now, live }), [items, busy, now, live]);
   const key = runs.filter((r) => r.state === "running" && r.background).map((r) => r.toolCallId).join(",");
   const bgRunning = useMemo(() => (key ? new Set(key.split(",")) : NO_IDS), [key]);
-  return { running: runningCount(runs), bgRunning };
+  return { running: runningCount(runs), runs, bgRunning };
+}
+
+/** A running sub-agent, as the live status line lists it. */
+export interface RunningSubagent {
+  id: string;
+  kind: string;
+  description: string;
+  /** What the launch asked for; absent fields inherit the main agent's. */
+  model: string | null;
+  effort: string | null;
+  /** When it was launched (ms). */
+  startedAt: number;
+  /** Tool calls it has made so far, counting those of sub-agents it started itself. */
+  toolCalls: number;
+}
+
+/** The running sub-agents among `runs`, in launch order. */
+export function runningSubagents(items: readonly TimelineItem[], runs: readonly SubagentRun[]): RunningSubagent[] {
+  const running = new Set(runs.filter((r) => r.state === "running").map((r) => r.itemId));
+  if (!running.size) return [];
+  const byParent = new Map<string, ToolCallItem[]>();
+  for (const it of items) {
+    if (it.kind === "tool_call" && it.parentToolCallId) {
+      const l = byParent.get(it.parentToolCallId);
+      if (l) l.push(it);
+      else byParent.set(it.parentToolCallId, [it]);
+    }
+  }
+  const count = (toolCallId: string, seen: Set<string>): number => {
+    if (seen.has(toolCallId)) return 0;
+    seen.add(toolCallId);
+    let n = 0;
+    for (const c of byParent.get(toolCallId) ?? []) n += 1 + (c.subagent && !c.subagent.control ? count(c.toolCallId, seen) : 0);
+    return n;
+  };
+  const out: RunningSubagent[] = [];
+  for (const it of items) {
+    if (it.kind !== "tool_call" || !running.has(it.id)) continue;
+    const s = it.subagent;
+    out.push({
+      id: it.id,
+      kind: s?.kind?.trim() || "Sub-agent",
+      description: s?.description?.trim() || it.title,
+      model: s?.model?.trim() || null,
+      effort: s?.effort?.trim() || null,
+      startedAt: it.ts,
+      toolCalls: count(it.toolCallId, new Set()),
+    });
+  }
+  return out;
+}
+
+/** The main agent's current model and effort: what a sub-agent that names none runs on. */
+export interface InheritedConfig {
+  model: string | null;
+  effort: string | null;
+}
+
+export function inheritedConfig(agent: Pick<Agent, "configOptions" | "model">): InheritedConfig {
+  const opts = agent.configOptions ?? [];
+  const pick = (o: ConfigOption | undefined) => (o?.currentValue ? choiceName(o) : null);
+  const model = pick(opts.find((o) => o.category === "model"));
+  return { model: model ?? agent.model ?? null, effort: pick(opts.find((o) => o.category === "thought_level")) };
+}
+
+export interface SubagentChip {
+  key: "model" | "effort";
+  text: string;
+  /** Not named by the launch: the main agent's value. */
+  inherited: boolean;
+}
+
+/**
+ * Model and effort chips for a sub-agent. A value the launch didn't name shows as "inherits" with the
+ * main agent's, or not at all when that isn't known (nothing is invented).
+ */
+export function subagentChips(info: Pick<SubagentInfo, "model" | "effort"> | undefined, inherited?: InheritedConfig): SubagentChip[] {
+  const out: SubagentChip[] = [];
+  const model = info?.model?.trim();
+  if (model) out.push({ key: "model", text: model, inherited: false });
+  else if (inherited?.model) out.push({ key: "model", text: `inherits ${inherited.model}`, inherited: true });
+  const effort = info?.effort?.trim();
+  if (effort) out.push({ key: "effort", text: `${effort} effort`, inherited: false });
+  else if (inherited?.effort) out.push({ key: "effort", text: `inherits ${inherited.effort} effort`, inherited: true });
+  return out;
 }
 
 /** Running sub-agent count for the header chip (a number, so streamed text doesn't re-render it). */

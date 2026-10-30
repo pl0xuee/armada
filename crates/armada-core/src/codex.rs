@@ -879,6 +879,7 @@ impl CodexDriver {
                 };
                 let prompt = item["prompt"].as_str().map(str::to_string);
                 let model = item["model"].as_str().map(str::to_string);
+                let effort = item["reasoningEffort"].as_str().map(str::to_string);
                 let tool = item["tool"].as_str().unwrap_or("");
                 // spawn/resume start a sub-agent; wait / close / send-input only
                 // manage existing ones.
@@ -919,6 +920,8 @@ impl CodexDriver {
                             kind: Some(label.clone()),
                             description,
                             prompt: prompt.clone(),
+                            model: model.clone(),
+                            effort: effort.clone(),
                             background: false,
                             control,
                         });

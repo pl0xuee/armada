@@ -2,10 +2,12 @@
 //! accounts and local storage. UI-agnostic; the Tauri shell wires it to the window.
 
 pub mod accounts;
+pub mod budget;
 pub mod checkpoints;
 pub mod childenv;
 pub mod local;
 pub mod model;
+pub mod project_config;
 pub mod providers;
 pub mod questions;
 pub mod redact;
@@ -23,6 +25,7 @@ mod helpers;
 mod jsonrpc;
 mod manager;
 mod mcp;
+mod plan_approval;
 mod secrets;
 mod session;
 

@@ -1,6 +1,5 @@
 /**
- * Turns a flat timeline into display rows: runs of plain tool calls, thoughts and interim
- * messages fold into one "activity group" row (like the desktop's), and calls that ran under a
+ * Turns a flat timeline into display rows: runs of plain tool calls and thoughts fold into one "activity group" row (like the desktop's), and calls that ran under a
  * sub-agent are nested under the call that launched it (recursively), instead of interleaving
  * with the main flow.
  */
@@ -19,16 +18,9 @@ export interface SubagentNode {
 export type Row =
   | { kind: "item"; key: string; item: TimelineItem }
   | { kind: "tools"; key: string; tools: ToolCallItem[] }
-  /** A run of finished-looking work (tool calls, thoughts, interim messages) folded into one line. */
+  /** A run of tool calls and thoughts folded into one line. */
   | { kind: "group"; key: string; items: TimelineItem[] }
   | { kind: "subagent"; key: string; node: SubagentNode };
-
-export interface BuildOptions {
-  /** The agent is only waiting on sub-agents: the trailing run folds even when it is a single row. */
-  foldTail?: boolean;
-  /** Ids of standalone rows on screen: they stay out of groups so the reader's content doesn't collapse. */
-  keep?: ReadonlySet<string>;
-}
 
 export const isRunning = (c: ToolCallItem) => c.status === "pending" || c.status === "in_progress";
 
@@ -39,7 +31,7 @@ export function isSubagentNode(x: ToolCallItem | SubagentNode): x is SubagentNod
 /** A call that launched a sub-agent. Codex wait/close/send calls (`control`) manage existing ones: plain tool calls. */
 export const isLauncher = (it: TimelineItem): it is ToolCallItem => it.kind === "tool_call" && !!it.subagent && !it.subagent.control;
 
-export function buildRows(items: TimelineItem[], opts: BuildOptions = {}): Row[] {
+export function buildRows(items: TimelineItem[]): Row[] {
   // Sub-agent launchers by their tool call id.
   const launchers = new Map<string, ToolCallItem>();
   for (const it of items) if (isLauncher(it) && it.toolCallId) launchers.set(it.toolCallId, it);
@@ -77,7 +69,7 @@ export function buildRows(items: TimelineItem[], opts: BuildOptions = {}): Row[]
   items.forEach((it, i) => {
     if (!(it.kind === "tool_call" && nested.has(it.id))) top.push(i);
   });
-  const grouped = groupActivity(items, top, opts);
+  const grouped = groupActivity(items, top);
 
   const rows: Row[] = [];
   for (const i of grouped.rows) {
@@ -170,7 +162,7 @@ export function estimateRow(r: Row): number {
     case "thought":
       return 16 + 44;
     case "permission":
-      return 16 + (it.resolution === null ? 330 : 52);
+      return 16 + (it.resolution === null ? (it.plan ? 560 : 330) : 52);
     case "question":
       return 16 + (it.resolution === null ? estimateQuestion(it) : 52 + 22 * summarize(it).length);
     case "plan":

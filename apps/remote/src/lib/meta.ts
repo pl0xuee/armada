@@ -105,7 +105,7 @@ export const isAlways = (o: PermissionOption) => o.kind === "allow_always" || o.
  * self-explanatory requests: no file changes, and a short one-line command.
  */
 export function swipeable(item: PermissionItem): boolean {
-  if (item.diffs.length) return false;
+  if (item.diffs.length || item.plan) return false;
   const cmd = item.command ?? "";
   return cmd.length <= 80 && !cmd.includes("\n");
 }

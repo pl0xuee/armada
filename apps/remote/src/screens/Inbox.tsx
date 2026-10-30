@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useState } from "react";
+import { isPlanApproval, planTitle } from "@shared/planApproval";
 import { DenyReasonSheet } from "@/components/DenyReasonSheet";
 import { AccountDot, ProviderBadge } from "@/components/Identity";
 import { Icon } from "@/components/Icon";
@@ -148,6 +149,8 @@ const InboxCard = memo(function InboxCard({ entry, now, onMore }: { entry: Inbox
   const { agent, item } = entry;
   return item.kind === "question" ? (
     <QuestionInboxCard agent={agent} item={item} now={now} />
+  ) : isPlanApproval(item) ? (
+    <PlanInboxCard agent={agent} item={item} now={now} />
   ) : (
     <PermissionInboxCard agent={agent} item={item} now={now} onMore={onMore} />
   );
@@ -225,6 +228,34 @@ function QuestionInboxCard({ agent, item, now }: { agent: Agent; item: QuestionI
           </div>
           <Button size="lg" variant="primary" icon="chevronRight" className="w-full" onClick={() => navigate({ name: "agent", agentId: agent.id })}>
             Answer
+          </Button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+/** A plan needs reading, so it isn't approvable from the list: this opens the agent where the plan is. */
+function PlanInboxCard({ agent, item, now }: { agent: Agent; item: PermissionItem; now: number }) {
+  return (
+    <div className="animate-enter">
+      <article
+        aria-label={`${agent.title}: plan ready for approval`}
+        className="overflow-hidden rounded-2xl border border-line-strong bg-card shadow-[0_12px_32px_-20px_rgba(0,0,0,0.9)] edge-strong"
+      >
+        <CardHeader agent={agent} ts={item.ts} now={now} />
+        <div className="space-y-3 p-4">
+          <div className="flex items-start gap-2.5">
+            <span className="mt-px inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-warn/12 text-warn">
+              <Icon name="bookText" size={16} />
+            </span>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <h2 className="text-[15.5px] leading-snug font-semibold break-words text-fg">Plan ready for approval</h2>
+              <p className="mt-0.5 line-clamp-2 text-[12.5px] text-muted">{planTitle(item.plan ?? "")}</p>
+            </div>
+          </div>
+          <Button size="lg" variant="primary" icon="chevronRight" className="w-full" onClick={() => navigate({ name: "agent", agentId: agent.id })}>
+            Review plan
           </Button>
         </div>
       </article>

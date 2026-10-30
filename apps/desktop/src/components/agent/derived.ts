@@ -151,7 +151,9 @@ export function agentDerived(
 function sameRuns(a: SubagentRun[], b: SubagentRun[]): boolean {
   return (
     a.length === b.length &&
-    a.every((x, i) => x.itemId === b[i].itemId && x.state === b[i].state && x.step === b[i].step)
+    a.every(
+      (x, i) => x.itemId === b[i].itemId && x.state === b[i].state && x.step === b[i].step && x.calls === b[i].calls,
+    )
   );
 }
 

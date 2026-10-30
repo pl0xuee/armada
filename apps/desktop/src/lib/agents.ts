@@ -138,6 +138,11 @@ export interface SubagentRun {
   /** Title of its latest child call, if any. */
   step: string | null;
   background: boolean;
+  /** The model / reasoning effort the launch named (null: it inherits the agent's). */
+  model: string | null;
+  effort: string | null;
+  /** Tool calls it has made so far. */
+  calls: number;
 }
 
 const unfinished = (s: ToolItem["status"]) => s === "in_progress" || s === "pending";
@@ -185,11 +190,13 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, c
   }
   const lastChild = new Map<string, ToolItem>();
   const lastChildTs = new Map<string, number>();
+  const callCount = new Map<string, number>();
   const openChildTs = new Map<string, number>();
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     if (it.kind === "tool_call" && it.parentToolCallId) {
       lastChild.set(it.parentToolCallId, it);
+      callCount.set(it.parentToolCallId, (callCount.get(it.parentToolCallId) ?? 0) + 1);
       lastChildTs.set(it.parentToolCallId, Math.max(it.ts, lastChildTs.get(it.parentToolCallId) ?? 0));
       if (unfinished(it.status))
         openChildTs.set(it.parentToolCallId, Math.max(it.ts, openChildTs.get(it.parentToolCallId) ?? 0));
@@ -225,6 +232,9 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, c
       state: running ? "running" : it.status === "failed" ? "failed" : "done",
       step: child ? child.title : null,
       background: bg,
+      model: it.subagent.model?.trim() || null,
+      effort: it.subagent.effort?.trim() || null,
+      calls: callCount.get(it.toolCallId) ?? 0,
     });
   }
   return runs;

@@ -12,6 +12,8 @@ type PermissionItem = Extract<TimelineItem, { kind: "permission" }>;
 
 export function findOption(item: PermissionItem, kinds: PermissionOptionKind[]): PermissionOption | undefined {
   for (const k of kinds) {
+    // A plan's "always" options switch the session's mode; no shortcut may pick one for you.
+    if (k === "allow_always" && item.plan) continue;
     const o = item.options.find((x) => x.kind === k);
     if (o) return o;
   }

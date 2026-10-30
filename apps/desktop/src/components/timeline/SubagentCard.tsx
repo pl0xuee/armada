@@ -1,12 +1,15 @@
 import { Bot, ChevronDown, ChevronRight, CircleCheck, CirclePause, CircleX, ScrollText } from "lucide-react";
 import { m, AnimatePresence } from "motion/react";
-import { memo, useId, useState } from "react";
+import { memo, useId, useMemo, useState } from "react";
 import type { TimelineItem } from "@/lib/types";
 import { pluralize } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useApp } from "@/store/app";
 import { Markdown } from "../Markdown";
 import { Spinner } from "../ui/misc";
 import { TOOL_ICON, ToolCallCard } from "./items";
+import { SubagentChips } from "./LiveStatus";
+import { inheritedOf, subagentChips } from "./thinking";
 
 type ToolItem = Extract<TimelineItem, { kind: "tool_call" }>;
 
@@ -48,6 +51,8 @@ export const SubagentCard = memo(function SubagentCard({
   const kind = info.kind?.trim() || "Sub-agent";
   const description = info.description?.trim() || null;
   const title = description ?? item.title;
+  const configOptions = useApp((st) => st.agents[agentId]?.configOptions);
+  const chips = useMemo(() => subagentChips(info, inheritedOf(configOptions)), [info, configOptions]);
   const latest = childCalls[childCalls.length - 1];
   const childrenRunning = childCalls.filter((c) => c.status === "in_progress" || c.status === "pending").length;
 
@@ -74,6 +79,7 @@ export const SubagentCard = memo(function SubagentCard({
             <span className="inline-flex h-5 items-center rounded-md border border-violet/30 bg-violet/10 px-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-violet">
               {kind}
             </span>
+            <SubagentChips chips={chips} />
             <span className="text-[11.5px] text-steel tabular">{pluralize(childCalls.length, "tool call")}</span>
             {bgRunning && <span className="text-[11.5px] text-accent">Running in background</span>}
             {running && childrenRunning > 0 && (

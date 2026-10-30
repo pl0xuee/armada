@@ -1,7 +1,7 @@
 import { ArrowDown } from "lucide-react";
-import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer } from "@tanstack/react-virtual";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Agent, TimelineItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
@@ -20,15 +20,17 @@ import {
   UserBubble,
 } from "./items";
 import { ActivityGroup } from "./ActivityGroup";
-import { finalAnswers, groupActivity, nextKeep, type KeepRow } from "./activityGroups";
+import { finalAnswers, groupActivity } from "./activityGroups";
 import { SubagentCard } from "./SubagentCard";
 import { useRunningSubagentCount, useSubagentRuns } from "../agent/useSubagents";
 import { useHeld, WAITING_HOLD_MS } from "@/hooks/useHeld";
-import { ThinkingIndicator } from "./ThinkingIndicator";
+import { LiveStatus } from "./LiveStatus";
 import { shouldShowThinking, turnEndOf, turnStart, waitingStatus } from "./thinking";
 import { TurnEndLine } from "./TurnEndLine";
 import { TurnSummaryCard, TurnSummaryLine } from "./TurnSummaryCard";
 import { QuestionCard, questionCardSelector } from "./QuestionCard";
+import { isPlanApproval } from "@/lib/planApproval";
+import { PlanApprovalCard } from "./PlanApprovalCard";
 import { latestPending, usePermissionKeys } from "./usePermissionKeys";
 import { latestPendingQuestion } from "@/lib/question";
 
@@ -50,7 +52,7 @@ function estimateSize(it: TimelineItem | undefined): number {
     case "tool_call":
       return it.subagent ? 150 : it.images?.length ? 380 : 48;
     case "permission":
-      return it.resolution === null ? 220 : 48;
+      return it.resolution === null ? (it.plan ? 520 : 220) : 48;
     case "question":
       return it.resolution === null ? 120 + it.fields.length * 150 : 48 + it.fields.length * 22;
     case "plan":
@@ -107,14 +109,11 @@ export function Timeline({
   // While sub-agents run, a brand-new unattributed call is usually a sub-agent's, named a moment
   // later: held back briefly so it goes straight into its card instead of flashing in the chat.
   const unattributed = useUnattributedHold(list, waiting);
-  // Tall standalone rows on screen stay unfolded (not absorbed into an activity group) until they scroll
-  // fully out of view, so a run folding never collapses content the reader is looking at.
-  const keepRef = useRef<ReadonlySet<string>>(new Set());
-  const [, bumpKeep] = useReducer((n: number) => n + 1, 0);
-  const keepKey = [...keepRef.current].join(",");
-  const structureKey = `${keepKey}:${list.length}:${list[0]?.id ?? ""}:${list[list.length - 1]?.id ?? ""}:${attributed}:${waiting}:${[...unattributed].join(",")}`;
+  // Folding depends only on what the items are (see `groupActivity`), never on what is on screen or on
+  // whether the agent is waiting, so rows never flip between folded and open under the reader.
+  const structureKey = `${list.length}:${list[0]?.id ?? ""}:${list[list.length - 1]?.id ?? ""}:${attributed}:${[...unattributed].join(",")}`;
   // Keyed on structure on purpose: it reads the current list, but deltas never change the structure.
-  const view = useMemo(() => buildView(list, waiting, unattributed, keepRef.current), [structureKey]);
+  const view = useMemo(() => buildView(list, unattributed), [structureKey]);
   const rows = view.top;
   const childrenOf = useResolvedLists(view.children, list, isToolItem);
   const groupItems = useResolvedLists(view.groups, list);
@@ -122,6 +121,10 @@ export function Timeline({
   // Expanded activity groups, keyed by group id (kept here so it survives row virtualization).
   const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(new Set());
   useLayoutEffect(() => setOpenGroups(new Set()), [agent.id]);
+  // The live status line's running-sub-agents list, collapsed by default.
+  const [subagentsOpen, setSubagentsOpen] = useState(false);
+  useLayoutEffect(() => setSubagentsOpen(false), [agent.id]);
+  const toggleSubagents = useCallback(() => setSubagentsOpen((v) => !v), []);
   const toggleGroup = useCallback((id: string) => {
     setOpenGroups((s) => {
       const n = new Set(s);
@@ -130,7 +133,6 @@ export function Timeline({
     });
   }, []);
 
-  const syncKeep = useRef<(inst: Virtualizer<HTMLDivElement, Element>) => void>(() => {});
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -146,7 +148,6 @@ export function Timeline({
     paddingEnd: 8,
     // Stick to the bottom while content streams in; otherwise flag new activity.
     onChange: (inst) => {
-      syncKeep.current(inst);
       const total = inst.getTotalSize();
       if (total === lastTotal.current) return;
       const grew = total > lastTotal.current;
@@ -157,37 +158,6 @@ export function Timeline({
       else if (grew) setHasNew(true);
     },
   });
-
-  syncKeep.current = (inst) => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const items = inst.getVirtualItems();
-    const visible: KeepRow[] = items.map((v) => {
-      const id = list[rows[v.index]]?.id ?? "";
-      return { id, standalone: !groupItems.has(id), start: v.start, end: v.end };
-    });
-    const byId = new Map<string, number>();
-    rows.forEach((r, i) => {
-      const id = list[r]?.id;
-      if (id && keepRef.current.has(id)) byId.set(id, i);
-    });
-    const next = nextKeep(
-      keepRef.current,
-      visible,
-      (id) => {
-        const m = inst.measurementsCache[byId.get(id) ?? -1];
-        return m && { start: m.start, end: m.end };
-      },
-      { top: el.scrollTop, bottom: el.scrollTop + el.clientHeight },
-      stick.current,
-    );
-    if (next === keepRef.current) return;
-    const released = [...keepRef.current].some((id) => !next.has(id));
-    keepRef.current = next;
-    if (released) bumpKeep();
-  };
-  // Rows mount/measure after render: refresh the kept set once the DOM settles too.
-  useLayoutEffect(() => syncKeep.current(virtualizer));
 
   // Rows re-measure (and the thinking line / footer resize) after the virtualizer's onChange has
   // already pinned: its scrollHeight was still the old one then. Re-pin whenever the content grows.
@@ -402,16 +372,13 @@ export function Timeline({
 
   const virtualRows = virtualizer.getVirtualItems();
 
-  // "Thinking" indicator: busy agent, but nothing at the end of the timeline is visibly streaming.
+  // Live status line: the one place that says what a busy agent is doing right now.
   const lastRowItem = rows.length ? list[rows[rows.length - 1]] : undefined;
   const messageSettled = useQuietFor(
     lastRowItem?.kind === "agent_message" ? `${lastRowItem.id}:${lastRowItem.text.length}` : null,
     MESSAGE_SETTLE_MS,
   );
-  const showThinking =
-    !(loading && !items) &&
-    (waiting ||
-      shouldShowThinking(agent.status, lastRowItem, !!lastRowItem && groupItems.has(lastRowItem.id), messageSettled));
+  const showThinking = !(loading && !items) && (waiting || shouldShowThinking(agent.status, lastRowItem));
   const turnEnd = !loading && !showThinking ? turnEndOf(agent.status, list, lastRowItem, agent.lastActivityAt) : null;
   const fallbackStart = useRef(Date.now());
   useLayoutEffect(() => {
@@ -505,7 +472,16 @@ export function Timeline({
               })}
             </div>
           )}
-          {showThinking && <ThinkingIndicator agent={agent} since={turnStart(list, fallbackStart.current)} />}
+          {showThinking && (
+            <LiveStatus
+              agent={agent}
+              items={list}
+              since={turnStart(list, fallbackStart.current)}
+              messageSettled={messageSettled}
+              open={subagentsOpen}
+              onToggle={toggleSubagents}
+            />
+          )}
           {turnEnd && <TurnEndLine end={turnEnd} lastActivityAt={agent.lastActivityAt} />}
           {footer}
         </div>
@@ -664,12 +640,7 @@ function useUnattributedHold(items: TimelineItem[], waiting: boolean): ReadonlyS
   return useMemo(() => new Set(held), [key]);
 }
 
-function buildView(
-  items: TimelineItem[],
-  waiting = false,
-  hold: ReadonlySet<string> = new Set(),
-  keep?: ReadonlySet<string>,
-): TimelineView {
+function buildView(items: TimelineItem[], hold: ReadonlySet<string> = new Set()): TimelineView {
   const parents = new Set<string>();
   const parentIdx = new Map<string, number>();
   items.forEach((it, i) => {
@@ -700,7 +671,7 @@ function buildView(
     }
     top.push(i);
   });
-  const grouped = groupActivity(items, top, { foldTail: waiting, keep });
+  const grouped = groupActivity(items, top);
   const groups = new Map<string, number[]>();
   for (const [first, idxs] of grouped.groups) groups.set(items[first].id, idxs);
   const finalIds = new Set<string>();
@@ -802,6 +773,16 @@ function renderItem(
       }
       return <ToolCallCard item={it} agentId={agent.id} agentLive={agentLive} />;
     case "permission":
+      if (isPlanApproval(it))
+        return (
+          <PlanApprovalCard
+            item={it}
+            agent={agent}
+            keyboard={it.requestId === ctx.pendingId}
+            reasonOpen={ctx.reasonFor === it.requestId}
+            onReasonOpenChange={ctx.reasonHandler(it.requestId)}
+          />
+        );
       return (
         <PermissionCard
           item={it}

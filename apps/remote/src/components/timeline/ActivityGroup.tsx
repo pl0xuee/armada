@@ -1,6 +1,6 @@
 import { memo, useId, useMemo } from "react";
 import { cn } from "@/lib/cn";
-import { currentStep, summarizeActivity } from "@/lib/activity";
+import { summarizeActivity } from "@/lib/activity";
 import { plural } from "@/lib/format";
 import { noteUserLayoutChange } from "@/lib/scroll";
 import type { TimelineItem, ToolCallItem } from "@/lib/types";
@@ -24,8 +24,8 @@ export function segments(items: TimelineItem[]): Segment[] {
 
 /**
  * A run of tool calls, thoughts and interim messages folded into one tappable line
- * ("Read 4 files, edited 2 files, ran 3 commands"); tapping expands it in place. While the agent
- * works on it, the line shows the current step instead of the summary.
+ * ("Read 4 files, edited 2 files, ran 3 commands"); tapping expands it in place. Only the summary is
+ * shown here, even while the agent works on it: what it is doing right now is the live status line's job.
  */
 export const ActivityGroup = memo(function ActivityGroup({
   items,
@@ -36,7 +36,7 @@ export const ActivityGroup = memo(function ActivityGroup({
   groupId,
 }: {
   items: TimelineItem[];
-  /** The agent is working and this group holds the latest timeline item. */
+  /** The agent is working and this group holds the latest timeline item: it spins. */
   live: boolean;
   /** False when the agent isn't running (interrupted / stopped): unfinished calls show as paused. */
   agentLive: boolean;
@@ -47,8 +47,6 @@ export const ActivityGroup = memo(function ActivityGroup({
   const bodyId = useId();
   const summary = useMemo(() => summarizeActivity(items), [items]);
   const last = items[items.length - 1];
-  const step = live ? currentStep(last) : null;
-  const text = step?.text ?? summary.text;
   const failed = summary.failed;
   const body = useMemo(() => (open ? segments(items) : []), [open, items]);
 
@@ -73,14 +71,8 @@ export const ActivityGroup = memo(function ActivityGroup({
             <Icon name="check" size={15} strokeWidth={2.4} className={failed > 0 ? "text-steel" : "text-ok/70"} />
           )}
         </span>
-        <span
-          className={cn(
-            "line-clamp-2 min-w-0 flex-1 py-1.5 text-[13.5px] leading-snug",
-            live ? "text-muted" : "text-steel",
-            step?.kind === "tool" && last?.kind === "tool_call" && last.toolKind === "execute" && "font-mono text-[12.5px]",
-          )}
-        >
-          {text}
+        <span className="line-clamp-2 min-w-0 flex-1 py-1.5 text-[13.5px] leading-snug text-steel">
+          {summary.text}
           {!live && failed > 0 && <span className="text-[12px] text-err/90"> · {failed} failed</span>}
           <span className="text-[12px] tabular"> · {plural(items.length, "step")}</span>
         </span>

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useIdentity } from "@/hooks/useIdentity";
 import { findOption, respondPermission } from "@/lib/actions";
+import { BudgetChip } from "@/components/agent/BudgetChip";
 import { agentCostText } from "@/lib/format";
 import type { QuestionItem } from "@/lib/question";
 import { DONE_META, STATUS } from "@/lib/providers";
@@ -188,7 +189,8 @@ export const AgentRowCompact = memo(function AgentRowCompact({
             Answer
           </Button>
         ) : (
-          <span className="hidden w-14 text-right text-[11.5px] tabular text-steel @xl:inline">
+          <span className="hidden items-center justify-end gap-1.5 text-right text-[11.5px] tabular text-steel @xl:inline-flex">
+            <BudgetChip agent={agent} compact />
             {agentCostText(agent)}
           </span>
         )}

@@ -2,6 +2,7 @@
 //! OS notifications, sounds, PTY terminals and git review commands.
 
 mod attention;
+mod budget;
 mod clipboard;
 mod commands;
 mod diagnostics;
@@ -14,6 +15,7 @@ mod log_writer;
 mod notify;
 mod pr_status;
 mod preview_proxy;
+mod project_settings;
 mod remote;
 mod sound;
 mod state;
@@ -142,6 +144,7 @@ macro_rules! handler {
             preview_proxy::preview_proxy_start,
             preview_proxy::preview_proxy_stop,
             commands::update_settings,
+            budget::budget_status,
             commands::set_interface_zoom,
             commands::preview_sound,
             commands::test_notification,
@@ -158,6 +161,9 @@ macro_rules! handler {
             commands::run_schedule,
             commands::test_custom_agent,
             commands::list_files,
+            project_settings::project_config,
+            project_settings::project_save_instruction,
+            project_settings::project_save_rules,
             commands::read_image,
             commands::remote_status,
             commands::remote_rotate_token,
