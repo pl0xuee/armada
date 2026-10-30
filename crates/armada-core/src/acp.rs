@@ -160,7 +160,10 @@ impl AcpDriver {
         if let Some(prev) = opts.resume {
             let can_resume = caps["sessionCapabilities"].get("resume").is_some();
             let can_load = caps["loadSession"].as_bool().unwrap_or(false);
-            let params = json!({ "sessionId": prev, "cwd": cwd, "mcpServers": mcp });
+            let mut params = json!({ "sessionId": prev, "cwd": cwd, "mcpServers": mcp });
+            if let Some(prompt) = system_prompt(caps) {
+                params["systemPrompt"] = prompt;
+            }
             let mut resumed = None;
             if can_resume {
                 match peer
@@ -196,12 +199,12 @@ impl AcpDriver {
         let (session_id, resp) = match session {
             Some(s) => s,
             None => {
+                let mut params = json!({ "cwd": cwd, "mcpServers": mcp });
+                if let Some(prompt) = system_prompt(caps) {
+                    params["systemPrompt"] = prompt;
+                }
                 let resp = peer
-                    .request_timeout(
-                        "session/new",
-                        json!({ "cwd": cwd, "mcpServers": mcp }),
-                        Some(Duration::from_secs(120)),
-                    )
+                    .request_timeout("session/new", params, Some(Duration::from_secs(120)))
                     .await
                     .map_err(|e| auth_hint(peer.with_stderr(e, 0)))?;
                 let id = resp["sessionId"]
@@ -936,6 +939,16 @@ pub async fn probe(
 }
 
 /// MCP servers in ACP's wire format (HTTP ones only if the agent supports them).
+/// Armada's note to the agent (see `guidance`), appended to its own system prompt, for agents that
+/// advertise `sessionCapabilities.systemPrompt`; others never see the field.
+fn system_prompt(caps: &Value) -> Option<Value> {
+    caps["sessionCapabilities"].get("systemPrompt")?;
+    Some(json!({
+        "mode": "append",
+        "content": [{ "type": "text", "text": crate::guidance::AGENT_GUIDANCE }],
+    }))
+}
+
 fn mcp_json(servers: &[McpServer], caps: &Value) -> Value {
     let http_ok = caps["mcpCapabilities"]["http"].as_bool().unwrap_or(false);
     let kv = |list: &[KeyValue]| -> Vec<Value> {

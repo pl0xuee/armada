@@ -84,7 +84,7 @@ describe("Markdown component", () => {
     expect(web).not.toContain("<img");
     expect(web).toContain('<a class="md-imgchip" href="https://example.com/x.png"');
     expect(web).toContain("Image “logo”: example.com/x.png");
-    expect(html("![d](data:image/png;base64,AAAA)")).toContain("unavailable");
+    expect(html("![d](data:image/svg+xml;base64,AAAA)")).toContain("unavailable");
     // Inside a link the chip must not be a second anchor.
     const nested = html("[![b](https://img.io/b.svg)](https://github.com/x)");
     expect(nested.match(/<a /g)).toHaveLength(1);
@@ -108,5 +108,13 @@ describe("Markdown component", () => {
   it("marks narration between tool calls as interim", () => {
     expect(html("hi", { interim: true })).toContain('class="md md-interim"');
     expect(html("hi")).toContain('class="md"');
+  });
+});
+
+describe("inline data: pictures", () => {
+  it("shows a small raster data URI as a picture and keeps a chip for anything else", () => {
+    const out = html("![dot](data:image/png;base64,iVBORw0KGgo=)\n\n![x](data:image/svg+xml;base64,PHN2Zz4=)");
+    expect(out).toContain('src="data:image/png;base64,iVBORw0KGgo="');
+    expect(out).not.toContain('src="data:image/svg+xml');
   });
 });

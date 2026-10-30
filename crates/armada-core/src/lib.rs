@@ -21,6 +21,7 @@ mod config_memory;
 mod db;
 mod files;
 mod git;
+mod guidance;
 mod helpers;
 mod jsonrpc;
 mod manager;
