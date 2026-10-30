@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useState, type ReactNode } from "react";
 import { respondToPermission } from "@/lib/controller";
 import { cn } from "@/lib/cn";
 import { relativeTime } from "@/lib/format";
@@ -6,6 +6,7 @@ import { useNow } from "@/lib/hooks";
 import { confirmOption, isAllow, primaryAllow, primaryReject, RESOLVED_LABEL } from "@/lib/meta";
 import { useStore } from "@/lib/store";
 import type { PermissionItem, PermissionOption } from "@/lib/types";
+import { DenyReasonSheet } from "../DenyReasonSheet";
 import { Icon, Spinner } from "../Icon";
 import { Button, type ButtonVariant } from "../ui";
 import { DiffList } from "./DiffView";
@@ -69,31 +70,78 @@ export function PermissionButtons({
   item,
   disabled,
   showRest = true,
+  onDenyWithReason,
 }: {
   agentId: string;
   item: PermissionItem;
   disabled?: boolean;
   showRest?: boolean;
+  /** Offer "Deny with reason…" (opens the reason sheet). */
+  onDenyWithReason?: () => void;
 }) {
   const { allow, reject, rest } = orderOptions(item);
+  const [more, setMore] = useState(false);
   const respond = async (o: PermissionOption) => {
     if (await confirmOption(o)) void respondToPermission(agentId, item.requestId, o.id);
   };
+  // The big pair always reads Deny / Approve (as in the Inbox and on the desktop); the agent's
+  // own option names ("Always allow", "Allow for this session", …) live under "More options".
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-2 gap-2">
         {reject && (
-          <Button size="lg" variant="danger" disabled={disabled} onClick={() => respond(reject)} className={cn(!allow && "col-span-2")}>
-            <span className="truncate">{reject.name}</span>
+          <Button
+            size="lg"
+            variant="danger"
+            disabled={disabled}
+            aria-label={`Deny: ${reject.name}`}
+            onClick={() => respond(reject)}
+            className={cn(!allow && "col-span-2")}
+          >
+            Deny
           </Button>
         )}
         {allow && (
-          <Button size="lg" variant="primary" disabled={disabled} onClick={() => respond(allow)} className={cn(!reject && "col-span-2")}>
-            <span className="truncate">{allow.name}</span>
+          <Button
+            size="lg"
+            variant="primary"
+            disabled={disabled}
+            aria-label={`Approve: ${allow.name}`}
+            onClick={() => respond(allow)}
+            className={cn(!reject && "col-span-2")}
+          >
+            Approve
           </Button>
         )}
       </div>
+      <div className="-mx-2 flex items-center justify-between">
+        {showRest && rest.length > 0 ? (
+          <button
+            type="button"
+            aria-expanded={more}
+            onClick={() => setMore((v) => !v)}
+            className="press inline-flex h-11 items-center gap-1 rounded-xl px-2 text-[13.5px] font-medium text-muted active:text-fg"
+          >
+            <Icon name="more" size={18} />
+            {more ? "Fewer options" : `More options (${rest.length})`}
+          </button>
+        ) : (
+          <span />
+        )}
+        {onDenyWithReason && reject && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onDenyWithReason}
+            className="press inline-flex h-11 items-center gap-1.5 rounded-xl px-2 text-[13.5px] font-medium text-muted active:text-fg disabled:opacity-45"
+          >
+            <Icon name="pencil" size={16} />
+            Deny with reason…
+          </button>
+        )}
+      </div>
       {showRest &&
+        more &&
         rest.map((o) => (
           <Button key={o.id} size="md" variant={OPTION_VARIANT[o.kind]} disabled={disabled} onClick={() => respond(o)} className="w-full">
             <span className="truncate">{o.name}</span>
@@ -112,34 +160,47 @@ export const PermissionCard = memo(function PermissionCard({
 }) {
   const sending = useStore((s) => s.resolving[item.requestId]);
   const now = useNow();
-  if (item.resolution !== null) return <ResolvedRow item={item} resolution={item.resolution} pending={false} />;
-  if (sending) return <ResolvedRow item={item} resolution={sending} pending />;
+  const [reasonOpen, setReasonOpen] = useState(false);
 
-  return (
-    <section
-      aria-label={`Permission request: ${item.title}`}
-      className="overflow-hidden rounded-2xl border border-warn/45 bg-card shadow-[0_0_0_1px_color-mix(in_srgb,var(--warn)_14%,transparent),0_16px_40px_-18px_color-mix(in_srgb,var(--warn)_50%,transparent)]"
-    >
-      <div className="flex items-center gap-2 border-b border-warn/15 bg-warn/[0.06] px-4 py-2.5">
-        <Icon name="shield" size={16} className="text-warn" />
-        <span className="text-[12px] font-semibold tracking-wider text-warn uppercase">Permission needed</span>
-        <span className="ml-auto text-[12px] text-steel tabular">{relativeTime(item.ts, now)}</span>
-      </div>
-      <div className="space-y-3 p-4">
-        <div className="flex items-start gap-2.5">
-          {item.toolKind && <Icon name={TOOL_ICON[item.toolKind]} size={18} className="mt-0.5 shrink-0 text-steel" />}
-          <h3 className="min-w-0 flex-1 text-[15.5px] leading-snug font-semibold break-words text-fg">{item.title}</h3>
+  let body: ReactNode;
+  if (item.resolution !== null) body = <ResolvedRow item={item} resolution={item.resolution} pending={false} />;
+  else if (sending) body = <ResolvedRow item={item} resolution={sending} pending />;
+  else
+    body = (
+      <section
+        aria-label={`Permission request: ${item.title}`}
+        className="overflow-hidden rounded-2xl border border-warn/45 bg-card shadow-[0_0_0_1px_color-mix(in_srgb,var(--warn)_14%,transparent),0_16px_40px_-18px_color-mix(in_srgb,var(--warn)_50%,transparent)]"
+      >
+        <div className="flex items-center gap-2 border-b border-warn/15 bg-warn/[0.06] px-4 py-2.5">
+          <Icon name="shield" size={16} className="text-warn" />
+          <span className="text-[12px] font-semibold tracking-wider text-warn uppercase">Permission needed</span>
+          <span className="ml-auto text-[12px] text-steel tabular">{relativeTime(item.ts, now)}</span>
         </div>
-        <PermissionSubject item={item} />
-        {readOnly ? (
-          <p className="flex items-center gap-2 rounded-xl bg-raised px-3 py-2.5 text-[13px] text-muted">
-            <Icon name="eye" size={16} className="shrink-0 text-steel" />
-            Waiting for the owner to respond.
-          </p>
-        ) : (
-          <PermissionButtons agentId={item.agentId} item={item} />
-        )}
-      </div>
-    </section>
+        <div className="space-y-3 p-4">
+          <div className="flex items-start gap-2.5">
+            {item.toolKind && <Icon name={TOOL_ICON[item.toolKind]} size={18} className="mt-0.5 shrink-0 text-steel" />}
+            <h3 className="min-w-0 flex-1 text-[15.5px] leading-snug font-semibold break-words text-fg">{item.title}</h3>
+          </div>
+          <PermissionSubject item={item} />
+          {readOnly ? (
+            <p className="flex items-center gap-2 rounded-xl bg-raised px-3 py-2.5 text-[13px] text-muted">
+              <Icon name="eye" size={16} className="shrink-0 text-steel" />
+              Waiting for the owner to respond.
+            </p>
+          ) : (
+            <PermissionButtons agentId={item.agentId} item={item} onDenyWithReason={() => setReasonOpen(true)} />
+          )}
+        </div>
+      </section>
+    );
+
+  // The sheet outlives the card's "sending" state, so it can finish and close on its own.
+  return (
+    <>
+      {body}
+      {!readOnly && (item.resolution === null || reasonOpen) && (
+        <DenyReasonSheet item={reasonOpen ? item : null} onClose={() => setReasonOpen(false)} />
+      )}
+    </>
   );
 });

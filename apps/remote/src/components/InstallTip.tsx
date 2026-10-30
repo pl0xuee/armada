@@ -19,6 +19,8 @@ export function InstallTip({ dismissible = true }: { dismissible?: boolean }) {
   const [hidden, setHidden] = useState(
     () => dismissible && storage.get(DISMISSED) === "1",
   );
+  // Two lines on the fleet; the steps open on "How?" (and are shown outright in Settings).
+  const [open, setOpen] = useState(!dismissible);
   if (!installTipApplies() || hidden) return null;
   return (
     <section
@@ -30,14 +32,30 @@ export function InstallTip({ dismissible = true }: { dismissible?: boolean }) {
           <Icon name="phone" size={17} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[14.5px] font-semibold text-fg">
+          <p className="text-[14.5px] leading-snug font-semibold text-fg">
             Install on iPhone
           </p>
-          <p className="mt-0.5 text-[13px] leading-relaxed text-muted">
-            Tap Share, then <span className="text-fg">Add to Home Screen</span>.
-            The Home Screen app has its own storage: open it, then pair it from
-            the desktop app (Settings, then Remote). Pair another device from
-            the desktop app any time.
+          <p className="text-[13px] leading-snug text-muted">
+            {open ? (
+              <>
+                Tap Share, then <span className="text-fg">Add to Home Screen</span>.
+                The Home Screen app has its own storage: open it, then pair it
+                from the desktop app (Settings, then Remote). Pair another
+                device from the desktop app any time.
+              </>
+            ) : (
+              <>
+                Add it to your Home Screen.{" "}
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  onClick={() => setOpen(true)}
+                  className="hit relative inline-block font-semibold text-accent"
+                >
+                  How?
+                </button>
+              </>
+            )}
           </p>
         </div>
         {dismissible && (

@@ -122,10 +122,15 @@ fn account_command(
 }
 
 /// The provider's own interactive login command (run in a PTY by the shell).
-/// Custom agents handle sign-in themselves.
-pub fn login_command(provider: Provider) -> Option<(String, Vec<String>)> {
+/// Custom agents handle sign-in themselves. Claude signs in with the bundled
+/// Claude Code when there is one (see `providers::claude_binary`).
+pub fn login_command(provider: Provider, data_dir: &Path) -> Option<(String, Vec<String>)> {
     match provider {
-        Provider::Claude => Some(("claude".into(), vec!["auth".into(), "login".into()])),
+        Provider::Claude => Some((
+            providers::claude_binary(data_dir)
+                .map_or_else(|| "claude".into(), |p| p.to_string_lossy().into_owned()),
+            vec!["auth".into(), "login".into()],
+        )),
         Provider::Codex => Some(("codex".into(), vec!["login".into()])),
         Provider::Grok => Some(("grok".into(), vec!["login".into()])),
         Provider::Custom | Provider::Local => None,
@@ -181,20 +186,47 @@ pub(crate) fn quiet_command(program: impl AsRef<std::ffi::OsStr>) -> tokio::proc
     cmd
 }
 
+/// Why a status command gave no answer.
+enum RunError {
+    NotFound,
+    TimedOut,
+    Failed(String),
+}
+
+impl RunError {
+    /// What to tell the user (the CLI is only "not installed" when it isn't found).
+    fn message(&self, cli: &str) -> String {
+        match self {
+            RunError::NotFound => format!("{cli} is not installed"),
+            RunError::TimedOut => format!(
+                "{cli} didn't answer within {} seconds. Check again in a moment.",
+                STATUS_TIMEOUT.as_secs()
+            ),
+            RunError::Failed(e) => format!("Couldn't run {cli}: {e}"),
+        }
+    }
+}
+
+const STATUS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// Runs a status command; returns (success, stdout, stderr).
-async fn run(program: &str, args: &[&str], account: &Account) -> Option<(bool, String, String)> {
-    let cli = which::which(program).ok()?;
+async fn run(
+    program: impl AsRef<std::ffi::OsStr>,
+    args: &[&str],
+    account: &Account,
+) -> Result<(bool, String, String), RunError> {
+    let cli = which::which(program).map_err(|_| RunError::NotFound)?;
     let out = tokio::time::timeout(
-        std::time::Duration::from_secs(20),
+        STATUS_TIMEOUT,
         account_command(cli, account, account_env(account))
             .args(args)
             .stdin(Stdio::null())
             .output(),
     )
     .await
-    .ok()?
-    .ok()?;
-    Some((
+    .map_err(|_| RunError::TimedOut)?
+    .map_err(|e| RunError::Failed(e.to_string()))?;
+    Ok((
         out.status.success(),
         String::from_utf8_lossy(&out.stdout).into_owned(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
@@ -202,7 +234,7 @@ async fn run(program: &str, args: &[&str], account: &Account) -> Option<(bool, S
 }
 
 /// Ask the provider CLI whether this account is signed in.
-pub async fn check_status(account: &Account) -> AccountStatus {
+pub async fn check_status(account: &Account, data_dir: &Path) -> AccountStatus {
     let mut status = AccountStatus {
         logged_in: false,
         label: None,
@@ -228,8 +260,14 @@ pub async fn check_status(account: &Account) -> AccountStatus {
             status.logged_in = true;
             status.label = Some("Managed by each agent".into());
         }
-        Provider::Claude => match run("claude", &["auth", "status", "--json"], account).await {
-            Some((_, stdout, stderr)) => {
+        Provider::Claude => match run(
+            providers::claude_binary(data_dir).unwrap_or_else(|| "claude".into()),
+            &["auth", "status", "--json"],
+            account,
+        )
+        .await
+        {
+            Ok((_, stdout, stderr)) => {
                 // Parse the first JSON value on stdout; tolerate log lines around it.
                 let json = stdout.find('{').and_then(|i| {
                     serde_json::Deserializer::from_str(&stdout[i..])
@@ -265,10 +303,10 @@ pub async fn check_status(account: &Account) -> AccountStatus {
                     status.error = Some(text.trim().to_string());
                 }
             }
-            None => status.error = Some("Claude Code is not installed".into()),
+            Err(e) => status.error = Some(e.message("Claude Code")),
         },
         Provider::Codex => match run("codex", &["login", "status"], account).await {
-            Some((ok, stdout, stderr)) => {
+            Ok((ok, stdout, stderr)) => {
                 let text = format!("{stdout}{stderr}");
                 let t = text.trim();
                 status.logged_in = ok && !t.to_lowercase().contains("not logged in");
@@ -276,7 +314,7 @@ pub async fn check_status(account: &Account) -> AccountStatus {
                     status.label = Some(t.lines().next().unwrap_or("Signed in").trim().to_string());
                 }
             }
-            None => status.error = Some("Codex CLI is not installed".into()),
+            Err(e) => status.error = Some(e.message("Codex CLI")),
         },
         Provider::Grok => {
             let home = account
@@ -437,14 +475,14 @@ mod local_tests {
             "CODEX_HOME".to_string(),
             "/tmp/armada-local-profile".to_string()
         )));
-        assert!(login_command(Provider::Local).is_none());
+        assert!(login_command(Provider::Local, Path::new("/nonexistent")).is_none());
     }
 
     #[tokio::test]
     async fn local_status_is_server_reachability() {
         // Nothing listens on port 9.
         let a = local_account("http://127.0.0.1:9");
-        let s = check_status(&a).await;
+        let s = check_status(&a, Path::new("/nonexistent")).await;
         assert!(!s.logged_in);
         assert!(s.error.unwrap().contains("Ollama"));
     }

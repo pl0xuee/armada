@@ -34,6 +34,20 @@ describe("parseNumber", () => {
     expect(parseNumber("abc")).toBeNull();
     expect(parseNumber("Infinity")).toBeNull();
   });
+
+  it("tells a thousands comma from a decimal comma", () => {
+    expect(parseNumber("1,000")).toBe(1000);
+    expect(parseNumber("1,000,000")).toBe(1_000_000);
+    expect(parseNumber("12,345.5")).toBe(12345.5);
+    expect(parseNumber("1.000,5")).toBe(1000.5);
+    expect(parseNumber("1,5")).toBe(1.5);
+    expect(parseNumber("0,25")).toBe(0.25);
+    expect(parseNumber("1,5000")).toBe(1.5);
+    expect(parseNumber("-1,000")).toBe(-1000);
+    expect(parseNumber("1,0,0")).toBeNull();
+    expect(parseNumber("1,00,000")).toBeNull();
+    expect(parseNumber("1,5,")).toBeNull();
+  });
 });
 
 describe("buildAnswers", () => {

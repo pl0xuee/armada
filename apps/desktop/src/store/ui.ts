@@ -29,6 +29,8 @@ export interface TerminalSession {
   provider?: Provider;
   /** The core reused a sign-in that was already running (its earlier output isn't replayed). */
   reused?: boolean;
+  /** The program that was started (shown when it prints nothing for a while). */
+  command?: string;
 }
 
 export interface NewAgentPreset {

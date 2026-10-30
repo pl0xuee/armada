@@ -30,7 +30,7 @@ import { basename, cn } from "@/lib/utils";
 import { useApp, usePendingPermissions, usePendingQuestions } from "@/store/app";
 import { QuestionCard } from "@/components/timeline/QuestionCard";
 import { useUi } from "@/store/ui";
-import { REASON_LABEL, REASON_TONE, type TriageEntry } from "./useTriage";
+import { REASON_TONE, reasonLabel, type TriageEntry } from "./useTriage";
 import { CodeText } from "../CodeText";
 
 type Permission = Extract<TimelineItem, { kind: "permission" }>;
@@ -81,19 +81,16 @@ export function TriageDetail({
   const pending = usePendingPermissions().find((p) => p.agent.id === agent.id)?.item;
   const question = usePendingQuestions().find((p) => p.agent.id === agent.id)?.item;
   const openAgent = useUi((s) => s.openAgent);
+  const label = reasonLabel(reason, !pending && !!question);
 
   return (
-    <article
-      data-agent-id={agent.id}
-      aria-label={`${agent.title}: ${REASON_LABEL[reason]}`}
-      className="flex min-h-0 flex-1 flex-col"
-    >
+    <article data-agent-id={agent.id} aria-label={`${agent.title}: ${label}`} className="flex min-h-0 flex-1 flex-col">
       <header className="flex items-start gap-3 border-b border-line px-5 py-4">
         <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="lg" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-medium", REASON_TONE[reason])}>
-              {REASON_LABEL[reason]}
+              {label}
             </span>
             <span className="text-[11.5px] text-steel">
               <RelTime ts={agent.lastActivityAt} long />
@@ -366,7 +363,9 @@ function DonePanel({
   fallback: string | null;
   agentId: string;
 }) {
-  const message = lastOf(items, "agent_message");
+  // A reply that is only a picture has no text to show here.
+  const message = [...(items ?? [])].reverse().find((i) => i.kind === "agent_message" && i.text.trim()) as
+    Extract<TimelineItem, { kind: "agent_message" }> | undefined;
   const summary = lastOf(items, "turn_summary");
   return (
     <div className="space-y-3">

@@ -124,6 +124,10 @@ struct CtxState {
     turn_tree: Option<String>,
     turn_cost_start: f64,
     turn_tokens_start: i64,
+    /// Pictures the agent put in its replies this turn (a runaway agent mustn't fill the
+    /// disk and every screen with them): how many, and fingerprints to skip repeats.
+    turn_pictures: usize,
+    turn_picture_ids: HashSet<u64>,
     /// "Send now" interrupted the turn: when it ends, run the head of the queue.
     advance_on_cancel: bool,
     pending_permissions: HashSet<String>,
@@ -184,6 +188,8 @@ impl AgentCtx {
                 turn_tree: None,
                 turn_cost_start: 0.0,
                 turn_tokens_start: 0,
+                turn_pictures: 0,
+                turn_picture_ids: HashSet::new(),
                 advance_on_cancel: false,
                 pending_permissions: HashSet::new(),
                 preamble: None,
@@ -376,6 +382,46 @@ impl AgentCtx {
     /// Streams text into the current message/thought. `ext_id` (Codex item ids)
     /// pins the delta to a specific item; without it consecutive chunks of the same
     /// kind are merged.
+    /// A picture in the agent's reply: its own message item, so the text before and
+    /// after it stays in order around it.
+    pub fn add_message_image(&self, image: Attachment) {
+        use std::hash::{Hash, Hasher};
+        let mut st = self.st.lock();
+        if st.replaying.is_some() {
+            return;
+        }
+        // The same picture again, or more than a turn can sensibly show: skipped (once
+        // over the limit the user is told).
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        image.data.hash(&mut h);
+        if !st.turn_picture_ids.insert(h.finish()) {
+            return;
+        }
+        st.turn_pictures += 1;
+        if st.turn_pictures > crate::files::MAX_MESSAGE_PICTURES_PER_TURN {
+            let first_over = st.turn_pictures == crate::files::MAX_MESSAGE_PICTURES_PER_TURN + 1;
+            drop(st);
+            if first_over {
+                self.notice(
+                    NoticeLevel::Warn,
+                    format!(
+                        "The agent sent more than {} pictures in one turn; the rest aren't shown.",
+                        crate::files::MAX_MESSAGE_PICTURES_PER_TURN
+                    ),
+                );
+            }
+            return;
+        }
+        self.end_stream_locked(&mut st);
+        self.push_locked(
+            &mut st,
+            ItemBody::AgentMessage {
+                text: String::new(),
+                images: vec![image],
+            },
+        );
+    }
+
     pub fn append_text(&self, kind: StreamKind, ext_id: Option<&str>, delta: &str) {
         if delta.is_empty() {
             return;
@@ -398,6 +444,7 @@ impl AgentCtx {
                 let body = match kind {
                     StreamKind::Message => ItemBody::AgentMessage {
                         text: String::new(),
+                        images: Vec::new(),
                     },
                     StreamKind::Thought => ItemBody::Thought {
                         text: String::new(),
@@ -414,7 +461,8 @@ impl AgentCtx {
         let mut offset = None;
         let CtxState { items, lens, .. } = &mut *st;
         if let Some(item) = items.get_mut(&id) {
-            if let ItemBody::AgentMessage { text } | ItemBody::Thought { text } = &mut item.body {
+            if let ItemBody::AgentMessage { text, .. } | ItemBody::Thought { text } = &mut item.body
+            {
                 let len = lens
                     .entry((id.clone(), LenField::Text))
                     .or_insert_with(|| text.encode_utf16().count());
@@ -452,12 +500,12 @@ impl AgentCtx {
         };
         let changed = matches!(
             st.items.get(&id).map(|i| &i.body),
-            Some(ItemBody::AgentMessage { text } | ItemBody::Thought { text }) if text != full
+            Some(ItemBody::AgentMessage { text, .. } | ItemBody::Thought { text }) if text != full
         );
         if changed && !full.is_empty() {
             let full = full.to_string();
             self.update_locked(&mut st, &id, |b| {
-                if let ItemBody::AgentMessage { text } | ItemBody::Thought { text } = b {
+                if let ItemBody::AgentMessage { text, .. } | ItemBody::Thought { text } = b {
                     *text = full;
                 }
             });
@@ -700,6 +748,14 @@ impl AgentCtx {
             a.last_activity_at = now_ms();
         });
         self.attention(AttentionReason::Permission, message, Some(request_id));
+    }
+
+    /// Closes every approval and question still open (their process is gone).
+    fn cancel_all_pending(&self) {
+        let ids: Vec<String> = self.st.lock().pending_permissions.iter().cloned().collect();
+        for id in ids {
+            self.cancel_pending(&id);
+        }
     }
 
     /// Closes an approval or question that can't be answered anymore.
@@ -1227,6 +1283,8 @@ impl AgentCtx {
             st.turn_started_at = now_ms();
             st.turn_cost_start = cost;
             st.turn_tokens_start = tokens;
+            st.turn_pictures = 0;
+            st.turn_picture_ids.clear();
             // Persist anything still buffered before dropping it from memory.
             self.flush_locked(&mut st);
             self.end_stream_locked(&mut st);
@@ -1514,7 +1572,14 @@ impl AgentCtx {
         let _settling = self.settle.lock();
         let (stale, dropped) = {
             let mut st = self.st.lock();
-            if !st.turn_active || generation.is_some_and(|g| g != st.generation) {
+            if generation.is_some_and(|g| g != st.generation) {
+                return;
+            }
+            if !st.turn_active {
+                // Nothing running, but a request can still be open (an MCP form that
+                // arrived between turns): whoever asked is gone.
+                drop(st);
+                self.cancel_all_pending();
                 return;
             }
             self.flush_locked(&mut st);
@@ -1600,6 +1665,7 @@ impl AgentCtx {
             }
             ExitIntent::None => {
                 // Idle: nothing was lost, but say so instead of failing silently later.
+                self.cancel_all_pending();
                 self.notice(
                     NoticeLevel::Info,
                     "The agent process exited; it will restart with your next message.",
@@ -1618,7 +1684,7 @@ impl AgentCtx {
                     .then(|| st.items.get(id))
                     .flatten()
                     .and_then(|i| match &i.body {
-                        ItemBody::AgentMessage { text } => Some(preview_of(text)),
+                        ItemBody::AgentMessage { text, .. } => Some(preview_of(text)),
                         _ => None,
                     })
             })

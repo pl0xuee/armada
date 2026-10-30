@@ -42,8 +42,10 @@ export function usePermissionKeys(
   agent: Agent,
   items: TimelineItem[] | undefined,
   onDenyWithReason: (requestId: string) => void,
+  /** Another side-by-side pane has the keyboard: do nothing. */
+  focused = true,
 ) {
-  const pending = latestPending(items);
+  const pending = focused ? latestPending(items) : null;
   const inflight = useRef(false);
   const arm = useRef(createArm());
   const state = useRef({ agent, pending, onDenyWithReason });

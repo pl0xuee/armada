@@ -188,7 +188,7 @@ const Tile = memo(function Tile({
         <AgentHeader agent={agent} tile={tiled ? { focused, first } : undefined} />
       </div>
       <ConflictBanner agent={agent} />
-      <TimelinePane agent={agent} />
+      <TimelinePane agent={agent} focused={focused} />
       {between}
       <div ref={composerRef} className="shrink-0">
         <Composer agent={agent} focused={focused} />
@@ -291,7 +291,12 @@ function AgentPane({ agentId, tileIds }: { agentId: string; tileIds?: string[] }
                 : "Workspace panel: not enough room. Enlarge the window."}
             </span>
             {tiled && (
-              <Button size="xs" variant="ghost" className="ml-auto" onClick={() => useUi.getState().setTileHelpers(false)}>
+              <Button
+                size="xs"
+                variant="ghost"
+                className="ml-auto"
+                onClick={() => useUi.getState().setTileHelpers(false)}
+              >
                 Show one pane
               </Button>
             )}

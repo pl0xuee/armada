@@ -315,6 +315,24 @@ pub fn summary(fields: &[QuestionField], answers: &Map<String, Value>) -> String
         .join(" \u{b7} ")
 }
 
+/// The answers as they are kept in the conversation: the values of secret fields (a
+/// pasted key or password) are replaced, so they are never stored or sent to other
+/// screens. The agent still gets the real values.
+pub fn redact(fields: &[QuestionField], answers: &Map<String, Value>) -> Map<String, Value> {
+    answers
+        .iter()
+        .map(|(key, value)| {
+            let secret = fields.iter().any(|f| &f.id == key && f.secret);
+            let shown = if secret && !value.is_null() {
+                Value::String("\u{2022}\u{2022}\u{2022}\u{2022}".into())
+            } else {
+                value.clone()
+            };
+            (key.clone(), shown)
+        })
+        .collect()
+}
+
 /// Checks submitted answers against the fields: known ids, the right types, and
 /// every required field filled. Returns a message for the user when they aren't.
 pub fn validate(fields: &[QuestionField], answers: &Map<String, Value>) -> Result<(), String> {
@@ -489,6 +507,22 @@ mod tests {
         let unknown: Map<String, Value> =
             serde_json::from_value(json!({ "name": "x", "nope": 1 })).unwrap();
         assert!(validate(&fields, &unknown).is_err());
+    }
+
+    #[test]
+    fn secret_answers_are_not_kept() {
+        let schema = json!({ "type": "object", "properties": {
+            "name": { "type": "string" }, "token": { "type": "string", "format": "password" } } });
+        let fields = fields_from_schema(&schema);
+        let answers: Map<String, Value> =
+            serde_json::from_value(json!({ "name": "armada", "token": "sk-secret" })).unwrap();
+        let kept = redact(&fields, &answers);
+        assert_eq!(kept["name"], "armada");
+        assert!(!kept["token"].as_str().unwrap().contains("sk-secret"));
+        // What the agent gets is untouched.
+        assert_eq!(content_for_schema(&schema, &answers)["token"], "sk-secret");
+        // The one-line summary doesn't show it either.
+        assert!(!summary(&fields, &kept).contains("sk-secret"));
     }
 
     #[test]

@@ -90,9 +90,13 @@ export function isAtLeastAsComplete(candidate: TimelineItem, base: TimelineItem)
   if (candidate.kind !== base.kind) return true;
   switch (candidate.kind) {
     case "user_message":
-    case "agent_message":
     case "thought":
       return candidate.text.length >= (base as typeof candidate).text.length;
+    case "agent_message": {
+      const b = base as typeof candidate;
+      // Pictures arrive with the item, not in deltas: never trade them away for an older copy.
+      return candidate.text.length > b.text.length || (candidate.text.length === b.text.length && (candidate.images?.length ?? 0) >= (b.images?.length ?? 0));
+    }
     case "tool_call": {
       const b = base as typeof candidate;
       const cr = TOOL_RANK[candidate.status] ?? 0;

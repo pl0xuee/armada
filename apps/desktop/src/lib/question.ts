@@ -36,12 +36,33 @@ export function questionGroups(fields: QuestionField[]): QuestionGroup[] {
   return fields.filter((f) => !folded.has(f.id)).map((field) => ({ field, other: others.get(field.id) ?? null }));
 }
 
-/** A number field's text as a number, or null when it isn't one. */
+const PLAIN_NUMBER = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i;
+const GROUPED_INT = /^[+-]?[1-9]\d{0,2}(,\d{3})+$/;
+const GROUPED_DECIMAL = /^[+-]?[1-9]\d{0,2}(,\d{3})+\.\d+$/;
+
+/**
+ * A number field's text as a number, or null when it isn't one. A comma is a thousands separator in
+ * well-formed digit groups ("1,000", "1,000.5") and a decimal point only when it is the single
+ * separator ("1,5"); anything else is rejected rather than guessed.
+ */
 export function parseNumber(text: string): number | null {
-  const t = text.trim();
+  let t = text.trim();
   if (!t) return null;
+  if (t.includes(",")) {
+    if (GROUPED_INT.test(t) || GROUPED_DECIMAL.test(t)) t = t.replaceAll(",", "");
+    else if (!t.includes(".") && t.split(",").length === 2) t = t.replace(",", ".");
+    else return null;
+  }
+  if (!PLAIN_NUMBER.test(t)) return null;
   const n = Number(t);
   return Number.isFinite(n) ? n : null;
+}
+
+/** Ids of number fields holding text that isn't a number. */
+export function invalidNumbers(fields: QuestionField[], d: QuestionDraft): string[] {
+  return fields
+    .filter((f) => f.kind === "number" && (d.texts[f.id] ?? "").trim() !== "" && parseNumber(d.texts[f.id]) === null)
+    .map((f) => f.id);
 }
 
 /** The other box's text when its row is selected. */
@@ -95,9 +116,13 @@ export function missingRequired(fields: QuestionField[], d: QuestionDraft): stri
     .map((g) => g.field.id);
 }
 
-/** Submit is allowed: nothing required is missing and there is something to send. */
+/** Submit is allowed: nothing required is missing, no number field is malformed, and there is something to send. */
 export function canSubmit(fields: QuestionField[], d: QuestionDraft): boolean {
-  return missingRequired(fields, d).length === 0 && Object.keys(buildAnswers(fields, d)).length > 0;
+  return (
+    missingRequired(fields, d).length === 0 &&
+    invalidNumbers(fields, d).length === 0 &&
+    Object.keys(buildAnswers(fields, d)).length > 0
+  );
 }
 
 /** Pick (or toggle, for multi) an option; picking in a single field leaves "Other". */
@@ -127,13 +152,22 @@ export function setBool(d: QuestionDraft, id: string, value: boolean): QuestionD
   return { ...d, bools: { ...d.bools, [id]: value } };
 }
 
-/** Index of the first group still without an answer (else 0): where keys act. */
-export function firstOpenGroup(groups: QuestionGroup[], d: QuestionDraft): number {
+/** Index of the first group at or after `from` still without an answer, or -1. */
+export function nextOpenGroup(groups: QuestionGroup[], d: QuestionDraft, from = 0): number {
   const answers = buildAnswers(
     groups.flatMap((g) => (g.other ? [g.field, g.other] : [g.field])),
     d,
   );
-  const i = groups.findIndex((g) => !(g.field.id in answers) && !(g.other && g.other.id in answers));
+  for (let i = Math.max(0, from); i < groups.length; i++) {
+    const g = groups[i];
+    if (!(g.field.id in answers) && !(g.other && g.other.id in answers)) return i;
+  }
+  return -1;
+}
+
+/** Index of the first group still without an answer (else 0): where keys act. */
+export function firstOpenGroup(groups: QuestionGroup[], d: QuestionDraft): number {
+  const i = nextOpenGroup(groups, d);
   return i < 0 ? 0 : i;
 }
 

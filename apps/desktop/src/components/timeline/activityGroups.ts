@@ -31,7 +31,8 @@ export function groupActivity(
     if (!it) return false;
     if (it.kind === "tool_call") return !it.subagent;
     if (it.kind === "thought") return true;
-    return it.kind === "agent_message" && !answers.has(i);
+    // A reply with a picture stays in view rather than folding into a group.
+    return it.kind === "agent_message" && !answers.has(i) && !it.images?.length;
   };
 
   const rows: number[] = [];
@@ -67,7 +68,11 @@ export function finalAnswers(items: TimelineItem[], top: number[]): Set<number> 
     if (k === "user_message") {
       if (lastMsg >= 0) answers.add(lastMsg);
       lastMsg = -1;
-    } else if (k === "agent_message") lastMsg = i;
+    } else if (k === "agent_message") {
+      // A picture doesn't replace the text before it as the turn's answer.
+      const m = items[i];
+      if (!(m?.kind === "agent_message" && m.images?.length && !m.text.trim())) lastMsg = i;
+    }
   }
   if (lastMsg >= 0) answers.add(lastMsg);
   return answers;

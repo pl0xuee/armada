@@ -277,7 +277,12 @@ interface ItemBase {
 export type TimelineItem = ItemBase &
   (
     | { kind: "user_message"; text: string; attachments?: Attachment[] }
-    | { kind: "agent_message"; text: string }
+    | {
+        kind: "agent_message";
+        text: string;
+        /** Pictures the model put in its reply (usually with empty text). */
+        images?: Attachment[];
+      }
     | { kind: "thought"; text: string }
     | {
         kind: "tool_call";

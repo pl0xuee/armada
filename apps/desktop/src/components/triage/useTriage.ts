@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { triageQueue, type NeedsReason } from "@/lib/agents";
 import type { Agent } from "@/lib/types";
-import { useApp } from "@/store/app";
+import { useApp, usePendingPermissions, usePendingQuestions } from "@/store/app";
 
 interface TriageStore {
   selectedId: string | null;
@@ -48,6 +48,21 @@ export const REASON_LABEL: Record<NeedsReason, string> = {
   error: "Error",
   done: "Done · unread",
 };
+
+/** The pill text: a question is not an approval, so it reads "Needs you". */
+export function reasonLabel(reason: NeedsReason, asksQuestion = false): string {
+  return asksQuestion && reason === "permission" ? "Needs you" : REASON_LABEL[reason];
+}
+
+/** Agents whose blocker is a question (an approval request, if both, comes first). */
+export function useQuestionAgents(): ReadonlySet<string> {
+  const questions = usePendingQuestions();
+  const permissions = usePendingPermissions();
+  return useMemo(() => {
+    const approving = new Set(permissions.map((p) => p.agent.id));
+    return new Set(questions.filter((q) => !approving.has(q.agent.id)).map((q) => q.agent.id));
+  }, [questions, permissions]);
+}
 
 export const REASON_TONE: Record<NeedsReason, string> = {
   permission: "border-warn/35 bg-warn/10 text-warn",

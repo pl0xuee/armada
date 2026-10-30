@@ -66,7 +66,8 @@ function projectItem(item: TimelineItem): TimelineItem | null {
     case "user_message":
       return { ...i, attachments: [] };
     case "agent_message":
-      return i;
+      // Viewers get the words, not pictures; a reply that is only a picture is hidden (remote/view.rs).
+      return i.text === "" && i.images?.length ? null : { ...i, images: [] };
     case "tool_call":
       return { ...i, locations: [], diffs: [], output: "", command: null, images: [], subagent: undefined };
     case "turn_summary":
@@ -83,6 +84,8 @@ export class MockBackend implements Backend {
   private items = new Map<string, TimelineItem[]>();
   private listeners = new Set<Listener>();
   private streamStep = 0;
+  /** `&fail=secretscheck`: the first secret-files look-ahead already failed. */
+  private secretCheckFailed = false;
   private streamItemId: string | null = null;
 
   constructor(scenario: Scenario) {
@@ -247,7 +250,7 @@ export class MockBackend implements Backend {
       return this.queueAction(agent, decodeURIComponent(q[2]), method === "POST" && !!q[3], interrupt);
     }
     const [pathOnly, query = ""] = path.split("?");
-    const m = /^\/api\/agents\/([^/]+)\/(items|prompt|permission|question|cancel|resume|stop|config|account|archive|read|diff|commit|ship|image)$/.exec(pathOnly);
+    const m = /^\/api\/agents\/([^/]+)\/(items|prompt|permission|question|cancel|resume|stop|config|account|archive|read|diff|commit|ship|image|secret-files)$/.exec(pathOnly);
     if (!m) throw new ApiError(404, "not found");
     const id = decodeURIComponent(m[1]);
     const action = m[2];
@@ -264,6 +267,16 @@ export class MockBackend implements Backend {
       if (this.s.scope === "viewer") list = list.map(projectItem).filter((i): i is TimelineItem => i !== null);
       if (limit) list = list.slice(-limit);
       return structuredClone(list);
+    }
+    if (action === "secret-files" && method === "GET") {
+      if (this.s.scope !== "owner") throw new ApiError(403, "This is a read-only link.");
+      // &fail=secretscheck: the first look-ahead times out; the commit's own 422 must still bring the list up.
+      if (this.s.fail.has("secretscheck") && !this.secretCheckFailed) {
+        this.secretCheckFailed = true;
+        throw new ApiError(408, null);
+      }
+      // &fail=secrets: the commit would add secret-looking files.
+      return this.s.fail.has("secrets") || this.s.fail.has("secretscheck") ? [".env.production", "deploy/server.key"] : [];
     }
     if (action === "diff" && method === "GET") {
       if (this.s.scope !== "owner") throw new ApiError(403, "This is a read-only link.");
@@ -310,12 +323,33 @@ export class MockBackend implements Backend {
           throw new ApiError(400, "The agent is still working; stop it or wait before committing.");
         }
         const message = String((body as { message?: unknown })?.message ?? "");
+        const opts = body as { exclude?: string[]; allowSecrets?: boolean };
+        if ((this.s.fail.has("secrets") || this.s.fail.has("secretscheck")) && !opts?.allowSecrets && !(opts?.exclude ?? []).includes(".env.production")) {
+          throw new ApiError(422, "These files look like secrets: .env.production, deploy/server.key. Leave them out of the commit, or confirm to include them.");
+        }
         if (action === "commit") {
+          // &fail=partial: files skipped (nested repo) and left behind, as the desktop reports them.
+          if (this.s.fail.has("partial")) {
+            return {
+              result: {
+                hash: "a1b2c3d",
+                files: ["e2e/checkout.spec.ts", "playwright.config.ts"],
+                leftUncommitted: 3,
+                skipped: ["vendor/ui-kit", "vendor/ui-kit/dist/index.js"],
+                message: "Committed 2 files (a1b2c3d); 3 other changed files were left uncommitted; skipped 2 files inside a submodule or nested repository",
+              },
+            };
+          }
           return { result: { hash: "a1b2c3d", files: ["e2e/checkout.spec.ts", "playwright.config.ts"], leftUncommitted: 0, skipped: [], message: `Committed 2 files (a1b2c3d): ${message}` } };
         }
         if (!agent.worktree) throw new ApiError(400, "Only agents running in their own worktree branch can be merged");
         if (this.s.fail.has("merge")) return { committed: "a1b2c3d", merged: null, error: `Committed a1b2c3d on ${agent.branch}, but the merge failed: conflicts in src/billing/plans.ts` };
-        return { committed: "a1b2c3d", merged: `Merged ${agent.branch} into ${agent.baseBranch ?? "main"}: 2 files changed`, error: null };
+        return {
+          committed: "a1b2c3d",
+          merged: `Merged ${agent.branch} into ${agent.baseBranch ?? "main"}: 2 files changed`,
+          error: null,
+          baseStatus: { branch: agent.baseBranch ?? "main", upstream: this.s.fail.has("noupstream") ? null : `origin/${agent.baseBranch ?? "main"}`, ahead: 2, behind: 1 },
+        };
       }
       case "archive":
         this.update(agent.id, { archived: !!(body as { archived?: boolean })?.archived });

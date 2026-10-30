@@ -1,6 +1,6 @@
 """Configurable ACP agent for lifecycle tests.
 Modes: normal, die, badstderr, slowinit, hanginit, replay, noresume, flood, steer.
-Prompt keywords: CRASH, PERM, HANG, CANCELERR, NOOPTS, EXITLATER, COST, ECHO, ASK."""
+Prompt keywords: CRASH, PERM, HANG, CANCELERR, NOOPTS, EXITLATER, COST, ECHO, ASK, LATEQ, PIC, SHOTS, WITHDRAW."""
 import json, sys, os, time
 MODE = sys.argv[1] if len(sys.argv) > 1 else "normal"
 next_id = 1000
@@ -102,6 +102,33 @@ while True:
                         break
                 res = r["result"]
                 text = text + " action=" + res["action"] + " content=" + json.dumps(res.get("content"), sort_keys=True)
+        if "SHOTS" in text:
+            # A runaway agent: many distinct pictures, and one of them again.
+            for i in range(30):
+                update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "image", "mimeType": "image/png", "data": "iVBOR%03d=" % i}})
+            update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "image", "mimeType": "image/png", "data": "iVBOR000="}})
+            send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+            continue
+        if "WITHDRAW" in text:
+            # A question the agent then gives up on (ACP $/cancel_request).
+            next_id += 1; qid = next_id
+            send({"jsonrpc": "2.0", "id": qid, "method": "elicitation/create", "params": {
+                "mode": "form", "sessionId": sid, "message": "Pick one",
+                "requestedSchema": {"type": "object", "properties": {"x": {"type": "string", "oneOf": [{"const": "a", "title": "A"}]}}}}})
+            time.sleep(0.3)
+            send({"jsonrpc": "2.0", "method": "$/cancel_request", "params": {"id": qid}})
+            time.sleep(0.3)
+            update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "moved on"}})
+            send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+            continue
+        if "PIC" in text:
+            # An image block in the reply, as claude-agent-acp sends the model's pictures.
+            update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "before "}})
+            update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "image", "mimeType": "image/png", "data": "iVBORw0KGgo="}})
+            update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "image", "mimeType": "image/png", "data": "", "uri": "https://example.com/a.png"}})
+            update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "after"}})
+            send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+            continue
         if "COST" in text:
             update(sid, {"sessionUpdate": "usage_update", "used": 10, "size": 100, "cost": {"amount": 0.5, "currency": "USD"}})
         if "PERM" in text:
@@ -127,6 +154,13 @@ while True:
             steered.clear()
         update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "reply to " + text}})
         send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+        if "LATEQ" in text:
+            # A form that arrives after the turn ended (an MCP server asking between turns).
+            time.sleep(0.5)
+            next_id += 1
+            send({"jsonrpc": "2.0", "id": next_id, "method": "elicitation/create", "params": {
+                "mode": "form", "sessionId": sid, "message": "Late question",
+                "requestedSchema": {"type": "object", "properties": {"x": {"type": "string", "title": "X"}}}}})
         if "EXITLATER" in text:
             time.sleep(0.3)
             sys.exit(0)

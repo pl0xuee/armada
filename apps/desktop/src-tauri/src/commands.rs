@@ -415,17 +415,8 @@ fn lock_idle_agent(
     Ok((guard, agent))
 }
 
-/// Commit for the desktop and the phone remote. Fails with
-/// [`git_review::NothingToCommit`] when there's nothing to take.
-pub(crate) async fn commit_impl(
-    core: &Core,
-    agent_id: &str,
-    message: &str,
-) -> anyhow::Result<CommitSummary> {
-    commit_excluding_impl(core, agent_id, message, &[]).await
-}
-
-/// [`commit_impl`], leaving `exclude` (repository-relative paths) out of the commit.
+/// Commit for the desktop and the phone remote, leaving `exclude` (repository-relative paths)
+/// out of the commit. Fails with [`git_review::NothingToCommit`] when there's nothing to take.
 pub(crate) async fn commit_excluding_impl(
     core: &Core,
     agent_id: &str,
@@ -448,18 +439,21 @@ pub async fn secret_looking_files(
     core: State<'_, Core>,
     agent_id: String,
 ) -> CmdResult<Vec<String>> {
-    let agent = core.agent(&agent_id).map_err(err)?;
+    secret_files_impl(&core, &agent_id).await.map_err(err)
+}
+
+/// [`secret_looking_files`] for the desktop and the phone remote.
+pub(crate) async fn secret_files_impl(core: &Core, agent_id: &str) -> anyhow::Result<Vec<String>> {
+    let agent = core.agent(agent_id)?;
     let touched = if agent.worktree {
         Vec::new()
     } else {
-        core.touched_files(&agent_id)
+        core.touched_files(agent_id)
     };
-    git_review::pending_secret_files(&agent, &touched)
-        .await
-        .map_err(err)
+    git_review::pending_secret_files(&agent, &touched).await
 }
 
-/// Outcome of "Commit & merge". `Err` from [`ship_impl`] means nothing changed; `Ok`
+/// Outcome of "Commit & merge". `Err` from [`ship_excluding_impl`] means nothing changed; `Ok`
 /// with `error` set means the commit landed but the merge didn't.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -479,14 +473,6 @@ pub struct ShipResult {
 
 /// "Commit & merge" for the desktop and the phone remote: commits what's left in the
 /// agent's worktree (if anything), then merges its branch into the base branch.
-pub(crate) async fn ship_impl(
-    core: &Core,
-    agent_id: &str,
-    message: &str,
-) -> anyhow::Result<ShipResult> {
-    ship_excluding_impl(core, agent_id, message, &[]).await
-}
-
 pub(crate) async fn ship_excluding_impl(
     core: &Core,
     agent_id: &str,
@@ -728,15 +714,20 @@ pub async fn login_account(
     if let Some(dir) = account.config_dir.as_deref().filter(|_| !account.is_system) {
         std::fs::create_dir_all(dir).map_err(|e| format!("creating {dir}: {e}"))?;
     }
-    let (program, args) = accounts::login_command(account.provider).ok_or_else(|| {
-        "Custom agents handle sign-in themselves; see the agent's own documentation.".to_string()
-    })?;
+    let (program, args) =
+        accounts::login_command(account.provider, core.data_dir()).ok_or_else(|| {
+            "Custom agents handle sign-in themselves; see the agent's own documentation."
+                .to_string()
+        })?;
     let exe = which::which(&program).map_err(|_| {
         format!(
             "{} is not installed (could not find `{program}` on PATH). Install it from Settings → Providers.",
             account.provider.display_name()
         )
     })?;
+    // What the dialog shows when the sign-in prints nothing, and what the log records.
+    let shown = login_command_line(&account, &exe, &args);
+    info!(account = %account.id, command = %shown, "starting sign-in");
     let spec = SpawnSpec {
         program: exe.into_os_string(),
         args: args.into_iter().map(Into::into).collect(),
@@ -760,8 +751,31 @@ pub async fn login_account(
         .map(|(terminal_id, reused)| LoginTerminal {
             terminal_id,
             reused,
+            command: shown,
         })
         .map_err(err)
+}
+
+/// The sign-in as a command line a person could run: the account's own settings folder
+/// first (`CLAUDE_CONFIG_DIR=…`; without it the command signs into the default profile),
+/// then the program and arguments, quoted where they contain spaces. Never shows API keys
+/// or other credentials: only the folder variables.
+fn login_command_line(account: &Account, exe: &std::path::Path, args: &[String]) -> String {
+    fn quote(s: &str) -> String {
+        if s.is_empty() || s.contains(|c: char| c.is_whitespace() || "\"'$`\\".contains(c)) {
+            format!("'{}'", s.replace('\'', "'\\''"))
+        } else {
+            s.to_string()
+        }
+    }
+    let mut parts: Vec<String> = accounts::account_env(account)
+        .into_iter()
+        .filter(|(k, _)| k.ends_with("_DIR") || k.ends_with("_HOME"))
+        .map(|(k, v)| format!("{k}={}", quote(&v)))
+        .collect();
+    parts.push(quote(&exe.to_string_lossy()));
+    parts.extend(args.iter().map(|a| quote(a)));
+    parts.join(" ")
 }
 
 /// The sign-in terminal; `reused` when a sign-in for this account was already
@@ -771,6 +785,8 @@ pub async fn login_account(
 pub struct LoginTerminal {
     terminal_id: String,
     reused: bool,
+    /// The program and arguments that were started, to show if it prints nothing.
+    command: String,
 }
 
 /// Whether `path` is a folder inside a git work tree (for launch preflight).
@@ -1317,6 +1333,26 @@ pub async fn revoke_share_link(remote: State<'_, Arc<Remote>>, id: String) -> Cm
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn login_command_lines_show_the_profile_but_never_keys() {
+        let mut account: Account = serde_json::from_value(serde_json::json!({
+            "id": "a", "name": "Work", "provider": "claude", "color": "#fff", "isSystem": false,
+            "authKind": "api_key", "configDir": "/home/me/My Profiles/work", "createdAt": 0
+        }))
+        .unwrap();
+        account.auth_kind = armada_core::AuthKind::ApiKey;
+        let line = login_command_line(
+            &account,
+            std::path::Path::new("/opt/Claude Code/claude"),
+            &["auth".into(), "login".into()],
+        );
+        assert_eq!(
+            line,
+            "CLAUDE_CONFIG_DIR='/home/me/My Profiles/work' '/opt/Claude Code/claude' auth login"
+        );
+        assert!(!line.contains("API_KEY"));
+    }
+
     use super::*;
 
     #[test]

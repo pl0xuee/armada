@@ -110,9 +110,24 @@ export function swipeable(item: PermissionItem): boolean {
   return cmd.length <= 80 && !cmd.includes("\n");
 }
 
+/**
+ * Codex's "Deny and stop" (`cancel`) is the one `reject_always` that isn't a
+ * standing rule: it denies this request and ends the turn.
+ */
+export function isDenyAndStop(o: PermissionOption): boolean {
+  return o.kind === "reject_always" && o.id === "cancel";
+}
+
 /** Confirm before an "always" answer (it changes future behaviour). */
 export async function confirmOption(o: PermissionOption): Promise<boolean> {
   if (!isAlways(o)) return true;
+  if (isDenyAndStop(o))
+    return confirmAction({
+      title: o.name,
+      body: "This request is denied and the agent's current turn ends.",
+      confirmLabel: "Deny and stop",
+      destructive: true,
+    });
   return confirmAction({
     title: o.name,
     body:
@@ -130,6 +145,11 @@ export const OPTION_HINT: Record<PermissionOption["kind"], string> = {
   reject_once: "Deny this request; the agent may try something else",
   reject_always: "Deny and don't ask again for requests like this",
 };
+
+/** What choosing this option does: by kind, except where the option's own id says more. */
+export function optionHint(o: PermissionOption): string {
+  return isDenyAndStop(o) ? "Deny and stop this turn" : OPTION_HINT[o.kind];
+}
 
 export const RESOLVED_LABEL: Record<PermissionOption["kind"], string> = {
   allow_once: "Allowed once",

@@ -2,10 +2,13 @@
  * Markdown parser for agent messages, producing a small AST that
  * `components/Markdown.tsx` renders as React elements (never HTML strings).
  *
- * Supported: ATX headings, paragraphs, bold/italic/strike, inline code,
- * fenced code blocks (also unterminated ones, while streaming), ordered and
- * unordered lists with nesting, block quotes, rules, GFM tables, links and
- * bare URLs. Only http(s)/mailto links are ever produced.
+ * Supported (the CommonMark + GFM subset the desktop app renders): ATX and
+ * setext headings, paragraphs with hard line breaks, bold/italic/strike,
+ * inline code, fenced and indented code blocks (also unterminated fences,
+ * while streaming), ordered/unordered/task lists with nesting and loose or
+ * tight spacing, block quotes, rules, GFM tables, links, images, bare URLs and
+ * emails, backslash escapes and character references. Only http(s)/mailto
+ * links are ever produced; images are never loaded from the network.
  *
  * Performance: agent output is untrusted and can be huge, so every pattern
  * is either linear or bounded. Block structure is detected with string
@@ -19,7 +22,16 @@ export type Block =
   | { t: "p"; text: string; plain?: boolean }
   | { t: "h"; level: number; text: string }
   | { t: "code"; lang: string; text: string }
-  | { t: "list"; ordered: boolean; start: number; items: Block[][] }
+  | {
+      t: "list";
+      ordered: boolean;
+      start: number;
+      items: Block[][];
+      /** Blank lines between items or an item's blocks: paragraphs get their own spacing. */
+      loose: boolean;
+      /** Per item: GFM task state (`- [x]`), or null for a plain item. Present only if some item is a task. */
+      checked?: (boolean | null)[];
+    }
   | { t: "quote"; blocks: Block[] }
   | { t: "hr" }
   | { t: "table"; head: string[]; align: Align[]; rows: string[][] };
@@ -27,7 +39,8 @@ export type Block =
 export type Inline =
   | string
   | { t: "code"; text: string }
-  | { t: "link"; href: string | null; children: Inline[]; raw?: string; image?: boolean }
+  | { t: "link"; href: string | null; children: Inline[]; raw?: string }
+  | { t: "image"; src: string; alt: string }
   | { t: "strong" | "em" | "del"; children: Inline[] }
   | { t: "br" }
   | { t: "caret" };
@@ -157,8 +170,45 @@ function startsBlock(line: string): boolean {
   return !!(fenceOpen(line) || heading(line) || isHr(line) || quoteBody(line) !== null || listItem(line));
 }
 
+/**
+ * Whether `line` ends a paragraph that is in progress. Like CommonMark, only a
+ * non-empty list item can interrupt one, and an ordered list only if it starts at 1.
+ */
+function interruptsParagraph(line: string): boolean {
+  if (fenceOpen(line) || heading(line) || isHr(line) || quoteBody(line) !== null) return true;
+  const li = listItem(line);
+  return !!li && li.text.trim() !== "" && (!/\d/.test(li.marker) || parseInt(li.marker, 10) === 1);
+}
+
+/** The underline of a setext heading: `===` (level 1) or `---` (level 2). */
+const SETEXT = /^ {0,3}(=+|-+)[ \t]*$/;
+
+/** Tabs in leading whitespace count as 4 spaces; fenced code keeps its tabs verbatim. */
+function splitLines(src: string): string[] {
+  const lines = src.replace(/\r\n?/g, "\n").split("\n");
+  if (!src.includes("\t")) return lines;
+  let fence: Fence | null = null;
+  return lines.map((line) => {
+    if (fence) {
+      if (isFenceClose(line, fence)) fence = null;
+      return line;
+    }
+    if (line.length <= MAX_FORMATTED) {
+      const open = fenceOpen(line);
+      if (open) {
+        fence = open;
+        return line;
+      }
+    }
+    return line.charCodeAt(0) === 9 || line.includes(" \t") ? line.replace(/^[ \t]+/, (ws) => ws.replace(/\t/g, "    ")) : line;
+  });
+}
+
+/** GFM task marker at the start of a list item's text. */
+const TASK = /^\[([ xX])\][ \t]+(?=\S)/;
+
 export function parseBlocks(src: string, depth = 0): Block[] {
-  const lines = src.replace(/\r\n?/g, "\n").replace(/\t/g, "    ").split("\n");
+  const lines = splitLines(src);
   const blocks: Block[] = [];
   let i = 0;
 
@@ -203,7 +253,7 @@ export function parseBlocks(src: string, depth = 0): Block[] {
 
     if (quoteBody(line) !== null) {
       const body: string[] = [];
-      while (i < lines.length && lines[i].trim() && (quoteBody(lines[i]) !== null || !startsBlock(lines[i]))) {
+      while (i < lines.length && lines[i].trim() && (quoteBody(lines[i]) !== null || !interruptsParagraph(lines[i]))) {
         body.push(quoteBody(lines[i]) ?? lines[i]);
         i++;
       }
@@ -217,13 +267,16 @@ export function parseBlocks(src: string, depth = 0): Block[] {
       const baseIndent = first.indent;
       const ordered = /\d/.test(first.marker);
       const start = ordered ? parseInt(first.marker, 10) : 1;
-      const items: { ci: number; lines: string[] }[] = [];
+      const items: { ci: number; lines: string[]; fence: Fence | null }[] = [];
+      let loose = false;
       let blankRun = false;
       while (i < lines.length) {
         const l = lines[i];
         const li = listItem(l);
-        if (li && li.indent <= baseIndent + 1 && /\d/.test(li.marker) === ordered) {
-          items.push({ ci: li.ci, lines: [" ".repeat(li.ci) + li.text] });
+        // A different bullet character (or "." vs ")") starts a new list.
+        if (li && li.indent <= baseIndent + 1 && /\d/.test(li.marker) === ordered && li.marker.slice(-1) === first.marker.slice(-1)) {
+          if (blankRun && items.length) loose = true;
+          items.push({ ci: li.ci, lines: [" ".repeat(li.ci) + li.text], fence: li.text.length <= MAX_FORMATTED ? fenceOpen(li.text) : null });
           blankRun = false;
           i++;
           continue;
@@ -235,7 +288,15 @@ export function parseBlocks(src: string, depth = 0): Block[] {
         }
         const cur = items[items.length - 1];
         if (leadingSpaces(l) >= Math.min(cur.ci, baseIndent + 2)) {
-          if (blankRun) cur.lines.push("");
+          // A blank line between two blocks of one item makes the list loose (blank lines inside code don't).
+          if (blankRun) {
+            cur.lines.push("");
+            if (!cur.fence) loose = true;
+          }
+          const inner = l.slice(Math.min(cur.ci, leadingSpaces(l)));
+          if (cur.fence) {
+            if (isFenceClose(inner, cur.fence)) cur.fence = null;
+          } else if (inner.length <= MAX_FORMATTED) cur.fence = fenceOpen(inner);
           cur.lines.push(l);
           blankRun = false;
           i++;
@@ -248,15 +309,22 @@ export function parseBlocks(src: string, depth = 0): Block[] {
         }
         break;
       }
-      blocks.push({
-        t: "list",
-        ordered,
-        start,
-        items: items.map(({ ci, lines: raw }) => {
-          const body = raw.map((l) => l.slice(Math.min(ci, leadingSpaces(l)))).join("\n");
-          return depth < MAX_DEPTH ? parseBlocks(body, depth + 1) : [{ t: "p", text: body }];
-        }),
+      let anyTask = false;
+      const checked: (boolean | null)[] = [];
+      const parsed = items.map(({ ci, lines: raw }) => {
+        let task: boolean | null = null;
+        const head = raw[0].slice(ci);
+        const m = TASK.exec(head);
+        if (m) {
+          task = m[1] !== " ";
+          raw[0] = " ".repeat(ci) + head.slice(m[0].length);
+          anyTask = true;
+        }
+        checked.push(task);
+        const body = raw.map((l) => l.slice(Math.min(ci, leadingSpaces(l)))).join("\n");
+        return depth < MAX_DEPTH ? parseBlocks(body, depth + 1) : [{ t: "p", text: body } as Block];
       });
+      blocks.push({ t: "list", ordered, start, items: parsed, loose, ...(anyTask ? { checked } : {}) });
       continue;
     }
 
@@ -277,16 +345,41 @@ export function parseBlocks(src: string, depth = 0): Block[] {
       continue;
     }
 
+    if (leadingSpaces(line) >= 4) {
+      // Indented code block: runs until a non-blank line that isn't indented.
+      const body: string[] = [];
+      while (i < lines.length && (!lines[i].trim() || (leadingSpaces(lines[i]) >= 4 && lines[i].length <= MAX_FORMATTED))) {
+        body.push(lines[i].slice(Math.min(4, leadingSpaces(lines[i]))));
+        i++;
+      }
+      while (body.length && !body[body.length - 1].trim()) body.pop();
+      blocks.push({ t: "code", lang: "", text: body.join("\n") });
+      continue;
+    }
+
     const para: string[] = [];
     let size = 0;
-    while (i < lines.length && lines[i].trim() && (para.length === 0 || !startsBlock(lines[i]))) {
-      if (para.length && lines[i].includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])) break;
-      if (para.length && lines[i].length > MAX_FORMATTED) break;
-      para.push(lines[i].trim());
-      size += lines[i].length;
+    let setext = 0;
+    while (i < lines.length && lines[i].trim()) {
+      const cur = lines[i];
+      if (para.length) {
+        if (cur.length <= MAX_FORMATTED && SETEXT.test(cur)) {
+          setext = cur.trimStart()[0] === "=" ? 1 : 2;
+          i++;
+          break;
+        }
+        if (interruptsParagraph(cur)) break;
+        if (cur.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])) break;
+        if (cur.length > MAX_FORMATTED) break;
+      }
+      // Trailing spaces stay (two of them are a hard line break); the final line is trimmed below.
+      para.push(cur.trimStart());
+      size += cur.length;
       i++;
     }
-    blocks.push({ t: "p", text: para.join("\n"), plain: size > MAX_FORMATTED || undefined });
+    const text = para.join("\n").trimEnd();
+    if (setext && size <= MAX_FORMATTED) blocks.push({ t: "h", level: setext, text: text.replace(/\n[ \t]*/g, " ") });
+    else blocks.push({ t: "p", text, plain: size > MAX_FORMATTED || undefined });
   }
   return blocks;
 }
@@ -305,16 +398,94 @@ export function safeHref(raw: string): string | null {
   }
 }
 
-const ESCAPE = /\\([\\`*_{}[\]()#+\-.!|~>])/y;
-// URL part allows one level of balanced parentheses, e.g. Wikipedia-style links.
-const LINK = /!?\[((?:[^[\]\\]|\\.|\[[^\]]*\])*)\]\(\s*<?((?:[^\s()<>]|\([^\s()<>]*\))*)>?(?:\s+["'][^"']*["'])?\s*\)/y;
+const ESCAPE = /\\([!-/:-@[-`{-~])/y; // any ASCII punctuation, as in CommonMark
+// URL part allows one level of balanced parentheses, e.g. Wikipedia-style links. The whitespace around the
+// destination is unambiguous (every optional part starts with a character the one before it can't match), so
+// a failed match backtracks in linear time: `[a](` followed by thousands of spaces used to cost O(k^2).
+const LINK =
+  /!?\[((?:[^[\]\\]|\\.|\[[^\]]*\])*)\]\(\s*(?:(?:<([^<>\n]*)>|((?:[^\s()<>]|\([^\s()<>]*\))+))(?:\s+["'][^"']*["'])?\s*)?\)/y;
 const ANGLE_URL = /<((?:https?:\/\/|mailto:)[^\s>]+)>/y;
+const ANGLE_MAIL = /<([A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)>/y;
 const BARE_URL = /https?:\/\/[^\s<>"']+/y;
+const BARE_WWW = /www\.[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?:[/?#][^\s<>"']*)?/y;
+const BARE_MAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/y;
+const ENTITY = /&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([A-Za-z][A-Za-z0-9]{1,9}));/y;
+const TRIPLE_STAR = /\*\*\*(?=[^\s*])([\s\S]*?[^\s*])\*\*\*(?!\*)/y;
+const TRIPLE_UNDER = /___(?=[^\s_])([\s\S]*?[^\s_])___(?!\w)/y;
 const STRONG_STAR = /\*\*(?=\S)([\s\S]*?\S)\*\*/y;
 const STRONG_UNDER = /__(?=\S)([\s\S]*?\S)__(?!\w)/y;
 const EM_STAR = /\*(?=[^\s*])([\s\S]*?[^\s*\\])\*(?!\*)/y;
 const EM_UNDER = /_(?=[^\s_])([\s\S]*?[^\s_\\])_(?!\w)/y;
-const STRIKE = /~~(?=\S)([\s\S]*?\S)~~/y;
+
+const TILDE = 126;
+
+/** Whether a UTF-16 code unit is whitespace in the sense of the regex `\s`. */
+function isSpaceCode(c: number): boolean {
+  return (
+    c === 32 || (c >= 9 && c <= 13) || c === 160 || c === 0x1680 || (c >= 0x2000 && c <= 0x200a) ||
+    c === 0x2028 || c === 0x2029 || c === 0x202f || c === 0x205f || c === 0x3000 || c === 0xfeff
+  );
+}
+
+/** Positions of the "~" characters that can close a strikethrough: not preceded by whitespace or another "~". */
+function strikeClosers(text: string): number[] {
+  const out: number[] = [];
+  for (let e = text.indexOf("~", 1); e !== -1; e = text.indexOf("~", e + 1)) {
+    const prev = text.charCodeAt(e - 1);
+    if (prev !== TILDE && !isSpaceCode(prev)) out.push(e);
+  }
+  return out;
+}
+
+/**
+ * GFM strikethrough, ~one~ and ~~two~~, looking at most WINDOW characters ahead: the same match as
+ * /(~~?)(?=[^\s~])([\s\S]*?[^\s~])\1(?!~)/y, but it only visits the "~" characters that can close
+ * (`closers`, from strikeClosers) instead of scanning the whole window per opener (text full of
+ * "~a ~a ~a" made that quadratic).
+ */
+function matchStrike(text: string, at: number, closers: readonly number[]): { len: number; body: string } | null {
+  const ml = text.charCodeAt(at + 1) === TILDE ? 2 : 1;
+  const first = text.charCodeAt(at + ml);
+  if (!(first === first) || first === TILDE || isSpaceCode(first)) return null; // NaN: end of text
+  const end = Math.min(text.length, at + WINDOW);
+  // First closer after the opener's first character.
+  let lo = 0;
+  let hi = closers.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (closers[mid] < at + ml + 1) lo = mid + 1;
+    else hi = mid;
+  }
+  for (; lo < closers.length && closers[lo] + ml <= end; lo++) {
+    const e = closers[lo];
+    if (ml === 2 && text.charCodeAt(e + 1) !== TILDE) continue;
+    if (e + ml < end && text.charCodeAt(e + ml) === TILDE) continue;
+    return { len: e + ml - at, body: text.slice(at + ml, e) };
+  }
+  return null;
+}
+
+/** The character references worth decoding in chat text (the HTML ones agents actually write). */
+const ENTITIES: Record<string, string> = {
+  amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: "\u00a0", copy: "©", reg: "®", trade: "™", hellip: "…",
+  mdash: "—", ndash: "–", lsquo: "‘", rsquo: "’", ldquo: "“", rdquo: "”", bull: "•", middot: "·", rarr: "→",
+  larr: "←", uarr: "↑", darr: "↓", harr: "↔", times: "×", divide: "÷", plusmn: "±", deg: "°", laquo: "«",
+  raquo: "»", euro: "€", pound: "£", yen: "¥", cent: "¢", sect: "§", para: "¶", infin: "∞", ne: "≠", le: "≤",
+  ge: "≥", check: "✓", hearts: "♥",
+};
+
+function decodeEntity(m: RegExpExecArray): string | null {
+  if (m[3] !== undefined) return ENTITIES[m[3]] ?? null;
+  const cp = m[1] !== undefined ? parseInt(m[1], 10) : parseInt(m[2], 16);
+  return cp > 0 && cp <= 0x10ffff && (cp < 0xd800 || cp > 0xdfff) ? String.fromCodePoint(cp) : null;
+}
+
+/** The text of an inline run, without any markup (image alt text, link hints). */
+export function inlineText(nodes: Inline[]): string {
+  return nodes
+    .map((n) => (typeof n === "string" ? n : n.t === "code" ? n.text : n.t === "image" ? n.alt : "children" in n ? inlineText(n.children) : n.t === "br" ? " " : ""))
+    .join("");
+}
 
 /** Sticky match at `at`, looking at most WINDOW characters ahead. */
 function match(re: RegExp, text: string, at: number): RegExpExecArray | null {
@@ -331,9 +502,10 @@ function trimUrl(url: string): string {
 
 const isWord = (ch: string | undefined) => !!ch && /\w/.test(ch);
 
-export function parseInline(text: string, depth = 0): Inline[] {
+export function parseInline(text: string, depth = 0, inLink = false): Inline[] {
   if (text.length > MAX_FORMATTED) return [text.split(CARET).join(""), ...(text.includes(CARET) ? [{ t: "caret" } as const] : [])];
   const out: Inline[] = [];
+  let closers: number[] | undefined; // strikethrough closers, found on first use
   let buf = "";
   const flush = () => {
     if (buf) out.push(buf);
@@ -343,7 +515,9 @@ export function parseInline(text: string, depth = 0): Inline[] {
     flush();
     out.push(node);
   };
-  const inner = (s: string) => (depth < MAX_DEPTH ? parseInline(s, depth + 1) : [s]);
+  const inner = (s: string, link = inLink) => (depth < MAX_DEPTH ? parseInline(s, depth + 1, link) : [s]);
+  // Cheap guards so the autolink patterns only run where they can match.
+  const hasAt = !inLink && text.includes("@");
   // For each backtick-run length, the position from which no closing run exists.
   const noCloser = new Map<number, number>();
 
@@ -351,6 +525,7 @@ export function parseInline(text: string, depth = 0): Inline[] {
   while (i < text.length) {
     const ch = text[i];
     let m: RegExpExecArray | null;
+    let st: ReturnType<typeof matchStrike>;
 
     if (ch === CARET) {
       push({ t: "caret" });
@@ -358,6 +533,11 @@ export function parseInline(text: string, depth = 0): Inline[] {
       continue;
     }
     if (ch === "\\") {
+      if (text[i + 1] === "\n") {
+        push({ t: "br" }); // backslash hard line break
+        i += 2;
+        continue;
+      }
       ESCAPE.lastIndex = i;
       if ((m = ESCAPE.exec(text))) {
         buf += m[1];
@@ -399,11 +579,29 @@ export function parseInline(text: string, depth = 0): Inline[] {
       continue;
     }
     if ((ch === "[" || (ch === "!" && text[i + 1] === "[")) && (m = match(LINK, text, i))) {
-      const label = m[1] || m[2];
-      // Images are never loaded (privacy + CSP); their alt text becomes a link.
-      push({ t: "link", href: safeHref(m[2]), children: inner(label), raw: m[2], image: ch === "!" });
+      const dest = (m[2] ?? m[3] ?? "").trim();
+      if (ch === "!") {
+        // Images are never fetched from the network (privacy + CSP): the renderer shows local
+        // files through the app's own API and everything else as a chip.
+        push({ t: "image", src: dest, alt: inlineText(inner(m[1], true)) });
+      } else {
+        push({ t: "link", href: safeHref(dest), children: inner(m[1] || dest, true), raw: dest });
+      }
       i += m[0].length;
       continue;
+    }
+    if (ch === "<" && !inLink && (m = match(ANGLE_MAIL, text, i))) {
+      push({ t: "link", href: "mailto:" + m[1], children: [m[1]] });
+      i += m[0].length;
+      continue;
+    }
+    if (ch === "&" && (m = (ENTITY.lastIndex = i, ENTITY.exec(text)))) {
+      const decoded = decodeEntity(m);
+      if (decoded !== null) {
+        buf += decoded;
+        i += m[0].length;
+        continue;
+      }
     }
     if (ch === "<" && (m = match(ANGLE_URL, text, i))) {
       const href = safeHref(m[1]);
@@ -412,7 +610,21 @@ export function parseInline(text: string, depth = 0): Inline[] {
       i += m[0].length;
       continue;
     }
-    if (ch === "h" && !isWord(text[i - 1]) && (m = match(BARE_URL, text, i))) {
+    if (ch === "w" && !inLink && !isWord(text[i - 1]) && text.startsWith("www.", i) && (m = match(BARE_WWW, text, i))) {
+      const url = trimUrl(m[0]);
+      const href = safeHref("http://" + url);
+      if (href) {
+        push({ t: "link", href, children: [url] });
+        i += url.length;
+        continue;
+      }
+    }
+    if (hasAt && /[A-Za-z0-9]/.test(ch) && !/[\w.+%-]/.test(text[i - 1] ?? "") && (m = match(BARE_MAIL, text, i))) {
+      push({ t: "link", href: "mailto:" + m[0], children: [m[0]] });
+      i += m[0].length;
+      continue;
+    }
+    if (ch === "h" && !inLink && !isWord(text[i - 1]) && (m = match(BARE_URL, text, i))) {
       const url = trimUrl(m[0]);
       const href = safeHref(url);
       if (href) {
@@ -424,6 +636,12 @@ export function parseInline(text: string, depth = 0): Inline[] {
     if (ch === "*" || ch === "_") {
       const under = ch === "_";
       const canOpen = !under || !isWord(text[i - 1]);
+      const triple = canOpen && text.startsWith(under ? "___" : "***", i) ? match(under ? TRIPLE_UNDER : TRIPLE_STAR, text, i) : null;
+      if (triple) {
+        push({ t: "em", children: [{ t: "strong", children: inner(triple[1]) }] });
+        i += triple[0].length;
+        continue;
+      }
       const strong = canOpen ? match(under ? STRONG_UNDER : STRONG_STAR, text, i) : null;
       if (strong) {
         push({ t: "strong", children: inner(strong[1]) });
@@ -437,9 +655,9 @@ export function parseInline(text: string, depth = 0): Inline[] {
         continue;
       }
     }
-    if (ch === "~" && text[i + 1] === "~" && (m = match(STRIKE, text, i))) {
-      push({ t: "del", children: inner(m[1]) });
-      i += m[0].length;
+    if (ch === "~" && (st = matchStrike(text, i, (closers ??= strikeClosers(text))))) {
+      push({ t: "del", children: inner(st.body) });
+      i += st.len;
       continue;
     }
     if (ch === "\n") {
@@ -463,15 +681,17 @@ export function parseInline(text: string, depth = 0): Inline[] {
 
 /**
  * Split a message into top-level chunks at blank lines that are outside code
- * fences and not followed by an indented (continuation) line. Each chunk
- * parses on its own, so while a message streams only the last chunk changes
- * and needs re-parsing.
+ * fences and don't continue the block above: not before an indented line (a
+ * list item's content, indented code), and not between the items of one list.
+ * Each chunk parses on its own, so while a message streams only the last chunk
+ * changes and needs re-parsing.
  */
 export function splitSegments(text: string): string[] {
   const lines = text.split("\n");
   const out: string[] = [];
   let cur: string[] = [];
   let fence: Fence | null = null;
+  let inList = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (fence) {
@@ -479,21 +699,33 @@ export function splitSegments(text: string): string[] {
       cur.push(line);
       continue;
     }
-    const open = line.length <= MAX_FORMATTED ? fenceOpen(line) : null;
-    if (open) fence = open;
-    if (!line.trim() && cur.length) {
-      const next = lines[i + 1];
-      const continuation = next !== undefined && next.trim() !== "" && /^[ \t]/.test(next);
-      if (!continuation) {
-        out.push(cur.join("\n"));
-        cur = [];
-        continue;
-      }
+    if (line.trim()) {
+      const open = line.length <= MAX_FORMATTED ? fenceOpen(line) : null;
+      if (open) fence = open;
+      if (line.length <= MAX_FORMATTED && listItem(line)) inList = true;
+      else if (!(inList && /^\s/.test(line))) inList = false;
+      cur.push(line);
+      continue;
     }
-    cur.push(line);
+    if (!cur.length) continue;
+    // A run of blank lines: look at the first line after it.
+    let k = i + 1;
+    while (k < lines.length && !lines[k].trim()) k++;
+    const next = lines[k];
+    const continues =
+      next !== undefined &&
+      (/^[ \t]/.test(next) || (inList && next.length <= MAX_FORMATTED && listItem(next) !== null));
+    if (continues) {
+      for (let j = i; j < k; j++) cur.push(lines[j]);
+    } else {
+      out.push(cur.join("\n"));
+      cur = [];
+      inList = false;
+    }
+    i = k - 1;
   }
   if (cur.length) out.push(cur.join("\n"));
-  return out;
+  return out.length ? out : [text];
 }
 
 /** Tiny LRU cache for parse results, keyed by the exact text. */
@@ -558,6 +790,9 @@ export function linkHostHint(href: string, label: string): string | null {
     return null;
   }
   const l = label.trim().toLowerCase();
-  if (!l || l.includes(host.toLowerCase())) return null;
+  if (!l) return null;
+  // The host has to appear as whole labels ("github.com" doesn't vouch for "ithub.com", nor "evil-github.com").
+  const h = host.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (new RegExp(`(?:^|[^a-z0-9.-])(?:www\\.)?${h}(?:$|[^a-z0-9.-]|\\.(?![a-z0-9-]))`).test(l)) return null;
   return host;
 }

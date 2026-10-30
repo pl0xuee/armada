@@ -5,12 +5,15 @@
  * Deep links for development and screenshots (all on the dev server):
  *   ?mock=1                         use the in-memory mock (default when no server answers)
  *   ?mock=0                         never use the mock
- *   #/  #/agent/<id>  #/inbox  #/new screens (agents: a1…a10; a3 has sub-agents + a queue, a5 a turn summary, a6 is rate-limited)
+ *   #/  #/agent/<id>  #/inbox  #/new screens (agents: a1…a12; a3 has sub-agents (one with a final report, a background one, a Codex control call), a running command with ANSI + progress bar and a queue; a4 a live activity group; a5/a12 a turn summary (a12: a long finished turn folded into one row, failed command with exit code, +/- edit counts); a6 is rate-limited; a7 is interrupted with paused calls)
  *   &pair=1 | &pair=revoked         pairing screen (fresh / "this device was unpaired")
  *   &scope=viewer                   read-only share link (agent a3)
  *   &empty=1                        no agents
  *   &hang=1                         state/items never load (skeletons)
  *   &fail=state,items,permission,prompt,cancel,resume,stop,config,account,create,stream,session-401,session-429,session-down
+ *   &fail=merge|partial|noupstream  ship result variants: merge conflict / commit with skipped + left-over files / merged with no upstream
+ *   &fail=secrets  the commit would add secret-looking files (.env.production, deploy/server.key)
+ *   &fail=secretscheck  as secrets, but the look-ahead check times out once: the commit's 422 must bring the list up
  *   &toast=permission|done|error    fire an attention event after connecting
  *   &stream=0                       stop the streaming simulation (stable screenshots)
  *   &offline=1                      pretend the device is offline

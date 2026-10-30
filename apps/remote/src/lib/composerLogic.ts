@@ -1,7 +1,7 @@
 /** Pure helpers behind the composer: pending-prompt reconciliation and the "/" command picker. */
 import { commandRank } from "@shared/slashCommands";
 import type { PendingPrompt } from "./store";
-import type { QueuedPrompt, RemoteEvent, SlashCommand, TimelineItem } from "./types";
+import type { Agent, QueuedPrompt, RemoteEvent, SlashCommand, TimelineItem } from "./types";
 
 const same = (a: string, b: string) => a.trim() === b.trim();
 
@@ -74,4 +74,33 @@ export function coalesceDeltas(events: RemoteEvent[]): RemoteEvent[] {
     } else out.push(ev);
   }
   return out;
+}
+
+/**
+ * The composer's placeholder in the desktop's wording for each state (waiting
+ * on an approval or a question, working, just finished, ready), as candidates
+ * from the full desktop sentence down to a short one: a phone's box may only
+ * fit the short one. Every busy state ends on the same "Queue a message…".
+ * Pick with `pickPlaceholder`.
+ */
+export function composerPlaceholders(
+  agent: Pick<Agent, "status" | "unread" | "availableCommands">,
+  name: string,
+  /** The agent is waiting on a question: typing queues a message, it doesn't answer it. */
+  asking = false,
+): string[] {
+  if (asking) return ["Answer above, or queue a message to run after this turn…", "Answer above, or queue a message…", "Answer above, or queue…"];
+  if (agent.status === "needs_permission") {
+    return ["Waiting for you above. Queue a message to run after this turn…", "Waiting for you above. Queue a message…", "Queue a message…"];
+  }
+  if (agent.status === "working" || agent.status === "starting") {
+    return [`${name} is working. Queue a follow-up message…`, `${name} is working. Queue a message…`, "Queue a message…"];
+  }
+  if (agent.status === "idle" && agent.unread) return ["Done. Reply, or start something new…", "Done. Reply…"];
+  return (agent.availableCommands?.length ?? 0) > 0 ? [`Message ${name}…  / for commands`, `Message ${name}…`] : [`Message ${name}…`];
+}
+
+/** The longest candidate that fits on one line (the shortest if none does). */
+export function pickPlaceholder(candidates: string[], fits: (text: string) => boolean): string {
+  return candidates.find(fits) ?? candidates[candidates.length - 1];
 }

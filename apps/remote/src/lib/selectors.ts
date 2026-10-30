@@ -108,6 +108,11 @@ export function useAgentPending(agent: Agent): number {
   );
 }
 
+/** Is this agent waiting on a question (rather than an approval)? */
+export function useAgentAsking(agentId: string): boolean {
+  return useStore((s) => pendingKindOf(permissionIndex(s.permissions).get(agentId)) === "question");
+}
+
 /** Approvals waiting on other agents than `agentId`. */
 export function useOtherPendingCount(agentId: string | null): number {
   return useStore((s) => {
@@ -150,6 +155,36 @@ export interface FleetGroup {
 
 const NEEDS_RANK: Partial<Record<Agent["status"], number>> = { needs_permission: 0, error: 1, interrupted: 2 };
 
+/**
+ * Does this (live) agent need the owner? Waiting on an approval, stopped by an
+ * error or interruption, or out of usage: a rate-limited agent always needs
+ * you, even if its status has already moved on from "error".
+ */
+export function needsYou(a: Agent): boolean {
+  return a.status in NEEDS_RANK || a.pendingPermissions > 0 || a.rateLimited === true;
+}
+
+export const USAGE_LIMIT_LABEL = "Usage limit";
+
+/**
+ * The last turn hit the account's usage limit and the agent isn't doing anything
+ * else: a warning ("Usage limit"), not a failure, and the fix is switching accounts.
+ */
+export function isUsageLimited(a: Pick<Agent, "rateLimited" | "status">): boolean {
+  return a.rateLimited === true && a.status !== "working" && a.status !== "starting" && a.status !== "needs_permission";
+}
+
+/** What an agent is waiting on: only questions, or (at least partly) approvals. */
+export function pendingKindOf(items: readonly PendingItem[] | undefined): "question" | "permission" | null {
+  if (!items?.length) return null;
+  return items.every((i) => i.kind === "question") ? "question" : "permission";
+}
+
+/** Approvals first, then errors (a usage limit is one), then interrupted. */
+function needsRank(a: Agent): number {
+  return NEEDS_RANK[a.status] ?? (a.rateLimited === true ? NEEDS_RANK.error! : 0);
+}
+
 /** Same grouping as the desktop sidebar: needs you, working, recent, archived. */
 export function groupFleet(agents: Agent[]): FleetGroup[] {
   const needs: Agent[] = [];
@@ -158,12 +193,12 @@ export function groupFleet(agents: Agent[]): FleetGroup[] {
   const archived: Agent[] = [];
   for (const a of agents) {
     if (a.archived) archived.push(a);
-    else if (a.status in NEEDS_RANK || a.pendingPermissions > 0) needs.push(a);
+    else if (needsYou(a)) needs.push(a);
     else if (a.status === "working" || a.status === "starting") working.push(a);
     else recent.push(a);
   }
   const byActivity = (x: Agent, y: Agent) => y.lastActivityAt - x.lastActivityAt;
-  needs.sort((x, y) => (NEEDS_RANK[x.status] ?? 0) - (NEEDS_RANK[y.status] ?? 0) || byActivity(x, y));
+  needs.sort((x, y) => needsRank(x) - needsRank(y) || byActivity(x, y));
   working.sort(byActivity);
   recent.sort(byActivity);
   archived.sort(byActivity);

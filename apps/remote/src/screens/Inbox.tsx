@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useState } from "react";
+import { DenyReasonSheet } from "@/components/DenyReasonSheet";
 import { AccountDot, ProviderBadge } from "@/components/Identity";
 import { Icon } from "@/components/Icon";
 import { Sheet } from "@/components/Sheet";
@@ -18,7 +19,7 @@ import {
   allowOnce,
   confirmOption,
   isAlways,
-  OPTION_HINT,
+  optionHint,
   primaryAllow,
   primaryReject,
   rejectOnce,
@@ -41,6 +42,7 @@ export function Inbox() {
   const stateError = useStore((s) => s.stateError);
   const now = useNow();
   const [optionsFor, setOptionsFor] = useState<string | null>(null);
+  const [reasonFor, setReasonFor] = useState<string | null>(null);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -60,6 +62,12 @@ export function Inbox() {
     for (const e of entries) if (e.item.kind === "permission" && e.item.requestId === optionsFor) return { agent: e.agent, item: e.item };
     return null;
   }, [entries, optionsFor]);
+
+  // Gone from the list once the deny is sent: the sheet then closes itself.
+  const reasonItem = useMemo(() => {
+    for (const e of entries) if (e.item.kind === "permission" && e.item.requestId === reasonFor) return e.item;
+    return null;
+  }, [entries, reasonFor]);
 
   let body;
   if (stateStatus !== "ready" && !entries.length) {
@@ -110,7 +118,15 @@ export function Inbox() {
         </div>
       </TopBar>
       <main className="mx-auto w-full max-w-[860px] flex-1 px-safe pt-4 pb-[calc(24px+var(--safe-bottom))]">{body}</main>
-      <OptionsSheet entry={sheetEntry} onClose={() => setOptionsFor(null)} />
+      <OptionsSheet
+        entry={sheetEntry}
+        onClose={() => setOptionsFor(null)}
+        onDenyWithReason={(id) => {
+          setOptionsFor(null);
+          setReasonFor(id);
+        }}
+      />
+      <DenyReasonSheet item={reasonItem} onClose={() => setReasonFor(null)} />
     </div>
   );
 }
@@ -229,8 +245,9 @@ const PermissionInboxCard = memo(function PermissionInboxCard({
 }) {
   const [leaving, exit] = useExit();
   const [showDiff, setShowDiff] = useState(false);
-  // Generic "Approve"/"Deny" (and swipes) only ever mean the one-shot options.
-  // Without one, the button names the real option and swiping is disabled.
+  // The big buttons always read "Deny" / "Approve" (the desktop's wording). Swipes only ever
+  // mean the one-shot options; without one the button falls back to the closest option (an
+  // "always" one asks to confirm) and the agent's own option names stay under "More options".
   const allowSafe = allowOnce(item);
   const rejectSafe = rejectOnce(item);
   const allow = allowSafe ?? primaryAllow(item);
@@ -298,7 +315,7 @@ const PermissionInboxCard = memo(function PermissionInboxCard({
                 aria-label={reject ? `Deny: ${reject.name}` : "Deny"}
                 onClick={() => reject && (isAlways(reject) ? void respond(reject) : exit(() => void respond(reject)))}
               >
-                <span className="truncate">{reject && !rejectSafe ? reject.name : "Deny"}</span>
+                Deny
               </Button>
               <Button
                 size="lg"
@@ -308,7 +325,7 @@ const PermissionInboxCard = memo(function PermissionInboxCard({
                 aria-label={allow ? `Approve: ${allow.name}` : "Approve"}
                 onClick={() => allow && (isAlways(allow) ? void respond(allow) : exit(() => void respond(allow)))}
               >
-                <span className="truncate">{allow && !allowSafe ? allow.name : "Approve"}</span>
+                Approve
               </Button>
             </div>
             <div className="-mx-2 -mb-2 flex items-center justify-between">
@@ -318,7 +335,7 @@ const PermissionInboxCard = memo(function PermissionInboxCard({
                 className="press inline-flex h-11 items-center gap-1 rounded-xl px-2 text-[13.5px] font-medium text-muted active:text-fg"
               >
                 <Icon name="more" size={18} />
-                {extra > 0 ? `More options (${extra})` : "All options"}
+                {extra > 0 ? `More options (${extra})` : "More options"}
               </button>
               <button
                 type="button"
@@ -336,7 +353,15 @@ const PermissionInboxCard = memo(function PermissionInboxCard({
   );
 });
 
-function OptionsSheet({ entry, onClose }: { entry: { agent: Agent; item: PermissionItem } | null; onClose: () => void }) {
+function OptionsSheet({
+  entry,
+  onClose,
+  onDenyWithReason,
+}: {
+  entry: { agent: Agent; item: PermissionItem } | null;
+  onClose: () => void;
+  onDenyWithReason: (requestId: string) => void;
+}) {
   // Keep showing the last entry while the sheet animates closed.
   const [shown, setShown] = useState(entry);
   useEffect(() => {
@@ -363,9 +388,20 @@ function OptionsSheet({ entry, onClose }: { entry: { agent: Agent; item: Permiss
                 }}
               >
                 <span className="block w-full truncate">{o.name}</span>
-                <span className="block w-full truncate text-[12.5px] font-normal opacity-75">{OPTION_HINT[o.kind]}</span>
+                <span className="block w-full truncate text-[12.5px] font-normal opacity-75">{optionHint(o)}</span>
               </Button>
             ))}
+            {primaryReject(e.item) && (
+              <Button
+                size="lg"
+                variant="ghost"
+                icon="pencil"
+                className="w-full"
+                onClick={() => onDenyWithReason(e.item.requestId)}
+              >
+                Deny with reason…
+              </Button>
+            )}
           </div>
         </div>
       )}

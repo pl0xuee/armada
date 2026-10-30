@@ -12,6 +12,7 @@ import { useDebounced } from "@/hooks/useDebounced";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useAttachments } from "@/hooks/useAttachments";
+import { latestPendingQuestion } from "@/lib/question";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { getDraft, onAttachmentsInsert, onDraftInsert, setDraft } from "./drafts";
@@ -93,6 +94,8 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
 
   const working = agent.status === "working" || agent.status === "starting";
   const blocked = agent.status === "needs_permission";
+  // A question waits above (typing here queues; it doesn't answer it).
+  const asking = useApp((s) => blocked && latestPendingQuestion(s.items[agent.id]) !== null);
   const resumable = agent.status === "interrupted" || agent.status === "stopped";
   const busy = working || blocked;
   // Sending while the agent works queues the message; it runs right after this turn.
@@ -252,7 +255,8 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
       onAttachmentsInsert(agent.id, (incoming) => {
         setAttachmentsRef.current((cur) => {
           const room = Math.max(0, MAX_ATTACHMENTS - cur.length);
-          if (incoming.length > room) toast.warning(`Only ${MAX_ATTACHMENTS} images per message; some weren't attached`);
+          if (incoming.length > room)
+            toast.warning(`Only ${MAX_ATTACHMENTS} images per message; some weren't attached`);
           return [...cur, ...incoming.slice(0, room)];
         });
       }),
@@ -484,7 +488,9 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
   const name = useIdentity(agent.provider, agent.customAgentId).short;
   const justDone = useIsDone(agent);
   const placeholder = blocked
-    ? `Waiting for you above. Queue a message to run after this turn…`
+    ? asking
+      ? `Answer above, or queue a message…`
+      : `Waiting for you above. Queue a message to run after this turn…`
     : working
       ? `${name} is working. Queue a follow-up message…`
       : justDone
@@ -516,7 +522,7 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
               >
                 <Kbd>Esc</Kbd>
                 {blocked
-                  ? "Answer the approval above, or press Esc again to stop the turn"
+                  ? "Respond to the request above, or press Esc again to stop the turn"
                   : "Press Esc again to stop the turn"}
               </div>
             )}
@@ -615,7 +621,7 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
                       />
                       <span className={cn("relative h-2 w-2 rounded-full", blocked ? "bg-warn" : "bg-accent")} />
                     </span>
-                    <span className={cn("whitespace-nowrap", width > 0 && width < 600 && "sr-only")}>
+                    <span className={cn("min-w-0 truncate", width > 0 && width < 600 && "sr-only")}>
                       {blocked ? "Waiting for you" : "Working…"}
                     </span>
                   </>

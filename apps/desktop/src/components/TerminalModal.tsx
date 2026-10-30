@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
+import { CopyButton } from "@/components/CopyButton";
 import { Spinner } from "@/components/ui/misc";
 import { api } from "@/lib/api";
 import { attachTerminal } from "@/lib/terminal-bus";
@@ -170,6 +171,17 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
       },
     });
 
+    // A program that prints nothing looks like a broken dialog: after a few seconds, say what is
+    // running so it can be tried by hand. Not for a reused sign-in: its earlier output isn't replayed,
+    // so silence is expected.
+    const quietTimer = window.setTimeout(() => {
+      if (tr.data.length === 0 && tr.exit === undefined && session.command && !session.reused) {
+        term.write(
+          `\x1b[2mStill waiting for ${session.command} to print something…\r\nIf nothing appears, run that command in a terminal to see what it says.\x1b[0m\r\n`,
+        );
+      }
+    }, 6000);
+
     // The core reuses a sign-in that's already running for this account without replaying its
     // earlier output; it tells us so (`reused`), so say it once when we have no transcript.
     if (fresh && session.reused) {
@@ -177,6 +189,7 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
     }
 
     return () => {
+      window.clearTimeout(quietTimer);
       cancelAnimationFrame(raf);
       ro.disconnect();
       dataSub.dispose();
@@ -247,6 +260,15 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
             aria-label="Terminal"
           />
         </div>
+        {session.command && (
+          <div className="mt-2 flex min-w-0 items-center gap-2 text-[11.5px] text-steel">
+            <span className="shrink-0">Command</span>
+            <code className="selectable min-w-0 flex-1 truncate rounded-md border border-line bg-code px-2 py-1 font-mono text-[11px] text-muted">
+              {session.command}
+            </code>
+            <CopyButton text={session.command} ariaLabel="Copy the command" />
+          </div>
+        )}
         {session.kind === "login" && !exited && (
           <p className="mt-2.5 text-[12px] text-muted">
             Finish signing in in your browser. If the CLI asks for a code, paste it here and press Enter.

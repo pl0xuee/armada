@@ -271,7 +271,9 @@ impl ArmadaTools {
             .iter()
             .rev()
             .find_map(|i| match &i.body {
-                ItemBody::AgentMessage { text } => Some(text.clone()),
+                ItemBody::AgentMessage { text, .. } if !text.trim().is_empty() => {
+                    Some(text.clone())
+                }
                 _ => None,
             })
             .or_else(|| agent.last_message.clone())

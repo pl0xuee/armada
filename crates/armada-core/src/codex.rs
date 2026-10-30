@@ -594,7 +594,11 @@ impl CodexDriver {
         } else {
             "skipped"
         };
-        self.ctx.question_resolved(request_id, resolution, answers);
+        // The agent got the real answers; the conversation keeps them without secrets.
+        let kept = answers
+            .as_ref()
+            .map(|a| crate::questions::redact(&fields, a));
+        self.ctx.question_resolved(request_id, resolution, kept);
         Ok(())
     }
 

@@ -10,6 +10,7 @@
  * so the two mechanisms don't fight.
  */
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { scrollByProgrammatic } from "@/lib/scroll";
 import { prefixSums, visibleRange } from "@/lib/virtual";
 
 const OVERSCAN = 600;
@@ -72,12 +73,16 @@ export function VirtualList<T>({
             changed = true;
             if (prev !== undefined && el.getBoundingClientRect().bottom <= topEdge) correction += h - prev;
           }
+          // Shrinking above the viewport while at the very bottom (a finished run folding into one line):
+          // the browser already moved the scroll position up by the same amount (it clamps to the new
+          // bottom), so correcting again would shift the content the reader is looking at.
+          if (correction < 0 && document.documentElement.scrollHeight - window.scrollY - window.innerHeight < 2) correction = 0;
           if (correction) {
             const s = scroll.current;
             if (s.touching || performance.now() - s.last < 120) {
               bias.current += correction;
               applyTransform();
-            } else window.scrollBy(0, correction);
+            } else scrollByProgrammatic(correction);
           }
           if (changed) setVersion((v) => v + 1);
         }),
@@ -148,7 +153,7 @@ export function VirtualList<T>({
     if (s.touching || performance.now() - s.last < 120) {
       bias.current += added;
       applyTransform();
-    } else window.scrollBy(0, added);
+    } else scrollByProgrammatic(added);
   }, [keys, offsets]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -160,7 +165,7 @@ export function VirtualList<T>({
       const b = bias.current;
       bias.current = 0;
       applyTransform();
-      window.scrollBy(0, b); // same frame as the transform reset: no visible jump
+      scrollByProgrammatic(b); // same frame as the transform reset: no visible jump
     };
     const schedule = () => {
       scroll.current.last = performance.now();

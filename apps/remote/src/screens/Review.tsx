@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CommitSheet, commitBlocked } from "@/components/CommitSheet";
 import { Icon } from "@/components/Icon";
 import { FileBlock } from "@/components/timeline/DiffView";
@@ -9,6 +9,7 @@ import { cn } from "@/lib/cn";
 import { loadDiff } from "@/lib/controller";
 import { parseUnified } from "@/lib/diff";
 import { plural, shortPath } from "@/lib/format";
+import { findFileIndex, takeReviewFocus } from "@/lib/reviewFocus";
 import { goBack } from "@/lib/router";
 import { useStore } from "@/lib/store";
 import { EmptyState, ErrorState } from "./States";
@@ -36,6 +37,21 @@ export function Review({ agentId }: { agentId: string }) {
   useEffect(load, [load]);
 
   const files = useMemo(() => (diff?.patch ? parseUnified(diff.patch, "patch") : []), [diff?.patch]);
+  // A file tapped in a turn summary: open and scroll to it once the patch is there.
+  const [focus] = useState(() => takeReviewFocus(agentId));
+  const focusIdx = useMemo(() => (focus ? findFileIndex(files.map((f) => f.path), focus) : -1), [focus, files]);
+  // The tapped file may have no change any more (committed or reverted since the summary).
+  const [missingDismissed, setMissingDismissed] = useState(false);
+  const missingFocus =
+    focus && diff && diff.files.length > 0 && !missingDismissed && focusIdx < 0 && findFileIndex(diff.files.map((f) => f.path), focus) < 0
+      ? focus
+      : null;
+  const scrolled = useRef(false);
+  useEffect(() => {
+    if (focusIdx < 0 || scrolled.current) return;
+    scrolled.current = true;
+    requestAnimationFrame(() => document.getElementById(`diff-${focusIdx}`)?.scrollIntoView({ block: "start" }));
+  }, [focusIdx]);
   const blocked = agent ? commitBlocked(agent) : null;
   const totals = useMemo(
     () => (diff ? diff.files.reduce((t, f) => ({ add: t.add + (f.additions || 0), del: t.del + (f.deletions || 0) }), { add: 0, del: 0 }) : null),
@@ -50,6 +66,22 @@ export function Review({ agentId }: { agentId: string }) {
   else
     body = (
       <div className="space-y-5">
+        {missingFocus && (
+          <div role="status" className="flex items-center gap-2.5 rounded-2xl border border-line-strong bg-card py-1 pr-1 pl-3.5 edge">
+            <Icon name="info" size={17} className="shrink-0 text-steel" />
+            <p className="min-w-0 flex-1 py-2 text-[13.5px] leading-snug text-muted">
+              No current changes in <span className="font-mono text-fg" title={missingFocus}>{shortPath(missingFocus, 2)}</span>
+            </p>
+            <button
+              type="button"
+              onClick={() => setMissingDismissed(true)}
+              aria-label="Dismiss"
+              className="press inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-steel active:bg-raised"
+            >
+              <Icon name="x" size={17} />
+            </button>
+          </div>
+        )}
         <section className="rounded-2xl border border-line bg-panel p-4 edge">
           <p className="text-[15px] font-semibold text-fg">
             {plural(diff.files.length, "file")} changed
@@ -103,7 +135,7 @@ export function Review({ agentId }: { agentId: string }) {
 
         <section aria-label="Patch" className="space-y-2">
           {files.map((f, i) => (
-            <FileBlock key={`${f.path}-${i}`} id={`diff-${i}`} file={f} defaultOpen={files.length <= 4} />
+            <FileBlock key={`${f.path}-${i}`} id={`diff-${i}`} file={f} defaultOpen={files.length <= 4 || i === focusIdx} />
           ))}
           {diff.truncated && (
             <p className="flex items-start gap-2 rounded-xl border border-line bg-panel px-3 py-2.5 text-[13px] text-muted">
@@ -141,7 +173,13 @@ export function Review({ agentId }: { agentId: string }) {
           </div>
         </div>
       )}
-      {agent && <CommitSheet agent={agent} mode={sheet} onClose={() => setSheet(null)} onDone={load} />}
+      {agent && <CommitSheet
+          agent={agent}
+          mode={sheet}
+          onClose={() => setSheet(null)}
+          onDone={load}
+          changes={diff && totals ? { files: diff.files.length, additions: totals.add, deletions: totals.del } : null}
+        />}
     </div>
   );
 }

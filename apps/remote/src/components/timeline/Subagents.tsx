@@ -3,6 +3,7 @@ import { cn } from "@/lib/cn";
 import { devParam } from "@/lib/dev";
 import { basename, formatCost, formatDuration, formatTokens, plural } from "@/lib/format";
 import { isRunning, isSubagentNode, latestChild, type SubagentNode } from "@/lib/rows";
+import { setReviewFocus } from "@/lib/reviewFocus";
 import { noteUserLayoutChange } from "@/lib/scroll";
 import type { TurnSummaryItem } from "@/lib/types";
 import { Icon, Spinner } from "../Icon";
@@ -11,22 +12,78 @@ import { ImageStrip } from "../Images";
 import { Button } from "../ui";
 import { navigate } from "@/lib/router";
 import { useStore } from "@/lib/store";
+import { Markdown } from "../Markdown";
 import { ToolRow } from "./Items";
 
 const EXPAND_ALL = devParam("expand") === "1";
 
-function statusColor(node: SubagentNode) {
-  if (isRunning(node.call)) return "var(--accent)";
-  return node.call.status === "failed" ? "var(--err)" : "var(--ok)";
+type Phase = "running" | "paused" | "failed" | "done";
+
+/**
+ * `running`: working now (an unfinished call of a live agent, or a background sub-agent whose
+ * launch call already completed but which is still counted as running). `paused`: the call never
+ * finished and the agent stopped.
+ */
+function phaseOf(call: SubagentNode["call"], agentLive: boolean, bgRunning: boolean): Phase {
+  const unfinished = isRunning(call);
+  if ((unfinished && agentLive) || bgRunning) return "running";
+  if (unfinished) return "paused";
+  return call.status === "failed" ? "failed" : "done";
+}
+
+const PHASE_COLOR: Record<Phase, string> = { running: "var(--accent)", paused: "var(--violet)", failed: "var(--err)", done: "var(--ok)" };
+
+/** A long final report is clamped until asked for. */
+const RESULT_CLAMP_CHARS = 360;
+
+function Result({ text }: { text: string }) {
+  const [full, setFull] = useState(false);
+  const long = text.length > RESULT_CLAMP_CHARS || text.split("\n").length > 8;
+  return (
+    <div className="border-t border-line/70 px-3 pt-2.5 pb-1">
+      <div className="mb-1 text-[11px] font-semibold tracking-wider text-steel uppercase">Result</div>
+      <div className={cn("min-w-0", long && !full && "max-h-[9.5rem] overflow-hidden [mask-image:linear-gradient(180deg,#000_70%,transparent)]")}>
+        <Markdown text={text} interim />
+      </div>
+      {long && (
+        <button
+          type="button"
+          onClick={() => {
+            noteUserLayoutChange();
+            setFull((v) => !v);
+          }}
+          className="press hit relative -ml-1 flex h-9 items-center px-1 text-[13px] font-semibold text-accent"
+          aria-expanded={full}
+        >
+          {full ? "Show less" : "Show full result"}
+        </button>
+      )}
+    </div>
+  );
 }
 
 /** A tool call that launched a sub-agent, with the sub-agent's own calls nested inside. */
-export const SubagentCard = memo(function SubagentCard({ node, depth = 0 }: { node: SubagentNode; depth?: number }) {
+export const SubagentCard = memo(function SubagentCard({
+  node,
+  agentLive = true,
+  bgRunning,
+  depth = 0,
+}: {
+  node: SubagentNode;
+  /** False when the agent isn't running (stopped / interrupted): an unfinished call is paused, not spinning. */
+  agentLive?: boolean;
+  /** toolCallIds of background sub-agents that are still running after their launch call completed. */
+  bgRunning?: ReadonlySet<string>;
+  depth?: number;
+}) {
   const { call } = node;
   const [open, setOpen] = useState(EXPAND_ALL);
   const [showPrompt, setShowPrompt] = useState(false);
-  const running = isRunning(call);
-  const color = statusColor(node);
+  const background = !!call.subagent?.background;
+  const phase = phaseOf(call, agentLive, background && call.status === "completed" && !!bgRunning?.has(call.toolCallId));
+  const running = phase === "running";
+  const color = PHASE_COLOR[phase];
+  const result = phase === "running" || phase === "paused" ? "" : call.output.trim();
   const latest = latestChild(node);
   const kind = call.subagent?.kind?.trim();
   const description = call.subagent?.description?.trim() || call.title;
@@ -52,27 +109,38 @@ export const SubagentCard = memo(function SubagentCard({ node, depth = 0 }: { no
           style={{ color, background: `color-mix(in srgb, ${color} 13%, transparent)` }}
         >
           <Icon name="bot" size={18} />
-          {running && <span className="animate-pulse-ring absolute inset-0 rounded-[10px]" style={{ background: color, opacity: 0.25 }} aria-hidden />}
+          {running && <span className="animate-pulse-ring-soft absolute inset-0 rounded-[10px]" style={{ background: color }} aria-hidden />}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5 text-[11.5px] font-semibold tracking-wider text-steel uppercase">
-            Sub-agent{kind ? <span className="truncate normal-case tracking-normal text-muted">· {kind}</span> : null}
+          <span className="flex min-w-0 items-center gap-1.5 text-[11.5px] font-semibold tracking-wider text-steel uppercase">
+            <span className="shrink-0 whitespace-nowrap">Sub-agent</span>
+            {kind ? <span className="truncate normal-case tracking-normal text-muted">· {kind}</span> : null}
           </span>
           <span className="mt-0.5 line-clamp-2 block text-[14.5px] leading-snug font-medium text-fg">{description}</span>
-          <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[12.5px] text-steel">
-            <span className="shrink-0 tabular">{plural(node.total, "tool call")}</span>
+          {/* One line. The latest step is a wrapping flex item that needs ~6rem: when it can't fit beside the
+              status it wraps onto a second line that is clipped, instead of showing as a stub ("· R…"). */}
+          <span className="mt-1 flex h-[18px] min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 overflow-hidden text-[12.5px] leading-[18px] text-steel">
+            <span className="shrink-0 whitespace-nowrap">
+              {background && <span className={running ? "font-medium text-accent" : "text-steel"}>{running ? "Running in background" : "Background"} · </span>}
+              <span className="tabular">{plural(node.total, "tool call")}</span>
+            </span>
             {latest && (running || !open) && (
-              <>
-                <span aria-hidden>·</span>
-                <span className="truncate">{latest.title}</span>
-              </>
+              <span className="min-w-0 flex-1 basis-24 truncate">
+                <span aria-hidden>· </span>
+                {latest.title}
+              </span>
             )}
           </span>
         </span>
         <span className="mt-1 flex shrink-0 items-center gap-1.5">
           {running ? (
             <Spinner size={16} className="text-accent" />
-          ) : call.status === "failed" ? (
+          ) : phase === "paused" ? (
+            <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" className="text-violet" role="img" aria-label="Paused">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M10 9v6M14 9v6" />
+            </svg>
+          ) : phase === "failed" ? (
             <Icon name="x" size={17} strokeWidth={2.2} className="text-err" label="Failed" />
           ) : (
             <Icon name="check" size={17} strokeWidth={2.2} className="text-ok" label="Done" />
@@ -80,8 +148,9 @@ export const SubagentCard = memo(function SubagentCard({ node, depth = 0 }: { no
           <Icon name="chevronDown" size={16} className={cn("text-steel transition-transform duration-150", !open && "-rotate-90")} />
         </span>
       </button>
+      {result && <Result text={result} />}
       {open && (
-        <div className="animate-fade border-t border-line/70">
+        <div className="animate-fade mt-1 border-t border-line/70">
           {prompt && (
             <div className="border-b border-line/70 px-3 py-2.5">
               <button
@@ -101,16 +170,16 @@ export const SubagentCard = memo(function SubagentCard({ node, depth = 0 }: { no
           )}
           {call.images && call.images.length > 0 && <ImageStrip images={call.images} className="px-3 pt-3" />}
           {node.children.length === 0 ? (
-            <p className="px-3 py-3 text-[13px] text-steel">{running ? "Getting started…" : "No tool calls."}</p>
+            <p className="px-3 py-3 text-[13px] text-steel">{running ? "Getting started…" : phase === "paused" ? "Paused." : "No tool calls."}</p>
           ) : (
             <div className="divide-y divide-line/60">
               {node.children.map((c) =>
                 isSubagentNode(c) ? (
                   <div key={c.call.id} className="p-2 pl-3">
-                    <SubagentCard node={c} depth={depth + 1} />
+                    <SubagentCard node={c} agentLive={agentLive} bgRunning={bgRunning} depth={depth + 1} />
                   </div>
                 ) : (
-                  <ToolRow key={c.id} item={c} />
+                  <ToolRow key={c.id} item={c} agentLive={agentLive} />
                 ),
               )}
             </div>
@@ -126,6 +195,8 @@ const FILES_SHOWN = 4;
 /** The review card shown when a turn finishes. */
 export const TurnSummaryCard = memo(function TurnSummaryCard({ item, latest = false }: { item: TurnSummaryItem; latest?: boolean }) {
   const [allFiles, setAllFiles] = useState(false);
+  // Only the owner can open a review; a share link shows the names only.
+  const owner = useStore((st) => st.session?.scope === "owner");
   const files = item.files ?? [];
   const shownFiles = allFiles ? files : files.slice(0, FILES_SHOWN);
   const stats: { label: string; value: string }[] = [];
@@ -149,13 +220,30 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, latest = fa
           <p className="mb-1.5 text-[13px] text-muted">{plural(files.length, "file")} changed</p>
           <ul className="flex flex-wrap gap-1.5">
             {shownFiles.map((f) => (
-              <li
-                key={f}
-                title={f}
-                className="inline-flex max-w-full items-center gap-1 truncate rounded-lg border border-line bg-card px-2 py-1 font-mono text-[11.5px] text-muted"
-              >
-                <Icon name="file" size={12} className="shrink-0 text-steel" />
-                <span className="truncate">{basename(f) || f}</span>
+              <li key={f} className="max-w-full min-w-0">
+                {owner ? (
+                  <button
+                    type="button"
+                    title={f}
+                    aria-label={`Review changes to ${basename(f) || f}`}
+                    onClick={() => {
+                      setReviewFocus(item.agentId, f);
+                      navigate({ name: "review", agentId: item.agentId });
+                    }}
+                    className="press inline-flex h-11 max-w-full items-center gap-1.5 rounded-xl border border-line bg-card px-3 font-mono text-[12px] text-muted"
+                  >
+                    <Icon name="file" size={13} className="shrink-0 text-steel" />
+                    <span className="truncate">{basename(f) || f}</span>
+                  </button>
+                ) : (
+                  <span
+                    title={f}
+                    className="inline-flex max-w-full items-center gap-1 truncate rounded-lg border border-line bg-card px-2 py-1 font-mono text-[11.5px] text-muted"
+                  >
+                    <Icon name="file" size={12} className="shrink-0 text-steel" />
+                    <span className="truncate">{basename(f) || f}</span>
+                  </span>
+                )}
               </li>
             ))}
             {files.length > FILES_SHOWN && (
@@ -166,7 +254,7 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, latest = fa
                     noteUserLayoutChange();
                     setAllFiles((v) => !v);
                   }}
-                  className="press hit relative inline-flex h-[26px] items-center rounded-lg px-2 text-[12px] font-medium text-accent"
+                  className="press inline-flex h-11 items-center rounded-lg px-2 text-[13px] font-medium text-accent"
                 >
                   {allFiles ? "Show less" : `+${files.length - FILES_SHOWN} more`}
                 </button>

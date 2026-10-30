@@ -20,6 +20,8 @@ const tool = (extra: object = {}) =>
   }) as unknown as TimelineItem;
 const user = () => ({ ...base(), kind: "user_message", text: "hi" }) as unknown as TimelineItem;
 const msg = () => ({ ...base(), kind: "agent_message", text: "ok" }) as unknown as TimelineItem;
+const pic = () =>
+  ({ ...base(), kind: "agent_message", text: "", images: [{ name: "i.png", mimeType: "image/png", data: "AAAA" }] }) as unknown as TimelineItem;
 const thought = () => ({ ...base(), kind: "thought", text: "hm" }) as unknown as TimelineItem;
 const perm = (resolution: string | null) =>
   ({
@@ -70,6 +72,21 @@ describe("groupActivity", () => {
     const g = run([user(), tool(), msg()]);
     expect(g.groups.size).toBe(0);
     expect(g.rows).toEqual([0, 1, 2]);
+  });
+});
+
+describe("pictures in replies", () => {
+  it("never fold into a group, and don't replace the text as the turn's answer", () => {
+    // tool, tool, picture, tool, text answer: the picture stays a row of its own.
+    const items = [user(), tool(), tool(), pic(), tool(), tool(), msg()];
+    const g = run(items);
+    expect(g.rows.includes(3)).toBe(true);
+    for (const members of g.groups.values()) expect(members.includes(3)).toBe(false);
+    // text answer, then a picture: the text is still the answer (not folded away).
+    const after = [user(), tool(), tool(), msg(), pic()];
+    const g2 = run(after);
+    expect(g2.rows).toContain(3);
+    expect(g2.rows).toContain(4);
   });
 });
 

@@ -51,10 +51,11 @@ export async function quickRespond(
 
 export async function startLogin(account: Account) {
   try {
-    const { terminalId, reused } = await api.loginAccount(account.id);
+    const { terminalId, reused, command } = await api.loginAccount(account.id);
     useUi.getState().setTerminal({
       terminalId,
       reused,
+      command,
       kind: "login",
       accountId: account.id,
       title: `Sign in · ${account.name}`,

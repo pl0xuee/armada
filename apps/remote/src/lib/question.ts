@@ -21,10 +21,20 @@ export function otherOf(fields: QuestionField[], id: string): QuestionField | nu
   return fields.find((f) => f.otherFor === id && f.id !== id) ?? null;
 }
 
-/** A number typed by the user (commas as decimal separators allowed), or null. */
+/**
+ * A number typed by the user, or null. A comma is a thousands separator when it groups digits in
+ * threes ("1,000", "1,000,000", "1,000.5"), a decimal separator otherwise ("1,5", "3,14"; also
+ * "1.000,5"). Anything else with a comma is rejected rather than silently misread.
+ */
 export function parseNumber(text: string): number | null {
-  const t = text.trim().replace(",", ".");
+  let t = text.trim();
   if (!t) return null;
+  if (t.includes(",")) {
+    if (/^[+-]?\d{1,3}(,\d{3})+(\.\d*)?$/.test(t)) t = t.replace(/,/g, "");
+    else if (/^[+-]?\d{1,3}(\.\d{3})+,\d+$/.test(t)) t = t.replace(/\./g, "").replace(",", ".");
+    else if (/^[^,.]*,[^,.]*$/.test(t)) t = t.replace(",", ".");
+    else return null;
+  }
   const n = Number(t);
   return Number.isFinite(n) ? n : null;
 }

@@ -9,6 +9,8 @@ import {
   buildAnswers,
   canSubmit,
   firstOpenGroup,
+  nextOpenGroup,
+  parseNumber,
   questionGroups,
   setBool,
   setText,
@@ -109,27 +111,52 @@ export const QuestionCard = memo(function QuestionCard({
     if (!ok) setBusy(null);
   };
 
-  const pick = (gi: number, index: number) => {
+  // `advance`: a number key on a single choice settles the question, so move on to the next one.
+  const pick = (gi: number, index: number, advance = false) => {
     const g = groups[gi];
     const options = g.field.options ?? [];
     setActive(gi);
     setCursor((c) => ({ ...c, [g.field.id]: index }));
     if (index < options.length) {
       update((d) => togglePick(d, g, options[index].value));
-      // A single choice settles the question: move on to the next one.
-      if (g.field.kind === "single" && gi < groups.length - 1) setActive(gi + 1);
+      if (advance && g.field.kind === "single" && gi < groups.length - 1) setActive(gi + 1);
     } else if (g.other) {
       update((d) => (d.otherOn[g.field.id] && g.field.kind === "single" ? d : toggleOther(d, g)));
     }
   };
 
+  const chooseBool = (gi: number, value: boolean) => {
+    update((d) => setBool(d, groups[gi].field.id, value));
+    setActive(gi < groups.length - 1 ? gi + 1 : gi);
+  };
+
+  // Enter: on to the next unanswered question; only the last one (or Ctrl/Cmd+Enter) submits, so a
+  // reflexive Enter after a number key can't send a half-answered card. `refocus`: Enter in a text box.
+  const enter = (from: number, force: boolean, refocus = false) => {
+    if (force || from >= groups.length - 1) return void submit();
+    const n = nextOpenGroup(groups, draft, from + 1);
+    const to = n < 0 ? groups.length - 1 : n;
+    setActive(to);
+    if (!refocus) return;
+    requestAnimationFrame(() => {
+      const f = groups[to].field;
+      const input =
+        f.kind === "text" || f.kind === "number"
+          ? cardRef.current?.querySelector<HTMLElement>(`[data-field-id="${CSS.escape(f.id)}"] input`)
+          : null;
+      if (input) input.focus();
+      else if (cardRef.current?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
+    });
+  };
+
   // Latest values for the window key handler.
-  const live = useRef({ groups, draft, active, cursor, ready, busy, pick, submit });
-  live.current = { groups, draft, active, cursor, ready, busy, pick, submit };
+  const live = useRef({ groups, draft, active, cursor, ready, busy, pick, chooseBool, enter, submit });
+  live.current = { groups, draft, active, cursor, ready, busy, pick, chooseBool, enter, submit };
   useEffect(() => {
     if (!keyboard || !pendingNow) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.altKey || e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
+      if ((e.metaKey && e.key !== "Enter") || e.altKey || e.defaultPrevented || e.isComposing || e.keyCode === 229)
+        return;
       if (!useQuestionUi.getState().visible[item.requestId]) return;
       if (
         document.querySelector(
@@ -141,34 +168,49 @@ export const QuestionCard = memo(function QuestionCard({
       const inCard = Boolean(t && cardRef.current?.contains(t));
       const typing = Boolean(t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)));
       const s = live.current;
-      if (
-        e.key === "Enter" &&
-        (e.ctrlKey || (!e.shiftKey && (typing ? inCard : !t?.closest("button, a, [role=menu]"))))
-      ) {
+      const g = s.groups[s.active];
+      const options = g?.field.options ?? [];
+      const rows = options.length + (g?.other ? 1 : 0);
+      // Where the highlight is: the arrow cursor, else the picked option (single).
+      const cur = g
+        ? (s.cursor[g.field.id] ?? options.findIndex((o) => s.draft.picks[g.field.id]?.includes(o.value)))
+        : -1;
+      const rowOn = (i: number) =>
+        i < options.length
+          ? Boolean(s.draft.picks[g.field.id]?.includes(options[i].value))
+          : Boolean(s.draft.otherOn[g.field.id]);
+      const force = e.ctrlKey || e.metaKey;
+      if (e.key === "Enter" && (force || (!e.shiftKey && (typing ? inCard : !t?.closest("button, a, [role=menu]"))))) {
         if (e.repeat) return;
         e.preventDefault();
-        void s.submit();
+        // Enter on a highlighted single-choice option that isn't chosen yet chooses it.
+        if (!force && g?.field.kind === "single" && cur >= 0 && cur < rows && !rowOn(cur)) s.pick(s.active, cur);
+        else s.enter(s.active, force);
         return;
       }
       if (e.ctrlKey || typing || e.repeat) return;
-      // Other focus targets (buttons elsewhere, links) keep their own keys.
+      // Other focus targets (buttons elsewhere, links) keep their own keys; a focused control in the
+      // card handles Space itself.
       if (t && !inCard && t.closest("button, a, [role=menuitem]")) return;
-      const g = s.groups[s.active];
+      if (e.key === " " && t?.closest("button, a, [role=checkbox], [role=radio]")) return;
       if (!g) return;
-      const rows = (g.field.options?.length ?? 0) + (g.other ? 1 : 0);
-      const cur = s.cursor[g.field.id] ?? -1;
       if (/^[1-9]$/.test(e.key)) {
         const i = Number(e.key) - 1;
-        if (i < rows) {
+        if (g.field.kind === "boolean") {
+          if (i < 2) {
+            e.preventDefault();
+            s.chooseBool(s.active, i === 0);
+          }
+        } else if (i < rows) {
           e.preventDefault();
-          s.pick(s.active, i);
+          s.pick(s.active, i, true);
         }
       } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && rows > 0 && g.field.kind !== "text") {
+        // Arrows only move the highlight; choosing is Space / Enter / a number key.
         e.preventDefault();
         const next = Math.max(0, Math.min(rows - 1, cur + (e.key === "ArrowDown" ? 1 : -1)));
-        if (g.field.kind === "single") s.pick(s.active, next);
-        else setCursor((c) => ({ ...c, [g.field.id]: next }));
-      } else if (e.key === " " && cur >= 0 && g.field.kind === "multi") {
+        setCursor((c) => ({ ...c, [g.field.id]: next }));
+      } else if (e.key === " " && cur >= 0 && rows > 0) {
         e.preventDefault();
         s.pick(s.active, cur);
       } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
@@ -183,6 +225,7 @@ export const QuestionCard = memo(function QuestionCard({
   if (!pendingNow) return <ResolvedQuestion item={item} />;
 
   const single = !multi ? groups[0] : null;
+  const activeKind = groups[active]?.field.kind;
   return (
     <m.div
       initial={{ opacity: 0, y: 6 }}
@@ -234,7 +277,7 @@ export const QuestionCard = memo(function QuestionCard({
             onPick={(i) => pick(gi, i)}
             onText={(id, text) => update((d) => setText(d, id, text))}
             onBool={(id, v) => update((d) => setBool(d, id, v))}
-            onSubmit={() => void submit()}
+            onEnter={(force) => enter(gi, force, true)}
           />
         ))}
       </div>
@@ -257,8 +300,17 @@ export const QuestionCard = memo(function QuestionCard({
         </Button>
         {keyboard && (
           <span className="ml-auto hidden items-center gap-1.5 text-[11px] text-steel sm:flex">
-            <Kbd>1</Kbd>–<Kbd>9</Kbd> pick <Kbd>↑</Kbd>
-            <Kbd>↓</Kbd> move
+            {activeKind === "boolean" && (
+              <>
+                <Kbd>1</Kbd> Yes <Kbd>2</Kbd> No
+              </>
+            )}
+            {(activeKind === "single" || activeKind === "multi") && (
+              <>
+                <Kbd>1</Kbd>–<Kbd>9</Kbd> pick <Kbd>↑</Kbd>
+                <Kbd>↓</Kbd> move
+              </>
+            )}
             {multi && (
               <>
                 <Kbd>←</Kbd>
@@ -285,7 +337,7 @@ function FieldBlock({
   onPick,
   onText,
   onBool,
-  onSubmit,
+  onEnter,
 }: {
   group: QuestionGroup;
   draft: QuestionDraft;
@@ -300,21 +352,28 @@ function FieldBlock({
   onPick: (index: number) => void;
   onText: (id: string, text: string) => void;
   onBool: (id: string, value: boolean) => void;
-  onSubmit: () => void;
+  /** Enter in a text box. */
+  onEnter: (force: boolean) => void;
 }) {
   const { field, other } = group;
   const options = field.options ?? [];
   const picked = draft.picks[field.id] ?? [];
   const otherOn = Boolean(draft.otherOn[field.id]);
   const otherRef = useRef<HTMLInputElement>(null);
+  // Focus the box when the user turns "Other" on, not when a saved draft remounts with it on.
+  const wasOtherOn = useRef(otherOn);
   useEffect(() => {
-    if (otherOn) otherRef.current?.focus();
+    if (otherOn && !wasOtherOn.current) otherRef.current?.focus();
+    wasOtherOn.current = otherOn;
   }, [otherOn]);
   const showHeader = field.title || (field.description && !hideDescription) || field.required;
   const choice = field.kind === "single" || field.kind === "multi";
+  const numberText = draft.texts[field.id] ?? "";
+  const badNumber = field.kind === "number" && numberText.trim() !== "" && parseNumber(numberText) === null;
 
   return (
     <div
+      data-field-id={field.id}
       className={cn("space-y-2 transition-opacity", dim && "opacity-70")}
       onFocusCapture={onFocus}
       onPointerDown={onFocus}
@@ -403,27 +462,36 @@ function FieldBlock({
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              onSubmit();
+              onEnter(e.ctrlKey || e.metaKey);
             }
           }}
         />
       )}
       {field.kind === "number" && (
-        <Input
-          type="text"
-          inputMode="decimal"
-          value={draft.texts[field.id] ?? ""}
-          disabled={disabled}
-          aria-label={field.title ?? field.description ?? field.id}
-          onChange={(e) => onText(field.id, e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              onSubmit();
-            }
-          }}
-          className="max-w-48 tabular"
-        />
+        <>
+          <Input
+            type="text"
+            inputMode="decimal"
+            value={draft.texts[field.id] ?? ""}
+            disabled={disabled}
+            aria-invalid={badNumber || undefined}
+            aria-describedby={badNumber ? `${field.id}-nan` : undefined}
+            aria-label={field.title ?? field.description ?? field.id}
+            onChange={(e) => onText(field.id, e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                onEnter(e.ctrlKey || e.metaKey);
+              }
+            }}
+            className="max-w-48 tabular"
+          />
+          {badNumber && (
+            <div id={`${field.id}-nan`} role="alert" className="text-[11.5px] text-err">
+              Not a number
+            </div>
+          )}
+        </>
       )}
       {field.kind === "boolean" && (
         <div role="radiogroup" aria-label={field.title ?? field.description ?? field.id} className="flex gap-2">
@@ -443,6 +511,7 @@ function FieldBlock({
               )}
             >
               {v ? "Yes" : "No"}
+              {keys && <Kbd className="ml-2">{v ? "1" : "2"}</Kbd>}
             </button>
           ))}
         </div>

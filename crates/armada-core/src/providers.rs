@@ -275,6 +275,38 @@ pub fn find_cli(provider: Provider) -> Option<PathBuf> {
     which::which(cli_name(provider)).ok()
 }
 
+/// The Claude Code binary that ships with the Claude Agent SDK under Armada's
+/// tools (`@anthropic-ai/claude-agent-sdk-<platform>`): what Claude agents run.
+pub fn bundled_claude(data_dir: &Path) -> Option<PathBuf> {
+    let scope = adapter_dir(data_dir)
+        .join("node_modules")
+        .join("@anthropic-ai");
+    let name = if cfg!(windows) {
+        "claude.exe"
+    } else {
+        "claude"
+    };
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(scope)
+        .ok()?
+        .flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("claude-agent-sdk-")
+        })
+        .map(|e| e.path())
+        .collect();
+    dirs.sort();
+    dirs.into_iter().map(|d| d.join(name)).find(|b| b.is_file())
+}
+
+/// The Claude Code binary for Armada's own commands (sign-in, account status):
+/// the bundled one first. A `claude` on PATH may be a wrapper (e.g. Omarchy's,
+/// which runs `mise use` first) that takes longer to start than these allow.
+pub fn claude_binary(data_dir: &Path) -> Option<PathBuf> {
+    bundled_claude(data_dir).or_else(|| find_cli(Provider::Claude))
+}
+
 pub fn find_node() -> Option<PathBuf> {
     which::which("node").ok()
 }
@@ -293,7 +325,7 @@ pub fn launch_spec(provider: Provider, data_dir: &Path) -> anyhow::Result<(PathB
     }
     match provider {
         Provider::Claude => {
-            if find_cli(Provider::Claude).is_none() {
+            if claude_binary(data_dir).is_none() {
                 anyhow::bail!(
                     "Claude Code is not installed. Install it from Settings → Providers."
                 );
@@ -398,7 +430,13 @@ pub async fn detect(data_dir: &Path) -> Vec<ProviderInfo> {
         }
     );
     let mut out = Vec::new();
-    for ((provider, path), version) in Provider::ALL.into_iter().zip(paths).zip(versions) {
+    for ((provider, path), mut version) in Provider::ALL.into_iter().zip(paths).zip(versions) {
+        // A `claude` that's slow to answer (a wrapper): show the version Armada runs.
+        if provider == Provider::Claude && version.is_none() {
+            if let Some(bundled) = bundled_claude(data_dir) {
+                version = version_of(bundled).await;
+            }
+        }
         let adapter_required = provider == Provider::Claude;
         out.push(ProviderInfo {
             provider,
@@ -422,6 +460,31 @@ pub async fn detect(data_dir: &Path) -> Vec<ProviderInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_the_bundled_claude_code() {
+        let data = std::env::temp_dir().join(format!("armada-bundled-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        assert_eq!(bundled_claude(&data), None);
+        let scope = adapter_dir(&data)
+            .join("node_modules")
+            .join("@anthropic-ai");
+        let name = if cfg!(windows) {
+            "claude.exe"
+        } else {
+            "claude"
+        };
+        // The SDK itself and other packages don't count; the platform package does.
+        std::fs::create_dir_all(scope.join("claude-agent-sdk")).unwrap();
+        std::fs::write(scope.join("claude-agent-sdk").join(name), "").unwrap();
+        assert_eq!(bundled_claude(&data), None);
+        let platform = scope.join("claude-agent-sdk-linux-x64");
+        std::fs::create_dir_all(&platform).unwrap();
+        std::fs::write(platform.join(name), "").unwrap();
+        assert_eq!(bundled_claude(&data), Some(platform.join(name)));
+        assert_eq!(claude_binary(&data), Some(platform.join(name)));
+        let _ = std::fs::remove_dir_all(&data);
+    }
 
     // The login-shell PATH lookup is Unix-only (and uses ':' separators).
     #[cfg(unix)]

@@ -1493,6 +1493,8 @@ export function seedItems(): Record<string, TimelineItem[]> {
       command: null,
       images: [mockScreenshot("checkout-guest.png"), mockScreenshot("checkout-3ds.png")],
     },
+    // A picture the model put in its reply (an image block), with no text of its own.
+    { kind: "agent_message", text: "", images: [mockScreenshot("checkout-receipt.png")] },
     {
       kind: "tool_call",
       toolCallId: "e-4",

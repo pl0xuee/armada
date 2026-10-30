@@ -69,8 +69,14 @@ pub fn project_item(item: &TimelineItem, roots: &[String]) -> Option<TimelineIte
             text: redact_secrets(text).into_owned(),
             attachments: Vec::new(),
         },
-        ItemBody::AgentMessage { text } => ItemBody::AgentMessage {
+        // A reply that is only a picture: nothing for a viewer to see.
+        ItemBody::AgentMessage { text, images } if text.is_empty() && !images.is_empty() => {
+            return None
+        }
+        // Viewers get the words, not pictures (they can show private screens).
+        ItemBody::AgentMessage { text, .. } => ItemBody::AgentMessage {
             text: redact_secrets(text).into_owned(),
+            images: Vec::new(),
         },
         ItemBody::ToolCall {
             tool_call_id,
@@ -165,7 +171,7 @@ pub fn mentions_path(visible: &[TimelineItem], path: &str, relative: Option<&str
     }
     visible.iter().any(|i| {
         let text = match &i.body {
-            ItemBody::UserMessage { text, .. } | ItemBody::AgentMessage { text } => text,
+            ItemBody::UserMessage { text, .. } | ItemBody::AgentMessage { text, .. } => text,
             ItemBody::ToolCall { title, .. } => title,
             _ => return false,
         };
@@ -255,6 +261,7 @@ mod tests {
         assert!(json.contains(r#""output":"""#));
 
         let said = item(ItemBody::AgentMessage {
+            images: vec![],
             text: ["I set API_KEY=s", "k-abcdefghijklmnopqrstuv for you"].concat(),
         });
         let json = serde_json::to_string(&project_item(&said, &r).unwrap()).unwrap();
@@ -287,6 +294,15 @@ mod tests {
                 fields: vec![],
                 resolution: None,
                 answers: None,
+            },
+            // A reply that is only a picture.
+            ItemBody::AgentMessage {
+                text: String::new(),
+                images: vec![armada_core::Attachment {
+                    name: "image".into(),
+                    mime_type: "image/png".into(),
+                    data: "AAAA".into(),
+                }],
             },
             ItemBody::Plan { entries: vec![] },
             ItemBody::Notice {
@@ -343,6 +359,7 @@ mod tests {
         let items = vec![
             item(ItemBody::AgentMessage {
                 text: "Saved shots/home.png".into(),
+                images: vec![],
             }),
             item(ItemBody::ToolCall {
                 tool_call_id: "t".into(),

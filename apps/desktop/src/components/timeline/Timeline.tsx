@@ -28,7 +28,7 @@ import { ThinkingIndicator } from "./ThinkingIndicator";
 import { shouldShowThinking, turnEndOf, turnStart, waitingStatus } from "./thinking";
 import { TurnEndLine } from "./TurnEndLine";
 import { TurnSummaryCard, TurnSummaryLine } from "./TurnSummaryCard";
-import { QuestionCard } from "./QuestionCard";
+import { QuestionCard, questionCardSelector } from "./QuestionCard";
 import { latestPending, usePermissionKeys } from "./usePermissionKeys";
 import { latestPendingQuestion } from "@/lib/question";
 
@@ -44,7 +44,7 @@ function estimateSize(it: TimelineItem | undefined): number {
     case "user_message":
       return 72 + Math.min(240, Math.floor(it.text.length / 90) * 22);
     case "agent_message":
-      return 60 + Math.min(900, Math.floor(it.text.length / 80) * 24);
+      return 60 + Math.min(900, Math.floor(it.text.length / 80) * 24) + (it.images?.length ? 340 : 0);
     case "thought":
       return 34;
     case "tool_call":
@@ -68,11 +68,14 @@ export function Timeline({
   agent,
   items,
   loading,
+  focused = true,
   footer,
 }: {
   agent: Agent;
   items: TimelineItem[] | undefined;
   loading: boolean;
+  /** This pane has the keyboard (side by side, only one does): card keys act here alone. */
+  focused?: boolean;
   footer?: ReactNode;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -344,9 +347,47 @@ export function Timeline({
   // "Deny with reason" editor for a request (opened by the card button or Shift+N).
   const [reasonFor, setReasonFor] = useState<string | null>(null);
   useEffect(() => setReasonFor(null), [agent.id]);
-  usePermissionKeys(agent, items, setReasonFor);
-  const pendingId = latestPending(items)?.requestId ?? null;
-  const questionId = latestPendingQuestion(items)?.requestId ?? null;
+  usePermissionKeys(agent, items, setReasonFor, focused);
+  const pendingId = (focused && latestPending(items)?.requestId) || null;
+  const questionId = (focused && latestPendingQuestion(items)?.requestId) || null;
+
+  // A pending question taller than the viewport opens with its top in view (sticking to the bottom
+  // would cut off the header and the first question, which is where the keys act). Following the
+  // stream resumes once it's answered.
+  const pendingQuestion = latestPendingQuestion(items)?.requestId ?? null;
+  const heldForQuestion = useRef(false);
+  useEffect(() => {
+    if (!pendingQuestion) {
+      if (heldForQuestion.current) {
+        heldForQuestion.current = false;
+        stick.current = true;
+        setAtBottom(true);
+        scrollToBottom();
+      }
+      return;
+    }
+    if (!stick.current) return;
+    let frame = 0;
+    let tries = 0;
+    const place = () => {
+      const el = scrollRef.current;
+      const card = el?.querySelector<HTMLElement>(questionCardSelector(pendingQuestion));
+      if (!el || !card) {
+        // The row mounts and measures a frame or two after the item arrives.
+        if (tries++ < 12) frame = requestAnimationFrame(place);
+        return;
+      }
+      if (card.offsetHeight <= el.clientHeight - 24) return;
+      const top = card.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+      heldForQuestion.current = true;
+      stick.current = false;
+      setAtBottom(false);
+      el.scrollTop = Math.max(0, top - 12);
+      lastTop.current = el.scrollTop;
+    };
+    frame = requestAnimationFrame(place);
+    return () => cancelAnimationFrame(frame);
+  }, [pendingQuestion, agent.id, scrollToBottom]);
 
   // Stable per-request callbacks so permission cards don't re-render on every frame.
   const reasonHandlers = useRef(new Map<string, (open: boolean) => void>());
@@ -614,7 +655,10 @@ function useUnattributedHold(items: TimelineItem[], waiting: boolean): ReadonlyS
     const byId = new Map(items.map((it) => [it.id, it.ts]));
     const next = Math.min(...held.map((id) => (byId.get(id) ?? now) + ATTRIBUTION_GRACE_MS));
     // Never sleep longer than the grace itself.
-    const t = setTimeout(() => setNow(Date.now()), Math.min(ATTRIBUTION_GRACE_MS + 50, Math.max(50, next - Date.now() + 20)));
+    const t = setTimeout(
+      () => setNow(Date.now()),
+      Math.min(ATTRIBUTION_GRACE_MS + 50, Math.max(50, next - Date.now() + 20)),
+    );
     return () => clearTimeout(t);
   }, [key, now]);
   return useMemo(() => new Set(held), [key]);
@@ -738,9 +782,7 @@ function renderItem(
     case "user_message":
       return <UserBubble item={it} />;
     case "agent_message":
-      return (
-        <AgentMessage item={it} agent={agent} interim={!view.finalIds.has(it.id)} streaming={liveTail} />
-      );
+      return <AgentMessage item={it} agent={agent} interim={!view.finalIds.has(it.id)} streaming={liveTail} />;
     case "thought":
       return <ThoughtBlock item={it} live={liveTail} agentId={agent.id} />;
     case "tool_call":
@@ -815,7 +857,11 @@ function LiveAnnouncer({ agent, items }: { agent: Agent; items: TimelineItem[] |
   const lastKind = items?.[items.length - 1]?.kind;
   const lastTitle = (() => {
     const it = items?.[items.length - 1];
-    return it && (it.kind === "permission" || it.kind === "tool_call") ? it.title : it?.kind === "question" ? it.message : "";
+    return it && (it.kind === "permission" || it.kind === "tool_call")
+      ? it.title
+      : it?.kind === "question"
+        ? it.message
+        : "";
   })();
   const seen = useRef<string | undefined>(lastId);
   const status = useRef(agent.status);

@@ -306,13 +306,16 @@ export const QuestionCard = memo(function QuestionCard({ item, readOnly }: { ite
     });
   const submit = () => {
     if (!canSubmit(item.fields, draft)) return setTouched(true);
-    drafts.delete(item.requestId);
-    void answerQuestion(item.agentId, item.requestId, buildAnswers(item.fields, draft));
+    send(buildAnswers(item.fields, draft));
   };
-  const skip = () => {
-    drafts.delete(item.requestId);
-    void answerQuestion(item.agentId, item.requestId, null);
-  };
+  const skip = () => send(null);
+  // The typed answers are only dropped once the server has them: if sending fails, the card (even
+  // after scrolling out of the virtual list and back) still has them to retry.
+  function send(answers: Parameters<typeof answerQuestion>[2]) {
+    void answerQuestion(item.agentId, item.requestId, answers).then((ok) => {
+      if (ok) drafts.delete(item.requestId);
+    });
+  }
 
   return (
     <section
