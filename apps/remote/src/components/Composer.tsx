@@ -11,18 +11,21 @@ import {
   type RefObject,
 } from "react";
 import { expandCommandShortcut } from "@shared/slashCommands";
-import { filterCommands, insertCommand, slashQuery } from "@/lib/composerLogic";
+import { composerPlaceholders, filterCommands, insertCommand, pickPlaceholder, slashQuery } from "@/lib/composerLogic";
+import { insertAtCaret } from "@/lib/templates";
 import { MAX_ATTACHMENTS, mergeAttachments } from "@/lib/attachments";
 import { cancelTurn, clearQueue, removeQueued, resumeQueue, sendPrompt, sendQueuedNow, toastError } from "@/lib/controller";
 import { confirmAction } from "@/lib/confirm";
 import { cn } from "@/lib/cn";
 import { agentIdentity, isBusy } from "@/lib/meta";
 import { draftKey } from "@/lib/drafts";
+import { useAgentAsking } from "@/lib/selectors";
 import { storage } from "@/lib/storage";
 import { useStore } from "@/lib/store";
 import type { Agent, Attachment, QueuedPrompt } from "@/lib/types";
 import { AttachButton, AttachmentTray, usePhotoPicker } from "./Attachments";
 import { Icon, Spinner } from "./Icon";
+import { TemplateSheet } from "./TemplateSheet";
 
 const MAX_HEIGHT = 168;
 
@@ -69,6 +72,9 @@ export const Composer = memo(function Composer({
   const [attachments, setAttachments] = useState<Attachment[]>(() => draftPhotos.get(agent.id) ?? []);
   const picker = usePhotoPicker(attachments, (list) => setAttachments((cur) => mergeAttachments(cur, list).list));
   const customAgents = useStore((s) => s.customAgents);
+  const templates = useStore((s) => s.templates);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const caret = useRef<{ start: number; end: number } | null>(null);
   const cancelling = useStore((s) => !!s.busy[`cancel:${agent.id}`]);
   const busy = isBusy(agent.status);
   const name = agentIdentity(agent, customAgents).short;
@@ -79,6 +85,26 @@ export const Composer = memo(function Composer({
     () => (query === null ? [] : filterCommands(agent.availableCommands ?? [], query)),
     [agent.availableCommands, query],
   );
+
+  // The longest placeholder that fits on one line (a wrapped one would make the empty box taller).
+  const asking = useAgentAsking(agent.id);
+  const candidates = useMemo(() => composerPlaceholders(agent, name, asking), [agent.status, agent.unread, agent.availableCommands, name, asking]);
+  const [placeholder, setPlaceholder] = useState(() => candidates[candidates.length - 1]);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const pick = () => {
+      const ctx = document.createElement("canvas").getContext("2d");
+      if (!ctx || el.clientWidth <= 0) return setPlaceholder(candidates[candidates.length - 1]);
+      ctx.font = getComputedStyle(el).font;
+      setPlaceholder(pickPlaceholder(candidates, (t) => ctx.measureText(t).width <= el.clientWidth - 2));
+    };
+    pick();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(pick);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [candidates]);
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -113,6 +139,27 @@ export const Composer = memo(function Composer({
     // Keep the keyboard up on phones so follow-ups are quick.
     ref.current?.focus({ preventScroll: true });
   }, [agent.id, agent.availableCommands, attachments, onChange, value]);
+
+  /** Open the template list, remembering where the caret was (the box blurs when the sheet opens). */
+  const openTemplates = () => {
+    const el = ref.current;
+    caret.current = el ? { start: el.selectionStart, end: el.selectionEnd } : null;
+    setTemplatesOpen(true);
+  };
+
+  /** A template goes in at the caret (replacing a selection); an empty box just takes it. */
+  const insertTemplate = (text: string) => {
+    const at = caret.current;
+    const next = insertAtCaret(latest.current, text, at?.start ?? null, at?.end ?? null);
+    onChange(next.text);
+    // After the sheet has closed (the page behind it is inert until then).
+    setTimeout(() => {
+      const el = ref.current;
+      if (!el) return;
+      el.focus({ preventScroll: true });
+      el.setSelectionRange(next.caret, next.caret);
+    }, 220);
+  };
 
   const editQueued = useCallback(
     async (q: QueuedPrompt) => {
@@ -199,6 +246,16 @@ export const Composer = memo(function Composer({
       >
         {picker.element}
         <AttachButton picker={picker} className="-ml-1.5" />
+        {templates.length > 0 && (
+          <button
+            type="button"
+            onClick={openTemplates}
+            aria-label="Insert a template"
+            className="press hit relative -ml-1.5 inline-flex h-12 w-10 shrink-0 items-center justify-center rounded-full text-steel active:bg-raised active:text-fg"
+          >
+            <Icon name="bookText" size={21} />
+          </button>
+        )}
         <label className="sr-only" htmlFor={`composer-${agent.id}`}>
           Message {name}
         </label>
@@ -222,7 +279,7 @@ export const Composer = memo(function Composer({
                 send();
               }
             }}
-            placeholder={busy ? `Queue a message for ${name}…` : `Message ${name}…`}
+            placeholder={placeholder}
             enterKeyHint="send"
             autoComplete="off"
             autoCorrect="on"
@@ -254,139 +311,148 @@ export const Composer = memo(function Composer({
           </button>
         )}
       </form>
+      <TemplateSheet open={templatesOpen} templates={templates} onClose={() => setTemplatesOpen(false)} onInsert={insertTemplate} />
     </div>
   );
 });
 
-const QUEUE_VISIBLE = 3;
-
-/** Messages waiting behind the current turn, with Edit / Send now / remove. */
+/** Messages waiting behind the current turn: one row (count, state) that opens into the list with labelled actions. */
 function QueueStack({ agent, onEdit }: { agent: Agent; onEdit: (q: QueuedPrompt) => void }) {
   const queue = agent.queue ?? [];
   const [expanded, setExpanded] = useState(false);
   const busy = useStore((s) => s.busy);
-  if (!queue.length) return null;
-  const shown = expanded ? queue : queue.slice(0, QUEUE_VISIBLE);
-  const hidden = queue.length - shown.length;
+  const count = queue.length;
+  // An empty queue starts collapsed next time.
+  useEffect(() => {
+    if (!count) setExpanded(false);
+  }, [count]);
+  if (!count) return null;
+  const open = expanded;
+  const clearAll = (
+    <button
+      type="button"
+      onClick={async () => {
+        const ok = await confirmAction({
+          title: `Clear ${count} queued messages?`,
+          body: "They'll be removed without running.",
+          confirmLabel: "Clear all",
+          destructive: true,
+        });
+        if (ok) void clearQueue(agent.id);
+      }}
+      className="press relative inline-flex h-11 shrink-0 items-center rounded-lg px-2.5 text-[13px] font-semibold text-muted"
+    >
+      Clear all
+    </button>
+  );
   return (
-    <section aria-label="Queued messages" className="mx-auto w-full max-w-[860px] px-safe pt-2.5">
-      <div className="mb-1.5 flex items-center gap-2 px-1 text-[12px]">
-        <Icon name="clock" size={13} className="text-steel" />
-        <span className="font-semibold text-muted">{queue.length} queued</span>
-        {agent.queuePaused ? (
-          <span className="min-w-0 truncate font-medium text-warn">Queue paused</span>
-        ) : (
-          <span className="min-w-0 truncate text-steel">Runs after this turn</span>
-        )}
-        <span className="ml-auto flex shrink-0 items-center">
-          {agent.queuePaused && (
-            <button
-              type="button"
-              onClick={() => void resumeQueue(agent.id)}
-              disabled={!!busy[`queue-resume:${agent.id}`]}
-              className="press hit relative h-8 rounded-lg px-2 font-semibold text-accent disabled:opacity-50"
-            >
-              Resume queue
-            </button>
+    <section aria-label="Queued messages" className="mx-auto w-full max-w-[860px] px-safe pt-2">
+      <div className="flex items-center rounded-xl border border-line bg-card edge">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={open}
+          className="press-row flex h-11 min-w-0 flex-1 items-center gap-2 rounded-xl pr-2 pl-3 text-left text-[13px]"
+        >
+          <Icon name="clock" size={15} className="shrink-0 text-steel" />
+          <span className="shrink-0 font-semibold text-fg">{count} queued</span>
+          {agent.queuePaused ? (
+            <span className="min-w-0 truncate font-medium text-warn">Queue paused</span>
+          ) : (
+            <span className="min-w-0 truncate text-steel">
+              {count === 1 || open ? "Runs after this turn" : queue[0].text.trim() || "Photos"}
+            </span>
           )}
-          {queue.length >= 2 && (
-            <button
-              type="button"
-              onClick={async () => {
-                const ok = await confirmAction({
-                  title: `Clear ${queue.length} queued messages?`,
-                  body: "They'll be removed without running.",
-                  confirmLabel: "Clear all",
-                  destructive: true,
-                });
-                if (ok) void clearQueue(agent.id);
-              }}
-              className="press hit relative h-8 rounded-lg px-2 font-semibold text-muted"
-            >
-              Clear all
-            </button>
-          )}
-        </span>
-      </div>
-      <ul className="space-y-1.5">
-        {shown.map((q) => {
-          const sending = !!busy[`queue:${q.id}`];
-          // Steering agents take it into the running turn; a slash command only works at
-          // the start of a turn, so it goes first in line instead.
-          const steers = !!agent.steerable && isBusy(agent.status);
-          const isCommand = q.text.trimStart().startsWith("/");
-          return (
-            <li key={q.id} className="animate-fade flex items-center gap-1 rounded-2xl border border-line-strong bg-card py-1 pr-1 pl-3.5 edge">
-              <div className="min-w-0 flex-1 py-1.5">
-                <p className="line-clamp-2 text-[14px] leading-[1.35] break-words text-fg">{q.text || "(photos only)"}</p>
-                {q.attachments > 0 && (
-                  <span className="mt-0.5 inline-flex items-center gap-1 text-[12px] text-steel">
-                    <Icon name="image" size={13} />
-                    {q.attachments === 1 ? "1 photo" : `${q.attachments} photos`}
-                  </span>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => onEdit(q)}
-                aria-label="Edit queued message"
-                className="press inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-muted active:bg-raised"
-              >
-                <Icon name="pencil" size={18} />
-              </button>
-              <button
-                type="button"
-                onClick={() => void sendQueuedNow(agent.id, q.id)}
-                disabled={sending}
-                aria-label={
-                  !isBusy(agent.status)
-                    ? "Send now"
-                    : !agent.steerable
-                      ? "Send now (interrupts the current turn)"
-                      : isCommand
-                        ? "Run next (when the current turn ends)"
-                        : "Send now (adds it to the running turn)"
-                }
-                className="press inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-accent active:bg-raised disabled:opacity-50"
-              >
-                {sending ? <Spinner size={16} /> : <Icon name="arrowUp" size={19} strokeWidth={2.2} />}
-              </button>
-              {steers && !isCommand && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const ok = await confirmAction({
-                      title: "Stop the current turn?",
-                      body: "The agent stops what it's doing and runs this message instead.",
-                      confirmLabel: "Stop & send",
-                      destructive: true,
-                    });
-                    if (ok) void sendQueuedNow(agent.id, q.id, true);
-                  }}
-                  disabled={sending}
-                  aria-label="Stop & send (stops the current turn and runs this instead)"
-                  className="press inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-warn active:bg-raised disabled:opacity-50"
-                >
-                  <Icon name="stop" size={17} />
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => void removeQueued(agent.id, q.id)}
-                aria-label="Remove queued message"
-                className="press inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-steel active:bg-raised"
-              >
-                <Icon name="x" size={18} />
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-      {hidden > 0 && (
-        <button type="button" onClick={() => setExpanded(true)} className="press mt-1 h-9 px-1 text-[12.5px] font-medium text-accent">
-          Show {hidden} more
+          <Icon name="chevronDown" size={16} className={cn("ml-auto shrink-0 text-steel transition-transform duration-150", open && "rotate-180")} />
         </button>
+        {open && count >= 2 && !agent.queuePaused && clearAll}
+        {agent.queuePaused && (
+          <button
+            type="button"
+            onClick={() => void resumeQueue(agent.id)}
+            disabled={!!busy[`queue-resume:${agent.id}`]}
+            className="press relative mr-1 inline-flex h-11 shrink-0 items-center rounded-lg px-2.5 text-[13px] font-semibold text-accent disabled:opacity-50"
+          >
+            Resume queue
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="animate-fade mt-1.5">
+          <ul className="max-h-[min(30dvh,260px)] space-y-1.5 overflow-y-auto overscroll-contain">
+            {queue.map((q) => (
+              <QueueItem key={q.id} agent={agent} q={q} sending={!!busy[`queue:${q.id}`]} onEdit={onEdit} />
+            ))}
+          </ul>
+          {count >= 2 && agent.queuePaused && clearAll}
+        </div>
       )}
     </section>
+  );
+}
+
+const QUEUE_ACTION = "press relative inline-flex h-11 min-w-0 flex-1 items-center justify-center rounded-lg px-1 text-[13px] font-semibold whitespace-nowrap active:bg-raised disabled:opacity-50";
+
+/** One queued message with its labelled actions: Send now, Stop & send, Edit, Remove. */
+function QueueItem({ agent, q, sending, onEdit }: { agent: Agent; q: QueuedPrompt; sending: boolean; onEdit: (q: QueuedPrompt) => void }) {
+  // Steering agents take it into the running turn; a slash command only works at
+  // the start of a turn, so it goes first in line instead.
+  const working = isBusy(agent.status);
+  const steers = !!agent.steerable && working;
+  const isCommand = q.text.trimStart().startsWith("/");
+  const sendTitle = !working
+    ? "Send now"
+    : !agent.steerable
+      ? "Send now (interrupts the current turn)"
+      : isCommand
+        ? "Run next (when the current turn ends)"
+        : "Send now (adds it to the running turn)";
+  return (
+    <li className="animate-fade rounded-2xl border border-line-strong bg-card px-3.5 pt-2.5 pb-1 edge">
+      <p className="line-clamp-2 text-[14px] leading-[1.35] break-words text-fg">{q.text || "(photos only)"}</p>
+      {q.attachments > 0 && (
+        <span className="mt-0.5 inline-flex items-center gap-1 text-[12px] text-steel">
+          <Icon name="image" size={13} />
+          {q.attachments === 1 ? "1 photo" : `${q.attachments} photos`}
+        </span>
+      )}
+      <div className="-mx-2 mt-1 flex items-center border-t border-line/60 pt-0.5">
+        <button
+          type="button"
+          onClick={() => void sendQueuedNow(agent.id, q.id)}
+          disabled={sending}
+          title={sendTitle}
+          aria-label={sendTitle}
+          className={cn(QUEUE_ACTION, "text-accent")}
+        >
+          {sending ? <Spinner size={15} /> : working && isCommand ? "Run next" : "Send now"}
+        </button>
+        {steers && !isCommand && (
+          <button
+            type="button"
+            onClick={async () => {
+              const ok = await confirmAction({
+                title: "Stop the current turn?",
+                body: "The agent stops what it's doing and runs this message instead.",
+                confirmLabel: "Stop & send",
+                destructive: true,
+              });
+              if (ok) void sendQueuedNow(agent.id, q.id, true);
+            }}
+            disabled={sending}
+            title="Stops the current turn and runs this instead"
+            className={cn(QUEUE_ACTION, "text-warn")}
+          >
+            Stop &amp; send
+          </button>
+        )}
+        <button type="button" onClick={() => onEdit(q)} disabled={sending} className={cn(QUEUE_ACTION, "text-muted")}>
+          Edit
+        </button>
+        <button type="button" onClick={() => void removeQueued(agent.id, q.id)} disabled={sending} className={cn(QUEUE_ACTION, "text-muted")}>
+          Remove
+        </button>
+      </div>
+    </li>
   );
 }

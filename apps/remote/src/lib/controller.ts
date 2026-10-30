@@ -24,6 +24,7 @@ import {
   newIdempotencyKey,
   pairDevice,
   type Backend,
+  type CommitOptions,
 } from "./api";
 import {
   adoptValidatedToken,
@@ -45,7 +46,9 @@ import {
 } from "./store";
 import { coalesceDeltas, reconcilePending } from "./composerLogic";
 import { purgeAllDrafts, purgeDraft } from "./drafts";
-import { commitMessage, shipOutcome, throttledProgress } from "./outcomes";
+import { denyThenSend } from "./denyReason";
+import { commitResult, conflictPrompt, isSecretsRefusal, needsResultSheet, shipResult, type CommitOutcome } from "./gitResult";
+import { throttledProgress } from "./outcomes";
 import { loadLocalImage } from "./localImages";
 import { applyConfigValue } from "./config";
 import {
@@ -1870,43 +1873,60 @@ export async function loadDiff(agentId: string) {
 }
 
 /**
- * Commit (or commit & merge) the agent's work. Errors mean nothing changed;
- * a ship that committed but couldn't merge reports a warning.
+ * Files a commit would add that look like secrets (empty when none), or null
+ * when they couldn't be checked: that is not "no secrets". The caller goes
+ * ahead and lets the server decide (it refuses them with a 422).
+ */
+export async function secretFilesFor(agentId: string): Promise<string[] | null> {
+  try {
+    const list = await api.secretFiles(requireBackend(), agentId);
+    return Array.isArray(list) ? list.filter((f) => typeof f === "string") : null;
+  } catch (e) {
+    handleAuthError(e);
+    return null;
+  }
+}
+
+/**
+ * Commit (or commit & merge) the agent's work. Errors mean nothing changed
+ * (null), except the server refusing secret-looking files: that comes back as
+ * `{ kind: "secrets" }` with the files, for the sheet to ask about. Otherwise the result: a clean commit is just a toast, anything else
+ * (a merge, skipped or left-over files, a conflict) is returned for the sheet
+ * to show with its next steps.
  */
 export async function commitWork(
   agentId: string,
   message: string,
   merge: boolean,
-): Promise<boolean> {
+  options: CommitOptions = {},
+): Promise<CommitOutcome | null> {
   const key = `commit:${agentId}`;
-  if (getState().busy[key]) return false;
+  if (getState().busy[key]) return null;
   setState((s) => ({ busy: { ...s.busy, [key]: true } }));
   try {
-    if (merge) {
-      const r = await api.ship(requireBackend(), agentId, message);
-      const outcome = shipOutcome(r);
-      pushToast({
-        ...outcome,
-        agentId: null,
-        reason: null,
-        duration: outcome.tone === "warn" ? 10_000 : 6_000,
-      });
-    } else {
-      const r = await api.commit(requireBackend(), agentId, message);
+    const result = merge
+      ? shipResult(await api.ship(requireBackend(), agentId, message, options))
+      : commitResult(await api.commit(requireBackend(), agentId, message, options));
+    if (!needsResultSheet(result) && result.kind === "committed") {
       pushToast({
         tone: "ok",
         title: "Committed",
-        body: commitMessage(r?.result),
+        body: result.message,
         agentId: null,
         reason: null,
         duration: 6_000,
       });
     }
-    return true;
+    return result;
   } catch (e) {
+    if (isSecretsRefusal(e)) {
+      // The look-ahead missed them (it failed, or files appeared since): ask now.
+      const files = await secretFilesFor(agentId);
+      if (files?.length) return { kind: "secrets", files };
+    }
     if (!handleAuthError(e))
       toastError(merge ? "Couldn't commit and merge" : "Couldn't commit", e);
-    return false;
+    return null;
   } finally {
     setState((s) => {
       const busy = { ...s.busy };
@@ -1914,6 +1934,30 @@ export async function commitWork(
       return { busy };
     });
   }
+}
+
+/** "Ask the agent to resolve" after a merge conflict: the desktop's prompt, sent as a message. */
+export async function askToResolveConflict(agent: Agent, error: string) {
+  await sendPrompt(agent.id, conflictPrompt(agent, error));
+}
+
+/**
+ * "Deny with reason": deny the request, then send the explanation as the next
+ * message (same order as the desktop). If the deny didn't go through, the
+ * reason isn't sent as if it had. Resolves true when the deny landed; a reason
+ * that then fails to send shows up as a failed message to retry.
+ */
+export async function denyWithReason(
+  agentId: string,
+  requestId: string,
+  denyOptionId: string,
+  reason: string,
+): Promise<boolean> {
+  return denyThenSend(
+    reason,
+    () => respondToPermission(agentId, requestId, denyOptionId),
+    (text) => sendPrompt(agentId, text),
+  );
 }
 
 /** "Retry now" on the reconnecting banner. */

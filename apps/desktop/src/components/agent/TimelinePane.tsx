@@ -4,7 +4,7 @@ import type { Agent } from "@/lib/types";
 import { useApp } from "@/store/app";
 
 /** Owns the items subscription so streamed frames re-render only the timeline, not the whole pane. */
-export function TimelinePane({ agent }: { agent: Agent }) {
+export function TimelinePane({ agent, focused = true }: { agent: Agent; focused?: boolean }) {
   const items = useApp((s) => s.items[agent.id]);
   const loading = useApp((s) => s.itemsLoading[agent.id] ?? false);
   const loadError = useApp((s) => s.itemsError[agent.id]);
@@ -13,6 +13,7 @@ export function TimelinePane({ agent }: { agent: Agent }) {
       agent={agent}
       items={items}
       loading={loading}
+      focused={focused}
       footer={
         loadError && !items ? (
           <div className="mx-auto mt-10 max-w-sm rounded-xl border border-err/30 bg-err/[0.06] p-4 text-center">

@@ -1,8 +1,10 @@
-import { memo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { devParam } from "@/lib/dev";
+import { cheapStatsAll } from "@/lib/diffStats";
 import { clockTime, formatBytes, shortPath, wordCount } from "@/lib/format";
 import { noteUserLayoutChange } from "@/lib/scroll";
+import { cleanTerminalOutput, exitCodeOf } from "@/lib/terminal";
 import type { Attachment, PlanEntry, TimelineItem, ToolCallItem, ToolKind, ToolStatus } from "@/lib/types";
 import { CopyButton } from "../CopyButton";
 import { Icon, Spinner, type IconName } from "../Icon";
@@ -114,11 +116,25 @@ export const UserBubble = memo(function UserBubble({
   );
 });
 
-export const AgentMessage = memo(function AgentMessage({ item, streaming }: { item: Of<"agent_message">; streaming: boolean }) {
-  if (!item.text && streaming) return <TypingDots />;
+export const AgentMessage = memo(function AgentMessage({
+  item,
+  streaming,
+  interim = false,
+}: {
+  item: Of<"agent_message">;
+  streaming: boolean;
+  /** Narration between tool calls (not the turn's final answer). */
+  interim?: boolean;
+}) {
+  const images = item.images ?? [];
+  if (!item.text && !images.length) {
+    if (streaming) return <TypingDots />;
+    return <p className="text-[12.5px] text-steel italic">No reply (the turn ended before any text).</p>;
+  }
   return (
     <div className="min-w-0">
-      <Markdown text={item.text} caret={streaming} />
+      {images.length > 0 && <ImageStrip images={images} large className={item.text ? "mb-2" : undefined} />}
+      {item.text && <Markdown text={item.text} caret={streaming} interim={interim} />}
     </div>
   );
 });
@@ -161,7 +177,18 @@ export const ThoughtRow = memo(function ThoughtRow({ item, streaming }: { item: 
 // ---------------------------------------------------------------------------
 // Tool calls
 
-function StatusGlyph({ status }: { status: ToolStatus }) {
+/** The agent stopped (interrupted / stopped) with this call unfinished: paused, not spinning. */
+function PauseGlyph() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" className="text-violet" role="img" aria-label="Paused">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M10 9v6M14 9v6" />
+    </svg>
+  );
+}
+
+function StatusGlyph({ status, paused = false }: { status: ToolStatus; paused?: boolean }) {
+  if (paused) return <PauseGlyph />;
   switch (status) {
     case "in_progress":
       return <Spinner size={15} className="text-accent" />;
@@ -183,14 +210,34 @@ export function outputWindow(length: number, pages: number): { start: number; hi
   return { start: length - shown, hidden: length - shown };
 }
 
-export function OutputBlock({ text, label = "Output" }: { text: string; label?: string }) {
+/**
+ * A command's output as plain text: ANSI colors are stripped and `\r` progress-bar redraws keep
+ * only their last state (like the desktop). `live`: the command is still running; the box follows
+ * the newest lines unless the reader scrolled up inside it.
+ */
+export function OutputBlock({ text: raw, label = "Output", live = false }: { text: string; label?: string; live?: boolean }) {
   const [pages, setPages] = useState(0);
+  const { text, hidden: dropped } = useMemo(() => cleanTerminalOutput(raw), [raw]);
   const { start, hidden } = outputWindow(text.length, pages);
   const shown = start ? text.slice(start) : text;
+  const ref = useRef<HTMLPreElement>(null);
+  const stick = useRef(true);
+  useEffect(() => {
+    const el = ref.current;
+    if (el && live && stick.current) el.scrollTop = el.scrollHeight;
+  }, [shown, live]);
   return (
     <div className="overflow-hidden rounded-xl border border-line bg-code">
       <div className="flex h-8 items-center justify-between border-b border-line/70 pr-1 pl-3">
-        <span className="text-[11px] font-medium tracking-wider text-steel uppercase">{label}</span>
+        <span className="flex items-center gap-1.5 text-[11px] font-medium tracking-wider text-steel uppercase">
+          {label}
+          {live && (
+            <span className="inline-flex items-center gap-1 tracking-normal text-accent normal-case">
+              <span className="animate-breathe h-1.5 w-1.5 rounded-full bg-accent" aria-hidden />
+              Live
+            </span>
+          )}
+        </span>
         <CopyButton text={text} label={`Copy ${label.toLowerCase()}`} />
       </div>
       {hidden > 0 && (
@@ -205,7 +252,15 @@ export function OutputBlock({ text, label = "Output" }: { text: string; label?: 
           {formatBytes(hidden)} earlier output hidden · Show {formatBytes(Math.min(hidden, OUTPUT_PAGE))} more
         </button>
       )}
-      <pre className="max-h-[22rem] overflow-auto px-3 py-2.5 font-mono text-[12px] leading-[1.55] whitespace-pre-wrap break-words text-muted">
+      <pre
+        ref={ref}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+        }}
+        className="max-h-[22rem] overflow-auto px-3 py-2.5 font-mono text-[12px] leading-[1.55] whitespace-pre-wrap break-words text-muted"
+      >
+        {dropped > 0 && !start && <span className="block select-none text-steel">… {dropped.toLocaleString()} earlier characters not shown</span>}
         {shown || " "}
       </pre>
     </div>
@@ -226,17 +281,57 @@ export function CommandBlock({ command }: { command: string }) {
   );
 }
 
-export const ToolRow = memo(function ToolRow({ item }: { item: ToolCallItem }) {
+/** +added / −removed line counts of an edit, for the row header. */
+function DiffStat({ additions, deletions }: { additions: number; deletions: number }) {
+  if (!additions && !deletions) return null;
+  return (
+    <span className="shrink-0 font-mono text-[11.5px] tabular" aria-label={`${additions} added, ${deletions} removed`}>
+      {additions > 0 && <span className="text-ok">+{additions}</span>}
+      {additions > 0 && deletions > 0 && " "}
+      {deletions > 0 && <span className="text-err">−{deletions}</span>}
+    </span>
+  );
+}
+
+/**
+ * Commands that opened themselves while running. Module-level (not a ref) so the row remembers it when the
+ * virtual list unmounts and remounts it; bounded, oldest forgotten first.
+ */
+const AUTO_OPENED_MAX = 500;
+const autoOpened = new Set<string>();
+export function rememberAutoOpened(id: string) {
+  if (autoOpened.has(id)) return;
+  if (autoOpened.size >= AUTO_OPENED_MAX) autoOpened.delete(autoOpened.values().next().value as string);
+  autoOpened.add(id);
+}
+export const wasAutoOpened = (id: string) => autoOpened.has(id);
+
+export const ToolRow = memo(function ToolRow({ item, agentLive = true }: { item: ToolCallItem; agentLive?: boolean }) {
   const hasDetails = !!(item.command || item.output || item.diffs.length || item.locations.length);
-  const [open, setOpen] = useState(EXPAND_ALL && hasDetails);
-  const color =
-    item.status === "failed" ? "var(--err)" : item.status === "in_progress" ? "var(--accent)" : "var(--steel)";
+  const unfinished = item.status === "pending" || item.status === "in_progress";
+  // An unfinished call of an agent that is no longer running (stopped, interrupted) is paused, not spinning.
+  const running = unfinished && agentLive;
+  const paused = unfinished && !agentLive;
+  const failed = item.status === "failed";
+  const isCmd = item.toolKind === "execute";
+  const [open, setOpen] = useState<boolean | null>(EXPAND_ALL && hasDetails ? true : null);
+  // A command that opened itself while running stays open when it finishes (no height jump).
+  if (running && isCmd) rememberAutoOpened(item.id);
+  const expanded = hasDetails && (open ?? (wasAutoOpened(item.id) || failed));
+  // Cheap counts for the header (no real diff until it is expanded).
+  const stats = useMemo(() => cheapStatsAll(item.diffs), [item.diffs]);
+  const exit = isCmd && failed ? exitCodeOf(item.output) : null;
+  const color = failed ? "var(--err)" : paused ? "var(--violet)" : running ? "var(--accent)" : "var(--steel)";
   return (
     <div>
       <button
         type="button"
-        onClick={() => hasDetails && toggle(setOpen)}
-        aria-expanded={hasDetails ? open : undefined}
+        onClick={() => {
+          if (!hasDetails) return;
+          noteUserLayoutChange();
+          setOpen(!expanded);
+        }}
+        aria-expanded={hasDetails ? expanded : undefined}
         disabled={!hasDetails}
         className={cn("flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left", hasDetails && "press-row")}
       >
@@ -250,16 +345,20 @@ export const ToolRow = memo(function ToolRow({ item }: { item: ToolCallItem }) {
         >
           <Icon name={TOOL_ICON[item.toolKind] ?? "wrench"} size={15} />
         </span>
-        <span className={cn("min-w-0 flex-1 truncate text-[14px]", item.status === "failed" ? "text-fg" : "text-fg/90")}>
+        <span className={cn("min-w-0 flex-1 truncate text-[14px]", isCmd && "font-mono text-[13px]", failed ? "text-fg" : "text-fg/90")}>
           {item.title}
         </span>
-        <StatusGlyph status={item.status} />
+        {item.diffs.length > 0 && <DiffStat additions={stats.additions} deletions={stats.deletions} />}
+        {exit !== null && (
+          <span className="shrink-0 rounded-md bg-err/10 px-1.5 py-px font-mono text-[11px] font-medium tabular text-err">exit {exit}</span>
+        )}
+        <StatusGlyph status={item.status} paused={paused} />
         {hasDetails && (
-          <Icon name="chevronDown" size={16} className={cn("shrink-0 text-steel transition-transform duration-150", !open && "-rotate-90")} />
+          <Icon name="chevronDown" size={16} className={cn("shrink-0 text-steel transition-transform duration-150", !expanded && "-rotate-90")} />
         )}
       </button>
       {item.images && item.images.length > 0 && <ImageStrip images={item.images} className="px-3 pb-3 pl-[52px]" />}
-      {open && (
+      {expanded && (
         <div className="animate-fade space-y-2 px-3 pt-0.5 pb-3">
           {item.command && <CommandBlock command={item.command} />}
           {item.locations.some(isLocalImagePath) && (
@@ -283,18 +382,18 @@ export const ToolRow = memo(function ToolRow({ item }: { item: ToolCallItem }) {
             </div>
           )}
           {item.diffs.length > 0 && <DiffList diffs={item.diffs} />}
-          {item.output && <OutputBlock text={item.output} />}
+          {(item.output || (running && isCmd)) && <OutputBlock text={item.output} live={running && isCmd} />}
         </div>
       )}
     </div>
   );
 });
 
-export const ToolGroup = memo(function ToolGroup({ items }: { items: ToolCallItem[] }) {
+export const ToolGroup = memo(function ToolGroup({ items, agentLive = true }: { items: ToolCallItem[]; agentLive?: boolean }) {
   return (
     <div className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line bg-panel edge">
       {items.map((it) => (
-        <ToolRow key={it.id} item={it} />
+        <ToolRow key={it.id} item={it} agentLive={agentLive} />
       ))}
     </div>
   );

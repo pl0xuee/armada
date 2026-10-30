@@ -517,7 +517,7 @@ async fn prompts_sent_mid_turn_are_queued_and_run_in_order() {
         .unwrap()
         .into_iter()
         .filter_map(|i| match i.body {
-            ItemBody::AgentMessage { text } => Some(text),
+            ItemBody::AgentMessage { text, .. } => Some(text),
             _ => None,
         })
         .collect();
@@ -788,6 +788,139 @@ async fn questions_are_shown_and_answered() {
     env.core.shutdown().await;
 }
 
+/// A picture in the agent's reply is kept with the conversation, in order around the
+/// text; a picture that is only a link becomes a markdown link (never fetched).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pictures_in_agent_replies_are_kept() {
+    let mut env = setup("pictures", mode("normal")).await;
+    let agent = env.core.create_agent(request(&env, "PIC")).await.unwrap();
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
+        .await
+        .expect("the turn finishes");
+    let replies: Vec<(String, usize)> = env
+        .core
+        .items(&agent.id)
+        .unwrap()
+        .into_iter()
+        .filter_map(|i| match i.body {
+            ItemBody::AgentMessage { text, images } => Some((text, images.len())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        replies,
+        [
+            ("before ".to_string(), 0),
+            (String::new(), 1),
+            (
+                "\n\n![image](https://example.com/a.png)\n\nafter".to_string(),
+                0
+            )
+        ],
+        "{replies:?}"
+    );
+    env.core.shutdown().await;
+}
+
+/// A question that arrives between turns (not tied to one) is closed when the agent is
+/// stopped, instead of staying "needs you" with nobody left to answer it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_question_between_turns_is_closed_when_the_agent_stops() {
+    let mut env = setup("late-question", mode("normal")).await;
+    let agent = env.core.create_agent(request(&env, "LATEQ")).await.unwrap();
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
+        .await
+        .expect("the turn finishes");
+    // It may already have arrived (events before "done" aren't kept): look at the items.
+    let open = |env: &Env| {
+        env.core.items(&agent.id).unwrap().iter().any(|i| {
+            matches!(
+                i.body,
+                ItemBody::Question {
+                    resolution: None,
+                    ..
+                }
+            )
+        })
+    };
+    for _ in 0..100 {
+        if open(&env) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(open(&env), "the late question");
+    assert_eq!(env.core.agent(&agent.id).unwrap().pending_permissions, 1);
+    env.core.stop_agent(&agent.id).await.unwrap();
+    let closed = env.core.items(&agent.id).unwrap().into_iter().any(
+        |i| matches!(&i.body, ItemBody::Question { resolution: Some(r), .. } if r == "cancelled"),
+    );
+    assert!(closed, "the question is closed");
+    assert_eq!(env.core.agent(&agent.id).unwrap().pending_permissions, 0);
+    env.core.shutdown().await;
+}
+
+/// A runaway agent's pictures are capped per turn, repeats are skipped, and the user is
+/// told once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pictures_per_turn_are_capped() {
+    let mut env = setup("shots", mode("normal")).await;
+    let agent = env.core.create_agent(request(&env, "SHOTS")).await.unwrap();
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
+        .await
+        .expect("the turn finishes");
+    let items = env.core.items(&agent.id).unwrap();
+    let pictures = items
+        .iter()
+        .filter(|i| matches!(&i.body, ItemBody::AgentMessage { images, .. } if !images.is_empty()))
+        .count();
+    assert_eq!(pictures, 24, "30 distinct pictures, capped");
+    let told = items
+        .iter()
+        .filter(|i| matches!(&i.body, ItemBody::Notice { text, .. } if text.contains("more than 24 pictures")))
+        .count();
+    assert_eq!(told, 1, "told once");
+    env.core.shutdown().await;
+}
+
+/// A question the agent withdraws ($/cancel_request) is closed instead of waiting for
+/// an answer nobody is listening for.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_withdrawn_question_is_closed() {
+    let mut env = setup("withdraw", mode("normal")).await;
+    let agent = env
+        .core
+        .create_agent(request(&env, "WITHDRAW"))
+        .await
+        .unwrap();
+    // The agent withdraws the question 0.3 s in and keeps working for another 0.3 s:
+    // the question must close then, not only when the turn ends.
+    let mut closed_while_working = false;
+    for _ in 0..150 {
+        let items = env.core.items(&agent.id).unwrap();
+        let closed = items.iter().any(|i| {
+            matches!(&i.body, ItemBody::Question { resolution: Some(r), .. } if r == "cancelled")
+        });
+        if closed {
+            let moved_on = items.iter().any(|i| {
+                matches!(&i.body, ItemBody::AgentMessage { text, .. } if text.contains("moved on"))
+            });
+            closed_while_working = !moved_on;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        closed_while_working,
+        "closed when withdrawn, before the turn went on"
+    );
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
+        .await
+        .expect("the turn finishes");
+    assert_eq!(env.core.agent(&agent.id).unwrap().pending_permissions, 0);
+    env.core.shutdown().await;
+}
+
 fn user_texts(env: &Env, agent_id: &str) -> Vec<String> {
     env.core
         .items(agent_id)
@@ -961,7 +1094,7 @@ fn agent_texts(env: &Env, agent_id: &str) -> Vec<String> {
         .unwrap()
         .into_iter()
         .filter_map(|i| match i.body {
-            ItemBody::AgentMessage { text } => Some(text),
+            ItemBody::AgentMessage { text, .. } => Some(text),
             _ => None,
         })
         .collect()

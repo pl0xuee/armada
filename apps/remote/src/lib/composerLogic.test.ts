@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterCommands, insertCommand, reconcilePending, slashQuery } from "./composerLogic";
+import { composerPlaceholders, filterCommands, insertCommand, pickPlaceholder, reconcilePending, slashQuery } from "./composerLogic";
 import type { PendingPrompt } from "./store";
 import type { TimelineItem } from "./types";
 
@@ -93,5 +93,40 @@ describe("throttledProgress / ship outcome / commit message", () => {
     });
     expect(commitMessage({ hash: "abc", message: "Committed 3 files (abc)" })).toBe("Committed 3 files (abc)");
     expect(commitMessage("legacy text")).toBe("legacy text");
+  });
+});
+
+describe("composer placeholder", () => {
+  const cmd = [{ name: "review" }] as never;
+  const a = (status: string, extra: Record<string, unknown> = {}) => ({ status, unread: false, availableCommands: [], ...extra }) as never;
+  it("starts from the desktop's wording for each state", () => {
+    expect(composerPlaceholders(a("needs_permission"), "Claude")[0]).toBe("Waiting for you above. Queue a message to run after this turn…");
+    expect(composerPlaceholders(a("working"), "Claude")[0]).toBe("Claude is working. Queue a follow-up message…");
+    expect(composerPlaceholders(a("starting"), "Claude")[0]).toBe("Claude is working. Queue a follow-up message…");
+    expect(composerPlaceholders(a("idle", { unread: true }), "Claude")[0]).toBe("Done. Reply, or start something new…");
+  });
+  it("offers slash commands only when the agent has them", () => {
+    expect(composerPlaceholders(a("idle"), "Codex")).toEqual(["Message Codex…"]);
+    expect(composerPlaceholders(a("idle", { availableCommands: cmd }), "Codex")).toEqual(["Message Codex…  / for commands", "Message Codex…"]);
+    expect(composerPlaceholders(a("error", { unread: true }), "Codex")).toEqual(["Message Codex…"]);
+  });
+  it("shortens to what fits on one line", () => {
+    const c = composerPlaceholders(a("working"), "Codex");
+    expect(pickPlaceholder(c, (t) => t.length <= 100)).toBe(c[0]);
+    expect(pickPlaceholder(c, (t) => t.length <= 36)).toBe("Codex is working. Queue a message…");
+    expect(pickPlaceholder(c, (t) => t.length <= 20)).toBe("Queue a message…");
+    expect(pickPlaceholder(c, () => false)).toBe("Queue a message…");
+  });
+  it("ends every busy state on the same short line", () => {
+    for (const status of ["working", "starting", "needs_permission"] as const) {
+      const c = composerPlaceholders(a(status), "Claude");
+      expect(c[c.length - 1]).toBe("Queue a message…");
+    }
+  });
+  it("says a pending question is answered above, and typing queues", () => {
+    const c = composerPlaceholders(a("needs_permission"), "Claude", true);
+    expect(c[0]).toBe("Answer above, or queue a message to run after this turn…");
+    expect(c[1]).toBe("Answer above, or queue a message…");
+    expect(pickPlaceholder(c, (t) => t.length <= 24)).toBe("Answer above, or queue…");
   });
 });

@@ -12,7 +12,18 @@ import { basename, plainPreview, plural, relativeTime, relativeTimeLong } from "
 import { useNow } from "@/lib/hooks";
 import { agentIdentity, safeColor, statusMeta } from "@/lib/meta";
 import { navigate } from "@/lib/router";
-import { accountOf, filterAgents, groupFleet, useAgentPending, useInbox, waitingLabel } from "@/lib/selectors";
+import {
+  accountOf,
+  filterAgents,
+  groupFleet,
+  isUsageLimited,
+  pendingKindOf,
+  permissionIndex,
+  USAGE_LIMIT_LABEL,
+  useAgentPending,
+  useInbox,
+  waitingLabel,
+} from "@/lib/selectors";
 import { useStore } from "@/lib/store";
 import type { Agent } from "@/lib/types";
 import { InstallTip, installTipApplies } from "@/components/InstallTip";
@@ -30,6 +41,7 @@ export function Fleet() {
   const [showArchived, setShowArchived] = useState(false);
   const [settings, setSettings] = useState(devParam("sheet") === "settings");
   const owner = useStore((s) => s.session?.scope === "owner");
+  const offline = useStore((s) => s.connection === "offline");
 
   const list = useMemo(() => Object.values(agents), [agents]);
   const [query, setQuery] = useState("");
@@ -158,14 +170,27 @@ export function Fleet() {
       />
       <main className="mx-auto w-full max-w-[860px] flex-1 px-safe pt-4 pb-[calc(96px+var(--safe-bottom))]">{body}</main>
       {owner && stateStatus === "ready" && (
-        <button
-          type="button"
-          onClick={() => navigate({ name: "new" })}
-          className="press animate-enter fixed right-[max(16px,var(--safe-right))] bottom-[max(18px,calc(var(--safe-bottom)+10px))] z-30 inline-flex h-14 items-center gap-2 rounded-full bg-accent pr-5 pl-4 text-[15.5px] font-semibold text-accent-fg shadow-[0_14px_34px_-10px_color-mix(in_srgb,var(--accent)_75%,transparent),inset_0_1px_0_rgba(255,255,255,0.35)]"
-        >
-          <Icon name="plus" size={22} strokeWidth={2.4} />
-          New agent
-        </button>
+        <div className="pointer-events-none fixed right-[max(16px,var(--safe-right))] bottom-[max(18px,calc(var(--safe-bottom)+10px))] z-30 flex flex-col items-end gap-2">
+          {offline && (
+            <p role="status" className="animate-fade rounded-full border border-line-strong bg-card px-3 py-1 text-[12.5px] text-muted edge">
+              Offline. Reconnect to start an agent.
+            </p>
+          )}
+          <button
+            type="button"
+            disabled={offline}
+            onClick={() => navigate({ name: "new" })}
+            className={cn(
+              "press pointer-events-auto inline-flex h-14 items-center gap-2 rounded-full pr-5 pl-4 text-[15.5px] font-semibold",
+              offline
+                ? "border border-line-strong bg-raised text-steel"
+                : "animate-enter bg-accent text-accent-fg shadow-[0_14px_34px_-10px_color-mix(in_srgb,var(--accent)_75%,transparent),inset_0_1px_0_rgba(255,255,255,0.35)]",
+            )}
+          >
+            <Icon name="plus" size={22} strokeWidth={2.4} />
+            New agent
+          </button>
+        </div>
       )}
       <SettingsSheet open={settings} onClose={() => setSettings(false)} />
     </div>
@@ -186,7 +211,7 @@ function InboxCallout({ count, questions }: { count: number; questions: number }
         <span className="block text-[15px] font-semibold text-fg">
           {waitingLabel(count, questions)}
         </span>
-        <span className="block truncate text-[13px] text-muted">Agents are paused until you respond</span>
+        <span className="block truncate text-[13px] text-muted">Agents are waiting on you</span>
       </span>
       <span className="inline-flex h-11 shrink-0 items-center gap-0.5 pr-1 pl-2 text-[14px] font-semibold text-warn">
         <span className="max-[359px]:sr-only">Review</span>
@@ -200,19 +225,23 @@ const AgentRow = memo(function AgentRow({ agent, now }: { agent: Agent; now: num
   const account = useStore((s) => accountOf(s.accounts, agent));
   const customAgents = useStore((s) => s.customAgents);
   const pending = useAgentPending(agent);
+  // Only the kind of what's waiting (a string, so streamed updates don't re-render the row).
+  const pendingKind = useStore((s) => pendingKindOf(permissionIndex(s.permissions).get(agent.id)));
   const id = agentIdentity(agent, customAgents);
   const preview = agent.lastMessage ? plainPreview(agent.lastMessage) : null;
-  const needs = agent.status === "needs_permission" || pending > 0;
+  const limited = isUsageLimited(agent);
+  const needs = agent.status === "needs_permission" || pending > 0 || limited;
+  const pendingIcon = pendingKind === "question" ? "sparkle" : "shield";
 
   return (
     <button
       type="button"
       onClick={() => navigate({ name: "agent", agentId: agent.id })}
-      aria-label={`${agent.title}, ${statusMeta(agent.status).label}${pending ? `, ${pending} waiting for approval` : ""}`}
+      aria-label={`${agent.title}, ${limited ? USAGE_LIMIT_LABEL : statusMeta(agent.status).label}${pending ? `, ${pending} waiting for approval` : ""}`}
       className={cn("press-row relative flex w-full items-start gap-3 px-3.5 py-3 text-left", needs && "bg-warn/[0.035]")}
     >
       {needs && <span className="absolute inset-y-3 left-0 w-[3px] rounded-r-full bg-warn" aria-hidden />}
-      <ProviderBadge agent={agent} size={42} status={agent.status} className="mt-0.5" />
+      <ProviderBadge agent={agent} size={42} status={limited ? "needs_permission" : agent.status} className="mt-0.5" />
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
           <span className={cn("min-w-0 flex-1 truncate text-[15.5px] leading-snug", agent.unread ? "font-semibold text-fg" : "font-medium text-fg/95")}>
@@ -224,7 +253,11 @@ const AgentRow = memo(function AgentRow({ agent, now }: { agent: Agent; now: num
           </span>
         </span>
         <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[13px] leading-snug">
-          <StatusText status={agent.status} className="shrink-0" />
+          {limited ? (
+            <span className="shrink-0 font-medium text-warn">{USAGE_LIMIT_LABEL}</span>
+          ) : (
+            <StatusText status={agent.status} className="shrink-0" />
+          )}
           <span className="text-line-strong" aria-hidden>
             ·
           </span>
@@ -252,7 +285,7 @@ const AgentRow = memo(function AgentRow({ agent, now }: { agent: Agent; now: num
             </span>
             {pending > 0 && (
               <span className="mt-px inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full bg-warn px-2 text-[12px] font-bold text-warn-fg tabular">
-                <Icon name="shield" size={12} strokeWidth={2.4} />
+                <Icon name={pendingIcon} size={12} strokeWidth={2.4} />
                 {pending}
               </span>
             )}

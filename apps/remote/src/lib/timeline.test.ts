@@ -91,6 +91,25 @@ describe("mergeSnapshot", () => {
   });
 });
 
+describe("agent messages with pictures", () => {
+  const withPic = (id: string, text: string, n: number): TimelineItem =>
+    ({ ...msg(id, 1, text), images: Array.from({ length: n }, (_, i) => ({ name: `${i}.png`, mimeType: "image/png", data: "AAAA" })) }) as TimelineItem;
+
+  it("never trades pictures away for an older copy with the same text", () => {
+    expect(isAtLeastAsComplete(withPic("m", "", 1), withPic("m", "", 0))).toBe(true);
+    expect(isAtLeastAsComplete(withPic("m", "", 0), withPic("m", "", 1))).toBe(false);
+    expect(isAtLeastAsComplete(withPic("m", "ab", 1), withPic("m", "a", 1))).toBe(true);
+    expect(isAtLeastAsComplete(withPic("m", "a", 1), withPic("m", "ab", 0))).toBe(false);
+  });
+
+  it("keeps the pictures when text deltas arrive", () => {
+    const items = [withPic("m", "he", 2)];
+    const r = applyDelta(items, { itemId: "m", field: "text", delta: "llo", offset: 2 });
+    expect(r.outcome).toBe("applied");
+    expect(r.items[0]).toMatchObject({ text: "hello", images: [{ name: "0.png" }, { name: "1.png" }] });
+  });
+});
+
 describe("isAtLeastAsComplete", () => {
   const perm = (resolution: string | null): TimelineItem => ({
     id: "p",

@@ -116,6 +116,14 @@ export interface StreamHandlers {
   onActivity: () => void;
 }
 
+/** What to do about secret-looking files in a commit (see `api.secretFiles`). */
+export interface CommitOptions {
+  /** Repository-relative paths to leave out of the commit. */
+  exclude?: string[];
+  /** Commit them anyway: the person confirmed. */
+  allowSecrets?: boolean;
+}
+
 export interface RequestOptions {
   /** Sent as Idempotency-Key: a retry with the same key gets the first result. */
   idempotencyKey?: string;
@@ -196,11 +204,21 @@ export interface CommitSummary {
   message?: string;
 }
 
-/** POST /ship ("Commit & merge"). */
+/** Where the base branch stands against its upstream after a merge (the merge itself is local). */
+export interface BaseBranchStatus {
+  branch: string;
+  /** e.g. "origin/main"; null when the base branch has no upstream. */
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+}
+
+/** POST /ship ("Commit & merge"). `error` set = the commit landed but the merge didn't. */
 export interface ShipResult {
   committed?: string | null;
   merged?: string | null;
   error?: string | null;
+  baseStatus?: BaseBranchStatus | null;
 }
 
 export const api = {
@@ -310,12 +328,17 @@ export const api = {
   // Git work (a big diff, commit hooks, a merge) can take well over 15 s.
   diff: (b: Backend, agentId: string) =>
     b.request("GET", agentPath(agentId, "/diff"), undefined, { timeoutMs: GIT_TIMEOUT_MS }) as Promise<AgentDiffSummary>,
-  commit: (b: Backend, agentId: string, message: string) =>
-    b.request("POST", agentPath(agentId, "/commit"), { message }, { timeoutMs: GIT_TIMEOUT_MS }) as Promise<
+  /** New files a commit would add whose names look like secrets (`.env`, keys), to ask about first. */
+  secretFiles: (b: Backend, agentId: string) =>
+    // A git scan of the checkout: as slow as the diff on a big repo, so the same patience.
+    b.request("GET", agentPath(agentId, "/secret-files"), undefined, { timeoutMs: GIT_TIMEOUT_MS }) as Promise<string[]>,
+  /** `exclude` leaves files out; without `allowSecrets` the server refuses secret-looking files that are in. */
+  commit: (b: Backend, agentId: string, message: string, opts: CommitOptions = {}) =>
+    b.request("POST", agentPath(agentId, "/commit"), { message, ...opts }, { timeoutMs: GIT_TIMEOUT_MS }) as Promise<
       { result?: CommitSummary | string } | undefined
     >,
-  ship: (b: Backend, agentId: string, message: string) =>
-    b.request("POST", agentPath(agentId, "/ship"), { message }, { timeoutMs: GIT_TIMEOUT_MS }) as Promise<
+  ship: (b: Backend, agentId: string, message: string, opts: CommitOptions = {}) =>
+    b.request("POST", agentPath(agentId, "/ship"), { message, ...opts }, { timeoutMs: GIT_TIMEOUT_MS }) as Promise<
       ShipResult | undefined
     >,
   image: (b: Backend, agentId: string, path: string) =>

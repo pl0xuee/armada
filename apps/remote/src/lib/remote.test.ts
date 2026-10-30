@@ -50,9 +50,23 @@ describe("links and local images", () => {
     expect(linkHostHint("https://www.example.com/x", "example.com docs")).toBeNull();
     expect(linkHostHint("mailto:a@b.c", "mail")).toBeNull();
   });
+  it("matches the host at label boundaries, so lookalike domains still get the hint", () => {
+    expect(linkHostHint("https://ithub.com/x", "github.com")).toBe("ithub.com");
+    expect(linkHostHint("https://github.com/x", "evil-github.com")).toBe("github.com");
+    expect(linkHostHint("https://github.com/x", "github.com.evil.org")).toBe("github.com");
+    expect(linkHostHint("https://github.com/x", "notgithub.com")).toBe("github.com");
+    expect(linkHostHint("https://a.example.com/x", "example.com")).toBe("a.example.com");
+    expect(linkHostHint("https://github.com/x", "github.com")).toBeNull();
+    expect(linkHostHint("https://github.com/x", "GitHub.com.")).toBeNull();
+    expect(linkHostHint("https://github.com/x", "www.github.com")).toBeNull();
+    expect(linkHostHint("https://github.com/x", "see https://github.com/x/y, ok")).toBeNull();
+    expect(linkHostHint("https://localhost:3000/a", "localhost:3000")).toBeNull();
+    expect(linkHostHint("https://a.b/x", "a.b (docs)")).toBeNull();
+    expect(linkHostHint("https://a.b/x", "axb")).toBe("a.b");
+  });
   it("recognises local image paths in markdown image syntax", () => {
     const [n] = parseInline("![shot](/tmp/shot.png)");
-    expect(n).toMatchObject({ t: "link", href: null, raw: "/tmp/shot.png", image: true });
+    expect(n).toEqual({ t: "image", src: "/tmp/shot.png", alt: "shot" });
     expect(isLocalImagePath("/tmp/shot.png")).toBe(true);
     expect(isLocalImagePath("C:\\\\shots\\\\a.JPG")).toBe(true);
     expect(isLocalImagePath("relative/a.png")).toBe(false);

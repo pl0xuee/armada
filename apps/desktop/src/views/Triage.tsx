@@ -6,8 +6,9 @@ import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { RelTime } from "@/components/RelTime";
 import { TriageDetail } from "@/components/triage/TriageDetail";
 import {
-  REASON_LABEL,
   REASON_TONE,
+  reasonLabel,
+  useQuestionAgents,
   useTriageQueue,
   useTriageStore,
   type TriageEntry,
@@ -28,6 +29,7 @@ export function TriageView() {
   const selectedId = useTriageStore((s) => s.selectedId);
   const select = useTriageStore((s) => s.select);
   const lastIndex = useRef(0);
+  const questionAgents = useQuestionAgents();
 
   // Keep a selection: the chosen agent while it's queued, else whatever took its place.
   const found = queue.findIndex((e) => e.agent.id === selectedId);
@@ -58,9 +60,17 @@ export function TriageView() {
 
   const markDone = (e: TriageEntry) =>
     run(async () => {
-      // An approval is still blocking; "Done" would just hide it.
+      // An approval or question is still blocking; "Done" would just hide it.
       if (e.reason === "permission") {
-        toast("Answer the request first", { description: "Approve or deny it (A / D), or open the agent to decide there." });
+        if (questionAgents.has(e.agent.id)) {
+          toast("Answer the question first", {
+            description: "Answer or skip it here, or open the agent to do it there.",
+          });
+        } else {
+          toast("Answer the request first", {
+            description: "Approve or deny it (A / D), or open the agent to decide there.",
+          });
+        }
         return;
       }
       await attempt("Couldn't mark it done", () => api.acknowledgeAgent(e.agent.id));
@@ -106,7 +116,9 @@ export function TriageView() {
       if (!current) return;
       const action = approvalActionFor(e);
       if (action) {
-        if (shouldIgnoreApprovalKey(e) || current.reason !== "permission") return;
+        // Questions are answered in their card (or in the agent): A / D do nothing there.
+        if (shouldIgnoreApprovalKey(e) || current.reason !== "permission" || questionAgents.has(current.agent.id))
+          return;
         e.preventDefault();
         if (action === "deny_reason") useUi.getState().openAgent(current.agent.id);
         else if (action === "allow_always") {
@@ -177,8 +189,17 @@ export function TriageView() {
               <Kbd>J</Kbd>
               <Kbd>K</Kbd> move <span className="mx-1 text-line-strong">·</span>
               <Kbd>E</Kbd> done <span className="mx-1 text-line-strong">·</span>
-              <Kbd>A</Kbd>
-              <Kbd>D</Kbd> answer <span className="mx-1 text-line-strong">·</span>
+              {current && questionAgents.has(current.agent.id) ? (
+                <>
+                  <Kbd>↵</Kbd> open to answer
+                </>
+              ) : (
+                <>
+                  <Kbd>A</Kbd>
+                  <Kbd>D</Kbd> answer
+                </>
+              )}{" "}
+              <span className="mx-1 text-line-strong">·</span>
               <Kbd>{modKey}</Kbd>
               <Kbd>J</Kbd> next
             </span>
@@ -202,6 +223,7 @@ export function TriageView() {
                   key={e.agent.id}
                   agent={e.agent}
                   reason={e.reason}
+                  asking={questionAgents.has(e.agent.id)}
                   active={e.agent.id === current.agent.id}
                   onSelect={select}
                 />
@@ -239,11 +261,13 @@ export function TriageView() {
 const QueueRow = memo(function QueueRow({
   agent,
   reason,
+  asking,
   active,
   onSelect,
 }: {
   agent: Agent;
   reason: NeedsReason;
+  asking: boolean;
   active: boolean;
   onSelect: (id: string) => void;
 }) {
@@ -270,7 +294,7 @@ const QueueRow = memo(function QueueRow({
           <span className="block truncate text-[12.5px] font-medium text-fg">{agent.title}</span>
           <span className="mt-1 flex items-center gap-1.5">
             <span className={cn("rounded-full border px-1.5 text-[10.5px] font-medium", REASON_TONE[reason])}>
-              {REASON_LABEL[reason]}
+              {reasonLabel(reason, asking)}
             </span>
             <span className="text-[11px] text-steel">
               <RelTime ts={agent.lastActivityAt} side="right" />

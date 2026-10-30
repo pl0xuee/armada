@@ -8,6 +8,8 @@ use crate::model::Attachment;
 pub const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 pub const MAX_IMAGE_BASE64: usize = (MAX_IMAGE_BYTES as usize).div_ceil(3) * 4;
 pub const MAX_IMAGES_PER_ITEM: usize = 8;
+/// Pictures an agent can add to its replies in one turn (each is its own item).
+pub const MAX_MESSAGE_PICTURES_PER_TURN: usize = 24;
 
 /// MIME type for raster image files we display (SVG is excluded on purpose).
 pub fn image_mime(path: &Path) -> Option<&'static str> {
@@ -145,6 +147,14 @@ pub fn project_files(root: &Path) -> anyhow::Result<Vec<String>> {
 /// The local path a `file://` URI names (`file:///x`, `file://localhost/x`,
 /// `file:///C:/x`, `file://server/share/x` on Windows), percent-decoded. None if `s`
 /// isn't a file URI.
+/// A path that names another machine (`\\server\share\x.png`, `//server/x.png`, or a
+/// verbatim `\\?\` form). Opening one makes Windows contact that machine, so agent-given
+/// image paths of this shape are refused before touching the filesystem.
+pub fn is_network_path(path: &str) -> bool {
+    let p = path.trim_start();
+    p.starts_with("\\\\") || p.starts_with("//")
+}
+
 pub fn file_uri_to_path(s: &str) -> Option<std::path::PathBuf> {
     let rest = s
         .get(..7)
@@ -419,6 +429,27 @@ fn score(path: &str, q: &str) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn network_paths_are_recognized() {
+        for p in [
+            r"\\server\share\a.png",
+            "//server/share/a.png",
+            r"\\?\UNC\server\a.png",
+            "  //x/y.png",
+        ] {
+            assert!(super::is_network_path(p), "{p}");
+        }
+        for p in [
+            "/home/me/a.png",
+            "shots/a.png",
+            r"C:\shots\a.png",
+            "a//b.png",
+            "./a.png",
+        ] {
+            assert!(!super::is_network_path(p), "{p}");
+        }
+    }
+
     use super::*;
 
     #[test]

@@ -2,7 +2,7 @@
  * Owner controls for one agent: session settings (mode / model / effort, as
  * advertised by each provider), switching accounts, and lifecycle actions.
  */
-import { memo, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { AccountDot } from "@/components/Identity";
 import { Icon, Spinner } from "@/components/Icon";
 import { Sheet } from "@/components/Sheet";
@@ -14,8 +14,8 @@ import { choiceName, visibleOptions } from "@/lib/config";
 import { cancelTurn, resumeAgent, setArchived, setConfigOption, stopAgent, switchAccount } from "@/lib/controller";
 import { isBusy, isResumable, safeColor } from "@/lib/meta";
 import { accountProblem } from "@/lib/newAgent";
-import { runningSubagents } from "@/lib/rows";
 import { useStore } from "@/lib/store";
+import { useRunningSubagentCount } from "@/lib/subagents";
 import type { Agent, ConfigOption, RemoteAccount } from "@/lib/types";
 
 /** Same-provider accounts the agent could switch to. */
@@ -23,19 +23,50 @@ export function switchableAccounts(agent: Agent, accounts: Record<string, Remote
   return Object.values(accounts).filter((a) => a.provider === agent.provider);
 }
 
+/** Which sides of a horizontal scroller have more to scroll to (for an edge fade). */
+function useScrollEdges(active: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !active) return;
+    const update = () => {
+      const left = el.scrollLeft > 4;
+      const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 4;
+      setEdges((cur) => (cur.left === left && cur.right === right ? cur : { left, right }));
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    ro?.observe(el);
+    if (el.firstElementChild) ro?.observe(el.firstElementChild);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro?.disconnect();
+    };
+  }, [active]);
+  return { ref, edges };
+}
+
 /** Header strip: one chip per session option, plus a running sub-agents badge. */
 export const SettingsChips = memo(function SettingsChips({ agent, onPick }: { agent: Agent; onPick: (optionId: string) => void }) {
   const options = visibleOptions(agent.configOptions);
   const busy = useStore((s) => s.busy);
   // A number, so streamed text (which changes the items every frame) doesn't re-render the chips.
-  const subagents = useStore((s) => {
-    const items = s.timelines[agent.id]?.items;
-    return items ? runningSubagents(items) : 0;
-  });
-  if (!options.length && !subagents) return null;
+  const subagents = useRunningSubagentCount(agent.id);
+  const shown = options.length > 0 || subagents > 0;
+  const { ref, edges } = useScrollEdges(shown);
+  if (!shown) return null;
   return (
     // Landscape phones: vertical space is precious; the settings stay in the details sheet.
-    <div className="scroll-x border-t border-line/60 [@media(orientation:landscape)_and_(max-height:500px)]:hidden">
+    // The edge fades say there are more chips to scroll to.
+    <div
+      ref={ref}
+      className={cn(
+        "scroll-x border-t border-line/60 [@media(orientation:landscape)_and_(max-height:500px)]:hidden",
+        edges.left && edges.right ? "fade-x" : edges.right ? "fade-x-end" : edges.left ? "fade-x-start" : "",
+      )}
+    >
       <div className="mx-auto flex w-max min-w-full max-w-none items-center gap-1.5 px-safe py-1.5 md:w-full md:max-w-[860px]">
         {subagents > 0 && (
           <span className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-accent/35 bg-accent/10 px-2.5 text-[12.5px] font-medium text-accent">

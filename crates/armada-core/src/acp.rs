@@ -535,7 +535,11 @@ impl AcpDriver {
         } else {
             "skipped"
         };
-        self.ctx.question_resolved(request_id, resolution, answers);
+        // The agent got the real answers; the conversation keeps them without secrets.
+        let kept = answers
+            .as_ref()
+            .map(|a| crate::questions::redact(&fields, a));
+        self.ctx.question_resolved(request_id, resolution, kept);
         Ok(())
     }
 
@@ -623,7 +627,10 @@ impl AcpDriver {
         match u["sessionUpdate"].as_str().unwrap_or("") {
             "agent_message_chunk" | "agent_thought_chunk" if from_subagent => {}
             "agent_message_chunk" => {
-                if let Some(t) = content_text(&u["content"]) {
+                let c = &u["content"];
+                if c["type"] == "image" {
+                    message_image(ctx, c);
+                } else if let Some(t) = content_text(c) {
                     ctx.append_text(StreamKind::Message, None, &t);
                 }
             }
@@ -723,6 +730,32 @@ impl AcpDriver {
         true
     }
 
+    /// The agent withdrew its request `rpc_id` (JSON-RPC `$/cancel_request`).
+    fn on_request_cancelled(&self, rpc_id: &Value) {
+        let perm = {
+            let mut perms = self.perms.lock();
+            let key = perms
+                .iter()
+                .find(|(_, id)| *id == rpc_id)
+                .map(|(k, _)| k.clone());
+            key.and_then(|k| perms.remove(&k).map(|_| k))
+        };
+        if let Some(req) = perm {
+            self.ctx.permission_resolved(&req, "cancelled");
+        }
+        let question = {
+            let mut questions = self.questions.lock();
+            let key = questions
+                .iter()
+                .find(|(_, (id, _))| id == rpc_id)
+                .map(|(k, _)| k.clone());
+            key.and_then(|k| questions.remove(&k).map(|_| k))
+        };
+        if let Some(req) = question {
+            self.ctx.question_resolved(&req, "cancelled", None);
+        }
+    }
+
     fn on_permission_request(&self, rpc_id: Value, params: &Value) -> bool {
         let tc = &params["toolCall"];
         let request_id = uuid::Uuid::new_v4().to_string();
@@ -791,6 +824,12 @@ async fn event_loop(
                 if method == "session/update" && !skip {
                     if let Some(d) = driver.upgrade() {
                         d.handle_update(&params["update"]);
+                    }
+                } else if method == "$/cancel_request" {
+                    // The agent gave up on a request it made (an approval or a question):
+                    // nobody is listening for the answer anymore.
+                    if let Some(d) = driver.upgrade() {
+                        d.on_request_cancelled(&params["id"]);
                     }
                 }
             }
@@ -1073,6 +1112,36 @@ fn apply_tool_fields(b: &mut ItemBody, u: &Value) {
                 }
             }
             _ => {}
+        }
+    }
+}
+
+/// A picture in the agent's reply: shown as an image. One that is only a link is
+/// kept as a markdown link instead (Armada never fetches remote images itself).
+fn message_image(ctx: &AgentCtx, c: &Value) {
+    let mime = c["mimeType"].as_str().unwrap_or("");
+    match c["data"].as_str().filter(|d| !d.is_empty()) {
+        Some(data)
+            if mime.starts_with("image/") && data.len() <= crate::files::MAX_IMAGE_BASE64 =>
+        {
+            ctx.add_message_image(Attachment {
+                name: "image".into(),
+                mime_type: mime.to_string(),
+                data: data.to_string(),
+            });
+        }
+        Some(_) => ctx.notice(
+            NoticeLevel::Warn,
+            "The agent sent a picture that is too large or not an image, so Armada didn't show it.",
+        ),
+        None => {
+            if let Some(uri) = c["uri"].as_str().filter(|u| !u.is_empty()) {
+                ctx.append_text(
+                    StreamKind::Message,
+                    None,
+                    &format!("\n\n![image]({uri})\n\n"),
+                );
+            }
         }
     }
 }

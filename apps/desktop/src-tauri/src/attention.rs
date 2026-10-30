@@ -352,7 +352,7 @@ impl Attention {
                 AttentionReason::Permission,
                 &format!("Still waiting: {}", agent.title),
                 &format!(
-                    "An approval has been pending for over {mins} minute{}.",
+                    "Something has been waiting on you for over {mins} minute{}.",
                     if mins == 1 { "" } else { "s" }
                 ),
                 request_id.as_deref(),
@@ -459,7 +459,7 @@ fn push_text(detail: &str, reason: AttentionReason, title: &str, body: &str) -> 
         );
     }
     let generic = match reason {
-        AttentionReason::Permission => "Needs your approval",
+        AttentionReason::Permission => "Needs you",
         AttentionReason::Done => "Finished",
         AttentionReason::Error => "Stopped with an error",
     };
@@ -701,10 +701,7 @@ mod tests {
     fn minimal_push_is_generic_and_full_is_scrubbed() {
         let body = "run: curl -H 'Authorization: Bearer abcdefghijklmnop1234' x";
         let (t, b) = push_text("minimal", AttentionReason::Permission, "Fix login", body);
-        assert_eq!(
-            (t.as_str(), b.as_str()),
-            ("Fix login", "Needs your approval")
-        );
+        assert_eq!((t.as_str(), b.as_str()), ("Fix login", "Needs you"));
         let (_, b) = push_text("minimal", AttentionReason::Error, "x", body);
         assert_eq!(b, "Stopped with an error");
         let (_, b) = push_text("full", AttentionReason::Done, "x", body);

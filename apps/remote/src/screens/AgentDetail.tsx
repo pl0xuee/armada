@@ -14,7 +14,7 @@ import { useNow } from "@/lib/hooks";
 import { agentIdentity, isBusy, isResumable, safeColor, statusMeta } from "@/lib/meta";
 import { useDelayed } from "@/lib/hooks";
 import { goBack, navigate } from "@/lib/router";
-import { isUserLayoutChange } from "@/lib/scroll";
+import { isProgrammaticScroll, isUserLayoutChange } from "@/lib/scroll";
 import { accountOf, useOtherPendingCount } from "@/lib/selectors";
 import { useStore, type PendingPrompt, type Timeline as TimelineState } from "@/lib/store";
 import type { Agent, TimelineItem } from "@/lib/types";
@@ -149,6 +149,8 @@ function TimelineSkeleton() {
 }
 
 const PIN_THRESHOLD = 96;
+/** A scroll within this long of the reader's last touch / wheel / key counts as theirs (iOS momentum). */
+const USER_SCROLL_MS = 1200;
 
 function distanceFromBottom() {
   const el = document.scrollingElement ?? document.documentElement;
@@ -186,7 +188,31 @@ function AgentView({
     // Pinned state must be current immediately (so auto-follow never fights the
     // reader's finger); the button state only changes when crossing the threshold.
     let away = false;
+    let lastHeight = document.documentElement.scrollHeight;
+    let touching = false;
+    let lastInput = -Infinity;
+    const input = () => (lastInput = performance.now());
+    // The reader is (or just was) driving the scroll: touching, or within a moment of the last wheel / key / touch.
+    const userActive = () => touching || performance.now() - lastInput < USER_SCROLL_MS;
+    const touchStart = () => ((touching = true), input());
+    const touchEnd = () => ((touching = false), input());
+    let snap = 0;
     const onScroll = () => {
+      const height = document.documentElement.scrollHeight;
+      const layoutShift = height !== lastHeight;
+      lastHeight = height;
+      // Scrolls the page makes on its own aren't the reader leaving the bottom: the list's corrections (they keep
+      // the reader's place), and the browser clamping the position when rows above shrink (an image still loading)
+      // right before they grow again. A reader who was following the bottom is put back there.
+      if (isProgrammaticScroll() || (layoutShift && !userActive())) {
+        if (pinned.current && !snap) {
+          snap = requestAnimationFrame(() => {
+            snap = 0;
+            if (pinned.current && !userActive() && distanceFromBottom() > 2) scrollToBottom();
+          });
+        }
+        return;
+      }
       const d = distanceFromBottom();
       pinned.current = d < PIN_THRESHOLD;
       const nowAway = d > 320;
@@ -196,7 +222,24 @@ function AgentView({
       }
     };
     window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    window.addEventListener("touchstart", touchStart, { passive: true });
+    window.addEventListener("touchmove", input, { passive: true });
+    window.addEventListener("touchend", touchEnd, { passive: true });
+    window.addEventListener("touchcancel", touchEnd, { passive: true });
+    window.addEventListener("wheel", input, { passive: true });
+    window.addEventListener("keydown", input);
+    window.addEventListener("mousedown", input);
+    return () => {
+      cancelAnimationFrame(snap);
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("touchstart", touchStart);
+      window.removeEventListener("touchmove", input);
+      window.removeEventListener("touchend", touchEnd);
+      window.removeEventListener("touchcancel", touchEnd);
+      window.removeEventListener("wheel", input);
+      window.removeEventListener("keydown", input);
+      window.removeEventListener("mousedown", input);
+    };
   }, []);
 
   // First paint of a loaded timeline starts at the newest message.
@@ -352,14 +395,15 @@ function LiveAnnouncer({ agent, items }: { agent: Agent; items: TimelineItem[] |
       }
     }
     if (!last || last.kind !== "agent_message") return;
-    const streaming = isBusy(agent.status) && items[items.length - 1] === last;
+    const pictures = !last.text.trim() ? (last.images?.length ?? 0) : 0;
+    const streaming = isBusy(agent.status) && items[items.length - 1] === last && !pictures;
     if (announced.current === null) {
       announced.current = last.id; // don't read out history on open
       return;
     }
-    if (streaming || announced.current === last.id || !last.text.trim()) return;
+    if (streaming || announced.current === last.id || (!last.text.trim() && !pictures)) return;
     announced.current = last.id;
-    setText(`${agent.title}: ${plainPreview(last.text).slice(0, 280)}`);
+    setText(`${agent.title}: ${pictures ? (pictures === 1 ? "sent a picture" : `sent ${pictures} pictures`) : plainPreview(last.text).slice(0, 280)}`);
   }, [items, agent.status, agent.title]);
   return (
     <div className="sr-only" role="status" aria-live="polite">

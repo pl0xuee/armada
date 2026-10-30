@@ -26,6 +26,7 @@ mod mcp;
 mod secrets;
 mod session;
 
+pub use files::is_network_path;
 pub use git::{hardened_command, hardening, Hardening, PUSH_REDIRECT_ERROR};
 pub use jsonrpc::kill_all_children;
 

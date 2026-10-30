@@ -11,9 +11,20 @@ docs/RELEASING.md).
 
 - **Agents can ask you questions.** When Claude asks you to choose (its multiple-choice questions, like in Claude Code), Codex asks for input, or an MCP server needs details, the question now appears as a card in the conversation: pick options (one or several), type your own answer under "Other", fill in text, yes/no or number fields, then Submit or Skip. On the desktop, number keys pick, arrows move and Enter submits. The agent waits for you like it does for an approval: it shows **Needs you**, lands in the Inbox, Triage and Mission Control, and notifies you. It works from the phone too. Before, Claude's question tool was switched off in Armada and Codex's questions were answered with nothing.
 
+- **Pictures the agent sends now show.** When a model puts an image in its reply, Armada used to drop it silently. It now appears in the conversation, in order, and you can click it to enlarge (desktop and phone).
+
 ### Changed
 
 - An agent waiting on you now shows **Needs you** (it may be an approval or a question).
+- **Phone: closer to the desktop.**
+  - Agent text renders like the desktop: nested and loose lists, task lists, tables, headings, hard line breaks, escapes, local images, diffs coloured, and basic syntax highlighting in code blocks.
+  - Finished work folds into one line ("Read 5 files, edited 2, ran 4 commands") with the answer kept visible; tap to expand.
+  - Sub-agent cards show their final report and keep showing background sub-agents as running.
+  - Command output is cleaned of terminal codes, and calls that never finished show as paused instead of spinning.
+  - The working indicator shows elapsed time and "Waiting on N sub-agents".
+  - Tap a file in the Done card to open its diff.
+  - Deny an approval with a reason, insert prompt templates in the composer, and see what happened after Commit & merge, with "Ask agent to resolve" on a conflict.
+  - Rate-limited agents show a usage-limit indicator.
 
 ## v0.1.8 — 2026-10-29
 
@@ -24,6 +35,12 @@ docs/RELEASING.md).
 
 ### Fixed
 
+- **Secrets stay out of commits and conversations.** The "looks like a secret" check for commits now works for agents running directly in your own folder (before, it silently never matched), including leaving files out. A secret you type into an agent's question (an API key or password) is no longer saved in the conversation.
+- **Questions behave.** A question no longer stays "needs you" after the agent stops, exits, or withdraws it, and the phone no longer keeps showing one that is already answered. Arrow keys only move the cursor on a question (they used to answer it), Enter on a multi-question card moves to the next question instead of sending it half-answered, and keyboard shortcuts only act on the focused agent when two are shown side by side.
+- **Pictures are capped** at 24 per turn (repeats skipped), and image paths that point at another computer (`\\server\share`) are refused.
+- **Phone polish from a full review.** Opening an agent no longer lands mid-conversation, the live work group no longer opens and closes by itself, the queue is one tidy "2 queued" row with labelled actions, prompt templates can't insert unfilled `{{placeholders}}`, approvals always read Deny / Approve, a rate-limited agent shows "Usage limit" instead of an error, the sub-agent pulse no longer looks broken, and a few text-clipping and contrast problems are fixed. Markdown links can no longer slow the page on adversarial text.
+- **Phone: committing can't sneak in secret files.** If a commit would add files that look like secrets (`.env`, keys), the phone asks first, like the desktop: leave them out, or include them anyway. The server enforces it too.
+- **Sign-in and account status.** Claude sign-in, account status and the version check now use the Claude Code that ships inside Armada instead of whatever `claude` is on your PATH, and error messages say what actually went wrong ("didn't answer in 20 seconds") instead of always "not installed". If a sign-in window shows nothing for 6 seconds, it now prints the command it is running.
 - **Phone: attaching photos works again.** The phone app's security policy blocked the step that reads a picked photo, so every attachment failed with "Couldn't read…".
 - **Phone: Stop & send.** The phone's queue gets the same ⚡ Stop & send (with a confirmation) and "Run next" for commands as the desktop.
 - **Phone: Commit and Commit & merge** no longer report a failure when commit hooks take more than 15 seconds.

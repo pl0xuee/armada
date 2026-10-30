@@ -3,6 +3,10 @@ import {
   EMPTY_DRAFT,
   buildAnswers,
   canSubmit,
+  firstOpenGroup,
+  invalidNumbers,
+  nextOpenGroup,
+  parseNumber,
   missingRequired,
   questionGroups,
   setBool,
@@ -95,6 +99,61 @@ describe("validation", () => {
   it("needs at least one answer even when nothing is required", () => {
     expect(canSubmit([{ id: "t", kind: "text" }], EMPTY_DRAFT)).toBe(false);
     expect(canSubmit([{ id: "t", kind: "text" }], setText(EMPTY_DRAFT, "t", "x"))).toBe(true);
+  });
+});
+
+describe("parseNumber", () => {
+  it("reads plain numbers", () => {
+    expect(parseNumber(" 4.5 ")).toBe(4.5);
+    expect(parseNumber("-3")).toBe(-3);
+    expect(parseNumber("1e3")).toBe(1000);
+    expect(parseNumber("")).toBeNull();
+    expect(parseNumber("abc")).toBeNull();
+    expect(parseNumber("0x10")).toBeNull();
+    expect(parseNumber("Infinity")).toBeNull();
+  });
+  it("treats a lone comma as a decimal point", () => {
+    expect(parseNumber("1,5")).toBe(1.5);
+    expect(parseNumber("0,25")).toBe(0.25);
+    expect(parseNumber("12,34")).toBe(12.34);
+  });
+  it("treats well-formed digit groups as thousands", () => {
+    expect(parseNumber("1,000")).toBe(1000);
+    expect(parseNumber("1,000,000")).toBe(1000000);
+    expect(parseNumber("1,234.5")).toBe(1234.5);
+  });
+  it("rejects ambiguous or malformed comma use", () => {
+    expect(parseNumber("1,2,3")).toBeNull();
+    expect(parseNumber("1,23.4")).toBeNull();
+    expect(parseNumber("1.000,5")).toBeNull();
+    expect(parseNumber(",5,")).toBeNull();
+  });
+});
+
+describe("invalid numbers", () => {
+  const f: QuestionField[] = [
+    { id: "n", kind: "number" },
+    { id: "t", kind: "text" },
+  ];
+  it("flags non-empty text that isn't a number and blocks submit", () => {
+    const d = setText(setText(EMPTY_DRAFT, "t", "x"), "n", "abc");
+    expect(invalidNumbers(f, d)).toEqual(["n"]);
+    expect(canSubmit(f, d)).toBe(false);
+    expect(canSubmit(f, setText(d, "n", "12"))).toBe(true);
+  });
+  it("empty number text is fine", () => {
+    expect(invalidNumbers(f, setText(EMPTY_DRAFT, "n", "  "))).toEqual([]);
+  });
+});
+
+describe("nextOpenGroup", () => {
+  it("finds the next unanswered question from an index", () => {
+    const gs = questionGroups(fields);
+    expect(nextOpenGroup(gs, EMPTY_DRAFT)).toBe(0);
+    const d = togglePick(EMPTY_DRAFT, gs[0], "pg");
+    expect(nextOpenGroup(gs, d)).toBe(1);
+    expect(nextOpenGroup(gs, d, 2)).toBe(-1);
+    expect(firstOpenGroup(gs, togglePick(d, gs[1], "pg"))).toBe(0);
   });
 });
 

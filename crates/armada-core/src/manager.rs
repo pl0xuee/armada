@@ -886,7 +886,7 @@ impl Core {
                 {
                     accounts::set_api_key(&id, key)?;
                 }
-                account.status = Some(accounts::check_status(&account).await);
+                account.status = Some(accounts::check_status(&account, &self.inner.data_dir).await);
             }
             if auth_kind == AuthKind::ApiKey {
                 let key = req
@@ -901,7 +901,7 @@ impl Core {
                         .context("Codex couldn't store the API key")?;
                 }
                 accounts::set_api_key(&id, key)?;
-                account.status = Some(accounts::check_status(&account).await);
+                account.status = Some(accounts::check_status(&account, &self.inner.data_dir).await);
             }
             self.put_account(account)
         }
@@ -944,7 +944,7 @@ impl Core {
             }
             return Err(e);
         }
-        account.status = Some(accounts::check_status(&account).await);
+        account.status = Some(accounts::check_status(&account, &self.inner.data_dir).await);
         self.put_account(account)
     }
 
@@ -967,7 +967,7 @@ impl Core {
     /// Runs `accounts::check_status` and persists the result.
     pub async fn check_account(&self, account_id: &str) -> Result<Account> {
         let account = self.account(account_id)?;
-        let status = accounts::check_status(&account).await;
+        let status = accounts::check_status(&account, &self.inner.data_dir).await;
         self.set_account_status(account_id, status)
     }
 
@@ -2469,7 +2469,7 @@ impl Core {
                 ItemBody::UserMessage { text, .. } => {
                     lines.push(format!("USER: {}", clip(text, 1500)))
                 }
-                ItemBody::AgentMessage { text } if !text.trim().is_empty() => {
+                ItemBody::AgentMessage { text, .. } if !text.trim().is_empty() => {
                     lines.push(format!("AGENT: {}", clip(text, 1500)))
                 }
                 ItemBody::ToolCall { title, .. } => {
@@ -2969,7 +2969,20 @@ fn transcript_markdown(agent: &Agent, items: &[TimelineItem]) -> String {
     for item in items {
         match &item.body {
             ItemBody::UserMessage { text, .. } => md.push_str(&format!("### You\n\n{text}\n\n")),
-            ItemBody::AgentMessage { text } => md.push_str(&format!("### Agent\n\n{text}\n\n")),
+            ItemBody::AgentMessage { text, images } => {
+                let pics = if images.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "_({} image{})_\n\n",
+                        images.len(),
+                        if images.len() == 1 { "" } else { "s" }
+                    )
+                };
+                if !text.trim().is_empty() || !pics.is_empty() {
+                    md.push_str(&format!("### Agent\n\n{text}\n\n{pics}"));
+                }
+            }
             ItemBody::Thought { text } if !text.trim().is_empty() => md.push_str(&format!(
                 "<details><summary>Thinking</summary>\n\n{text}\n\n</details>\n\n"
             )),
@@ -3165,6 +3178,9 @@ impl Core {
         let input = path.trim();
         let requested =
             crate::files::file_uri_to_path(input).unwrap_or_else(|| PathBuf::from(input));
+        if crate::files::is_network_path(&requested.to_string_lossy()) {
+            bail!("Armada doesn't load images from other computers: {input}");
+        }
         let full = if requested.is_absolute() {
             requested
         } else {

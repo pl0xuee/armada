@@ -730,7 +730,7 @@ async fn stream_offsets_and_final_item() {
                         .await
                         .unwrap();
                 }
-                if let ItemBody::AgentMessage { text } = &item.body {
+                if let ItemBody::AgentMessage { text, .. } = &item.body {
                     message_id = Some(item.id.clone());
                     if !text.is_empty() {
                         final_text = Some(text.clone());
@@ -892,7 +892,7 @@ async fn subagent_calls_nest_under_their_task() {
     let texts: Vec<&str> = items
         .iter()
         .filter_map(|i| match &i.body {
-            ItemBody::AgentMessage { text } | ItemBody::Thought { text } => Some(text.as_str()),
+            ItemBody::AgentMessage { text, .. } | ItemBody::Thought { text } => Some(text.as_str()),
             _ => None,
         })
         .collect();
@@ -1007,7 +1007,7 @@ async fn codex_server_requests_and_ask_mode() {
     let reply = items
         .iter()
         .find_map(|i| match &i.body {
-            ItemBody::AgentMessage { text } => Some(text.clone()),
+            ItemBody::AgentMessage { text, .. } => Some(text.clone()),
             _ => None,
         })
         .unwrap();

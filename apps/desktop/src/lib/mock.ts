@@ -1948,13 +1948,13 @@ export const mockApi: ArmadaApi = {
     // Like the core: a login already running for this account is reused (its output isn't replayed).
     for (const existing of terminals.values()) {
       if (existing.kind === "login" && existing.accountId === accountId && !existing.done) {
-        return delay({ terminalId: existing.id, reused: true }, 40);
+        return delay({ terminalId: existing.id, reused: true, command: "claude auth login" }, 40);
       }
     }
     const t: MockTerminal = { id: newId("term"), kind: "login", accountId, buffer: "", stage: 0, done: false };
     terminals.set(t.id, t);
     void runLogin(t);
-    return delay({ terminalId: t.id, reused: false }, 80);
+    return delay({ terminalId: t.id, reused: false, command: "claude auth login" }, 80);
   },
 
   async detectProviders(): Promise<ProviderInfo[]> {

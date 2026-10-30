@@ -1538,9 +1538,14 @@ pub async fn commit_excluding(
         );
         let rel = repo_relative_paths(cwd, &top, touched);
         ensure_lfs_commit_safe(agent, cwd, Some(&rel), None).await?;
+        // `exclude` holds repository-relative names; `touched` is whatever the agent
+        // recorded (often absolute), so compare them in the same form.
         let touched: Vec<String> = touched
             .iter()
-            .filter(|t| !exclude.contains(t))
+            .filter(|t| {
+                let one = repo_relative_paths(cwd, &top, std::slice::from_ref(*t));
+                !one.iter().any(|r| exclude.contains(r)) && !exclude.contains(t)
+            })
             .cloned()
             .collect();
         commit_paths(cwd, message, &touched).await
@@ -1561,10 +1566,32 @@ pub async fn pending_secret_files(
     touched: &[String],
 ) -> anyhow::Result<Vec<String>> {
     let cwd = agent_cwd(agent)?;
-    let out = git(cwd, &["ls-files", "--others", "--exclude-standard", "-z"]).await?;
+    // `--full-name`: relative to the repository root like `repo_relative_paths`, whatever
+    // folder the agent works in (recorded paths are often absolute).
+    let out = git(
+        cwd,
+        &[
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "--full-name",
+            "-z",
+        ],
+    )
+    .await?;
+    let mine: Option<Vec<String>> = if agent.worktree {
+        None
+    } else {
+        let top = PathBuf::from(
+            git(cwd, &["rev-parse", "--show-toplevel"])
+                .await?
+                .trim_end_matches(['\r', '\n']),
+        );
+        Some(repo_relative_paths(cwd, &top, touched))
+    };
     Ok(nul_split(&out)
         .filter(|p| looks_like_secret(p))
-        .filter(|p| agent.worktree || touched.iter().any(|t| t == p))
+        .filter(|p| mine.as_ref().is_none_or(|m| m.iter().any(|t| t == p)))
         .map(str::to_string)
         .collect())
 }
@@ -3337,6 +3364,42 @@ mod tests {
         ] {
             assert!(!looks_like_secret(p), "{p}");
         }
+    }
+
+    /// An agent working in the user's own checkout (no worktree), from a subfolder, with
+    /// the absolute paths its tool calls record: secrets are found, and leaving them out
+    /// really leaves them out.
+    #[tokio::test]
+    async fn secrets_are_found_and_excluded_for_agents_in_the_users_checkout() {
+        let repo = Repo::new();
+        repo.write("app/readme.md", "r");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        repo.write("app/.env", "TOKEN=1");
+        repo.write("app/main.rs", "fn main() {}");
+        repo.write("other/id_rsa", "key"); // not the agent's: never part of its commit
+        let cwd = repo.dir.join("app");
+        let mut agent = worktree_agent(&repo, &cwd, "main", "main");
+        agent.worktree = false;
+        let touched = vec![
+            cwd.join(".env").display().to_string(),
+            cwd.join("main.rs").display().to_string(),
+        ];
+        let found = pending_secret_files(&agent, &touched).await.unwrap();
+        assert_eq!(found, vec!["app/.env".to_string()], "{found:?}");
+        let summary = commit_excluding(&agent, "msg", &touched, &found)
+            .await
+            .unwrap();
+        assert_eq!(
+            summary.files,
+            vec!["app/main.rs".to_string()],
+            "{summary:?}"
+        );
+        let status = repo.git(&["status", "--porcelain", "-uall"]);
+        assert!(
+            status.contains("app/.env") && status.contains("other/id_rsa"),
+            "{status}"
+        );
     }
 
     #[tokio::test]

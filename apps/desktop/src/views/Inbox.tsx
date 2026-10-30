@@ -69,6 +69,7 @@ export function InboxView() {
   }, [queue, selectedIndex]);
 
   const selected: InboxEntry | undefined = queue[selectedIndex];
+  const asking = selected?.item.kind === "question";
 
   // Scroll only the list container (scrollIntoView would also scroll overflow-hidden ancestors).
   const listRef = useRef<HTMLDivElement>(null);
@@ -122,7 +123,8 @@ export function InboxView() {
     setAlwaysArmed(false);
   }, [selected?.item.id]);
 
-  // Keyboard (see lib/approvalKeys): J/K move · A allow once · ⇧A always (twice) · D deny · ⇧D / ⏎ open.
+  // Keyboard (see lib/approvalKeys): J/K move · A allow once · ⇧A always (twice) · D deny · ⇧D / ⏎ open
+  // (a question: ⏎ opens the agent to answer).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ui = useUi.getState();
@@ -131,13 +133,10 @@ export function InboxView() {
       if (action) {
         // Holding a key must never answer a chain of requests (shouldIgnore covers e.repeat).
         if (shouldIgnoreApprovalKey(e) || !selected || inFlight.current || busy.has(selected.item.id)) return;
-        e.preventDefault();
         const it = selected.item;
-        // Questions are answered in the agent: A / D open it.
-        if (it.kind === "question") {
-          openAgent(selected.agent.id);
-          return;
-        }
+        // Questions are answered in the agent (↵ opens it); A / D mean nothing there.
+        if (it.kind === "question") return;
+        e.preventDefault();
         if (action === "deny_reason") {
           openAgent(selected.agent.id);
           return;
@@ -278,23 +277,35 @@ export function InboxView() {
       {queue.length > 0 && (
         <div className="texture flex h-10 shrink-0 items-center justify-center gap-4 border-t border-line bg-panel px-3 text-[11.5px] text-steel @3xl:gap-5">
           <Hint keys={["J", "K"]} label="Move" />
-          <Hint keys={["A"]} label="Allow" />
-          <span className="hidden @3xl:contents">
-            <Hint keys={["⇧", "A"]} label="Always (twice)" />
-          </span>
-          <Hint keys={["D"]} label="Deny" />
-          <span className="hidden @3xl:contents">
-            <Hint keys={["↵"]} label="Open agent" />
-          </span>
+          {asking ? (
+            <Hint keys={["↵"]} label="Answer" />
+          ) : (
+            <>
+              <Hint keys={["A"]} label="Allow" />
+              <span className="hidden @3xl:contents">
+                <Hint keys={["⇧", "A"]} label="Always (twice)" />
+              </span>
+              <Hint keys={["D"]} label="Deny" />
+              <span className="hidden @3xl:contents">
+                <Hint keys={["↵"]} label="Open agent" />
+              </span>
+            </>
+          )}
           <Tooltip
             content={
               <span className="flex flex-col gap-1 py-0.5">
                 <Hint keys={["J", "K"]} label="Move between requests" />
-                <Hint keys={["A"]} label="Allow once" />
-                <Hint keys={["⇧", "A"]} label="Always allow (press twice)" />
-                <Hint keys={["D"]} label="Deny" />
-                <Hint keys={["⇧", "D"]} label="Deny with a reason (opens the agent)" />
-                <Hint keys={["↵"]} label="Open the agent" />
+                {asking ? (
+                  <Hint keys={["↵"]} label="Open the agent to answer" />
+                ) : (
+                  <>
+                    <Hint keys={["A"]} label="Allow once" />
+                    <Hint keys={["⇧", "A"]} label="Always allow (press twice)" />
+                    <Hint keys={["D"]} label="Deny" />
+                    <Hint keys={["⇧", "D"]} label="Deny with a reason (opens the agent)" />
+                    <Hint keys={["↵"]} label="Open the agent" />
+                  </>
+                )}
               </span>
             }
           >

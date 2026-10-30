@@ -647,6 +647,11 @@ pub enum ItemBody {
     },
     AgentMessage {
         text: String,
+        /// Pictures the model put in its reply (an image block; Armada never fetches
+        /// remote images itself). Usually with empty `text`: the text that follows
+        /// starts a new message.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<Attachment>,
     },
     Thought {
         text: String,

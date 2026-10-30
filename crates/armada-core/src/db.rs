@@ -243,7 +243,7 @@ fn merge_lenient<T: DeserializeOwned>(
 fn search_text(item: &TimelineItem) -> String {
     use crate::model::ItemBody::*;
     let s = match &item.body {
-        UserMessage { text, .. } | AgentMessage { text } => text.clone(),
+        UserMessage { text, .. } | AgentMessage { text, .. } => text.clone(),
         ToolCall { title, command, .. } => {
             format!("{title} {}", command.as_deref().unwrap_or(""))
         }
@@ -931,6 +931,7 @@ mod tests {
                 ts: seq,
                 body: ItemBody::AgentMessage {
                     text: format!("m{seq}"),
+                    images: Vec::new(),
                 },
             })
             .unwrap();

@@ -27,13 +27,17 @@ export function imageSrc(a: Attachment): string | null {
 }
 
 const MAX_THUMBS = 4;
+const MAX_LARGE = 6;
 
-/** Thumbnail strip; tapping one opens the viewer. */
-export function ImageStrip({ images, className }: { images: Attachment[]; className?: string }) {
+/**
+ * Thumbnail strip; tapping one opens the viewer. `large` shows each picture at its own aspect
+ * (up to 18rem tall), for pictures that are the content of a reply rather than an attachment.
+ */
+export function ImageStrip({ images, className, large = false }: { images: Attachment[]; className?: string; large?: boolean }) {
   const [open, setOpen] = useState<number | null>(null);
   const valid = images.map((a) => ({ a, src: imageSrc(a) })).filter((x): x is { a: Attachment; src: string } => !!x.src);
   if (!valid.length) return null;
-  const shown = valid.slice(0, MAX_THUMBS);
+  const shown = valid.slice(0, large ? MAX_LARGE : MAX_THUMBS);
   const extra = valid.length - shown.length;
   return (
     <>
@@ -47,9 +51,18 @@ export function ImageStrip({ images, className }: { images: Attachment[]; classN
               setOpen(i);
             }}
             aria-label={`View image ${a.name || i + 1}`}
-            className="press relative h-24 w-[132px] max-w-[calc(50%-4px)] overflow-hidden rounded-xl border border-line-strong bg-code"
+            className={cn(
+              "press relative overflow-hidden rounded-xl border border-line-strong bg-code",
+              large ? "max-w-full" : "h-24 w-[132px] max-w-[calc(50%-4px)]",
+            )}
           >
-            <img src={src} alt={a.name || "Screenshot"} loading="lazy" decoding="async" className="h-full w-full object-cover object-top" />
+            <img
+              src={src}
+              alt={a.name || "Screenshot"}
+              loading="lazy"
+              decoding="async"
+              className={large ? "block max-h-72 w-auto max-w-full object-contain" : "h-full w-full object-cover object-top"}
+            />
             {extra > 0 && i === shown.length - 1 && (
               <span className="absolute inset-0 flex items-center justify-center bg-black/55 text-[15px] font-semibold text-white">+{extra}</span>
             )}

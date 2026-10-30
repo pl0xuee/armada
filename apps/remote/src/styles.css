@@ -14,7 +14,7 @@
   --border-strong: #353c46;
   --text-1: #e6eaef;
   --text-2: #9aa4b2;
-  --steel: #7d8b99;
+  --steel: #8190a0; /* lifted from #7d8b99: 4.66:1 on --bg-3 (raised), was 4.37:1 */
   --accent: #4fc3f7;
   --accent-fg: #06141b;
   --warn: #f5b544;
@@ -193,6 +193,20 @@
     display: none;
   }
 
+  /* A horizontal scroller with more to scroll to: fade that edge (set from its scroll position). */
+  .fade-x-end {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  }
+  .fade-x-start {
+    -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent);
+    mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent);
+  }
+  .fade-x {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+  }
+
   .line-clamp-2 {
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -200,19 +214,20 @@
     overflow: hidden;
   }
 
-  /* ---- Markdown ---------------------------------------------------------- */
+  /* ---- Markdown ----------------------------------------------------------
+   * Mirrors the desktop app's `prose-chat` (apps/desktop/src/styles/globals.css):
+   * same sizes, heading scale, list indents, code, quote and table look. */
   .md {
     font-size: 15px;
-    line-height: 1.6;
+    line-height: 1.68;
     overflow-wrap: anywhere;
     color: var(--text-1);
   }
   .md > * + * {
-    margin-top: 0.7em;
+    margin-top: 0.8em;
   }
   .md strong {
-    font-weight: 620;
-    color: #f3f6f9;
+    font-weight: 600;
   }
   .md em {
     font-style: italic;
@@ -220,43 +235,54 @@
   .md del {
     color: var(--text-2);
   }
-  .md-h1,
-  .md-h2,
-  .md-h3 {
-    font-weight: 650;
+  .md-h {
+    letter-spacing: -0.012em;
     line-height: 1.3;
-    letter-spacing: -0.01em;
-    margin: 1.1em 0 0.2em;
-  }
-  .md > .md-h1:first-child,
-  .md > .md-h2:first-child,
-  .md > .md-h3:first-child {
-    margin-top: 0;
   }
   .md-h1 {
-    font-size: 19px;
+    font-size: 1.4em;
+    font-weight: 700;
   }
   .md-h2 {
-    font-size: 17px;
+    font-size: 1.2em;
+    font-weight: 650;
   }
   .md-h3 {
-    font-size: 15px;
+    font-size: 1.05em;
+    font-weight: 650;
+  }
+  .md-h4 {
+    font-size: 0.95em;
+    font-weight: 600;
+    color: var(--text-2);
+  }
+  .md > * + .md-h1 {
+    margin-top: 1.7em;
+  }
+  .md > * + .md-h2 {
+    margin-top: 1.5em;
+  }
+  .md > * + :is(.md-h3, .md-h4) {
+    margin-top: 1.25em;
+  }
+  .md > :is(.md-h1, .md-h2, .md-h3, .md-h4) + *,
+  .md :is(.md-h1, .md-h2, .md-h3, .md-h4) + * {
+    margin-top: 0.5em;
   }
   .md-code {
     font-family: var(--font-mono);
-    font-size: 0.86em;
-    padding: 0.12em 0.38em;
+    font-size: 0.87em;
+    padding: 0.1em 0.38em;
     border-radius: 5px;
-    background: var(--bg-3);
-    border: 1px solid var(--border);
-    color: #d6e4f0;
+    background: color-mix(in srgb, var(--bg-3) 85%, transparent);
+    color: color-mix(in srgb, var(--text-1) 88%, var(--accent));
     overflow-wrap: anywhere;
   }
   .md-link {
     color: var(--accent);
     text-decoration: underline;
     text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
-    text-underline-offset: 2px;
+    text-underline-offset: 3px;
   }
   .md-host {
     color: var(--text-2);
@@ -266,7 +292,22 @@
   .md-badlink {
     color: var(--text-2);
     text-decoration: underline dotted;
-    text-underline-offset: 2px;
+    text-underline-offset: 3px;
+  }
+  .md-imgchip {
+    display: inline-flex;
+    max-width: 100%;
+    align-items: center;
+    gap: 6px;
+    margin: 0 2px;
+    padding: 2px 6px;
+    vertical-align: middle;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-2);
+    background: var(--bg-3);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
   }
   .md-caret {
     display: inline-block;
@@ -279,25 +320,48 @@
     animation: breathe 1s ease-in-out infinite;
   }
   .md-pre {
+    margin-top: 0.8em;
+    margin-bottom: 0.8em;
     background: var(--code-bg);
     border: 1px solid var(--border);
     border-radius: 12px;
     overflow: hidden;
   }
+  .md > .md-pre:first-child {
+    margin-top: 0;
+  }
+  .md > .md-pre:last-child {
+    margin-bottom: 0;
+  }
   .md-pre pre {
     margin: 0;
     white-space: pre;
     tab-size: 2;
+    -webkit-text-size-adjust: 100%;
+  }
+  /* Syntax colors: the desktop theme's --syntax-* palette. */
+  .tk-k {
+    color: #c4a7ff;
+  }
+  .tk-s {
+    color: #8fdcb0;
+  }
+  .tk-c {
+    color: #6b7886;
+    font-style: italic;
+  }
+  .tk-n {
+    color: #f5b544;
+  }
+  .tk-f {
+    color: #6cc9f5;
   }
   .md-ul,
   .md-ol {
-    padding-left: 1.35em;
+    padding-left: 1.5em;
   }
   .md-ul {
     list-style: disc;
-  }
-  .md-ul .md-ul {
-    list-style: circle;
   }
   .md-ol {
     list-style: decimal;
@@ -308,18 +372,35 @@
   .md li > * + * {
     margin-top: 0.4em;
   }
+  .md li > :is(.md-ul, .md-ol) {
+    margin-top: 0.3em;
+  }
+  .md li > .md-pre {
+    margin-top: 0.8em;
+    margin-bottom: 0.8em;
+  }
   .md li::marker {
     color: var(--steel);
   }
+  .md-check {
+    margin-right: 0.4em;
+    vertical-align: -0.1em;
+    accent-color: var(--accent);
+  }
   .md-quote {
-    border-left: 3px solid var(--gunmetal);
-    padding-left: 12px;
+    border-left: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
+    padding: 0.5em 0.9em;
+    border-radius: 0 10px 10px 0;
     color: var(--text-2);
+  }
+  .md-quote > * + * {
+    margin-top: 0.5em;
   }
   .md-hr {
     border: 0;
     border-top: 1px solid var(--border);
-    margin: 1em 0;
+    margin: 1.6em 0;
   }
   .md-table-wrap {
     overflow-x: auto;
@@ -328,24 +409,40 @@
   }
   .md-table {
     border-collapse: collapse;
-    font-size: 13.5px;
+    font-size: 0.9em;
+    line-height: 1.5;
     min-width: 100%;
   }
   .md-table th,
   .md-table td {
-    padding: 7px 11px;
-    border-bottom: 1px solid var(--border);
+    padding: 0.5em 0.85em;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+    vertical-align: top;
     white-space: nowrap;
+    overflow-wrap: normal;
     text-align: left;
   }
+  .md-table td.md-wrap {
+    white-space: normal;
+    min-width: 14em;
+  }
   .md-table th {
-    background: var(--bg-2);
+    background: color-mix(in srgb, var(--bg-3) 70%, transparent);
     font-weight: 600;
     color: var(--text-2);
-    font-size: 12.5px;
+    font-size: 0.92em;
+  }
+  .md-table tbody tr:nth-child(even) td {
+    background: color-mix(in srgb, var(--bg-2) 55%, transparent);
   }
   .md-table tr:last-child td {
     border-bottom: 0;
+  }
+  /* Narration between tool calls: same size, softer color. */
+  .md-interim,
+  .md-interim strong,
+  .md-interim .md-code {
+    color: var(--text-2);
   }
 }
 
@@ -358,6 +455,9 @@
   }
   .animate-pulse-ring {
     animation: pulse-ring 1.8s var(--ease-out) infinite;
+  }
+  .animate-pulse-ring-soft {
+    animation: pulse-ring-soft 1.8s var(--ease-out) infinite;
   }
   .animate-breathe {
     animation: breathe 1.6s ease-in-out infinite;
@@ -396,6 +496,18 @@
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+/* A ring that stays inside a clipped card (the sub-agent icon): it grows to 1.35x, not the dots' 2.6x. */
+@keyframes pulse-ring-soft {
+  0% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  80%,
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
   }
 }
 @keyframes pulse-ring {

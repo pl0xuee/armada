@@ -32,6 +32,9 @@ export const templates = [
   { id: "t-review", name: "Review PR", text: "Review the open changes on this branch. Flag bugs, risky changes and missing tests." },
   { id: "t-tests", name: "Write tests", text: "Add tests for the code you just changed and make sure the suite passes." },
   { id: "t-fix-ci", name: "Fix CI", text: "CI is failing on main. Find the cause and fix it with the smallest change." },
+  // Parity: templates with {{placeholders}} open the fill-in form in the composer.
+  { id: "t-explain", name: "Explain a file", text: "Explain what {{target_file}} does and how it fits into {{area}}. Keep it short and point at the key functions." },
+  { id: "t-refactor", name: "Refactor", text: "Refactor {{target}} without changing behaviour. Keep the public API and make sure the tests still pass." },
 ];
 
 type Choice = [value: string, name: string, description?: string];
@@ -92,6 +95,7 @@ export const slashCommands = [
   { name: "init", description: "Create an AGENTS.md / CLAUDE.md for this project", hint: null },
   { name: "clear", description: "Start a fresh conversation", hint: null },
   { name: "cost", description: "Show usage for this session", hint: null },
+  { name: "remote-control", description: "Continue this session from claude.ai/code or the Claude mobile app", hint: null },
 ];
 
 function agent(
@@ -189,6 +193,18 @@ export function buildAgents(now: number): Agent[] {
         { id: "q1", text: "After the refactor, migrate Settings.tsx to useApi as well.", attachments: 0 },
         { id: "q2", text: "Then compare the bundle size before and after.", attachments: 1 },
       ],
+    }),
+    agent(now, "a12", "Audit checkout accessibility", "claude", "acc-work", "idle", {
+      agoMin: 6,
+      branch: "armada/a11y-audit",
+      worktree: true,
+      costUsd: 1.36,
+      tokensUsed: 118_000,
+      contextUsed: 70_000,
+      contextSize: 200_000,
+      lastMessage: "Fixed 5 accessibility issues in the checkout flow; the e2e suite and axe checks pass.",
+      configOptions: providerConfig("claude", "claude-sonnet"),
+      availableCommands: slashCommands,
     }),
     agent(now, "a4", "Compare vector DBs for search", "grok", "acc-grok", "working", {
       agoMin: 2,
@@ -429,6 +445,21 @@ export function buildTimelines(now: number): Record<string, TimelineItem[]> {
       kind: "agent_message",
       text: "Found it. `refreshToken()` isn't single-flight: when two requests get a **401** at the same moment, both start a refresh, and the second one revokes the token the first just obtained.\n\nThe fix keeps one in-flight promise and shares it:\n\n```ts\nlet inflight: Promise<Session> | null = null;\n\nexport function refreshToken() {\n  inflight ??= doRefresh().finally(() => {\n    inflight = null;\n  });\n  return inflight;\n}\n```\n\nI also added a regression test that fires **5 concurrent requests** against an expired session. See the [MDN notes on promises](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise) for the `finally` semantics.",
     },
+    {
+      ...base("a1", at(5.5)),
+      kind: "agent_message",
+      text: "",
+      images: [{ name: "refresh-race.png", mimeType: "image/png", data: ORDERS_PNG }],
+    },
+    {
+      ...base("a1", at(5.2)),
+      kind: "agent_message",
+      text: "Before and after, rendered from the test harness:",
+      images: [
+        { name: "before.png", mimeType: "image/png", data: ORDERS_PNG },
+        { name: "after.png", mimeType: "image/png", data: CHECKOUT_PNG },
+      ],
+    },
     tool("a1", at(5), "edit", "Edit src/auth/session.ts", {
       locations: ["src/auth/session.ts"],
       diffs: [diff("src/auth/session.ts", sessionOld, sessionNew)],
@@ -501,7 +532,7 @@ export function buildTimelines(now: number): Record<string, TimelineItem[]> {
         { id: "approved", name: "Approve", kind: "allow_once" },
         { id: "approved_for_session", name: "Approve for session", kind: "allow_always" },
         { id: "denied", name: "Deny", kind: "reject_once" },
-        { id: "abort", name: "Deny and stop", kind: "reject_always" },
+        { id: "cancel", name: "Deny and stop", kind: "reject_always" },
       ],
       resolution: null,
     },
@@ -526,6 +557,9 @@ export function buildTimelines(now: number): Record<string, TimelineItem[]> {
         description: "Find every component that calls the API client directly",
         prompt: "Search src/ for direct uses of api.get / api.post. For each, note the component, the endpoint and whether it handles loading and errors. Report a table; don't change any files.",
       },
+      // The sub-agent's final report (shown on its card once it finishes).
+      output:
+        "## Direct API calls\n\n| Component | Endpoint | Loading | Errors |\n|---|---|---|---|\n| `Orders.tsx` | `/orders?page=` | yes | no |\n| `Customers.tsx` | `/customers` | yes | yes |\n| `Dashboard.tsx` | `/stats`, `/orders/recent` | no | no |\n| `Settings.tsx` | `/settings` | no | no |\n\n**4 components** call `api.get` directly. Only `Customers.tsx` handles errors, so the hook should surface `error` by default.",
     }),
     tool("a3", at(8.35), "search", "Search for api.get(", { parentToolCallId: "sa-audit", output: "12 matches in 6 files" }),
     tool("a3", at(8.3), "read", "Read src/pages/Orders.tsx", { parentToolCallId: "sa-audit", locations: ["src/pages/Orders.tsx"] }),
@@ -563,6 +597,35 @@ export function buildTimelines(now: number): Record<string, TimelineItem[]> {
     }),
     tool("a3", at(1.8), "read", "Read src/pages/Customers.tsx", { parentToolCallId: "sa-customers", locations: ["src/pages/Customers.tsx"] }),
     tool("a3", at(1.2), "edit", "Edit src/pages/Customers.tsx", { parentToolCallId: "sa-customers", status: "in_progress" }),
+    // Codex-style management call: shown like a tool call, never counted as a running sub-agent.
+    tool("a3", at(1.1), "other", "Wait for Migrate Customers.tsx", { toolCallId: "sa-wait", subagent: { kind: "wait", control: true } }),
+    // A background sub-agent: its launch call completed, but it keeps running.
+    tool("a3", at(1), "other", "Task: Compare bundle size", {
+      toolCallId: "sa-bundle",
+      output: "Async agent launched successfully. It keeps running in the background.",
+      subagent: {
+        kind: "general-purpose",
+        description: "Build before and after and compare the bundle size",
+        prompt: "Build the app on main and on this branch, then report the size difference per chunk.",
+        background: true,
+      },
+    }),
+    tool("a3", at(0.9), "execute", "Run npx vite build --report", {
+      parentToolCallId: "sa-bundle",
+      command: "npx vite build --report",
+      status: "in_progress",
+      output: "vite v6.3.5 building for production...\n",
+    }),
+    // A running command: ANSI colors and a progress bar redrawn with \r.
+    tool("a3", at(0.7), "execute", "Run npm install", {
+      command: "npm install",
+      status: "in_progress",
+      output:
+        "\x1b[1m\x1b[36mnpm\x1b[0m \x1b[33mwarn\x1b[0m deprecated inflight@1.0.6: This module is not supported\n" +
+        "\x1b[2K\x1b[1G(\x1b[32m#\x1b[0m#########) \x1b[1m12%\x1b[0m idealTree:react\r" +
+        "\x1b[2K\x1b[1G(\x1b[32m####\x1b[0m######) \x1b[1m47%\x1b[0m reify:vite\r" +
+        "\x1b[2K\x1b[1G(\x1b[32m#########\x1b[0m#) \x1b[1m91%\x1b[0m reify:esbuild",
+    }),
     {
       ...base("a3", at(0.5)),
       kind: "agent_message",
@@ -583,6 +646,13 @@ export function buildTimelines(now: number): Record<string, TimelineItem[]> {
       kind: "agent_message",
       text: "## Short version\n\n| | p95 @ 20M | Filtering | Ops |\n|---|---|---|---|\n| pgvector | ~45 ms | SQL | Existing Postgres |\n| Qdrant | ~12 ms | Payload index | New service |\n| LanceDB | ~30 ms | Basic | Embedded |\n\npgvector is the simplest fit up to ~5M rows; past that Qdrant's filtering wins.",
     },
+    {
+      ...base("a4", at(2)),
+      kind: "agent_message",
+      text: "## Formatting check\n\nSetext heading\n==============\n\nHard break after this line  \nsecond line, and one with a backslash\\\nthird line. Escapes: \\*not italic\\*, 5 \\< 6, AT&amp;T, ~~old~~ ~new~, ***both***, `a || b`.\n\n1. **Install** the tools:\n\n   ```bash\n   npm i -g pnpm\n   ```\n\n2. Configure:\n   - [x] write `.env`\n   - [ ] rotate keys\n     - nested _deeper_ item\n3. Verify\n\n> **Note**\n> - quoted bullet\n> - another one\n\n| Option | Default | Notes |\n|:--|:-:|--:|\n| `--ef` | 64 | higher is slower, see [docs](https://qdrant.tech/documentation/) |\n| `m` | 16 | graph degree |\n\n```diff\n- ef = 32\n+ ef = 128\n@@ -3,2 +3,2 @@\n```\n\n```python\ndef search(q, k=10):\n    # nearest neighbours\n    return index.query(q, top_k=k)  # 12 ms\n```\n\n![diagram](/home/dev/code/acme-api/docs/diagram.png) and a web one: ![logo](https://qdrant.tech/logo.png)\n\n---\n\nSee https://lancedb.github.io/lancedb/ or mail me@example.com.",
+    },
+    // Still working: the trailing run of calls is the live group (open, showing the current step).
+    tool("a4", at(1.5), "search", "Search for LanceDB filtering", { output: "docs/concepts/filtering.md\ndocs/guides/prefilter.md" }),
     tool("a4", at(1), "fetch", "Fetch lancedb.github.io/lancedb/concepts", { status: "in_progress" }),
   ];
 
@@ -697,6 +767,12 @@ export function buildTimelines(now: number): Record<string, TimelineItem[]> {
       kind: "agent_message",
       text: "Theme tokens are in place; next I'll update the code block styles.",
     },
+    tool("a7", at(95.5), "edit", "Edit docs/styles/code.css", { locations: ["docs/styles/code.css"], status: "in_progress" }),
+    tool("a7", at(95.4), "other", "Task: Check contrast ratios", {
+      toolCallId: "sa-contrast",
+      status: "in_progress",
+      subagent: { kind: "Explore", description: "Check text contrast in both themes", prompt: "Compute WCAG contrast for every theme token pair." },
+    }),
     {
       ...base("a7", at(95)),
       kind: "notice",
@@ -715,6 +791,87 @@ export function buildTimelines(now: number): Record<string, TimelineItem[]> {
   tl.a10 = [
     { ...base("a10", at(60 * 24 * 3 + 30)), kind: "user_message", text: "Spike: can we render 1M points with WebGPU?" },
     { ...base("a10", at(60 * 24 * 3)), kind: "agent_message", text: "WebGPU is ~4x faster for 1M points but Safari support is still partial." },
+  ];
+
+  // A long finished turn: lots of work folded into one line, then the answer and a "Done" card.
+  tl.a12 = [
+    { ...base("a12", at(38)), kind: "user_message", text: "Audit the checkout flow for accessibility problems and fix what you find. Run the e2e suite when you're done." },
+    { ...base("a12", at(37.8)), kind: "thought", text: "Start with the form components: labels, focus order and error announcements are the usual culprits. Then check colour contrast and the modal." },
+    tool("a12", at(37.5), "read", "Read src/billing/CheckoutForm.tsx", { locations: ["src/billing/CheckoutForm.tsx"] }),
+    tool("a12", at(37.4), "read", "Read src/billing/CardField.tsx", { locations: ["src/billing/CardField.tsx"] }),
+    tool("a12", at(37.3), "read", "Read src/billing/ErrorSummary.tsx", { locations: ["src/billing/ErrorSummary.tsx"] }),
+    tool("a12", at(37.2), "search", "Search for aria-", { output: "src/billing/CardField.tsx:14: aria-label\nsrc/billing/Modal.tsx:9: aria-modal" }),
+    tool("a12", at(37), "read", "Read src/billing/Modal.tsx", { locations: ["src/billing/Modal.tsx"] }),
+    { ...base("a12", at(36.5)), kind: "agent_message", text: "Four things stand out: the card field has no visible label, errors aren't announced, the modal doesn't trap focus, and the muted text fails contrast." },
+    tool("a12", at(35), "execute", "Run npx axe-cli http://localhost:5173/checkout", {
+      command: "npx axe-cli http://localhost:5173/checkout",
+      status: "failed",
+      output:
+        "\x1b[1mRunning axe-core 4.10.0\x1b[0m\n\x1b[31m✖ 5 violations found\x1b[0m\n  \x1b[33mlabel\x1b[0m: Form elements must have labels (1 node)\n  \x1b[33mcolor-contrast\x1b[0m: Elements must meet minimum color contrast (3 nodes)\n  \x1b[33maria-dialog-name\x1b[0m: Dialogs must have an accessible name (1 node)\n\nexit code 1",
+    }),
+    tool("a12", at(34), "edit", "Edit src/billing/CardField.tsx", {
+      locations: ["src/billing/CardField.tsx"],
+      diffs: [
+        diff(
+          "src/billing/CardField.tsx",
+          '<input className="card" placeholder="Card number" />\n<p className="hint">We never store your card.</p>\n',
+          '<label htmlFor="card">Card number</label>\n<input id="card" className="card" autoComplete="cc-number" inputMode="numeric" />\n<p id="card-hint" className="hint">We never store your card.</p>\n',
+        ),
+      ],
+    }),
+    tool("a12", at(33), "edit", "Edit src/billing/ErrorSummary.tsx", {
+      locations: ["src/billing/ErrorSummary.tsx"],
+      diffs: [diff("src/billing/ErrorSummary.tsx", '<div className="errors">\n', '<div className="errors" role="alert" aria-live="assertive">\n')],
+    }),
+    { ...base("a12", at(32.5)), kind: "thought", text: "The modal needs a focus trap and an accessible name. I'll use the dialog element's label and restore focus to the trigger on close." },
+    tool("a12", at(32), "edit", "Edit src/billing/Modal.tsx", {
+      locations: ["src/billing/Modal.tsx"],
+      diffs: [
+        diff(
+          "src/billing/Modal.tsx",
+          '<div className="modal" aria-modal="true">\n',
+          '<div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">\n  <FocusTrap onEscape={onClose}>\n',
+        ),
+      ],
+    }),
+    tool("a12", at(31), "edit", "Edit src/styles/tokens.css", {
+      locations: ["src/styles/tokens.css"],
+      diffs: [diff("src/styles/tokens.css", "--muted: #8b95a1;\n", "--muted: #6b7684;\n")],
+    }),
+    tool("a12", at(30), "execute", "Run npm install --save-dev focus-trap-react", {
+      command: "npm install --save-dev focus-trap-react",
+      output:
+        "\x1b[2K\x1b[1G(#####     ) reify:focus-trap-react: \x1b[32mhttp fetch\x1b[0m GET 200\r\x1b[2K\x1b[1G(##########) reify:focus-trap-react: \x1b[32msill\x1b[0m audit\n\nadded 2 packages in 3s",
+    }),
+    tool("a12", at(29), "read", "Read e2e/checkout.spec.ts", { locations: ["e2e/checkout.spec.ts"] }),
+    tool("a12", at(28), "edit", "Edit e2e/checkout.spec.ts", {
+      locations: ["e2e/checkout.spec.ts"],
+      diffs: [diff("e2e/checkout.spec.ts", 'await page.getByPlaceholder("Card number").fill(card);\n', 'await page.getByLabel("Card number").fill(card);\n')],
+    }),
+    tool("a12", at(27), "execute", "Run npx playwright test e2e/checkout.spec.ts", {
+      command: "npx playwright test e2e/checkout.spec.ts",
+      output: "\x1b[32m✓\x1b[0m 14 passed (38.2s)",
+    }),
+    tool("a12", at(26), "execute", "Run npx axe-cli http://localhost:5173/checkout", {
+      command: "npx axe-cli http://localhost:5173/checkout",
+      output: "\x1b[1mRunning axe-core 4.10.0\x1b[0m\n\x1b[32m✓ 0 violations found\x1b[0m",
+    }),
+    { ...base("a12", at(25)), kind: "agent_message", text: "All five violations are fixed. Here is what changed:" },
+    {
+      ...base("a12", at(24.8)),
+      kind: "agent_message",
+      text: "Fixed **5 accessibility issues** in the checkout flow:\n\n- The card number field now has a real `<label>` and `autocomplete`\n- Validation errors are announced (`role=\"alert\"`)\n- The modal has an accessible name and traps focus (new dependency: `focus-trap-react`)\n- Muted text now meets the 4.5:1 contrast ratio\n\nThe e2e suite passes (14 tests) and axe reports **0 violations**.",
+    },
+    {
+      ...base("a12", at(24.5)),
+      kind: "turn_summary",
+      durationMs: 13 * MIN + 41_000,
+      files: ["e2e/checkout.spec.ts", "playwright.config.ts", "src/billing/legacy.ts", "src/billing/CardField.tsx", "src/billing/Modal.tsx"],
+      toolCalls: 17,
+      commands: 5,
+      costUsd: 1.36,
+      tokens: 118_000,
+    },
   ];
 
   return tl;

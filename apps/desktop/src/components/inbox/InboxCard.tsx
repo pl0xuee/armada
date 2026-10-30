@@ -155,6 +155,9 @@ export const InboxCard = memo(
               {item.kind === "question" && (
                 <Button size="sm" variant="warn" onClick={() => onOpen(agent.id)}>
                   Answer <ArrowUpRight />
+                  <Kbd className="ml-0.5 hidden h-4 min-w-4 border-transparent bg-black/15 text-[10px] text-current shadow-none @lg/card:inline-flex">
+                    ↵
+                  </Kbd>
                 </Button>
               )}
               {(perm?.options ?? []).map((o) => {
@@ -184,7 +187,7 @@ export const InboxCard = memo(
               })}
               <Button size="sm" variant="ghost" className="ml-auto" onClick={() => onOpen(agent.id)}>
                 Open agent <ArrowUpRight />
-                <Kbd className="ml-0.5 hidden h-4 min-w-4 text-[10px] @lg/card:inline-flex">↵</Kbd>
+                {!asking && <Kbd className="ml-0.5 hidden h-4 min-w-4 text-[10px] @lg/card:inline-flex">↵</Kbd>}
               </Button>
             </div>
           </div>

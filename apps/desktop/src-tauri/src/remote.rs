@@ -1445,6 +1445,7 @@ impl Remote {
             .route("/api/agents/{id}/items", get(items))
             .route("/api/agents/{id}/permission", post(permission))
             .route("/api/agents/{id}/question", post(answer_question))
+            .route("/api/agents/{id}/secret-files", get(secret_files))
             .route("/api/agents/{id}/cancel", post(cancel))
             .route("/api/agents/{id}/resume", post(resume))
             .route("/api/agents/{id}/stop", post(stop))
@@ -1827,7 +1828,10 @@ impl From<anyhow::Error> for ApiError {
         let msg = format!("{e:#}");
         let status = if msg.contains("not found") {
             StatusCode::NOT_FOUND
-        } else if msg.contains("no longer pending") || msg.contains("isn't running anymore") {
+        } else if msg.contains("no longer pending")
+            || msg.contains("no longer waiting")
+            || msg.contains("isn't running anymore")
+        {
             StatusCode::CONFLICT
         } else {
             StatusCode::BAD_REQUEST
@@ -2616,9 +2620,70 @@ async fn diff_summary(
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct MessageBody {
     #[serde(default)]
     message: String,
+    /// Repository-relative paths to leave out of the commit.
+    #[serde(default)]
+    exclude: Vec<String>,
+    /// Commit files that look like secrets (`.env`, keys) anyway: the person asked.
+    #[serde(default)]
+    allow_secrets: bool,
+}
+
+/// Refuses a commit that would add files that look like secrets unless they are left
+/// out (`exclude`) or the request says to include them: the desktop asks first, so the
+/// phone mustn't be a way around that.
+async fn guard_secret_files(
+    core: &armada_core::Core,
+    agent_id: &str,
+    body: &MessageBody,
+) -> Result<(), ApiError> {
+    if body.allow_secrets {
+        return Ok(());
+    }
+    let secrets = crate::commands::secret_files_impl(core, agent_id).await?;
+    match secret_refusal(&secrets, &body.exclude) {
+        Some(message) => Err(ApiError(StatusCode::UNPROCESSABLE_ENTITY, message)),
+        None => Ok(()),
+    }
+}
+
+/// The refusal for secret-looking files that aren't left out, or None when there's none.
+fn secret_refusal(secrets: &[String], exclude: &[String]) -> Option<String> {
+    let unhandled: Vec<&String> = secrets.iter().filter(|f| !exclude.contains(f)).collect();
+    if unhandled.is_empty() {
+        return None;
+    }
+    let list = unhandled
+        .iter()
+        .take(5)
+        .map(|f| f.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let more = unhandled.len().saturating_sub(5);
+    Some(format!(
+        "These files look like secrets: {list}{}. Leave them out of the commit, or confirm to include them.",
+        if more > 0 {
+            format!(" and {more} more")
+        } else {
+            String::new()
+        }
+    ))
+}
+
+/// New files a commit would add whose names look like secrets, so the phone can ask first.
+async fn secret_files(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<String>>, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    Ok(Json(
+        crate::commands::secret_files_impl(&c.remote.core(), &id).await?,
+    ))
 }
 
 async fn commit(
@@ -2629,7 +2694,10 @@ async fn commit(
     Json(body): Json<MessageBody>,
 ) -> Result<Json<Value>, ApiError> {
     owner(&c.auth(&peer, &headers)?)?;
-    let result = crate::commands::commit_impl(&c.remote.core(), &id, &body.message).await?;
+    let core = c.remote.core();
+    guard_secret_files(&core, &id, &body).await?;
+    let result =
+        crate::commands::commit_excluding_impl(&core, &id, &body.message, &body.exclude).await?;
     Ok(Json(json!({ "result": result })))
 }
 
@@ -2642,7 +2710,10 @@ async fn ship(
     Json(body): Json<MessageBody>,
 ) -> Result<Json<Value>, ApiError> {
     owner(&c.auth(&peer, &headers)?)?;
-    let result = crate::commands::ship_impl(&c.remote.core(), &id, &body.message).await?;
+    let core = c.remote.core();
+    guard_secret_files(&core, &id, &body).await?;
+    let result =
+        crate::commands::ship_excluding_impl(&core, &id, &body.message, &body.exclude).await?;
     Ok(Json(serde_json::to_value(result).unwrap_or_default()))
 }
 
@@ -2653,6 +2724,9 @@ fn check_viewer_image(core: &Core, id: &str, path: &str) -> anyhow::Result<()> {
     let agent = core.agent(id)?;
     let input = path.trim();
     if input.is_empty() || input.starts_with("file:") {
+        return Err(denied());
+    }
+    if armada_core::is_network_path(input) {
         return Err(denied());
     }
     let requested = std::path::PathBuf::from(input);
@@ -2993,6 +3067,20 @@ mod tests {
         assert!(lan_refresh_target(None, None, Some(b)).is_none());
         assert!(lan_refresh_target(None, Some(rs(false, true)), Some(b)).is_none());
         assert!(lan_refresh_target(None, Some(rs(true, false)), Some(b)).is_none());
+    }
+
+    #[test]
+    fn secret_files_must_be_left_out_or_confirmed() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(secret_refusal(&[], &[]), None);
+        // Left out: fine. Some left in: refused, naming only those.
+        assert_eq!(secret_refusal(&s(&[".env"]), &s(&[".env"])), None);
+        let msg = secret_refusal(&s(&[".env", "deploy.key"]), &s(&[".env"])).unwrap();
+        assert!(msg.contains("deploy.key") && !msg.contains(".env,") && msg.contains("confirm"));
+        let many = s(&[
+            "a.pem", "b.pem", "c.pem", "d.pem", "e.pem", "f.pem", "g.pem",
+        ]);
+        assert!(secret_refusal(&many, &[]).unwrap().contains("and 2 more"));
     }
 
     #[test]

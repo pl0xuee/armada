@@ -59,7 +59,7 @@ export function Rail() {
       item.view === "triage" && needs > 0
         ? `${item.label}, ${needs} waiting`
         : item.view === "inbox" && pending > 0
-          ? `${item.label}, ${pending} approval${pending === 1 ? "" : "s"}`
+          ? `${item.label}, ${pending} waiting`
           : item.view === "mission" && working > 0
             ? `${item.label}, ${working} working`
             : item.label;

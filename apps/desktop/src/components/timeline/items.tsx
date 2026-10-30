@@ -113,8 +113,10 @@ export const AgentMessage = memo(function AgentMessage({
   interim?: boolean;
   streaming: boolean;
 }) {
+  const images = item.images ?? [];
   return (
     <div className="group relative">
+      {images.length > 0 && <MessageImages images={images} />}
       {item.text ? (
         <Markdown
           text={item.text}
@@ -123,7 +125,7 @@ export const AgentMessage = memo(function AgentMessage({
           runAgentId={agent.cwd ? agent.id : undefined}
           className={cn("prose-chat", interim && "prose-interim")}
         />
-      ) : !streaming ? (
+      ) : images.length > 0 ? null : !streaming ? (
         <p className="text-[12.5px] italic text-steel">No reply (the turn ended before any text).</p>
       ) : (
         <div className="flex h-5 items-center gap-1" aria-label="Typing">
@@ -145,6 +147,32 @@ export const AgentMessage = memo(function AgentMessage({
     </div>
   );
 });
+
+/** Pictures the agent put in its reply: shown in full, click to enlarge. */
+function MessageImages({ images }: { images: Attachment[] }) {
+  const [open, setOpen] = useState<number | null>(null);
+  return (
+    <div className="my-1 flex flex-wrap gap-2">
+      {images.map((img, i) => (
+        <button
+          key={`${img.name}-${i}`}
+          type="button"
+          onClick={() => setOpen(i)}
+          aria-label={`View ${img.name}`}
+          className="overflow-hidden rounded-xl border border-line-strong bg-base transition-transform duration-150 hover:scale-[1.01] active:scale-[0.99]"
+        >
+          <img
+            src={attachmentSrc(img)}
+            alt={img.name}
+            className="block max-h-[420px] w-auto max-w-full object-contain"
+            draggable={false}
+          />
+        </button>
+      ))}
+      <ImageLightbox images={images} index={open} onIndexChange={setOpen} />
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------- thought
 

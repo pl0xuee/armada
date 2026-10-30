@@ -212,7 +212,7 @@ const tauriApi = {
   deleteAccount: (accountId: string) => invoke<void>("delete_account", { accountId }),
   checkAccount: (accountId: string) => invoke<Account>("check_account", { accountId }),
   /** Starts the provider's own login flow in a PTY; returns a terminal id. */
-  loginAccount: (accountId: string) => invoke<{ terminalId: string; reused: boolean }>("login_account", { accountId }),
+  loginAccount: (accountId: string) => invoke<{ terminalId: string; reused: boolean; command: string }>("login_account", { accountId }),
 
   // local model servers
   /** Probes the default Ollama and LM Studio addresses. */

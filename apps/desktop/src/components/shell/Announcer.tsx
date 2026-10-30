@@ -23,7 +23,7 @@ export function Announcer() {
           const old = before[a.id];
           if (!old || a.archived) continue;
           const who = `${a.title} (${identityFor(a.provider, a.customAgentId, custom).short})`;
-          if (a.pendingPermissions > old.pendingPermissions) lines.push(`${who} needs your approval.`);
+          if (a.pendingPermissions > old.pendingPermissions) lines.push(`${who} is waiting on you.`);
           else if (a.status === "error" && old.status !== "error")
             lines.push(a.rateLimited ? `${who} hit its usage limit.` : `${who} stopped with an error.`);
         }
