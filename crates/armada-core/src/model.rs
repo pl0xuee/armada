@@ -301,6 +301,10 @@ pub struct Agent {
     /// agent moved to another account; survives restarts until the brief is sent).
     #[serde(default)]
     pub needs_briefing: bool,
+    /// The agent has been told it can show pictures (see `guidance`): as its system prompt, or
+    /// as a note ahead of a prompt when its session was resumed.
+    #[serde(default)]
+    pub guided: bool,
     /// The user's last choice per composer option (model, effort, …), re-applied
     /// whenever this agent's adapter restarts. Never holds permission options.
     #[serde(default)]

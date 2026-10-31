@@ -5,6 +5,12 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## Unreleased
+
+### Fixed
+
+- **Agents that were already running still said they can't show pictures.** Claude ignores new instructions when an existing conversation is resumed, so only brand-new agents knew. Existing agents now get a short note about it ahead of their next message, once.
+
 ## v0.1.10 — 2026-10-29
 
 ### New

@@ -47,6 +47,8 @@ pub struct AcpDriver {
     barriers: Mutex<HashMap<u64, tokio::sync::oneshot::Sender<()>>>,
     next_barrier: std::sync::atomic::AtomicU64,
     config_src: Mutex<HashMap<String, ConfigSource>>,
+    /// Armada's note to the agent went in as the new session's system prompt.
+    guided: std::sync::atomic::AtomicBool,
 }
 
 pub struct StartOptions<'a> {
@@ -113,6 +115,7 @@ impl AcpDriver {
             barriers: Mutex::default(),
             next_barrier: std::sync::atomic::AtomicU64::new(FIRST_SYNC_BARRIER),
             config_src: Mutex::default(),
+            guided: std::sync::atomic::AtomicBool::new(false),
         });
         tokio::spawn(event_loop(
             Arc::downgrade(&driver),
@@ -160,10 +163,7 @@ impl AcpDriver {
         if let Some(prev) = opts.resume {
             let can_resume = caps["sessionCapabilities"].get("resume").is_some();
             let can_load = caps["loadSession"].as_bool().unwrap_or(false);
-            let mut params = json!({ "sessionId": prev, "cwd": cwd, "mcpServers": mcp });
-            if let Some(prompt) = system_prompt(caps) {
-                params["systemPrompt"] = prompt;
-            }
+            let params = json!({ "sessionId": prev, "cwd": cwd, "mcpServers": mcp });
             let mut resumed = None;
             if can_resume {
                 match peer
@@ -202,6 +202,9 @@ impl AcpDriver {
                 let mut params = json!({ "cwd": cwd, "mcpServers": mcp });
                 if let Some(prompt) = system_prompt(caps) {
                     params["systemPrompt"] = prompt;
+                    driver
+                        .guided
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
                 }
                 let resp = peer
                     .request_timeout("session/new", params, Some(Duration::from_secs(120)))
@@ -222,6 +225,12 @@ impl AcpDriver {
 
     pub fn session_id(&self) -> String {
         self.session_id.lock().clone()
+    }
+
+    /// Whether Armada's note went in as this session's system prompt (a resumed session
+    /// ignores one, so it needs the note in a message instead).
+    pub fn guided(&self) -> bool {
+        self.guided.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn apply_session_config(&self, resp: &Value) {

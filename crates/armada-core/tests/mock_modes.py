@@ -31,7 +31,7 @@ while True:
                 read()
         caps = {"loadSession": True}
         if MODE != "replay":
-            caps["sessionCapabilities"] = {"resume": {}}
+            caps["sessionCapabilities"] = {"resume": {}, "systemPrompt": {"mode": {"override": {}}}}
         result = {"protocolVersion": 1, "agentCapabilities": caps}
         if MODE == "steer":
             # claude-agent-acp's steering extension.

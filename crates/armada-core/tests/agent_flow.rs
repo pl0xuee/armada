@@ -1056,3 +1056,87 @@ async fn codex_server_requests_and_ask_mode() {
         .any(|o| o.id == "approval" && o.current_value == "untrusted"));
     core.shutdown().await;
 }
+
+/// Allows the permission the mock asks for with every prompt.
+async fn approve_next(rx: &mut mpsc::UnboundedReceiver<ArmadaEvent>, core: &Core, agent_id: &str) {
+    let ArmadaEvent::Attention {
+        request_id: Some(request),
+        ..
+    } = next_matching(rx, |e| {
+        matches!(
+            e,
+            ArmadaEvent::Attention {
+                reason: AttentionReason::Permission,
+                ..
+            }
+        )
+    })
+    .await
+    else {
+        unreachable!()
+    };
+    core.respond_permission(agent_id, &request, "yes")
+        .await
+        .unwrap();
+}
+
+/// Agents are told they can show pictures: as the system prompt of a new session when the agent
+/// takes one (nothing visible in the prompt), otherwise as a note ahead of the first prompt, once.
+#[tokio::test]
+async fn agents_are_told_they_can_show_pictures() {
+    for (name, no_system_prompt) in [("guide-sys", false), ("guide-note", true)] {
+        let (core, mut rx, account, project) = custom_mock_core(name).await;
+        if no_system_prompt {
+            let mut settings = core.settings().unwrap();
+            settings.custom_agents[0].env = vec![KeyValue {
+                name: "MOCK_NO_SYSTEM_PROMPT".into(),
+                value: "1".into(),
+            }];
+            core.save_settings(settings).unwrap();
+        }
+        let agent = core
+            .create_agent(CreateAgentRequest {
+                provider: Provider::Custom,
+                account_id: account,
+                project_path: project.to_string_lossy().into_owned(),
+                prompt: "hello".into(),
+                title: None,
+                worktree: false,
+                model: None,
+                group_id: None,
+                custom_agent_id: Some("mock".into()),
+                permission_mode: None,
+                attachments: vec![],
+            })
+            .await
+            .unwrap();
+        approve_next(&mut rx, &core, &agent.id).await;
+        let done = |e: &ArmadaEvent| {
+            matches!(
+                e,
+                ArmadaEvent::Attention {
+                    reason: AttentionReason::Done,
+                    ..
+                }
+            )
+        };
+        let ArmadaEvent::Attention { body, .. } = next_matching(&mut rx, done).await else {
+            unreachable!()
+        };
+        if no_system_prompt {
+            // (The notification body is shortened, so only the start of the note is visible.)
+            assert!(body.starts_with("You said: [Note from Armada"), "{body}");
+        } else {
+            assert_eq!(body, "You said: hello");
+        }
+        assert!(core.agent(&agent.id).unwrap().guided);
+        // Only once: the next prompt is sent as is.
+        core.send_prompt(&agent.id, "again", vec![]).await.unwrap();
+        approve_next(&mut rx, &core, &agent.id).await;
+        let ArmadaEvent::Attention { body, .. } = next_matching(&mut rx, done).await else {
+            unreachable!()
+        };
+        assert_eq!(body, "You said: again");
+        core.shutdown().await;
+    }
+}
