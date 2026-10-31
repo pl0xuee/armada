@@ -7,6 +7,14 @@ docs/RELEASING.md).
 
 ## Unreleased
 
+### New
+
+- **GitHub, built in.** A new **GitHub** button in the Review panel does what used to need a terminal. **Sign in** runs `gh auth login` in a window and then connects git to that sign-in, which is what pushes from Armada were missing (git can't ask for a password here). **Push** sends the agent's current branch to GitHub, never forced. **Create repository & push** turns the project into a new GitHub repository (setting up git and making a first commit if the folder has none, leaving out files that look like secrets such as `.env`), private by default. Pushes that fail for lack of credentials now say so and point to the button, instead of a bare git error.
+
+- **Start up to 8 agents at once on the same task.** The home composer and the New agent dialog have an **Agents** stepper (1 to 8). With more than one, each agent runs in its own worktree and branch, so they can't overwrite each other, and Start becomes “Start 4”. They open together inside their project, in a grid that fits the window (4 as 2×2, 8 as 4×2; fewer columns in a narrow window, then tabs), numbered Claude #1, #2… If some fail to start, the prompt is kept and a retry starts only the ones that failed, in the same grid. It needs a git repository, and Armada tells you when the folder isn't one.
+
+- **Projects tab.** The first tab is now **Projects**, and the sidebar is organised by project: each folder is a row with its agents under it, a count, a “N need you” badge and a **+**. Click a project to see all its agents together in the same grid, with a box underneath to start more of them (1 to 8 at a time) in that project; **+** takes you straight to that box. Click an agent's card (or **Tell it something**) to select it, and the box becomes that agent's own message box, so you can tell it something without leaving the grid; **New agents** switches back. **Open** goes to the agent's conversation, and the **project button at the top left** of it brings you back to the grid with that agent still selected. Projects that need you come first, and ⌘1–9 follow the new order.
+
 ### Fixed
 
 - **Agents that were already running still said they can't show pictures.** Claude ignores new instructions when an existing conversation is resumed, so only brand-new agents knew. Existing agents now get a short note about it ahead of their next message, once.

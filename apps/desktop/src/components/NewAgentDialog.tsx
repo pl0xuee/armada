@@ -10,10 +10,18 @@ import { CUSTOM_ACCOUNT_ID, PROVIDER_ORDER, PROVIDERS } from "@/lib/providers";
 import type { Account, Agent, Provider } from "@/lib/types";
 import { cn, errorMessage, modKey, uuid, isMac } from "@/lib/utils";
 import { pickFolder } from "@/lib/window";
-import { customFromChoice, pickAccount, readLaunchDefaults, rememberLaunch, resolveLaunch } from "@/lib/launchDefaults";
+import {
+  customFromChoice,
+  needsWorktree,
+  pickAccount,
+  readLaunchDefaults,
+  rememberLaunch,
+  resolveLaunch,
+} from "@/lib/launchDefaults";
 import { useApp } from "@/store/app";
 import { useUi, type NewAgentPreset } from "@/store/ui";
 import { AccountAvatar } from "./AccountAvatar";
+import { AgentCount } from "./home/AgentCount";
 import { useAttachments } from "@/hooks/useAttachments";
 import { AttachButton, DropOverlay } from "./AttachControls";
 import { AttachmentStrip } from "./AttachmentStrip";
@@ -72,6 +80,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
   const settings = useApp((s) => s.settings);
   const openAgent = useUi((s) => s.openAgent);
   const openCompare = useUi((s) => s.openCompare);
+  const openProject = useUi((s) => s.openProject);
   const setView = useUi((s) => s.setView);
 
   const recent = settings?.recentProjects ?? [];
@@ -99,6 +108,8 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
     PROVIDER_ORDER.map((p) => defaultAccount(accounts, p)?.id).filter((x): x is string => !!x),
   );
   const [worktree, setWorktree] = useState(initial.worktree);
+  /** Separate agents to start on this task (not in Compare mode, which starts one per account). */
+  const [count, setCount] = useState(1);
   const [title, setTitle] = useState("");
   const [model, setModel] = useState("");
   const [prompt, setPrompt] = useState(preset?.prompt ?? "");
@@ -148,7 +159,16 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
 
   const providerAccounts = useMemo(() => accounts.filter((a) => a.provider === provider), [accounts, provider]);
   const account = accounts.find((a) => a.id === accountId);
-  const issues = usePreflight({ provider, account: custom ? undefined : account, folder: project, worktree });
+  // Several agents in one folder would overwrite each other, so each gets its own worktree.
+  // Retrying the failed ones of a partial launch keeps them isolated like the ones that started.
+  const parallel = !compare && (needsWorktree(count) || (launched.length > 0 && groupRef.current !== null));
+  const issues = usePreflight({
+    provider,
+    account: custom ? undefined : account,
+    folder: project,
+    worktree: worktree || parallel,
+  });
+  const notGit = parallel && issues.some((i) => i.id === "not_git");
 
   const chooseProvider = (key: string) => {
     setChoice(key);
@@ -205,9 +225,12 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
       : account
         ? [{ key: account.id, provider: account.provider, accountId: account.id, customAgentId: null }]
         : [];
+  /** What a launch starts: one per account in Compare mode, otherwise `count` copies of the one chosen. */
+  const launches: LaunchTarget[] = compare ? chosen : chosen.flatMap((t) => Array.from({ length: count }, () => t));
   const canSubmit =
     project.trim() !== "" &&
     chosen.length > 0 &&
+    !notGit &&
     // The prompt is optional (the agent starts and waits), except in Compare mode,
     // which exists to send one prompt to several agents.
     // After a partial Compare launch, retrying the failed targets joins the same group.
@@ -226,11 +249,13 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
     if (!canSubmit || submittingRef.current) return;
     submittingRef.current = true;
     setSubmitting(true);
-    if (compare && !groupRef.current) groupRef.current = uuid();
-    const groupId = compare ? groupRef.current : null;
+    // Compare groups one agent per account; several copies of one agent are grouped too, so they open together.
+    // A retry after a partial launch keeps the group even if only one agent is left to start.
+    if ((compare || count > 1) && !groupRef.current) groupRef.current = uuid();
+    const groupId = groupRef.current;
     try {
       const results = await Promise.allSettled(
-        chosen.map((t) =>
+        launches.map((t) =>
           api.createAgent({
             provider: t.provider,
             accountId: t.accountId,
@@ -238,7 +263,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
             projectPath: project.trim(),
             prompt: prompt.trim(),
             title: title.trim() || null,
-            worktree,
+            worktree: worktree || parallel,
             model: modelFor(t),
             groupId,
             permissionMode: mode,
@@ -250,7 +275,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
       const failed: { target: LaunchTarget; error: string }[] = [];
       results.forEach((r, i) => {
         if (r.status === "fulfilled") created.push(r.value);
-        else failed.push({ target: chosen[i], error: errorMessage(r.reason) });
+        else failed.push({ target: launches[i], error: errorMessage(r.reason) });
       });
       for (const a of created) useApp.getState().upsertAgent(a);
       if (!compare && provider === "local" && model.trim()) rememberLocalModel(accountId, model.trim());
@@ -268,8 +293,13 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
         }
         onDone();
         if (groupId && allLaunched.length >= 2) {
-          openCompare(groupId);
-          toast.success(`Launched ${allLaunched.length} agents`, { description: "Comparing side by side." });
+          // A comparison (one agent per account) has its own page; several copies of one agent
+          // stay inside their project, where more can be started.
+          if (compare) openCompare(groupId);
+          else openProject(allLaunched[0].projectPath);
+          toast.success(`Launched ${allLaunched.length} agents`, {
+            description: compare ? "Comparing side by side." : "Each has its own worktree.",
+          });
         } else if (allLaunched[0]) {
           openAgent(allLaunched[0].id);
         }
@@ -282,17 +312,20 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
       if (compare) {
         const ok = new Set(created.map((a) => targetKeyOf(a)));
         setTargets((t) => t.filter((k) => !ok.has(k)));
+      } else {
+        setCount(failed.length);
       }
       const lines = (
         <span className="mt-0.5 flex flex-col gap-0.5">
-          {failed.map((f) => (
-            <span key={f.target.key}>
+          {failed.map((f, i) => (
+            <span key={`${f.target.key}-${i}`}>
               <span className="font-medium text-fg">{targetLabel(f.target)}</span>: {f.error}
             </span>
           ))}
         </span>
       );
       if (created.length === 0 && launched.length === 0) {
+        groupRef.current = null; // nothing started: a retry shouldn't reuse the group
         toast.error(failed.length === 1 ? "Couldn't launch agent" : `Couldn't launch ${failed.length} agents`, {
           description: lines,
         });
@@ -307,10 +340,11 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
           action:
             groupId && allLaunched.length > 0
               ? {
-                  label: "View comparison",
+                  label: compare ? "View comparison" : "View project",
                   onClick: () => {
                     onDone();
-                    openCompare(groupId);
+                    if (compare) openCompare(groupId);
+                    else openProject(allLaunched[0].projectPath);
                   },
                 }
               : undefined,
@@ -514,6 +548,11 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
             <LocalModelPicker key={account.id} account={account} value={model} onChange={setModel} />
           )}
           {!compare && <PreflightNotes issues={issues} className="mt-2" />}
+          {notGit && (
+            <p className="mt-1 text-[12px] text-warn">
+              Starting several agents needs a git repository, so each can have its own worktree.
+            </p>
+          )}
           {compare && chosen.length < 2 && launched.length === 0 && (
             <p className="mt-2 text-[12px] text-steel">Pick at least two agents to compare.</p>
           )}
@@ -563,11 +602,19 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
         {/* Options */}
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
           <label className="flex items-center gap-2 text-[12.5px] text-fg">
-            <Switch checked={worktree} onCheckedChange={setWorktree} aria-label="Isolated git worktree" />
+            <Switch
+              checked={worktree || parallel}
+              disabled={parallel}
+              onCheckedChange={setWorktree}
+              aria-label="Isolated git worktree"
+            />
             <GitBranch className="h-3.5 w-3.5 text-steel" />
             Isolated worktree
-            <span className="text-[11.5px] text-steel">(own branch, no conflicts)</span>
+            <span className="text-[11.5px] text-steel">
+              {parallel ? "(each agent gets its own)" : "(own branch, no conflicts)"}
+            </span>
           </label>
+          {!compare && <AgentCount value={count} onChange={setCount} disabled={submitting} />}
           <PermissionModeChip value={mode} onChange={setMode} />
           <button
             type="button"
@@ -620,7 +667,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
         </Button>
         <Button variant="primary" disabled={!canSubmit || submitting} onClick={() => void submit()}>
           {submitting ? <Spinner className="h-3.5 w-3.5 text-current" /> : <Rocket />}
-          {compare ? `Launch ${chosen.length} agents` : "Launch agent"}
+          {compare || count > 1 ? `Launch ${launches.length} agents` : "Launch agent"}
         </Button>
       </DialogFooter>
     </>

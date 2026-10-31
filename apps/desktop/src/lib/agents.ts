@@ -1,11 +1,20 @@
 import type { Account, Agent, TimelineItem } from "./types";
+import { basename } from "./utils";
 
-export type AgentGroupId = "needs" | "working" | "recent" | "archived";
+/** Key of the group that holds archived agents (not a real project path). */
+export const ARCHIVED_KEY = "__archived__";
 
-export interface AgentGroup {
-  id: AgentGroupId;
-  label: string;
+export interface ProjectGroup {
+  /** The project folder, without a trailing slash. */
+  path: string;
+  /** The folder's name. */
+  name: string;
+  /** Not archived: agents that need you first, then working ones, then the most recently active. */
   agents: Agent[];
+  /** Agents waiting for the user (permission, error, interrupted). */
+  needs: number;
+  working: number;
+  lastActivityAt: number;
 }
 
 const NEEDS_RANK: Partial<Record<Agent["status"], number>> = {
@@ -14,7 +23,17 @@ const NEEDS_RANK: Partial<Record<Agent["status"], number>> = {
   interrupted: 2,
 };
 
-export function groupAgents(agents: Agent[], query = ""): AgentGroup[] {
+const needsYou = (a: Agent) => a.status in NEEDS_RANK || a.pendingPermissions > 0;
+const isWorking = (a: Agent) => a.status === "working" || a.status === "starting";
+
+export const projectKey = (path: string) => path.trim().replace(/[\\/]+$/, "") || path;
+
+/**
+ * The sidebar's projects: every folder that has agents, each with its agents, projects that
+ * need you first and then the most recently active. Archived agents are returned separately.
+ * `query` filters agents (title, folder, branch, last message).
+ */
+export function groupByProject(agents: Agent[], query = ""): { projects: ProjectGroup[]; archived: Agent[] } {
   const q = query.trim().toLowerCase();
   const match = (a: Agent) =>
     !q ||
@@ -23,35 +42,44 @@ export function groupAgents(agents: Agent[], query = ""): AgentGroup[] {
     (a.branch ?? "").toLowerCase().includes(q) ||
     (a.lastMessage ?? "").toLowerCase().includes(q);
 
-  const needs: Agent[] = [];
-  const working: Agent[] = [];
-  const recent: Agent[] = [];
+  const byPath = new Map<string, Agent[]>();
   const archived: Agent[] = [];
   for (const a of agents) {
     if (!match(a)) continue;
-    if (a.archived) archived.push(a);
-    else if (a.status in NEEDS_RANK || a.pendingPermissions > 0) needs.push(a);
-    else if (a.status === "working" || a.status === "starting") working.push(a);
-    else recent.push(a);
+    if (a.archived) {
+      archived.push(a);
+      continue;
+    }
+    const key = projectKey(a.projectPath);
+    const list = byPath.get(key);
+    if (list) list.push(a);
+    else byPath.set(key, [a]);
   }
   const byActivity = (x: Agent, y: Agent) => y.lastActivityAt - x.lastActivityAt;
-  needs.sort((x, y) => (NEEDS_RANK[x.status] ?? 0) - (NEEDS_RANK[y.status] ?? 0) || byActivity(x, y));
-  working.sort(byActivity);
-  recent.sort(byActivity);
+  const rank = (a: Agent) => (needsYou(a) ? (NEEDS_RANK[a.status] ?? 0) : isWorking(a) ? 3 : 4);
+  const projects: ProjectGroup[] = [];
+  for (const [path, list] of byPath) {
+    list.sort((x, y) => rank(x) - rank(y) || byActivity(x, y));
+    projects.push({
+      path,
+      name: basename(path),
+      agents: list,
+      needs: list.filter(needsYou).length,
+      working: list.filter(isWorking).length,
+      lastActivityAt: Math.max(...list.map((a) => a.lastActivityAt)),
+    });
+  }
+  projects.sort(
+    (x, y) =>
+      Number(y.needs > 0) - Number(x.needs > 0) || y.lastActivityAt - x.lastActivityAt || x.name.localeCompare(y.name),
+  );
   archived.sort(byActivity);
-  return [
-    { id: "needs", label: "Needs you", agents: needs },
-    { id: "working", label: "Working", agents: working },
-    { id: "recent", label: "Recent", agents: recent },
-    { id: "archived", label: "Archived", agents: archived },
-  ];
+  return { projects, archived };
 }
 
-/** Flat order used by ⌘1..9 (archived excluded). */
+/** Flat order used by ⌘1..9: the sidebar's order, project by project (archived excluded). */
 export function orderedAgents(agents: Agent[]): Agent[] {
-  return groupAgents(agents)
-    .filter((g) => g.id !== "archived")
-    .flatMap((g) => g.agents);
+  return groupByProject(agents).projects.flatMap((p) => p.agents);
 }
 
 export function accountName(accounts: Account[], id: string): string {

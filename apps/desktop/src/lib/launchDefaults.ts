@@ -2,6 +2,7 @@
 // New agent dialog, the prompt-first home and "Start agent" in the command palette.
 import { api } from "./api";
 import { recallLocalModel } from "./local";
+import { errorMessage, uuid } from "./utils";
 import { CUSTOM_ACCOUNT_ID, PROVIDER_ORDER, type BuiltinProvider } from "./providers";
 import type { Account, Agent, CreateAgentRequest, CustomAgent, Provider, ProviderInfo, Settings } from "./types";
 
@@ -116,28 +117,87 @@ export function rememberLaunch(
   });
 }
 
-/** Create one agent from a resolved target + prompt (used by home and the palette). */
-export async function launchAgent(
+function launchRequest(
   t: ResolvedLaunch,
   prompt: string,
-  permissionMode: "auto" | "ask" | null = null,
-): Promise<Agent> {
-  const req: CreateAgentRequest = {
+  permissionMode: "auto" | "ask" | null,
+  worktree: boolean,
+): CreateAgentRequest {
+  return {
     provider: t.provider,
     accountId: t.accountId,
     customAgentId: t.customAgentId,
     projectPath: t.folder.trim(),
     prompt: prompt.trim(),
     title: null,
-    worktree: t.worktree,
+    worktree,
     model: t.provider === "local" ? recallLocalModel(t.accountId) : null,
     groupId: null,
     attachments: [],
     permissionMode,
   };
-  const agent = await api.createAgent(req);
+}
+
+/** Create one agent from a resolved target + prompt (used by home and the palette). */
+export async function launchAgent(
+  t: ResolvedLaunch,
+  prompt: string,
+  permissionMode: "auto" | "ask" | null = null,
+): Promise<Agent> {
+  const agent = await api.createAgent(launchRequest(t, prompt, permissionMode, t.worktree));
   rememberLaunch(t);
   return agent;
+}
+
+/** Most separate agents one launch can start in the same project. */
+export const MAX_PARALLEL_AGENTS = 8;
+
+export function clampAgentCount(n: number): number {
+  return Number.isFinite(n) ? Math.min(MAX_PARALLEL_AGENTS, Math.max(1, Math.floor(n))) : 1;
+}
+
+/** Whether a launch of `count` agents must run each in its own worktree (they'd overwrite each other's files otherwise). */
+export const needsWorktree = (count: number) => count > 1;
+
+export interface LaunchBatch {
+  /** The group the agents share (so they can be shown together), null for a single agent. */
+  groupId: string | null;
+  created: Agent[];
+  /** One message per agent that didn't start. */
+  failed: string[];
+}
+
+/**
+ * Starts `count` (1 to {@link MAX_PARALLEL_AGENTS}) separate agents on the same task in the same
+ * project. With more than one, each gets its own worktree and branch and they share a group
+ * (pass the previous batch's `groupId` when retrying the ones that failed). Never rejects:
+ * agents that couldn't start are reported in `failed`, so a retry can start only those.
+ */
+export async function launchAgents(
+  t: ResolvedLaunch,
+  prompt: string,
+  permissionMode: "auto" | "ask" | null,
+  count: number,
+  groupId: string | null = null,
+): Promise<LaunchBatch> {
+  const n = clampAgentCount(count);
+  // Retrying the failed ones of a batch (it has a group) keeps them isolated like their siblings.
+  const worktree = t.worktree || needsWorktree(n) || groupId !== null;
+  const group = groupId ?? (needsWorktree(n) ? uuid() : null);
+  const results = await Promise.allSettled(
+    // Async, so a throw while building the request is a failed agent, not an escaped exception.
+    Array.from({ length: n }, async () =>
+      api.createAgent({ ...launchRequest(t, prompt, permissionMode, worktree), groupId: group }),
+    ),
+  );
+  const created: Agent[] = [];
+  const failed: string[] = [];
+  for (const r of results) {
+    if (r.status === "fulfilled") created.push(r.value);
+    else failed.push(errorMessage(r.reason));
+  }
+  if (created.length > 0) rememberLaunch(t);
+  return { groupId: group, created, failed };
 }
 
 /** Projects found on this computer, fetched once per session. */

@@ -16,6 +16,7 @@ import {
   FolderOpen,
   GitBranch,
   GitCompare,
+  LayoutGrid,
   Globe,
   PanelLeftOpen,
   PanelRightClose,
@@ -167,6 +168,21 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
             </Button>
           </Tooltip>
         )}
+        {(!tile || tile.first) && (
+          // Back to the project's grid of agents, with this one still selected there.
+          <Tooltip content={`All agents in ${basename(agent.projectPath)}`}>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="-ml-1 shrink-0 gap-1.5 px-2 text-muted"
+              aria-label={`Back to all agents in ${basename(agent.projectPath)}`}
+              onClick={() => useUi.getState().openProject(agent.projectPath, agent.id)}
+            >
+              <LayoutGrid />
+              {tier !== "compact" && <span className="max-w-[120px] truncate">{basename(agent.projectPath)}</span>}
+            </Button>
+          </Tooltip>
+        )}
         <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="md" />
         <div className="min-w-0 flex-1">
           <EditableTitle agent={agent} />
@@ -208,7 +224,11 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
         <div className="flex shrink-0 items-center gap-1.5">
           {tile || (tier === "compact" && inGroup) ? (
             <Tooltip content={done ? "Done" : STATUS[agent.status].label}>
-              <span className="flex h-6 w-5 items-center justify-center" role="img" aria-label={STATUS[agent.status].label}>
+              <span
+                className="flex h-6 w-5 items-center justify-center"
+                role="img"
+                aria-label={STATUS[agent.status].label}
+              >
                 <StatusDot status={agent.status} size={8} done={done} />
               </span>
             </Tooltip>
@@ -229,13 +249,13 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
             <UsageChip account={account} compact={false} />
           )}
           {!tile && (
-          <DetailsPopover
-            agent={agent}
-            account={account}
-            identityName={identity.name}
-            identityColor={identity.color}
-            tier={tier}
-          />
+            <DetailsPopover
+              agent={agent}
+              account={account}
+              identityName={identity.name}
+              identityColor={identity.color}
+              tier={tier}
+            />
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -329,42 +349,42 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
           {agent.parentId && <TileToggle />}
           {!tile && (
             <>
-          <Tooltip
-            content={
-              workspaceOpen
-                ? workspaceRoom === 0
-                  ? "Hide workspace panel (not enough room to show it)"
-                  : "Hide workspace panel"
-                : workspaceRoom === 0
-                  ? "Show workspace panel (window is small)"
-                  : "Show workspace panel"
-            }
-            shortcut={[modKey, "`"]}
-          >
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label="Toggle workspace panel"
-              aria-pressed={workspaceOpen}
-              onClick={() => useUi.getState().setWorkspaceOpen(!workspaceOpen)}
-            >
-              <SquareTerminal />
-            </Button>
-          </Tooltip>
+              <Tooltip
+                content={
+                  workspaceOpen
+                    ? workspaceRoom === 0
+                      ? "Hide workspace panel (not enough room to show it)"
+                      : "Hide workspace panel"
+                    : workspaceRoom === 0
+                      ? "Show workspace panel (window is small)"
+                      : "Show workspace panel"
+                }
+                shortcut={[modKey, "`"]}
+              >
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Toggle workspace panel"
+                  aria-pressed={workspaceOpen}
+                  onClick={() => useUi.getState().setWorkspaceOpen(!workspaceOpen)}
+                >
+                  <SquareTerminal />
+                </Button>
+              </Tooltip>
             </>
           )}
           {(!tile || tile.focused) && (
-          <Tooltip content={inspectorOpen ? "Hide inspector" : "Show inspector"}>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label="Toggle inspector"
-              aria-pressed={inspectorOpen}
-              onClick={toggleInspector}
-            >
-              {inspectorOpen ? <PanelRightClose /> : <PanelRightOpen />}
-            </Button>
-          </Tooltip>
+            <Tooltip content={inspectorOpen ? "Hide inspector" : "Show inspector"}>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Toggle inspector"
+                aria-pressed={inspectorOpen}
+                onClick={toggleInspector}
+              >
+                {inspectorOpen ? <PanelRightClose /> : <PanelRightOpen />}
+              </Button>
+            </Tooltip>
           )}
         </div>
       </div>

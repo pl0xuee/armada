@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { archiveAgent } from "@/lib/actions";
 import { api } from "@/lib/api";
 import { conflictPrompt, gitBusyReason, mergeToast, shipOutcome, toastCommit, toastPr } from "@/lib/gitResults";
+import { GithubDialog } from "./git/GithubDialog";
 import { PushBaseNotice } from "./git/PushBaseNotice";
 import { pluralize } from "@/lib/format";
 import { PatchIndex } from "@/lib/patchIndex";
@@ -36,6 +37,7 @@ import { ReviewDiffColumn, type DiffColumnHandle } from "./review/ReviewDiffColu
 import { ReviewFileList } from "./review/ReviewFileList";
 import { fileSignature, useAgentViewed, useViewedFiles } from "./review/viewedStore";
 import { ProviderGlyph } from "./ProviderGlyph";
+import { GithubGlyph } from "./settings/GithubGlyph";
 import { ConfirmDialog } from "./ui/alert-dialog";
 import { Button } from "./ui/button";
 import { Input, Label, Textarea } from "./ui/input";
@@ -98,6 +100,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   const [commitMsg, setCommitMsg] = useState("");
   const [busy, setBusy] = useState<BusyKind | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [githubOpen, setGithubOpen] = useState(false);
   const [editing, setEditing] = useState<{ key: string; commentId: string | null } | null>(null);
   const [revertTarget, setRevertTarget] = useState<{ path: string; hunk: number | null } | null>(null);
   const [revertError, setRevertError] = useState<string | null>(null);
@@ -795,6 +798,14 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
             <Trash2 />
             Discard
           </Button>
+          <Button
+            variant="secondary"
+            onClick={() => setGithubOpen(true)}
+            title="Sign in to GitHub, push this branch, or put the project on GitHub"
+          >
+            <GithubGlyph className="h-3.5 w-3.5" />
+            GitHub
+          </Button>
           <PrPopover
             agent={agent}
             autoOpen={prIntent && !!diff}
@@ -858,6 +869,13 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         </div>
       </footer>
 
+      <GithubDialog
+        agent={agent}
+        open={githubOpen}
+        onOpenChange={setGithubOpen}
+        disabled={gitBlocked}
+        onPushed={() => refreshPrSoon(agent.id)}
+      />
       <ConfirmDialog
         open={secrets !== null}
         onOpenChange={(o) => {

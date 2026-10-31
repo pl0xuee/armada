@@ -26,7 +26,7 @@ interface RailItem {
 }
 
 const TOP: RailItem[] = [
-  { view: "agents", label: "Agents", icon: MessagesSquare },
+  { view: "agents", label: "Projects", icon: MessagesSquare },
   { view: "triage", label: "Needs you", icon: ListTodo, shortcut: [modKey, "J"] },
   { view: "mission", label: "Mission Control", icon: LayoutGrid, shortcut: [modKey, "⇧", "M"] },
   { view: "inbox", label: "Inbox", icon: Inbox, shortcut: [modKey, "I"] },

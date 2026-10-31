@@ -34,6 +34,8 @@ export interface TerminalSession {
   reused?: boolean;
   /** The program that was started (shown when it prints nothing for a while). */
   command?: string;
+  /** A GitHub sign-in (`gh auth login`), not an agent account's. */
+  github?: boolean;
 }
 
 export interface NewAgentPreset {
@@ -47,6 +49,10 @@ export interface NewAgentPreset {
 interface UiStore {
   view: View;
   selectedAgentId: string | null;
+  /** The project whose agents the Projects tab shows as a grid (when no single agent is open). */
+  selectedProjectPath: string | null;
+  /** The agent card to select when the project page opens (the one you came back from). */
+  projectFocusId: string | null;
   compareGroupId: string | null;
   settingsSection: SettingsSection;
   inspectorOpen: boolean;
@@ -90,6 +96,8 @@ interface UiStore {
 
   setView: (v: View) => void;
   openAgent: (id: string) => void;
+  /** Show a project's agents together in the Projects tab. */
+  openProject: (path: string, focusAgentId?: string) => void;
   /** Open an agent and scroll its timeline to one item (e.g. a sub-agent's card). */
   revealItem: (agentId: string, itemId: string) => void;
   clearRevealTarget: () => void;
@@ -242,6 +250,8 @@ const initial = initialFromUrl();
 export const useUi = create<UiStore>((set) => ({
   view: initial.view,
   selectedAgentId: initial.agent,
+  selectedProjectPath: null,
+  projectFocusId: null,
   compareGroupId: null,
   settingsSection: "appearance",
   inspectorOpen: readInspector(),
@@ -286,11 +296,14 @@ export const useUi = create<UiStore>((set) => ({
   setWorkspaceRoom: (workspaceRoom) => set((s) => (s.workspaceRoom === workspaceRoom ? s : { workspaceRoom })),
 
   setView: (view) => set({ view }),
-  openAgent: (id) => set({ view: "agents", selectedAgentId: id }),
+  openAgent: (id) => set({ view: "agents", selectedAgentId: id, selectedProjectPath: null }),
+  openProject: (path, focusAgentId) =>
+    set({ view: "agents", selectedAgentId: null, selectedProjectPath: path, projectFocusId: focusAgentId ?? null }),
   revealItem: (agentId, itemId) =>
     set((s) => ({
       view: "agents",
       selectedAgentId: agentId,
+      selectedProjectPath: null,
       revealTarget: { agentId, itemId, tick: (s.revealTarget?.tick ?? 0) + 1 },
     })),
   clearRevealTarget: () => set({ revealTarget: null }),

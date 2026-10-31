@@ -2,7 +2,8 @@ import { ArrowUp, Check, ChevronDown, FolderOpen, GitBranch } from "lucide-react
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useIdentity } from "@/hooks/useIdentity";
-import { launchAgent, resolveLaunch, type ResolvedLaunch } from "@/lib/launchDefaults";
+import type { Agent } from "@/lib/types";
+import { launchAgents, needsWorktree, resolveLaunch, type ResolvedLaunch } from "@/lib/launchDefaults";
 import { CUSTOM_ACCOUNT_ID, PROVIDER_ORDER, PROVIDERS } from "@/lib/providers";
 import { basename, cn, errorMessage, isMac, modKey, prettyPath } from "@/lib/utils";
 import { pickFolder } from "@/lib/window";
@@ -24,6 +25,7 @@ import { Spinner } from "../ui/misc";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Switch } from "../ui/switch";
 import { Tooltip } from "../ui/tooltip";
+import { AgentCount } from "./AgentCount";
 import { PermissionModeChip, usePermissionMode } from "./PermissionModeChip";
 import { PreflightNotes, usePreflight } from "./PreflightNotes";
 import { ProjectPicker } from "./ProjectPicker";
@@ -35,13 +37,32 @@ const chipClass =
  * Prompt-first home: type what an agent should do, pick where, press ⌘⏎.
  * Remembers the last provider / account / folder / worktree (lib/launchDefaults).
  */
-export function HomeComposer({ compact = false, autoFocus = true }: { compact?: boolean; autoFocus?: boolean }) {
+export function HomeComposer({
+  compact = false,
+  autoFocus = true,
+  folder: lockedFolder,
+  onLaunched,
+  placeholder = "What should an agent do?",
+}: {
+  compact?: boolean;
+  autoFocus?: boolean;
+  /** Start agents in this project only (no folder picker), e.g. from a project's own page. */
+  folder?: string;
+  /** Called with the agents that started, instead of opening them (the project page stays put). */
+  onLaunched?: (agents: Agent[], groupId: string | null) => void;
+  placeholder?: string;
+}) {
   const [mode, setMode] = usePermissionMode();
   const accounts = useApp((s) => s.accounts);
   const settings = useApp((s) => s.settings);
   const openAgent = useUi((s) => s.openAgent);
-  const [target, setTarget] = useState<ResolvedLaunch>(() => resolveLaunch(accounts, settings));
+  const openProject = useUi((s) => s.openProject);
+  const [chosen, setTarget] = useState<ResolvedLaunch>(() => resolveLaunch(accounts, settings));
+  const target = useMemo(() => (lockedFolder ? { ...chosen, folder: lockedFolder } : chosen), [chosen, lockedFolder]);
   const [prompt, setPrompt] = useState("");
+  const [count, setCount] = useState(1);
+  /** The agents already started for this prompt when some failed, so a retry joins them. */
+  const batchRef = useRef<{ groupId: string; started: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -78,28 +99,59 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
     : target.provider !== "custom" && !account
       ? `Add a ${PROVIDERS[target.provider].short} account first`
       : null;
-  const canStart = !missing && prompt.trim().length > 0 && !busy;
+  // Several agents, or the failed ones of a batch being retried: each in its own worktree.
+  const parallel = needsWorktree(count) || batchRef.current !== null;
   const issues = usePreflight({
     provider: target.provider,
     account: target.provider === "custom" ? undefined : account,
     folder: target.folder,
-    worktree: target.worktree,
+    worktree: target.worktree || parallel,
   });
+  // Several agents in one non-git folder would share it, so they can't be started at all.
+  const notGit = parallel && issues.some((i) => i.id === "not_git");
+  const canStart = !missing && prompt.trim().length > 0 && !busy && !notGit;
 
   const start = async () => {
     if (!canStart || busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     try {
-      const agent = await launchAgent(target, prompt, mode);
-      useApp.getState().upsertAgent(agent);
-      setPrompt("");
-      openAgent(agent.id);
+      const batch = batchRef.current;
+      const { groupId, created, failed } = await launchAgents(target, prompt, mode, count, batch?.groupId);
+      const started = (batch?.started ?? 0) + created.length;
+      for (const a of created) useApp.getState().upsertAgent(a);
+      if (failed.length === 0) {
+        setPrompt("");
+        setCount(1);
+        batchRef.current = null;
+      } else {
+        // Keep the prompt, and only offer to start the ones that didn't, so a retry can't duplicate the rest.
+        setCount(failed.length);
+        batchRef.current = groupId && started > 0 ? { groupId, started } : null;
+      }
+      if (onLaunched) {
+        if (created.length > 0) onLaunched(created, groupId);
+        if (failed.length === 0)
+          toast.success(created.length > 1 ? `Started ${created.length} agents` : "Agent started", {
+            description: created.length > 1 ? "Each has its own worktree." : undefined,
+          });
+      } else if (groupId && started > 1) {
+        // Several agents: show them all together in their project, where more can be started.
+        openProject(created[0]?.projectPath ?? target.folder.trim());
+        if (failed.length === 0)
+          toast.success(`Started ${started} agents`, { description: "Each has its own worktree." });
+      } else if (created[0]) openAgent(created[0].id);
+      if (failed.length > 0) {
+        toast.error(
+          created.length > 0 ? `Started ${created.length}, ${failed.length} failed` : "Couldn't start the agent",
+          {
+            description: [...new Set(failed)].join("\n"),
+            action: { label: "More options", onClick: () => useUi.getState().openNewAgent({ prompt }) },
+          },
+        );
+      }
     } catch (e) {
-      toast.error("Couldn't start the agent", {
-        description: errorMessage(e),
-        action: { label: "More options", onClick: () => useUi.getState().openNewAgent({ prompt }) },
-      });
+      toast.error("Couldn't start the agent", { description: errorMessage(e) });
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -128,7 +180,7 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
             void start();
           }
         }}
-        placeholder="What should an agent do?"
+        placeholder={placeholder}
         className={cn(
           "block w-full resize-none bg-transparent px-4 pt-3.5 leading-relaxed text-fg placeholder:text-steel focus:outline-none",
           compact ? "min-h-[56px] text-[13.5px]" : "min-h-[84px] text-[15px]",
@@ -136,19 +188,29 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
       />
       <div className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2.5 pt-1.5">
         <AgentPicker target={target} onChange={(t) => setTarget((cur) => ({ ...cur, ...t }))} />
-        <FolderPicker folder={target.folder} onChange={(folder) => setTarget((cur) => ({ ...cur, folder }))} />
-        <Tooltip content="Run in an isolated git worktree (its own branch)">
+        {!lockedFolder && (
+          <FolderPicker folder={target.folder} onChange={(folder) => setTarget((cur) => ({ ...cur, folder }))} />
+        )}
+        <Tooltip
+          content={
+            parallel
+              ? "Several agents each run in their own worktree"
+              : "Run in an isolated git worktree (its own branch)"
+          }
+        >
           <label className={cn(chipClass, "cursor-default gap-2 pr-1.5")}>
             <GitBranch className="h-3.5 w-3.5 text-steel" />
             <span className={cn(compact && "sr-only")}>Worktree</span>
             <Switch
-              checked={target.worktree}
+              checked={target.worktree || parallel}
+              disabled={parallel}
               onCheckedChange={(worktree) => setTarget((cur) => ({ ...cur, worktree }))}
               aria-label="Isolated git worktree"
               className="scale-[0.85]"
             />
           </label>
         </Tooltip>
+        <AgentCount value={count} onChange={setCount} compact={compact} disabled={busy} />
         {!compact && <PermissionModeChip value={mode} onChange={setMode} className="h-7 rounded-lg" />}
         <div className="ml-auto flex items-center gap-2">
           <ComposerVoiceButtons onText={insertDictation} />
@@ -159,7 +221,7 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
               size={compact ? "icon-sm" : "sm"}
               disabled={!canStart}
               onClick={() => void start()}
-              aria-label="Start agent"
+              aria-label={count > 1 ? `Start ${count} agents` : "Start agent"}
               aria-keyshortcuts={isMac ? "Meta+Enter" : "Control+Enter"}
             >
               {busy ? (
@@ -167,7 +229,7 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
               ) : (
                 <ArrowUp className="!h-4 !w-4" strokeWidth={2.5} />
               )}
-              {!compact && "Start"}
+              {!compact && (count > 1 ? `Start ${count}` : "Start")}
             </Button>
           </Tooltip>
         </div>

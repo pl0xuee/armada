@@ -293,7 +293,9 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
         title={`Stop the ${what}?`}
         description={
           session.kind === "login"
-            ? "The sign-in process ends and this account stays signed out. You can start it again from Accounts."
+            ? session.github
+              ? "The sign-in process ends and you stay signed out of GitHub. You can start it again from the GitHub button in Review."
+              : "The sign-in process ends and this account stays signed out. You can start it again from Accounts."
             : "The installer is stopped midway. You can run it again from Settings → Providers."
         }
         confirmLabel={`Stop ${what}`}
@@ -333,7 +335,12 @@ function StatusChip({ state }: { state: RunState }) {
 async function afterExit(session: TerminalSession, code: number | null) {
   const store = useApp.getState();
   try {
-    if (session.kind === "login" && session.accountId) {
+    if (session.github) {
+      // Connect git to the new login here (not in the background), so the status read next includes it.
+      const gh = await api.githubSetupGit().catch(() => api.githubStatus());
+      if (gh.loggedIn) toast.success(gh.user ? `Signed in to GitHub as ${gh.user}` : "Signed in to GitHub");
+      else if (code !== 130 && code !== 143) toast.warning("You're still signed out of GitHub");
+    } else if (session.kind === "login" && session.accountId) {
       const acc = await api.checkAccount(session.accountId);
       store.upsertAccount(acc);
       if (acc.status?.loggedIn) {

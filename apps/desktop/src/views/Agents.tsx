@@ -22,6 +22,7 @@ import { TimelinePane } from "@/components/agent/TimelinePane";
 import { Inspector } from "@/components/agent/Inspector";
 import { AppMark } from "@/components/AppMark";
 import { HomeComposer } from "@/components/home/HomeComposer";
+import { ProjectView } from "@/components/project/ProjectView";
 import { RelTime } from "@/components/RelTime";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { PreviewTab } from "@/components/workspace/PreviewTab";
@@ -56,6 +57,7 @@ import { useUi } from "@/store/ui";
 export function AgentsView() {
   const selectedId = useUi((s) => s.selectedAgentId);
   const agent = useApp((s) => (selectedId ? s.agents[selectedId] : undefined));
+  const projectPath = useUi((s) => s.selectedProjectPath);
   const list = useAgentListLayout();
   // "main,helper,helper" while the open agent is part of a main + helpers group (and tiling is on).
   const tileOn = useUi((s) => s.tileHelpers);
@@ -66,7 +68,7 @@ export function AgentsView() {
   });
 
   // Narrow window, nothing open: the list is the main area.
-  if (!list.docked && !agent) {
+  if (!list.docked && !agent && !projectPath) {
     return (
       <div className="flex h-full flex-col">
         <div className="mx-auto w-full max-w-[760px] shrink-0 px-3 pt-3">
@@ -89,6 +91,8 @@ export function AgentsView() {
           agentId={agent.id}
           tileIds={familyKey ? familyKey.split(",") : undefined}
         />
+      ) : projectPath ? (
+        <ProjectView key={projectPath} path={projectPath} />
       ) : (
         <Welcome />
       )}

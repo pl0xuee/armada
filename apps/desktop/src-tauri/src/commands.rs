@@ -17,6 +17,7 @@ use tracing::{info, warn};
 
 use crate::attention::Attention;
 use crate::git_review::{self, AgentDiff, CommitSummary};
+use crate::github;
 use crate::pr_status::{self, PrCache, PrStatus};
 use crate::remote::{Remote, RemoteStatus, ShareLink};
 use crate::state::Shell;
@@ -623,6 +624,111 @@ pub async fn create_pr(
     git_review::create_pr(&agent, &title, &body)
         .await
         .map_err(err)
+}
+
+// ---- GitHub ----------------------------------------------------------------------
+
+/// Whether `gh` is installed and signed in, and whether git can use that sign-in.
+#[tauri::command]
+pub async fn github_status() -> CmdResult<github::GithubStatus> {
+    Ok(github::status().await)
+}
+
+/// Runs `gh auth login` (browser sign-in) in a terminal window. While one is already open,
+/// returns that terminal's id.
+#[tauri::command]
+pub async fn github_login(
+    core: State<'_, Core>,
+    terminals: State<'_, Terminals>,
+) -> CmdResult<LoginTerminal> {
+    let exe = armada_core::providers::resolve_program("gh").ok_or_else(|| {
+        "The GitHub CLI (gh) is not installed. Get it from https://cli.github.com".to_string()
+    })?;
+    let args = github::login_args();
+    let shown = login_command_line_plain(&exe, &args);
+    info!(command = %shown, "starting GitHub sign-in");
+    let spec = SpawnSpec {
+        program: exe.into_os_string(),
+        args: args.iter().map(|a| (*a).into()).collect(),
+        env_remove: Vec::new(),
+        env: Vec::new(),
+        cwd: None,
+    };
+    terminals
+        // Git is connected to the sign-in by the UI afterwards (github_setup_git), so the status it
+        // reads next already includes it.
+        .spawn_unique("github-login", core.inner().clone(), spec, move |code| {
+            info!(?code, "GitHub sign-in exited");
+        })
+        .map(|(terminal_id, reused)| LoginTerminal {
+            terminal_id,
+            reused,
+            command: shown,
+        })
+        .map_err(err)
+}
+
+fn login_command_line_plain(exe: &std::path::Path, args: &[&str]) -> String {
+    let mut parts = vec![exe.to_string_lossy().into_owned()];
+    parts.extend(args.iter().map(|a| a.to_string()));
+    parts.join(" ")
+}
+
+/// Lets git use `gh`'s GitHub login for HTTPS pushes (`gh auth setup-git`).
+#[tauri::command]
+pub async fn github_setup_git() -> CmdResult<github::GithubStatus> {
+    github::setup_git().await.map_err(err)?;
+    Ok(github::status().await)
+}
+
+/// What publishing `path` would start from: repository or not, commits, remotes, a name.
+#[tauri::command]
+pub async fn github_repo_info(path: String) -> CmdResult<github::RepoInfo> {
+    let path = armada_core::providers::expand_home(&path);
+    github::repo_info(std::path::Path::new(&path))
+        .await
+        .map_err(err)
+}
+
+/// Creates a GitHub repository from the project folder (initialising git and making a
+/// first commit if needed) and pushes it.
+#[tauri::command]
+pub async fn github_publish(
+    core: State<'_, Core>,
+    agent_id: String,
+    name: String,
+    private: bool,
+    description: String,
+) -> CmdResult<github::PublishResult> {
+    let (_guard, agent) = lock_idle_agent(&core, &agent_id, "publishing").map_err(err)?;
+    // The project folder, not an agent's worktree: the remote belongs to the repository.
+    let project = armada_core::providers::expand_home(&agent.project_path);
+    // Publishing may commit everything in that folder, so no other agent may be writing into it.
+    let busy_neighbour = core.agents().map_err(err)?.into_iter().any(|other| {
+        other.id != agent.id
+            && !other.worktree
+            && armada_core::providers::expand_home(&other.cwd) == project
+            && matches!(
+                other.status,
+                AgentStatus::Working | AgentStatus::Starting | AgentStatus::NeedsPermission
+            )
+    });
+    if busy_neighbour {
+        return Err(
+            "Another agent is working in this project folder. Publishing would commit its unfinished changes; wait for it to finish or stop it first."
+                .to_string(),
+        );
+    }
+    github::publish(&project, &name, private, &description)
+        .await
+        .map_err(err)
+}
+
+/// Pushes the agent's current branch to GitHub (never forced).
+#[tauri::command]
+pub async fn push_agent_branch(core: State<'_, Core>, agent_id: String) -> CmdResult<String> {
+    let (_guard, agent) = lock_idle_agent(&core, &agent_id, "pushing").map_err(err)?;
+    github::push_agent(&agent).await.map_err(err)
 }
 
 /// PR + CI status for the agent's branch. Quiet by design: problems come back as

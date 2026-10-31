@@ -9,6 +9,7 @@ mod diagnostics;
 mod dictation;
 mod events;
 mod git_review;
+mod github;
 mod hotkey;
 mod local;
 mod log_writer;
@@ -115,6 +116,12 @@ macro_rules! handler {
             commands::discover_projects,
             commands::is_git_repo,
             commands::create_pr,
+            commands::github_status,
+            commands::github_login,
+            commands::github_setup_git,
+            commands::github_repo_info,
+            commands::github_publish,
+            commands::push_agent_branch,
             commands::pr_status,
             commands::pr_fix_ci_prompt,
             commands::pr_review_prompt,
