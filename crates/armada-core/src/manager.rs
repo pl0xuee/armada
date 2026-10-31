@@ -56,6 +56,12 @@ impl Driver {
             Driver::Codex(d) => d.session_id(),
         }
     }
+    fn guided(&self) -> bool {
+        match self {
+            Driver::Acp(d) => d.guided(),
+            Driver::Codex(d) => d.guided(),
+        }
+    }
     fn prompt(&self, prompt: Prompt) {
         match self {
             Driver::Acp(d) => d.prompt(prompt),
@@ -1252,6 +1258,16 @@ impl Core {
                 ctx.set_preamble(brief);
             }
         }
+        // Agents need to know they can show pictures. A new session got that as its system
+        // prompt; a resumed one ignores a system prompt, so the note goes ahead of its next
+        // prompt instead, once (the session keeps it from then on).
+        if !agent.guided && !driver.guided() {
+            let note = crate::guidance::note();
+            ctx.set_preamble(match ctx.take_preamble() {
+                Some(pre) => format!("{note}\n\n---\n\n{pre}"),
+                None => note,
+            });
+        }
         self.inner
             .live
             .lock()
@@ -1260,6 +1276,7 @@ impl Core {
             a.session_id = Some(session_id);
             a.running = true;
             a.needs_briefing = false;
+            a.guided = true;
         })?;
         Ok(driver)
     }
@@ -1694,6 +1711,7 @@ impl Core {
             permission_mode,
             acknowledged_at: None,
             needs_briefing: false,
+            guided: false,
             parent_id: helper.as_ref().map(|h| h.parent_id.clone()),
             helper_sync: helper.as_ref().map(|_| HelperSync {
                 state: HelperSyncState::InSync,

@@ -11,6 +11,11 @@ To show a picture, put ![short description](path) in your reply. The path can be
 - a small png/jpeg/gif/webp as a data URI: ![description](data:image/png;base64,...) (under about 3 MB).
 Armada loads the file and shows it inline in the conversation, on the phone app too. Pictures from web addresses (http/https) are never loaded: download them into your working folder first, then reference the file. Don't tell the user you can't show images; screenshots, charts and generated images you save as files can be shown this way.";
 
+/// The same text as a note ahead of a message, for sessions that can't take it as instructions.
+pub fn note() -> String {
+    format!("[Note from Armada, the app you are running in]\n{AGENT_GUIDANCE}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::AGENT_GUIDANCE;

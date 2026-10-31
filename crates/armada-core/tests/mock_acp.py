@@ -1,6 +1,7 @@
 """Minimal ACP agent for tests: streams a reply, asks for one permission, edits nothing."""
 
 import json
+import os
 import sys
 
 pending = {}
@@ -25,6 +26,11 @@ def read():
     return json.loads(line)
 
 
+# An agent that takes a system prompt (claude-agent-acp does) unless MOCK_NO_SYSTEM_PROMPT is set.
+SESSION_CAPS = {"resume": {}}
+if not os.environ.get("MOCK_NO_SYSTEM_PROMPT"):
+    SESSION_CAPS["systemPrompt"] = {"mode": {"override": {}}}
+
 while True:
     msg = read()
     method = msg.get("method")
@@ -32,7 +38,7 @@ while True:
     if method == "initialize":
         send({"jsonrpc": "2.0", "id": mid, "result": {
             "protocolVersion": 1,
-            "agentCapabilities": {"loadSession": True, "sessionCapabilities": {"resume": {}}},
+            "agentCapabilities": {"loadSession": True, "sessionCapabilities": SESSION_CAPS},
             "authMethods": []}})
     elif method in ("session/new", "session/resume", "session/load"):
         mcp_count = len(msg["params"].get("mcpServers", []))

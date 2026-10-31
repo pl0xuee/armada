@@ -115,6 +115,8 @@ pub struct CodexDriver {
     effort: Mutex<Option<String>>,
     /// Codex takes `turn/steer` (cleared if this Codex predates it).
     steering: std::sync::atomic::AtomicBool,
+    /// Armada's note went in as the thread's developer instructions.
+    guided: bool,
 }
 
 pub struct StartOptions<'a> {
@@ -233,6 +235,7 @@ impl CodexDriver {
                 }
             }
         }
+        let guided = thread.is_none();
         let resp = match thread {
             Some(v) => v,
             None => {
@@ -280,6 +283,7 @@ impl CodexDriver {
             local_models: opts.local_models.map(<[LocalModel]>::to_vec),
             effort: Mutex::new(resp["reasoningEffort"].as_str().map(str::to_string)),
             steering: std::sync::atomic::AtomicBool::new(true),
+            guided,
         });
         tokio::spawn(event_loop(
             Arc::downgrade(&driver),
@@ -295,6 +299,11 @@ impl CodexDriver {
 
     pub fn session_id(&self) -> String {
         self.thread_id.clone()
+    }
+
+    /// Whether Armada's note went in as this thread's developer instructions.
+    pub fn guided(&self) -> bool {
+        self.guided
     }
 
     async fn publish_config(&self) {
