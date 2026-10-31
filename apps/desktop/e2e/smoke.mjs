@@ -142,7 +142,7 @@ try {
     ["Schedules", "Schedules"],
     ["Usage", "Usage"],
     ["Accounts", "Accounts"],
-    ["Agents", null],
+    ["Projects", null],
   ];
   const goRail = async (label) => {
     const btn = await browser.$(`nav[aria-label="Primary"] button[aria-label^="${label}"]`);
