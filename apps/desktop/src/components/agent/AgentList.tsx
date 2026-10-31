@@ -8,6 +8,7 @@ import {
   GitFork,
   Repeat,
   ChevronRight,
+  FolderOpen,
   PanelLeftClose,
   Pencil,
   Play,
@@ -21,7 +22,7 @@ import {
 import { m, AnimatePresence } from "motion/react";
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { archiveAgent, exportConversation, renameAgent, resumeAgent, stopAgent } from "@/lib/actions";
-import { groupAgents, orderedAgents, type AgentGroupId } from "@/lib/agents";
+import { ARCHIVED_KEY, groupByProject, orderedAgents, projectKey } from "@/lib/agents";
 import { nestHelpers, syncPresentation } from "@/lib/helpers";
 import { relativeTime, relativeTimeLong } from "@/lib/format";
 import { DONE_META, STATUS } from "@/lib/providers";
@@ -44,16 +45,17 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import { Kbd } from "../ui/kbd";
 import { Tooltip } from "../ui/tooltip";
 
-const COLLAPSE_KEY = "armada.collapsedGroups";
+const COLLAPSE_KEY = "armada.collapsedProjects";
 
-function readCollapsed(): Record<AgentGroupId, boolean> {
+/** Which projects are folded, by folder path (archived agents are folded unless opened). */
+function readCollapsed(): Record<string, boolean> {
   try {
     const raw = localStorage.getItem(COLLAPSE_KEY);
-    if (raw) return JSON.parse(raw) as Record<AgentGroupId, boolean>;
+    if (raw) return JSON.parse(raw) as Record<string, boolean>;
   } catch {
     /* ignore */
   }
-  return { needs: false, working: false, recent: false, archived: true };
+  return { [ARCHIVED_KEY]: true };
 }
 
 export type AgentListVariant = "docked" | "drawer" | "full";
@@ -69,6 +71,8 @@ export function AgentList({
   const agentsMap = useApp((s) => s.agents);
   const accounts = useApp((s) => s.accounts);
   const selected = useUi((s) => s.selectedAgentId);
+  const selectedProject = useUi((s) => s.selectedProjectPath);
+  const openProject = useUi((s) => s.openProject);
   const openNewAgent = useUi((s) => s.openNewAgent);
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState(readCollapsed);
@@ -79,12 +83,19 @@ export function AgentList({
   // Helpers nest under their main agent, except while filtering (then every match is its own row).
   const searchingNow = query.trim().length > 0;
   const nesting = useMemo(() => (searchingNow ? null : nestHelpers(agents)), [agents, searchingNow]);
-  const groups = useMemo(() => groupAgents(nesting ? nesting.roots : agents, query), [nesting, agents, query]);
+  const { projects, archived } = useMemo(
+    () => groupByProject(nesting ? nesting.roots : agents, query),
+    [nesting, agents, query],
+  );
   const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
-  const total = agents.filter((a) => !a.archived).length;
   const searching = query.trim().length > 0;
+  // Counts every project that has agents, not only the ones matching the filter.
+  const total = useMemo(
+    () => new Set(agents.filter((a) => !a.archived).map((a) => projectKey(a.projectPath))).size,
+    [agents],
+  );
 
-  const toggle = (id: AgentGroupId) => {
+  const toggle = (id: string) => {
     const next = { ...collapsed, [id]: !collapsed[id] };
     setCollapsed(next);
     try {
@@ -117,7 +128,7 @@ export function AgentList({
 
   return (
     <aside
-      aria-label="Agents"
+      aria-label="Projects"
       className={cn(
         "flex h-full flex-col bg-panel",
         variant === "docked" && "w-[clamp(272px,24vw,304px)] shrink-0 border-r border-line",
@@ -128,12 +139,15 @@ export function AgentList({
       <div className={cn("flex h-full w-full flex-col", variant === "full" && "mx-auto max-w-[760px]")}>
         <div className={cn("flex items-center gap-2 px-3.5 pb-2 pt-3", variant === "full" && "px-4 pb-3 pt-5")}>
           {variant !== "full" && (
-            <Tooltip content={variant === "drawer" ? "Close agent list" : "Hide agent list"} shortcut={[modKey, "B"]}>
+            <Tooltip
+              content={variant === "drawer" ? "Close project list" : "Hide project list"}
+              shortcut={[modKey, "B"]}
+            >
               <Button
                 size="icon-xs"
                 variant="ghost"
                 className="-ml-1"
-                aria-label={variant === "drawer" ? "Close agent list" : "Hide agent list"}
+                aria-label={variant === "drawer" ? "Close project list" : "Hide project list"}
                 onClick={toggleAgentList}
               >
                 {variant === "drawer" ? <X className="!h-3.5 !w-3.5" /> : <PanelLeftClose className="!h-3.5 !w-3.5" />}
@@ -141,7 +155,7 @@ export function AgentList({
             </Tooltip>
           )}
           <h2 className={cn("font-semibold tracking-tight", variant === "full" ? "text-[18px]" : "text-[13px]")}>
-            Agents
+            Projects
           </h2>
           <span className="rounded-md bg-raised px-1.5 text-[11px] font-medium text-steel tabular">{total}</span>
           <Tooltip content="New agent" shortcut={[modKey, "N"]}>
@@ -170,8 +184,8 @@ export function AgentList({
                   (e.target as HTMLInputElement).blur();
                 }
               }}
-              placeholder="Filter agents"
-              aria-label="Filter agents"
+              placeholder="Filter projects"
+              aria-label="Filter projects"
               spellCheck={false}
               className="h-8 w-full rounded-lg border border-line bg-base/50 pl-8 pr-8 text-[12.5px] text-fg placeholder:text-steel transition-colors hover:border-line-strong focus:border-accent/50 focus:outline-none focus:ring-3 focus:ring-accent/10"
             />
@@ -191,23 +205,96 @@ export function AgentList({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-          {groups.map((g) => {
-            if (g.agents.length === 0) return null;
-            const isCollapsed = collapsed[g.id] && !searching;
+          {projects.map((p) => {
+            const isCollapsed = collapsed[p.path] && !searching;
             return (
-              <div key={g.id} className="mb-1">
-                <button
-                  type="button"
-                  onClick={() => toggle(g.id)}
-                  aria-expanded={!isCollapsed}
-                  className="group flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel transition-colors hover:text-muted"
+              // One card per project: its header and its agents together, the agents hanging off a line.
+              <div
+                key={p.path}
+                className={cn(
+                  "mb-2.5 rounded-xl border bg-base/40 p-1 transition-colors",
+                  selectedProject === p.path && !selected ? "border-accent/30" : "border-line",
+                )}
+              >
+                <div
+                  className={cn(
+                    "group/project relative mb-0.5 flex h-9 items-center gap-0.5 rounded-lg pr-1 transition-colors",
+                    selectedProject === p.path && !selected
+                      ? "bg-accent/[0.13] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent)_45%,transparent)]"
+                      : "hover:bg-raised/60",
+                  )}
                 >
-                  <ChevronRight
-                    className={cn("h-3 w-3 transition-transform duration-150", !isCollapsed && "rotate-90")}
-                  />
-                  <span className={cn(g.id === "needs" && "text-warn/90")}>{g.label}</span>
-                  <span className="font-medium tabular text-steel/70">{g.agents.length}</span>
-                </button>
+                  {selectedProject === p.path && !selected && (
+                    <span
+                      aria-hidden
+                      className="absolute -left-2 top-2 h-5 w-[3px] rounded-r-full bg-accent shadow-[0_0_8px_var(--accent)]"
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => toggle(p.path)}
+                    aria-expanded={!isCollapsed}
+                    aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${p.name}`}
+                    className="flex h-9 w-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:text-fg"
+                  >
+                    <ChevronRight
+                      className={cn("h-3 w-3 transition-transform duration-150", !isCollapsed && "rotate-90")}
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      openProject(p.path);
+                      onNavigate?.();
+                    }}
+                    aria-current={selectedProject === p.path && !selected ? "true" : undefined}
+                    title={`${p.path}: show all its agents`}
+                    className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-1 text-[13px] font-semibold tracking-tight text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                  >
+                    <FolderOpen
+                      className={cn(
+                        "h-4 w-4 shrink-0",
+                        selectedProject === p.path && !selected ? "text-accent" : "text-muted",
+                      )}
+                    />
+                    <span className="truncate">{p.name}</span>
+                    <span className="shrink-0 rounded-md bg-raised px-1.5 text-[11px] font-medium tabular text-muted">
+                      {p.agents.length}
+                    </span>
+                    {p.needs > 0 && (
+                      <span
+                        className="shrink-0 rounded-full bg-warn/20 px-2 py-px text-[11px] font-semibold text-warn ring-1 ring-warn/40 tabular"
+                        title={`${p.needs} need${p.needs === 1 ? "s" : ""} you`}
+                      >
+                        {p.needs} need{p.needs === 1 ? "s" : ""} you
+                      </span>
+                    )}
+                    {p.needs === 0 && p.working > 0 && (
+                      <span
+                        className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent animate-breathe"
+                        aria-label={`${p.working} working`}
+                      />
+                    )}
+                  </button>
+                  <Tooltip content={`Add agents to ${p.name}`}>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      className="shrink-0 border border-line-strong/70 text-muted hover:border-accent/50 hover:text-accent"
+                      aria-label={`Add agents to ${p.name}`}
+                      onClick={() => {
+                        openProject(p.path);
+                        onNavigate?.();
+                        // The project page has its composer; focus it so you can type straight away.
+                        requestAnimationFrame(() =>
+                          document.querySelector<HTMLTextAreaElement>("#home-prompt-compact")?.focus(),
+                        );
+                      }}
+                    >
+                      <Plus className="!h-3.5 !w-3.5" />
+                    </Button>
+                  </Tooltip>
+                </div>
                 <AnimatePresence initial={false}>
                   {!isCollapsed && (
                     <m.ul
@@ -215,9 +302,12 @@ export function AgentList({
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
                       transition={{ duration: 0.12 }}
-                      className="space-y-px"
+                      className={cn(
+                        "mb-0.5 ml-3 space-y-px border-l-2 pl-1",
+                        selectedProject === p.path && !selected ? "border-accent/45" : "border-line-strong/70",
+                      )}
                     >
-                      {g.agents.map((a) => (
+                      {p.agents.map((a) => (
                         <Fragment key={a.id}>
                           <AgentRow
                             agent={a}
@@ -247,13 +337,49 @@ export function AgentList({
               </div>
             );
           })}
-          {searching && groups.every((g) => g.agents.length === 0) && (
-            <div className="px-4 py-10 text-center text-[12.5px] text-steel">No agents match “{query}”.</div>
+          {archived.length > 0 && (
+            <div className="mb-1">
+              <button
+                type="button"
+                onClick={() => toggle(ARCHIVED_KEY)}
+                aria-expanded={!collapsed[ARCHIVED_KEY] || searching}
+                className="flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel transition-colors hover:text-muted"
+              >
+                <ChevronRight
+                  className={cn(
+                    "h-3 w-3 transition-transform duration-150",
+                    (!collapsed[ARCHIVED_KEY] || searching) && "rotate-90",
+                  )}
+                />
+                Archived
+                <span className="font-medium tabular text-steel/70">{archived.length}</span>
+              </button>
+              {(!collapsed[ARCHIVED_KEY] || searching) && (
+                <ul className="space-y-px">
+                  {archived.map((a) => (
+                    <AgentRow
+                      key={a.id}
+                      agent={a}
+                      account={accountMap.get(a.accountId)}
+                      selected={a.id === selected}
+                      now={now}
+                      hotkey={null}
+                      onNavigate={onNavigate}
+                    />
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          {searching && projects.length === 0 && archived.length === 0 && (
+            <div className="px-4 py-10 text-center text-[12.5px] text-steel">
+              No projects or agents match “{query}”.
+            </div>
           )}
           {!searching && agents.length === 0 && (
             <div className="px-4 py-10 text-center">
-              <p className="text-[13px] font-medium">No agents yet</p>
-              <p className="mt-1 text-[12px] text-steel">Launch your first one to get started.</p>
+              <p className="text-[13px] font-medium">No projects yet</p>
+              <p className="mt-1 text-[12px] text-steel">Launch an agent in a folder to get started.</p>
               <Button size="sm" variant="primary" className="mt-4" onClick={() => openNewAgent()}>
                 <Plus className="!h-3.5 !w-3.5" /> New agent
               </Button>

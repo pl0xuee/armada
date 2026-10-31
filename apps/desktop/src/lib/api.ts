@@ -40,6 +40,9 @@ import type {
   ShareLink,
   ShipResult,
   BaseBranchStatus,
+  GithubStatus,
+  PublishResult,
+  RepoInfo,
   TimelineItem,
   UpdateInfo,
   VoiceAssistantUsage,
@@ -208,6 +211,18 @@ const tauriApi = {
   baseBranchStatus: (agentId: string) => invoke<BaseBranchStatus>("base_branch_status", { agentId }),
   pushBaseBranch: (agentId: string) => invoke<BaseBranchStatus>("push_base_branch", { agentId }),
   createPr: (agentId: string, title: string, body: string) => invoke<string>("create_pr", { agentId, title, body }),
+  // GitHub
+  githubStatus: () => invoke<GithubStatus>("github_status"),
+  /** Starts `gh auth login` in a terminal (git is connected to the sign-in when it succeeds). */
+  githubLogin: () => invoke<{ terminalId: string; reused: boolean; command: string }>("github_login"),
+  /** `gh auth setup-git`: lets git push over HTTPS with the GitHub sign-in. */
+  githubSetupGit: () => invoke<GithubStatus>("github_setup_git"),
+  githubRepoInfo: (path: string) => invoke<RepoInfo>("github_repo_info", { path }),
+  /** Makes the project a git repo if needed, creates the GitHub repository and pushes to it. */
+  githubPublish: (agentId: string, name: string, isPrivate: boolean, description: string) =>
+    invoke<PublishResult>("github_publish", { agentId, name, private: isPrivate, description }),
+  /** Pushes the agent's current branch (never forced). Resolves to a one-line summary. */
+  pushAgentBranch: (agentId: string) => invoke<string>("push_agent_branch", { agentId }),
   /** PR + CI status of the agent's branch (cached; never rejects for gh/auth/network problems). */
   prStatus: (agentId: string, force = false) => invoke<PrStatus>("pr_status", { agentId, force }),
   /** Editable "Fix CI" prompt: failing checks plus trimmed failing-job logs. Rejects when nothing is failing. */

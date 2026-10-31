@@ -856,6 +856,38 @@ export interface BaseBranchStatus {
   behind: number;
 }
 
+/** Whether `gh` is installed and signed in, and whether git can use that sign-in. */
+export interface GithubStatus {
+  ghInstalled: boolean;
+  loggedIn: boolean;
+  user: string | null;
+  /** git has a credential helper, so HTTPS pushes can authenticate without a prompt. */
+  gitReady: boolean;
+}
+
+export interface GitRemote {
+  name: string;
+  url: string;
+}
+
+/** What publishing a folder to GitHub would start from. */
+export interface RepoInfo {
+  isRepo: boolean;
+  hasCommits: boolean;
+  branch: string | null;
+  remotes: GitRemote[];
+  /** A valid repository name derived from the folder name. */
+  suggestedName: string;
+}
+
+export interface PublishResult {
+  url: string;
+  /** Short hash of the first commit, when Armada had to make one. */
+  committed: string | null;
+  /** Secret-looking files left out of that first commit. */
+  leftOut: string[];
+}
+
 /** A runnable project command detected in an agent's folder. */
 export interface ProjectScript {
   id: string;

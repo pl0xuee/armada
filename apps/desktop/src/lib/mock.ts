@@ -28,6 +28,8 @@ import type {
   RestorePreview,
   ShipResult,
   BaseBranchStatus,
+  GithubStatus,
+  RepoInfo,
   PrStatus,
   PrInfo,
   PrCheck,
@@ -741,6 +743,7 @@ async function finishLogin(t: MockTerminal) {
   termOut(t.id, `\r\n\r\n${C.dim}Exchanging code…${C.reset}\r\n`);
   await sleep(900);
   const acc = db.accounts.find((a) => a.id === t.accountId);
+  if (!t.accountId) mockGithub = { ghInstalled: true, loggedIn: true, user: "sam", gitReady: true };
   if (acc) {
     acc.status = {
       loggedIn: true,
@@ -965,6 +968,10 @@ function mockProbe(kind: LocalKind, baseUrl: string): LocalProbe {
 }
 
 const mockBase: Record<string, BaseBranchStatus> = {};
+/** Browser preview: GitHub starts signed out so the whole flow can be tried. */
+let mockGithub: GithubStatus = { ghInstalled: true, loggedIn: false, user: null, gitReady: false };
+/** Project folder -> remote URL once "published" in the preview. */
+const mockPublished = new Map<string, string>();
 
 /** Port the mock agent "a-token" says its dev server runs on. */
 const MOCK_DEV_PORT = 4723;
@@ -1759,6 +1766,67 @@ export const mockApi: ArmadaApi = {
     assertIdle(a, "merging");
     await gitLock(agentId, 700);
     return `Merged ${a.branch ?? "branch"} into ${a.baseBranch ?? "main"} (fast-forward).`;
+  },
+
+  async githubStatus() {
+    return delay<GithubStatus>({ ...mockGithub }, 200);
+  },
+
+  async githubLogin() {
+    for (const existing of terminals.values()) {
+      if (existing.kind === "login" && !existing.accountId && !existing.done) {
+        return delay({ terminalId: existing.id, reused: true, command: "gh auth login" }, 40);
+      }
+    }
+    const t: MockTerminal = { id: newId("term"), kind: "login", buffer: "", stage: 0, done: false };
+    terminals.set(t.id, t);
+    void runLogin(t);
+    return delay(
+      { terminalId: t.id, reused: false, command: "gh auth login --hostname github.com --git-protocol https --web" },
+      80,
+    );
+  },
+
+  async githubSetupGit() {
+    await sleep(300);
+    mockGithub = { ...mockGithub, gitReady: true };
+    return { ...mockGithub };
+  },
+
+  async githubRepoInfo(path) {
+    await sleep(150);
+    const p = path.trim().replace(/\/+$/, "");
+    const name = (p.split("/").pop() ?? "project").replace(/[^A-Za-z0-9._-]+/g, "-") || "my-project";
+    const published = mockPublished.get(p);
+    return clone<RepoInfo>({
+      isRepo: true,
+      hasCommits: true,
+      branch: "main",
+      remotes: published ? [{ name: "origin", url: published }] : [],
+      suggestedName: name,
+    });
+  },
+
+  async githubPublish(agentId, name, _private, _description) {
+    const a = getAgent(agentId);
+    assertIdle(a, "publishing");
+    if (!mockGithub.loggedIn) throw new Error("Sign in to GitHub first.");
+    await sleep(1200);
+    const url = `https://github.com/${mockGithub.user ?? "sam"}/${name}`;
+    mockPublished.set(a.projectPath, `${url}.git`);
+    return { url, committed: "a1b2c3d", leftOut: [".env"] };
+  },
+
+  async pushAgentBranch(agentId) {
+    const a = getAgent(agentId);
+    assertIdle(a, "pushing");
+    if (!mockGithub.loggedIn) {
+      throw new Error(
+        "GitHub didn't accept Armada's credentials. Sign in to GitHub with the GitHub button in the Review panel.",
+      );
+    }
+    await gitLock(agentId, 800);
+    return `Pushed ${a.branch ?? "main"} to origin`;
   },
 
   async createPr(agentId) {

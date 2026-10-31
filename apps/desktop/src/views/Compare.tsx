@@ -1,13 +1,13 @@
-import { Archive, Columns3, MessageSquare, Sparkles } from "lucide-react";
+import { Archive, Columns3, MessageSquare, Plus, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { CompareColumn } from "@/components/compare/CompareColumn";
+import { AgentGrid } from "@/components/compare/AgentGrid";
 import { EmptyState } from "@/components/EmptyState";
 import { HeaderAction, PageHeader } from "@/components/PageHeader";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { Button } from "@/components/ui/button";
-import { useNow } from "@/hooks/useNow";
 import { api } from "@/lib/api";
+import { useNow } from "@/hooks/useNow";
 import { relativeTimeLong } from "@/lib/format";
 import { identityFor } from "@/lib/identity";
 import { providerRank } from "@/lib/providers";
@@ -46,30 +46,15 @@ function buildGroups(agents: Record<string, Agent>): Group[] {
   return groups.sort((a, b) => b.createdAt - a.createdAt);
 }
 
-/**
- * Pane width at which columns sit side by side (each needs ~320px); below it the
- * columns become tabs. Literal class strings so Tailwind can see them.
- */
-const WIDE = {
-  2: { tabs: "@3xl:hidden", col: "@3xl:flex @3xl:min-w-[300px]", row: "@3xl:overflow-x-auto" },
-  3: { tabs: "@5xl:hidden", col: "@5xl:flex @5xl:min-w-[300px]", row: "@5xl:overflow-x-auto" },
-  4: { tabs: "@7xl:hidden", col: "@7xl:flex @7xl:min-w-[300px]", row: "@7xl:overflow-x-auto" },
-} as const;
-
 export function CompareView() {
   const agents = useApp((s) => s.agents);
   const items = useApp((s) => s.items);
-  const accounts = useApp((s) => s.accounts);
   const compareGroupId = useUi((s) => s.compareGroupId);
   const openCompare = useUi((s) => s.openCompare);
-  const openAgent = useUi((s) => s.openAgent);
   const openNewAgent = useUi((s) => s.openNewAgent);
   const now = useNow();
   const [keeping, setKeeping] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  /** Column shown on narrow panes, where columns become tabs. */
-  const [tabId, setTabId] = useState<string | null>(null);
-  const customAgents = useApp((s) => s.settings?.customAgents);
 
   const groups = useMemo(() => buildGroups(agents), [agents]);
   const group = groups.find((g) => g.id === compareGroupId) ?? groups[0];
@@ -79,8 +64,6 @@ export function CompareView() {
     if (!groupIds) return;
     for (const id of groupIds.split(",")) void useApp.getState().ensureItems(id);
   }, [groupIds]);
-
-  const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
 
   const prompt = useMemo(() => {
     if (!group) return null;
@@ -114,16 +97,6 @@ export function CompareView() {
   const active = group.agents.filter((a) => !a.archived);
   const archived = group.agents.filter((a) => a.archived);
   const columns = showArchived ? group.agents : active.length ? active : group.agents;
-  const costs = columns.map((a) => a.costUsd);
-  const minCost = Math.min(...costs);
-  // "Cheapest" only means something once every answer is in and the costs actually differ.
-  const anyWorking = columns.some(
-    (a) => a.status === "working" || a.status === "starting" || a.status === "needs_permission",
-  );
-  const showCheapest = columns.length > 1 && !anyWorking && minCost < Math.max(...costs);
-  const activeTab = columns.find((a) => a.id === tabId) ?? columns[0];
-  const bp = columns.length <= 2 ? WIDE[2] : columns.length === 3 ? WIDE[3] : WIDE[4];
-
   const keep = async (winner: Agent) => {
     const losers = group.agents.filter((a) => a.id !== winner.id && !a.archived);
     setKeeping(true);
@@ -165,7 +138,16 @@ export function CompareView() {
         title="Compare"
         subtitle={`${group.agents.length} agents · ${basename(group.agents[0].projectPath)} · started ${relativeTimeLong(group.createdAt, now)}`}
         right={
-          <HeaderAction icon={<Sparkles />} label="New comparison" onClick={() => openNewAgent({ compare: true })} />
+          <>
+            <HeaderAction
+              icon={<Plus />}
+              label="Add agents"
+              variant="primary"
+              hint={`Start more agents in ${basename(group.agents[0].projectPath)}`}
+              onClick={() => openNewAgent({ projectPath: group.agents[0].projectPath })}
+            />
+            <HeaderAction icon={<Sparkles />} label="New comparison" onClick={() => openNewAgent({ compare: true })} />
+          </>
         }
       >
         {groups.length > 1 && (
@@ -237,88 +219,11 @@ export function CompareView() {
           )}
         </div>
 
-        {columns.length > 1 && (
-          <div
-            role="tablist"
-            aria-label="Agents in this comparison"
-            onKeyDown={(e) =>
-              tabKeys(
-                e,
-                columns.map((a) => a.id),
-                activeTab.id,
-                setTabId,
-                "cmp-tab-",
-              )
-            }
-            className={cn(
-              "-mx-1 flex shrink-0 gap-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-              bp.tabs,
-            )}
-          >
-            {columns.map((a) => {
-              const id = identityFor(a.provider, a.customAgentId, customAgents);
-              const sel = a.id === activeTab.id;
-              return (
-                <button
-                  key={a.id}
-                  id={`cmp-tab-${a.id}`}
-                  type="button"
-                  role="tab"
-                  aria-selected={sel}
-                  tabIndex={sel ? 0 : -1}
-                  aria-controls={`cmp-col-${a.id}`}
-                  onClick={() => setTabId(a.id)}
-                  className={cn(
-                    "flex h-9 min-w-0 flex-1 basis-0 items-center justify-center gap-2 rounded-lg border px-3 text-[12.5px] font-medium transition-colors",
-                    sel
-                      ? "border-line-strong bg-raised text-fg edge"
-                      : "border-line/60 text-muted hover:bg-raised/60 hover:text-fg",
-                    a.archived && "opacity-60",
-                  )}
-                >
-                  <ProviderGlyph provider={a.provider} customAgentId={a.customAgentId} size="xs" />
-                  <span className="truncate">{id.short}</span>
-                  {a.status === "working" || a.status === "starting" ? (
-                    <span
-                      className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent animate-breathe"
-                      aria-label="Working"
-                    />
-                  ) : showCheapest && a.costUsd === minCost ? (
-                    <span className="hidden text-[10.5px] font-normal text-ok @md:inline">cheapest</span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        <div className={cn("flex min-h-0 flex-1 gap-3 pb-1", bp.row)}>
-          {columns.map((a) => (
-            <div
-              key={a.id}
-              id={`cmp-col-${a.id}`}
-              role="tabpanel"
-              aria-labelledby={columns.length > 1 ? `cmp-tab-${a.id}` : undefined}
-              className={cn(
-                "min-h-0 min-w-0 flex-1 basis-0",
-                bp.col,
-                a.id === activeTab.id ? "flex" : "hidden",
-                a.archived && "opacity-55",
-              )}
-            >
-              <CompareColumn
-                agent={a}
-                account={accountMap.get(a.accountId)}
-                items={items[a.id]}
-                now={now}
-                cheapest={showCheapest && a.costUsd === minCost}
-                onOpen={() => openAgent(a.id)}
-                onKeep={() => void keep(a)}
-                keeping={keeping || (active.length === 1 && active[0].id === a.id)}
-              />
-            </div>
-          ))}
-        </div>
+        <AgentGrid
+          agents={columns}
+          onKeep={(a) => void keep(a)}
+          keepDisabled={(a) => keeping || (active.length === 1 && active[0].id === a.id)}
+        />
       </div>
     </div>
   );

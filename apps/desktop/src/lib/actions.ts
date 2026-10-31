@@ -70,6 +70,24 @@ export async function startLogin(account: Account) {
   }
 }
 
+/** `gh auth login` in the terminal window; afterwards git is connected to the sign-in. */
+export async function startGithubLogin() {
+  try {
+    const { terminalId, reused, command } = await api.githubLogin();
+    useUi.getState().setTerminal({
+      terminalId,
+      reused,
+      command,
+      kind: "login",
+      github: true,
+      title: "Sign in to GitHub",
+      subtitle: "Uses the GitHub CLI. Armada never sees your password; git is set up to use the sign-in afterwards.",
+    });
+  } catch (e) {
+    toast.error("Couldn't start the GitHub sign-in", { description: errorMessage(e) });
+  }
+}
+
 export async function startInstall(provider: Provider) {
   try {
     const terminalId = await api.installProvider(provider);
