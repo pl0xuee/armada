@@ -6,6 +6,8 @@
  */
 import type {
   Agent as CoreAgent,
+  PrInfo,
+  ResponseStyle,
   KvistcodeEvent,
   AgentStatus,
   Attachment,
@@ -34,6 +36,7 @@ export type {
 
 export type { TimelineItem };
 export type { QuestionAnswers, QuestionField, QuestionOption } from "@shared/types";
+export type { ResponseStyle, SearchGroup, SearchHit, SearchResults } from "@shared/types";
 export type { ConfigOption, ConfigOptionChoice, QueuedPrompt, SlashCommand, SubagentInfo } from "@shared/types";
 
 export type Provider = CoreProvider;
@@ -71,7 +74,8 @@ type AddedLater =
   | "needsBriefing"
   | "configChoices"
   | "parentId"
-  | "helperSync";
+  | "helperSync"
+  | "budgetHold";
 
 export type Agent = Omit<CoreAgent, ViewerTrimmedField | AddedLater> & Partial<Pick<CoreAgent, ViewerTrimmedField | AddedLater>>;
 
@@ -143,6 +147,22 @@ export interface StateSnapshot {
   defaultWorktree?: boolean;
   /** Absent on older servers (then the choice isn't offered). */
   defaultPermissionMode?: PermissionMode;
+  /** Owner only; absent on older servers (then the setting isn't offered). */
+  responseStyle?: ResponseStyle;
+}
+
+/** What GET /api/agents/{id}/pr sends of a pull request: counts and a link, no check names or logs. */
+export type PhonePr = Pick<PrInfo, "number" | "title" | "state" | "review" | "mergeState" | "summary"> & {
+  /** A web link, or null when the server found none it trusts. */
+  url: string | null;
+};
+
+/** GET /api/agents/{id}/pr: "none" = no PR for the branch, "unknown" = GitHub couldn't be asked (`reason` says why). */
+export interface PrSnapshot {
+  state: "ok" | "none" | "unknown";
+  reason: string | null;
+  pr: PhonePr | null;
+  fetchedAt: number;
 }
 
 export type PermissionItem = Extract<TimelineItem, { kind: "permission" }>;

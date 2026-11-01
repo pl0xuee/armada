@@ -1,7 +1,11 @@
+import type { HoldChoice } from "./budgetHold";
 import type {
   Agent,
   Attachment,
+  PrSnapshot,
   QuestionAnswers,
+  ResponseStyle,
+  SearchResults,
   CreateAgentRequest,
   Session,
   StateSnapshot,
@@ -314,6 +318,17 @@ export const api = {
   /** "Done" in Needs you: dismisses an error / usage limit / finished agent until it does something new. Older servers: 404. */
   acknowledge: (b: Backend, agentId: string) =>
     b.request("POST", agentPath(agentId, "/acknowledge")) as Promise<void>,
+  /** Answers an agent held at a limit (raise it, continue once, stop). Owner only; older servers: 404. */
+  budget: (b: Backend, agentId: string, choice: HoldChoice) =>
+    b.request("POST", agentPath(agentId, "/budget"), choice) as Promise<void>,
+  /** PR and CI status of the agent's branch. GitHub is asked through `gh`, so allow it some time. */
+  pr: (b: Backend, agentId: string) =>
+    b.request("GET", agentPath(agentId, "/pr"), undefined, { timeoutMs: PR_TIMEOUT_MS }) as Promise<PrSnapshot>,
+  /** Full-text search over every conversation, grouped by agent. */
+  search: (b: Backend, query: string) =>
+    b.request("GET", `/api/search?q=${encodeURIComponent(query)}`) as Promise<SearchResults>,
+  setResponseStyle: (b: Backend, style: ResponseStyle) =>
+    b.request("POST", "/api/response-style", { style }) as Promise<void>,
   removeQueued: (b: Backend, agentId: string, qid: string) =>
     b.request(
       "DELETE",
@@ -358,6 +373,8 @@ export const api = {
 };
 
 const REQUEST_TIMEOUT_MS = 15_000;
+/** `gh` can take a while; the server gives up on it after 30 s. */
+const PR_TIMEOUT_MS = 35_000;
 /** Commit (pre-commit hooks), merge and large diffs. */
 const GIT_TIMEOUT_MS = 180_000;
 /** Just under the server's 150 s upload deadline, so the client reports it first. */

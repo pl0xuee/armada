@@ -393,7 +393,9 @@ export type KvistcodeEvent =
   | { type: "schedule_updated"; schedule: Schedule }
   | { type: "schedule_removed"; scheduleId: string }
   | { type: "update_available"; update: UpdateInfo }
-  | { type: "update_progress"; downloaded: number; total: number | null };
+  | { type: "update_progress"; downloaded: number; total: number | null }
+  /** Settings changed from the phone: show them, so the window doesn't save an older copy over them. */
+  | { type: "settings_changed"; settings: Settings };
 
 export interface UpdateInfo {
   currentVersion: string;

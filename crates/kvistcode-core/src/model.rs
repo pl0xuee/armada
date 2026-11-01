@@ -922,6 +922,11 @@ pub enum KvistcodeEvent {
         downloaded: u64,
         total: Option<u64>,
     },
+    /// The settings were changed from somewhere other than the desktop window (the phone),
+    /// so the window shows the new values and doesn't save an older copy over them.
+    SettingsChanged {
+        settings: Box<Settings>,
+    },
 }
 
 /// A newer Kvistcode release on GitHub.

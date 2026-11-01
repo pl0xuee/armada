@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { isPlanApproval, planTitle } from "@shared/planApproval";
+import { HoldBody } from "@/components/BudgetHold";
 import { DenyReasonSheet } from "@/components/DenyReasonSheet";
 import { AccountDot, ProviderBadge } from "@/components/Identity";
 import { Icon } from "@/components/Icon";
@@ -31,6 +32,7 @@ import { primaryFields } from "@/lib/question";
 import { switchableAccounts, AccountSheet } from "./AgentControls";
 import { goBack, navigate } from "@/lib/router";
 import { accountOf, useInbox, useTriage, type InboxEntry } from "@/lib/selectors";
+import { holdLabel, type HoldLike } from "@/lib/budgetHold";
 import { reasonLabel, triageSections, needsYouLabel, type TriageEntry, type NeedsReason } from "@/lib/triage";
 import { questionHeadline } from "@/lib/dock";
 import { planChoices } from "@shared/planApproval";
@@ -191,6 +193,7 @@ function QueueEntry({
     return loading ? <InboxSkeleton count={1} /> : <WaitingCard agent={agent} now={now} />;
   }
   if (reason === "done") return <DoneCard agent={agent} now={now} />;
+  if (reason === "budget" && agent.budgetHold) return <BudgetCard agent={agent} hold={agent.budgetHold} now={now} />;
   return <RecoveryCard agent={agent} reason={reason} now={now} onSwitch={() => onSwitch(agent.id)} />;
 }
 
@@ -511,6 +514,20 @@ function RecoveryCard({ agent, reason, now, onSwitch }: { agent: Agent; reason: 
             </Button>
           </div>
           <CardFooter agent={agent} showSwitch={!limited && canSwitch} onSwitch={onSwitch} />
+        </div>
+      </article>
+    </div>
+  );
+}
+
+/** An agent held at a limit: what it reached, and how to go on. */
+function BudgetCard({ agent, hold, now }: { agent: Agent; hold: HoldLike; now: number }) {
+  return (
+    <div className="animate-enter">
+      <article aria-label={`${agent.title}: ${holdLabel(hold)}`} className="overflow-hidden rounded-2xl border border-line-strong bg-card shadow-[0_12px_32px_-20px_rgba(0,0,0,0.9)] edge-strong">
+        <CardHeader agent={agent} ts={agent.budgetHold?.since ?? agent.lastActivityAt} now={now} />
+        <div className="p-4">
+          <HoldBody agent={agent} hold={hold} onContinued={() => navigate({ name: "agent", agentId: agent.id })} />
         </div>
       </article>
     </div>

@@ -4,9 +4,10 @@
  * owner/viewer split, so the real code paths are exercised.
  */
 import { ApiError, type Backend, type HttpMethod, type RequestOptions, type StreamHandlers } from "@/lib/api";
-import type { Agent, Attachment, AttentionReason, CreateAgentRequest, QuestionAnswers, RemoteEvent, Session, TimelineItem } from "@/lib/types";
+import type { Agent, Attachment, AttentionReason, CreateAgentRequest, QuestionAnswers, RemoteEvent, ResponseStyle, SearchGroup, SearchHit, SearchResults, Session, TimelineItem } from "@/lib/types";
 import { CHECKOUT_PNG, ORDERS_PNG } from "./images";
 import { mockDiff } from "./diff";
+import { mockPr } from "./pr";
 import { buildExtras } from "./scenarios";
 import { streamChunk, stressAgent, stressTimeline } from "./stress";
 import { accounts, buildAgents, buildTimelines, customAgents, nextSeq, projects, providerConfig, STREAM_SCRIPT, templates } from "./data";
@@ -42,7 +43,7 @@ export function scenarioFromParams(p: URLSearchParams): Scenario {
     pair: pair === "revoked" ? "revoked" : pair ? "plain" : null,
     stressItems: p.get("stress") === "1" ? Math.max(10, Number(p.get("items") ?? 3000) || 3000) : 0,
     stressRate: Math.max(1, Number(p.get("rate") ?? 60) || 60),
-    extras: new Set(["quick", "plan", "group", "md", "dock"].filter((k) => p.get(k) === "1")),
+    extras: new Set(["quick", "plan", "group", "md", "dock", "hold"].filter((k) => p.get(k) === "1")),
   };
 }
 
@@ -92,6 +93,7 @@ export class MockBackend implements Backend {
   private secretCheckFailed = false;
   private streamItemId: string | null = null;
   private createSeq = 0;
+  private responseStyle: ResponseStyle = "concise";
 
   constructor(scenario: Scenario) {
     this.s = scenario;
@@ -217,6 +219,7 @@ export class MockBackend implements Backend {
         templates: this.s.scope === "owner" ? templates : [],
         defaultWorktree: this.s.scope === "owner",
         defaultPermissionMode: "ask",
+        ...(this.s.scope === "owner" ? { responseStyle: this.responseStyle } : {}),
       };
     }
     if (path === "/api/permissions") {
@@ -227,6 +230,17 @@ export class MockBackend implements Backend {
         for (const i of list) if ((i.kind === "permission" || i.kind === "question") && i.resolution === null) out.push(structuredClone(i));
       }
       return out;
+    }
+    if (path.startsWith("/api/search")) {
+      if (this.s.scope !== "owner") throw new ApiError(403, "This is a read-only link.");
+      if (this.s.fail.has("search")) throw new ApiError(500, "search failed (simulated)");
+      return this.search(new URLSearchParams(path.split("?")[1] ?? "").get("q") ?? "");
+    }
+    if (path === "/api/response-style" && method === "POST") {
+      if (this.s.scope !== "owner") throw new ApiError(403, "This is a read-only link.");
+      if (this.s.fail.has("response-style")) throw new ApiError(500, "save failed (simulated)");
+      this.responseStyle = (body as { style: ResponseStyle }).style;
+      return;
     }
     if (path === "/api/agents" && method === "POST") {
       if (this.s.scope !== "owner") throw new ApiError(403, "This is a read-only link.");
@@ -260,7 +274,7 @@ export class MockBackend implements Backend {
       return this.queueAction(agent, decodeURIComponent(q[2]), method === "POST" && !!q[3], interrupt);
     }
     const [pathOnly, query = ""] = path.split("?");
-    const m = /^\/api\/agents\/([^/]+)\/(items|prompt|permission|question|cancel|resume|stop|config|account|archive|read|acknowledge|diff|commit|ship|image|secret-files)$/.exec(pathOnly);
+    const m = /^\/api\/agents\/([^/]+)\/(items|prompt|permission|question|cancel|resume|stop|config|account|archive|read|acknowledge|budget|pr|diff|commit|ship|image|secret-files)$/.exec(pathOnly);
     if (!m) throw new ApiError(404, "not found");
     const id = decodeURIComponent(m[1]);
     const action = m[2];
@@ -277,6 +291,11 @@ export class MockBackend implements Backend {
       if (this.s.scope === "viewer") list = list.map(projectItem).filter((i): i is TimelineItem => i !== null);
       if (limit) list = list.slice(-limit);
       return structuredClone(list);
+    }
+    if (action === "pr" && method === "GET") {
+      if (this.s.scope !== "owner") throw new ApiError(403, "This is a read-only link.");
+      if (this.s.fail.has("pr")) throw new ApiError(500, "gh failed (simulated)");
+      return mockPr(id);
     }
     if (action === "secret-files" && method === "GET") {
       if (this.s.scope !== "owner") throw new ApiError(403, "This is a read-only link.");
@@ -370,6 +389,23 @@ export class MockBackend implements Backend {
       case "acknowledge":
         this.update(agent.id, { unread: false, acknowledgedAt: Date.now() });
         return;
+      case "budget": {
+        const hold = agent.budgetHold;
+        if (!hold) return;
+        const choice = body as { action: string; by?: number };
+        if (choice.action === "raise") {
+          if (!(Number(choice.by) > 0)) throw new ApiError(400, "Enter an amount above zero");
+          if (hold.cap + Number(choice.by) <= hold.spent) throw new ApiError(400, "That is still under what was spent. Raise it by more.");
+          this.update(agent.id, { budgetHold: null, queuePaused: false });
+        } else if (choice.action === "continue_once") {
+          this.update(agent.id, { budgetHold: null, queuePaused: false });
+        } else if (choice.action === "stop") {
+          this.update(agent.id, { budgetHold: null, queue: [], queuedPrompts: 0, queuePaused: false, acknowledgedAt: Date.now() });
+        } else {
+          throw new ApiError(400, "Unknown action");
+        }
+        return;
+      }
       case "permission":
         return this.permission(agent, body as { requestId: string; optionId: string });
       case "question":
@@ -380,6 +416,27 @@ export class MockBackend implements Backend {
         return this.resume(agent);
     }
     throw new ApiError(404, "not found");
+  }
+
+  /** Matches in the timelines, grouped by agent like the core's `search_grouped` (words wrapped in \u0001 / \u0002). */
+  private search(query: string): SearchResults {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const groups: SearchGroup[] = [];
+    for (const [agentId, list] of this.items) {
+      const hits: SearchHit[] = [];
+      let total = 0;
+      for (const it of list) {
+        const text = it.kind === "user_message" || it.kind === "agent_message" ? it.text : "";
+        if (!text || !words.every((w) => text.toLowerCase().includes(w))) continue;
+        total++;
+        if (hits.length >= 3) continue;
+        const marked = words.reduce((t, w) => t.replace(new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig"), (m) => `\u0001${m}\u0002`), text);
+        hits.push({ agentId, itemId: it.id, kind: it.kind, snippet: marked.slice(0, 160), ts: it.ts, seq: it.seq });
+      }
+      if (total) groups.push({ agentId, hits, total });
+    }
+    groups.sort((a, b) => b.total - a.total);
+    return { groups, indexing: false, truncated: false };
   }
 
   private update(id: string, patch: Partial<Agent>) {

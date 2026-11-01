@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { planChoices, planTitle } from "@shared/planApproval";
+import { BudgetHoldCard } from "@/components/dock/BudgetHoldCard";
 import { DenyReasonSheet } from "@/components/DenyReasonSheet";
 import { Icon } from "@/components/Icon";
 import { OptionsSheet } from "@/components/OptionsSheet";
@@ -47,7 +48,9 @@ export const Dock = memo(function Dock({ agent, onSwitchAccount }: { agent: Agen
   const pending = useStore((s) => permissionIndex(s.permissions).get(agent.id));
   const resolving = useStore((s) => s.resolving);
   const need = useMemo(() => dockNeed(pending?.filter((p) => !resolving[p.requestId])), [pending, resolving]);
-  const block = need ? null : dockBlock(agent);
+  // Held at a limit: it waits for you like a request does, and nothing else is wrong with it.
+  const hold = need ? null : (agent.budgetHold ?? null);
+  const block = need || hold ? null : dockBlock(agent);
   const [sheet, setSheet] = useState<Sheets>(null);
   // The sheet for a request closes by itself once that request is gone.
   const needId = need?.item.requestId ?? null;
@@ -58,6 +61,7 @@ export const Dock = memo(function Dock({ agent, onSwitchAccount }: { agent: Agen
   return (
     <div className="mx-auto w-full max-w-[860px] px-safe">
       {need && <NeedCard agent={agent} need={need} onSheet={setSheet} />}
+      {hold && <BudgetHoldCard agent={agent} hold={hold} />}
       {block && <BlockedCard agent={agent} block={block} onSwitchAccount={onSwitchAccount} />}
       <Chips agent={agent} sheet={sheet} onSheet={setSheet} />
       {need && need.kind !== "question" && (

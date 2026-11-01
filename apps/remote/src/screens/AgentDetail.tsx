@@ -3,6 +3,7 @@ import { AccountDot, ProviderBadge, StatusDot } from "@/components/Identity";
 import { Composer, type ComposerHandle } from "@/components/Composer";
 import { AddAgentsSheet } from "@/components/AddAgents";
 import { Dock } from "@/components/dock/Dock";
+import { PrChip } from "@/components/PrChip";
 import { SiblingStrip, useSiblings } from "@/components/SiblingStrip";
 import { canAddAgents } from "@/lib/together";
 import { ImageSource } from "@/components/LocalImage";
@@ -11,6 +12,7 @@ import { Sheet } from "@/components/Sheet";
 import { Timeline } from "@/components/timeline/Timeline";
 import { TopBar } from "@/components/TopBar";
 import { Button, IconButton } from "@/components/ui";
+import { holdLabel } from "@/lib/budgetHold";
 import { loadTimeline, markRead, resumeAgent, unpair } from "@/lib/controller";
 import { devParam } from "@/lib/dev";
 import { basename, formatCost, formatTokens, plainPreview, relativeTimeLong } from "@/lib/format";
@@ -104,9 +106,13 @@ const DetailHeader = memo(function DetailHeader({
             <h1 className="truncate text-[15.5px] leading-tight font-semibold text-fg">{agent.title}</h1>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12.5px] leading-tight text-muted">
               <StatusDot status={agent.status} size={7} />
-              <span className="shrink-0" style={{ color: agent.status === "idle" || agent.status === "stopped" ? undefined : meta.color }}>
-                {meta.label}
-              </span>
+              {agent.budgetHold ? (
+                <span className="shrink-0 text-warn">{holdLabel(agent.budgetHold)}</span>
+              ) : (
+                <span className="shrink-0" style={{ color: agent.status === "idle" || agent.status === "stopped" ? undefined : meta.color }}>
+                  {meta.label}
+                </span>
+              )}
               <span className="text-line-strong">·</span>
               <span className="truncate">{account ? account.name : id.short}</span>
             </div>
@@ -299,6 +305,7 @@ function AgentView({
       <>
         <SiblingStrip agentId={agent.id} onAdd={canAdd ? openAdd : undefined} />
         <SettingsChips agent={agent} onPick={setOptionSheet} />
+        <PrChip agent={agent} />
       </>
     ),
     [agent, canAdd, openAdd],

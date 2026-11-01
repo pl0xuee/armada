@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { Agent, Attachment, AttentionReason, PendingItem, PermissionMode, PromptTemplate, RemoteAccount, RemoteCustomAgent, Session, TimelineItem } from "./types";
+import type { Agent, Attachment, AttentionReason, PendingItem, PermissionMode, PrSnapshot, PromptTemplate, RemoteAccount, RemoteCustomAgent, ResponseStyle, Session, TimelineItem } from "./types";
 
 export type Phase =
   /** Checking the stored token. */
@@ -93,6 +93,10 @@ export interface State {
   defaultWorktree: boolean;
   /** null = the server doesn't support choosing it. */
   defaultPermissionMode: PermissionMode | null;
+  /** "How agents report" (owner only); null = the server doesn't send it. */
+  responseStyle: ResponseStyle | null;
+  /** The last PR/CI status the server gave for each agent's branch. */
+  prs: Record<string, PrSnapshot>;
   timelines: Record<string, Timeline>;
 
   connection: Connection;
@@ -130,6 +134,8 @@ export const initialState: State = {
   templates: [],
   defaultWorktree: false,
   defaultPermissionMode: null,
+  responseStyle: null,
+  prs: {},
   timelines: {},
   connection: "connecting",
   connectionNote: null,
