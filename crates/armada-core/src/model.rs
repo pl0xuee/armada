@@ -312,6 +312,13 @@ pub struct Agent {
     /// whenever this agent's adapter restarts. Never holds permission options.
     #[serde(default)]
     pub config_choices: std::collections::BTreeMap<String, String>,
+    /// This agent's own spending limits, set by "Raise limit"; they win over the
+    /// per-agent defaults in settings.
+    #[serde(default)]
+    pub budget: Option<crate::budget::BudgetCap>,
+    /// Set while the agent waits at a spending limit (see `manager/budgets.rs`).
+    #[serde(default)]
+    pub budget_hold: Option<crate::budget::BudgetHold>,
     /// For a helper agent: the main agent it works for.
     #[serde(default)]
     pub parent_id: Option<String>,
@@ -977,6 +984,74 @@ pub struct NotificationSettings {
     pub smart_mute: bool,
 }
 
+/// Where an alert target posts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AlertKind {
+    /// A Slack incoming webhook.
+    #[default]
+    Slack,
+    /// A Discord channel webhook.
+    Discord,
+    /// Any endpoint: Armada POSTs JSON.
+    Webhook,
+}
+
+/// Which events an alert target hears about.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AlertEvents {
+    /// An agent waits for an approval or an answer.
+    pub needs_you: bool,
+    pub finished: bool,
+    pub failed: bool,
+    /// A spending limit paused an agent.
+    pub budget: bool,
+}
+
+impl Default for AlertEvents {
+    fn default() -> Self {
+        AlertEvents {
+            needs_you: true,
+            finished: false,
+            failed: true,
+            budget: true,
+        }
+    }
+}
+
+/// A place alerts are posted besides the desktop and ntfy: a Slack or Discord
+/// incoming webhook, or any URL that takes a JSON POST.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AlertTarget {
+    pub id: String,
+    /// A label shown in Settings (optional).
+    pub name: String,
+    pub kind: AlertKind,
+    /// The webhook URL. A secret: the database keeps a `keychain:` reference and the
+    /// URL itself lives in the OS keychain.
+    pub url: String,
+    pub enabled: bool,
+    pub events: AlertEvents,
+}
+
+impl Default for AlertTarget {
+    fn default() -> Self {
+        AlertTarget {
+            id: String::new(),
+            name: String::new(),
+            kind: AlertKind::default(),
+            url: String::new(),
+            enabled: true,
+            events: AlertEvents::default(),
+        }
+    }
+}
+
+/// Most alert targets one installation keeps.
+pub const MAX_ALERT_TARGETS: usize = 8;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct QuietHours {
@@ -1038,8 +1113,15 @@ pub struct Settings {
     pub daily_budget_usd: Option<f64>,
     /// Cap on what one agent spends in total, in USD (None = no cap).
     pub agent_budget_usd: Option<f64>,
-    /// What reaching a cap does: alert only, or also pause the agents.
+    /// What reaching a cap does: alert only, or also hold the agents at their next turn end.
     pub budget_action: crate::budget::BudgetAction,
+    /// Token caps, like the dollar ones (None = no cap).
+    pub daily_budget_tokens: Option<i64>,
+    pub agent_budget_tokens: Option<i64>,
+    /// Caps on everything the agents of one project spend, by project folder.
+    pub project_budgets: std::collections::BTreeMap<String, crate::budget::BudgetCap>,
+    /// Slack, Discord and generic webhook targets for alerts (ntfy has its own field).
+    pub alert_targets: Vec<AlertTarget>,
 }
 
 /// The voice assistant: talk to Armada through OpenAI's Realtime API. Off by default;
@@ -1307,6 +1389,21 @@ impl Settings {
                 ));
             }
         }
+        for (name, cap) in [
+            ("daily token budget", self.daily_budget_tokens),
+            ("agent token budget", self.agent_budget_tokens),
+        ] {
+            if cap.is_some_and(|c| c <= 0) {
+                return Err(format!(
+                    "The {name} must be more than 0 (or empty for no cap)"
+                ));
+            }
+        }
+        for (project, cap) in &self.project_budgets {
+            if let Some(problem) = cap.problem() {
+                return Err(format!("Project budget for {project}: {problem}"));
+            }
+        }
         crate::voice::validate_voice(&self.voice.model, &self.voice.language)?;
         Ok(())
     }
@@ -1350,6 +1447,23 @@ impl Settings {
                 *cap = None;
                 reset.push(name);
             }
+        }
+        for (cap, name) in [
+            (&mut self.daily_budget_tokens, "dailyBudgetTokens"),
+            (&mut self.agent_budget_tokens, "agentBudgetTokens"),
+        ] {
+            if cap.is_some_and(|c| c <= 0) {
+                *cap = None;
+                reset.push(name);
+            }
+        }
+        let mut bad_project = false;
+        for cap in self.project_budgets.values_mut() {
+            bad_project |= cap.sanitize();
+        }
+        self.project_budgets.retain(|_, cap| !cap.is_empty());
+        if bad_project {
+            reset.push("projectBudgets");
         }
         if crate::voice::model_spec(&self.voice.model).is_none() {
             self.voice.model = defaults.voice.model.clone();
@@ -1425,6 +1539,10 @@ impl Default for Settings {
             daily_budget_usd: None,
             agent_budget_usd: None,
             budget_action: Default::default(),
+            daily_budget_tokens: None,
+            agent_budget_tokens: None,
+            project_budgets: Default::default(),
+            alert_targets: Vec::new(),
         }
     }
 }

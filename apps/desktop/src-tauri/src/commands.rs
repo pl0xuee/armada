@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use crate::AppHandle;
 use armada_core::{
-    accounts, toolchain, Account, Agent, AgentStatus, ArmadaEvent, Attachment, AttentionReason,
-    Core, CreateAccountRequest, CreateAgentRequest, CustomAgent, McpServer, Provider, ProviderInfo,
-    Schedule, SearchResults, Settings, TimelineItem, UpdateInfo,
+    accounts, toolchain, Account, Agent, AgentStatus, AlertKind, ArmadaEvent, Attachment,
+    AttentionReason, Core, CreateAccountRequest, CreateAgentRequest, CustomAgent, McpServer,
+    Provider, ProviderInfo, Schedule, SearchResults, Settings, TimelineItem, UpdateInfo,
 };
 use serde::Serialize;
 use tauri::{Manager, State};
@@ -1074,6 +1074,36 @@ fn validate_settings(previous: Option<&Settings>, settings: &Settings) -> CmdRes
     if let (Some(url), true) = (url, url_changed) {
         crate::attention::validate_ntfy_url(url).map_err(|e| format!("Phone push URL: {e}"))?;
     }
+    validate_alert_targets(previous, settings)
+}
+
+/// Alert targets (Slack, Discord, webhooks): sane counts and ids, and a valid URL for
+/// every target that is new or whose URL or kind changed.
+fn validate_alert_targets(previous: Option<&Settings>, settings: &Settings) -> CmdResult<()> {
+    let targets = &settings.alert_targets;
+    if targets.len() > armada_core::model::MAX_ALERT_TARGETS {
+        return Err(format!(
+            "Alerts: at most {} targets",
+            armada_core::model::MAX_ALERT_TARGETS
+        ));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for t in targets {
+        if t.id.trim().is_empty() || !seen.insert(t.id.as_str()) {
+            return Err("Alerts: every target needs its own id".into());
+        }
+        if t.name.chars().count() > 60 {
+            return Err("Alerts: a target's name can be at most 60 characters".into());
+        }
+        let unchanged = previous.is_some_and(|p| {
+            p.alert_targets
+                .iter()
+                .any(|o| o.id == t.id && o.url == t.url && o.kind == t.kind)
+        });
+        if !unchanged {
+            crate::webhooks::validate_url(t.kind, &t.url).map_err(|e| format!("Alerts: {e}"))?;
+        }
+    }
     Ok(())
 }
 
@@ -1163,6 +1193,33 @@ pub async fn test_notification(
         .map_err(|e| e.to_string())?
         .map(|_| ())
         .map_err(|e| format!("The notification was shown, but the phone push failed: {e}"))
+}
+
+/// Settings -> Alerts "Send test": posts a test message to a Slack, Discord or webhook
+/// target. `url` tests one before it is saved; otherwise the saved target `target_id`.
+/// Fails with the reason (the URL itself is never part of it).
+#[tauri::command]
+pub async fn test_alert_target(
+    core: State<'_, Core>,
+    kind: AlertKind,
+    url: Option<String>,
+    target_id: Option<String>,
+) -> CmdResult<()> {
+    let typed = url.filter(|u| !u.trim().is_empty());
+    let url = match typed {
+        Some(u) => u,
+        None => core
+            .settings()
+            .map_err(err)?
+            .alert_targets
+            .into_iter()
+            .find(|t| Some(&t.id) == target_id.as_ref())
+            .map(|t| t.url)
+            .ok_or_else(|| "Enter the webhook URL first".to_string())?,
+    };
+    tauri::async_runtime::spawn_blocking(move || crate::webhooks::send_test(kind, &url))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Opens a web link in the browser, opens a folder in the file manager, or reveals a

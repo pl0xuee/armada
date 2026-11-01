@@ -86,7 +86,17 @@ fn query_words_are_quoted_and_the_last_is_a_prefix() {
 fn odd_input_never_breaks_the_query() {
     let db = open("odd");
     db.put_item(&user("a", 1, "hello world")).unwrap();
-    for q in ["\"", "AND", "a OR", "(", "NEAR(", "*", "col:x", "^hello", "hello -world"] {
+    for q in [
+        "\"",
+        "AND",
+        "a OR",
+        "(",
+        "NEAR(",
+        "*",
+        "col:x",
+        "^hello",
+        "hello -world",
+    ] {
         assert!(db.search(q).is_ok(), "{q:?}");
     }
 }
@@ -96,8 +106,14 @@ fn new_items_are_searchable_at_once() {
     let db = open("live");
     db.put_item(&user("a1", 1, "Please fix the login redirect"))
         .unwrap();
-    db.put_item(&tool("a1", 2, "Edit", "src/auth/session.ts", "secret output"))
-        .unwrap();
+    db.put_item(&tool(
+        "a1",
+        2,
+        "Edit",
+        "src/auth/session.ts",
+        "secret output",
+    ))
+    .unwrap();
     db.put_item(&user("a2", 1, "Unrelated chat about lunch"))
         .unwrap();
 
