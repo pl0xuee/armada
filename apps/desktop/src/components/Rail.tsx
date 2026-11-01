@@ -3,6 +3,7 @@ import { m } from "motion/react";
 import type { ComponentType } from "react";
 import { useTriageCount } from "./triage/useTriage";
 import { useApp } from "@/store/app";
+import { useBackgroundIds } from "@/store/background";
 import { useUi, type View } from "@/store/ui";
 import { cn, modKey } from "@/lib/utils";
 import { CountBadge } from "./ui/misc";
@@ -29,7 +30,12 @@ const BOTTOM: RailItem[] = [{ view: "settings", label: "Settings", icon: Setting
 export function Rail() {
   const view = useUi((s) => s.view);
   const setView = useUi((s) => s.setView);
-  const working = useApp((s) => Object.values(s.agents).filter((a) => a.status === "working").length);
+  const background = useBackgroundIds();
+  const working = useApp(
+    (s) =>
+      Object.values(s.agents).filter((a) => a.status === "working" || (a.status === "idle" && background.has(a.id)))
+        .length,
+  );
   // The same count as the Needs you tab and the window title.
   const needs = useTriageCount();
 

@@ -17,16 +17,22 @@ export interface ProjectGroup {
   lastActivityAt: number;
 }
 
-const isWorking = (a: Agent) => a.status === "working" || a.status === "starting";
+const isWorking = (a: Agent, background?: ReadonlySet<string>) =>
+  a.status === "working" || a.status === "starting" || (a.status === "idle" && !!background?.has(a.id));
 
 export const projectKey = (path: string) => path.trim().replace(/[\\/]+$/, "") || path;
 
 /**
  * The sidebar's projects: every folder that has agents, each with its agents, projects that
  * need you first and then the most recently active. Archived agents are returned separately.
- * `query` filters agents (title, folder, branch, last message).
+ * `query` filters agents (title, folder, branch, last message). `background`: idle agents that still have
+ * a workflow or background agents running, counted as working.
  */
-export function groupByProject(agents: Agent[], query = ""): { projects: ProjectGroup[]; archived: Agent[] } {
+export function groupByProject(
+  agents: Agent[],
+  query = "",
+  background?: ReadonlySet<string>,
+): { projects: ProjectGroup[]; archived: Agent[] } {
   const q = query.trim().toLowerCase();
   const match = (a: Agent) =>
     !q ||
@@ -52,7 +58,7 @@ export function groupByProject(agents: Agent[], query = ""): { projects: Project
   // Agents that need you first (most urgent reason first), then working ones, then the rest.
   const rank = (a: Agent) => {
     const reason = needsAttention(a);
-    return reason ? NEED_RANK[reason] : isWorking(a) ? NEED_RANK_END : NEED_RANK_END + 1;
+    return reason ? NEED_RANK[reason] : isWorking(a, background) ? NEED_RANK_END : NEED_RANK_END + 1;
   };
   const projects: ProjectGroup[] = [];
   for (const [path, list] of byPath) {
@@ -62,7 +68,7 @@ export function groupByProject(agents: Agent[], query = ""): { projects: Project
       name: basename(path),
       agents: list,
       needs: list.filter((a) => needsAttention(a) !== null).length,
-      working: list.filter(isWorking).length,
+      working: list.filter((a) => isWorking(a, background)).length,
       lastActivityAt: Math.max(...list.map((a) => a.lastActivityAt)),
     });
   }

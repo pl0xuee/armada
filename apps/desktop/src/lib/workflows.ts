@@ -27,19 +27,26 @@ export interface WorkflowCall {
   ts: number;
 }
 
+/** The agent's recent workflow runs, newest first. */
+export function recentWorkflowCalls(items: TimelineItem[] | undefined, now: number): WorkflowCall[] {
+  const calls: WorkflowCall[] = [];
+  if (!items) return calls;
+  for (let i = items.length - 1; i >= 0 && calls.length < WORKFLOW_WATCH_MAX; i--) {
+    const it = items[i];
+    if (isWorkflowCall(it) && now - it.ts < WORKFLOW_WATCH_MAX_AGE_MS)
+      calls.push({ itemId: it.id, toolCallId: it.toolCallId, ts: it.ts });
+  }
+  return calls;
+}
+
 /**
  * The agent's recent workflow runs, newest first, encoded as one string (a primitive, so a selector
  * using it doesn't re-render per streamed token). Decode with `parseWorkflowKey`.
  */
 export function recentWorkflowKey(items: TimelineItem[] | undefined, now: number): string {
-  if (!items) return "";
-  const calls: string[] = [];
-  for (let i = items.length - 1; i >= 0 && calls.length < WORKFLOW_WATCH_MAX; i--) {
-    const it = items[i];
-    if (isWorkflowCall(it) && now - it.ts < WORKFLOW_WATCH_MAX_AGE_MS)
-      calls.push([it.id, it.toolCallId, it.ts].join("\t"));
-  }
-  return calls.join("\n");
+  return recentWorkflowCalls(items, now)
+    .map((c) => [c.itemId, c.toolCallId, c.ts].join("\t"))
+    .join("\n");
 }
 
 export function parseWorkflowKey(key: string): WorkflowCall[] {
@@ -135,9 +142,9 @@ function put(key: string, entry: WorkflowEntry) {
   useWorkflows.setState((s) => ({ byKey: { ...s.byKey, [key]: entry } }));
 }
 
-async function poll(key: string) {
+async function poll(key: string, force = false) {
   const w = watches.get(key);
-  if (!w || w.inflight || w.done || blurred()) return;
+  if (!w || w.inflight || w.done || (!force && blurred())) return;
   w.inflight = true;
   try {
     const progress = await api.workflowProgress(w.agentId, w.toolCallId);
@@ -155,6 +162,11 @@ async function poll(key: string) {
   } finally {
     w.inflight = false;
   }
+}
+
+/** One read of a watched run even while the window is blurred (the caller decides that is worth it). */
+export function pollWorkflowNow(agentId: string, toolCallId: string) {
+  void poll(workflowKey(agentId, toolCallId), true);
 }
 
 function stop(w: Watch) {

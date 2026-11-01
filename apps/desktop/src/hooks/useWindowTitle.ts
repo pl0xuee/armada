@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 import { useTriageCount } from "@/components/triage/useTriage";
 import { api } from "@/lib/api";
+import { backgroundActive, backgroundShort } from "@/lib/background";
 import { windowTitle } from "@/lib/windowTitle";
+import { useBackground } from "@/store/background";
 import { isDone, useCompletion } from "@/store/completion";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
@@ -16,7 +18,12 @@ export function useWindowTitle(enabled: boolean) {
   const agent = useApp((st) => (selected ? st.agents[selected] : undefined));
   const marked = useCompletion((st) => !!(selected && st.done[selected]));
   const needs = useTriageCount();
-  const base = windowTitle(agent, agent ? isDone(agent, marked) : false);
+  const bg = useBackground(selected ?? "");
+  const base = windowTitle(
+    agent,
+    agent ? isDone(agent, marked) : false,
+    backgroundActive(bg) ? backgroundShort(bg) : null,
+  );
   const text = needs > 0 ? `(${needs}) ${base}` : base;
   useEffect(() => {
     document.title = text;

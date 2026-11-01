@@ -28,8 +28,7 @@ import { archiveAgent, exportConversation, renameAgent, resumeAgent, stopAgent }
 import { ARCHIVED_KEY, groupByProject, orderedAgents, projectKey } from "@/lib/agents";
 import { MAX_TILES, nestHelpers, syncPresentation } from "@/lib/helpers";
 import { relativeTime, relativeTimeLong } from "@/lib/format";
-import { DONE_META, STATUS } from "@/lib/providers";
-import { useIsDone } from "@/store/completion";
+import { useBackgroundIds, useStatusView } from "@/store/background";
 import type { Account, Agent } from "@/lib/types";
 import { basename, cn, modKey } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
@@ -114,12 +113,14 @@ export function AgentList({
   const rowsReady = afterPaint || variant !== "docked";
 
   const agents = useMemo(() => Object.values(agentsMap), [agentsMap]);
+  // Agents whose turn ended but whose workflow / background agents still run count as working.
+  const background = useBackgroundIds();
   // Helpers nest under their main agent, except while filtering (then every match is its own row).
   const searchingNow = query.trim().length > 0;
   const nesting = useMemo(() => (searchingNow ? null : nestHelpers(agents)), [agents, searchingNow]);
   const { projects, archived } = useMemo(
-    () => groupByProject(nesting ? nesting.roots : agents, query),
-    [nesting, agents, query],
+    () => groupByProject(nesting ? nesting.roots : agents, query, background),
+    [nesting, agents, query, background],
   );
   const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   const searching = query.trim().length > 0;
@@ -536,11 +537,12 @@ const AgentRow = memo(function AgentRow({
   const setDeleteAgent = useUi((s) => s.setDeleteAgent);
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(agent.title);
-  const done = useIsDone(agent);
-  const status = done ? DONE_META : STATUS[agent.status];
+  const view = useStatusView(agent);
+  const { done, meta: status } = view;
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const resumable = agent.status === "interrupted" || agent.status === "stopped";
-  const live = agent.status === "working" || agent.status === "needs_permission" || agent.status === "starting";
+  const live =
+    agent.status === "working" || agent.status === "needs_permission" || agent.status === "starting" || view.background;
 
   const inputRef = useRef<HTMLInputElement>(null);
   /** Always start from the current title (it may have changed since the row mounted). */
@@ -690,12 +692,15 @@ const AgentRow = memo(function AgentRow({
                 </span>
               </div>
               <div className="mt-0.5 flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[11.5px] text-steel">
-                <StatusDot status={agent.status} size={6} done={done} />
+                <StatusDot status={view.dot} size={6} done={done} />
                 <span
                   className="shrink-0"
+                  title={view.detail ?? undefined}
                   style={{
                     color:
-                      !done && (agent.status === "idle" || agent.status === "stopped") ? undefined : status.colorVar,
+                      !done && !view.background && (agent.status === "idle" || agent.status === "stopped")
+                        ? undefined
+                        : status.colorVar,
                   }}
                 >
                   {status.label}

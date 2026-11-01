@@ -437,3 +437,154 @@ fn big_transcripts_are_read_from_the_tail_and_counted_incrementally() {
     assert_eq!(p.agents[0].tool_calls, 401);
     assert_eq!(p.agents[0].latest.as_deref(), Some("Running cargo test"));
 }
+
+// ---- the turn ends while a run goes on ----------------------------------------------
+
+fn run_progress(state: WorkflowState, agents: usize) -> anyhow::Result<WorkflowProgress> {
+    Ok(WorkflowProgress {
+        run_id: None,
+        state,
+        agents: (0..agents)
+            .map(|i| WorkflowAgent {
+                id: format!("a{i}"),
+                label: format!("a{i}"),
+                phase: None,
+                status: WorkflowAgentStatus::Working,
+                tool_calls: 0,
+                latest: None,
+                idle_secs: None,
+            })
+            .collect(),
+    })
+}
+
+#[test]
+fn a_running_workflow_is_named_in_the_turn_end_text() {
+    let one = [LaunchedRun::Running { agents: 5 }];
+    assert_eq!(
+        turn_end_body(&one).as_deref(),
+        Some("Finished its turn. A workflow is still running (5 agents).")
+    );
+    let single = [LaunchedRun::Running { agents: 1 }];
+    assert_eq!(
+        turn_end_body(&single).as_deref(),
+        Some("Finished its turn. A workflow is still running (1 agent).")
+    );
+    let starting = [LaunchedRun::Running { agents: 0 }];
+    assert_eq!(
+        turn_end_body(&starting).as_deref(),
+        Some("Finished its turn. A workflow is still running.")
+    );
+    let two = [
+        LaunchedRun::Running { agents: 3 },
+        LaunchedRun::Running { agents: 2 },
+    ];
+    assert_eq!(
+        turn_end_body(&two).as_deref(),
+        Some("Finished its turn. 2 workflows are still running (5 agents).")
+    );
+}
+
+#[test]
+fn an_unreadable_run_only_may_still_be_running() {
+    let maybe = [LaunchedRun::Unreadable];
+    assert_eq!(
+        turn_end_body(&maybe).as_deref(),
+        Some("Finished its turn. A workflow may still be running.")
+    );
+    // A run that is known to run wins over one that can't be read.
+    let mixed = [LaunchedRun::Unreadable, LaunchedRun::Running { agents: 2 }];
+    assert_eq!(
+        turn_end_body(&mixed).as_deref(),
+        Some("Finished its turn. A workflow is still running (2 agents).")
+    );
+    assert!(turn_end_body(&[]).is_none());
+    assert!(turn_end_body(&maybe).unwrap().starts_with(TURN_ONLY_PREFIX));
+}
+
+#[test]
+fn only_a_run_that_says_running_is_claimed() {
+    let running = run_progress(WorkflowState::Running, 4);
+    assert_eq!(
+        launched_run(&running, false),
+        Some(LaunchedRun::Running { agents: 4 })
+    );
+    // Finished and quiet runs are not claimed.
+    assert_eq!(
+        launched_run(&run_progress(WorkflowState::Finished, 4), true),
+        None
+    );
+    assert_eq!(
+        launched_run(&run_progress(WorkflowState::Unknown, 4), true),
+        None
+    );
+    // A folder that can't be read counts only for a run launched in this turn.
+    let err: anyhow::Result<WorkflowProgress> = Err(anyhow!("not allowed"));
+    assert_eq!(launched_run(&err, true), Some(LaunchedRun::Unreadable));
+    assert_eq!(launched_run(&err, false), None);
+}
+
+fn launch_item(id: &str, seq: i64, ts: i64, workflow: bool) -> TimelineItem {
+    TimelineItem {
+        id: id.into(),
+        agent_id: "a".into(),
+        seq,
+        ts,
+        body: ItemBody::ToolCall {
+            tool_call_id: id.into(),
+            title: "Workflow".into(),
+            tool_kind: crate::model::ToolKind::Think,
+            status: crate::model::ToolStatus::Completed,
+            locations: Vec::new(),
+            diffs: Vec::new(),
+            output: String::new(),
+            command: None,
+            images: Vec::new(),
+            subagent: workflow.then(|| SubAgent {
+                kind: Some("workflow".into()),
+                workflow: Some(Box::new(WorkflowLaunch {
+                    transcript_dir: format!("/x/{id}"),
+                    ..Default::default()
+                })),
+                ..SubAgent::default()
+            }),
+            parent_tool_call_id: None,
+        },
+    }
+}
+
+#[test]
+fn recent_launches_are_the_newest_few_and_flag_this_turn() {
+    let now = 100 * 3600 * 1000;
+    let items = [
+        launch_item("ancient", 1, now - 20 * 3600 * 1000, true),
+        launch_item("w1", 2, now - 5000, true),
+        launch_item("plain", 3, now - 4000, false),
+        launch_item("w2", 4, now - 2000, true),
+        launch_item("w3", 5, now - 1000, true),
+        launch_item("w4", 6, now - 500, true),
+    ];
+    let found = recent_launches(items.iter(), now - 1500, now);
+    let dirs: Vec<_> = found
+        .iter()
+        .map(|(l, t)| (l.transcript_dir.as_str(), *t))
+        .collect();
+    assert_eq!(dirs, [("/x/w4", true), ("/x/w3", true), ("/x/w2", false)]);
+    assert!(recent_launches(std::iter::empty(), 0, now).is_empty());
+}
+
+#[test]
+fn the_quiet_finished_alert_names_what_ended() {
+    assert_eq!(
+        everything_finished_body(Some(5)),
+        "Everything finished. Its workflow (5 agents) is done."
+    );
+    assert_eq!(
+        everything_finished_body(Some(1)),
+        "Everything finished. Its workflow (1 agent) is done."
+    );
+    assert_eq!(
+        everything_finished_body(None),
+        "Everything finished. Its workflow is done."
+    );
+}

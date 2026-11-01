@@ -24,6 +24,8 @@ import { AttachmentStrip } from "../AttachmentStrip";
 import { TemplatePicker } from "../TemplatePicker";
 import { Button } from "../ui/button";
 import { useIsDone } from "@/store/completion";
+import { useBackground } from "@/store/background";
+import { backgroundActive } from "@/lib/background";
 import { Kbd } from "../ui/kbd";
 import { Tooltip } from "../ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/menu";
@@ -528,6 +530,12 @@ function ComposerImpl({
 
   const name = useIdentity(agent.provider, agent.customAgentId).short;
   const justDone = useIsDone(agent);
+  const bg = useBackground(agent.id);
+  const bgNote = !backgroundActive(bg)
+    ? null
+    : bg.workflows > 0
+      ? "A workflow is still running"
+      : "Background agents may still be running";
   const placeholder = blocked
     ? asking
       ? primary === "deliver"
@@ -542,8 +550,10 @@ function ComposerImpl({
         : primary === "deliver"
           ? `${name} is working. Type a follow-up: it reads it at its next step…`
           : `${name} is working. Queue a follow-up message…`
-      : justDone
-        ? `Done. Reply, or start something new…`
+      : bgNote
+        ? `Turn finished. ${bgNote}. Reply, or start something new…`
+        : justDone
+          ? `Done. Reply, or start something new…`
         : agent.availableCommands.length > 0
           ? `Message ${name}…  / for commands, @ for files`
           : `Message ${name}…  @ to mention files`;
