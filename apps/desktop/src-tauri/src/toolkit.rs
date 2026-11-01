@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 
 use kvistcode_core::project_config::{self, InstructionDoc, InstructionSave};
+use kvistcode_core::skill_prefs::{self, Scope, SkillToggles};
 use kvistcode_core::skills::{self, SkillDoc, SkillInfo};
 use kvistcode_core::{providers, Core};
 use tauri::State;
@@ -106,4 +107,44 @@ pub async fn skills_create(
         _ => return Err("Skills can be created for you or for a project".to_string()),
     };
     blocking(move || skills::create(&root, &scope, &name, &description).map_err(err)).await
+}
+
+/// Which skills are switched off: everywhere, and in `project` when given.
+#[tauri::command]
+pub async fn skills_toggles(
+    core: State<'_, Core>,
+    project: Option<String>,
+) -> CmdResult<SkillToggles> {
+    let root = optional_project(&core, project)?;
+    let dir = core.data_dir().to_path_buf();
+    blocking(move || {
+        let key = root.as_deref().map(skill_prefs::project_key);
+        Ok(skill_prefs::load(&dir).toggles(key.as_deref()))
+    })
+    .await
+}
+
+/// Switches a skill (by the id `skills_list` returned) on or off, "global" (all projects,
+/// your own skills) or "project". Only Kvistcode's own list changes: no skill file is
+/// touched. Agents pick it up when they next start.
+#[tauri::command]
+pub async fn skills_set_enabled(
+    core: State<'_, Core>,
+    project: Option<String>,
+    scope: String,
+    id: String,
+    enabled: bool,
+) -> CmdResult<SkillToggles> {
+    let scope = Scope::parse(&scope).map_err(err)?;
+    let root = optional_project(&core, project)?;
+    if scope == Scope::Project && root.is_none() {
+        return Err("Choose a project first".to_string());
+    }
+    let dir = core.data_dir().to_path_buf();
+    blocking(move || {
+        let listed = skills::list(root.as_deref(), providers::home_dir().as_deref());
+        let key = root.as_deref().map(skill_prefs::project_key);
+        skill_prefs::set_enabled(&dir, &listed, key.as_deref(), scope, &id, enabled).map_err(err)
+    })
+    .await
 }
