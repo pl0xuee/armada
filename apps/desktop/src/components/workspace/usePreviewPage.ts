@@ -243,5 +243,8 @@ export function usePreviewPage(opts: {
 
   const clear = useCallback(() => setEntries([]), []);
 
-  return { iframeRef, frameSrc, frameReady, tools, simulated: !!session?.simulated, entries, clear, inspecting, inspect, screenshot, onFrameLoad };
+  /** Back / forward inside the page (its own session history). */
+  const navigate = useCallback((dir: "back" | "forward") => send({ cmd: "history", dir }), [send]);
+
+  return { iframeRef, frameSrc, frameReady, tools, simulated: !!session?.simulated, entries, clear, inspecting, inspect, screenshot, navigate, onFrameLoad };
 }
