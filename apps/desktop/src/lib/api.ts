@@ -64,7 +64,7 @@ import type {
   SettingsFile,
   SettingsScope,
 } from "./projectConfig";
-import type { InstructionSave, SkillDoc, SkillInfo, SkillScope } from "./toolkit";
+import type { InstructionSave, SkillDoc, SkillInfo, SkillScope, SkillToggles, SwitchScope } from "./toolkit";
 import { onVoiceBus } from "./voiceBus";
 import type { VaEvent } from "./voiceAssistant";
 
@@ -112,9 +112,6 @@ const tauriApi = {
   listFiles: (agentId: string, query: string) => invoke<string[]>("list_files", { agentId, query }),
   // project settings: instruction files, permission rules, hooks, commands and skills of a project
   projectConfig: (project: string) => invoke<ProjectConfig>("project_config", { project }),
-  /** Saves CLAUDE.md / AGENTS.md at the project root (created if missing). */
-  projectSaveInstruction: (project: string, file: InstructionFileName, content: string) =>
-    invoke<InstructionDoc>("project_save_instruction", { project, file, content }),
   /** Replaces the allow/ask/deny lists in settings.json or settings.local.json, keeping all other keys. */
   projectSaveRules: (project: string, scope: SettingsScope, rules: PermissionRules) =>
     invoke<SettingsFile>("project_save_rules", { project, scope, rules }),
@@ -140,6 +137,14 @@ const tauriApi = {
   /** Creates SKILL.md from a template for you ("user") or the project ("project"); never replaces a skill. */
   skillsCreate: (project: string | null, scope: Exclude<SkillScope, "plugin">, name: string, description: string) =>
     invoke<SkillInfo>("skills_create", { project, scope, name, description }),
+  /** Skills Kvistcode hides from Claude agents (by folder name): everywhere, and in `project`. */
+  skillsToggles: (project: string | null) => invoke<SkillToggles>("skills_toggles", { project }),
+  /**
+   * Switches a skill on or off for "global" (all projects, your own skills) or "project". Only Kvistcode's own
+   * list changes, never a skill file; Claude agents pick it up when they next start.
+   */
+  skillsSetEnabled: (project: string | null, scope: SwitchScope, id: string, enabled: boolean) =>
+    invoke<SkillToggles>("skills_set_enabled", { project, scope, id, enabled }),
   /** Starts a helper agent beside a busy one: runs now, in parallel, on a copy of the main agent's files. */
   spawnHelper: (parentId: string, prompt: string, attachments?: Attachment[]) =>
     invoke<Agent>("spawn_helper", { parentId, prompt, attachments: attachments ?? [] }),

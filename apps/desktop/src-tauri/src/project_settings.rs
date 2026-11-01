@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use kvistcode_core::project_config::{
-    self, InstructionDoc, PermissionRules, ProjectConfig, SettingsFile, SettingsScope,
+    self, PermissionRules, ProjectConfig, SettingsFile, SettingsScope,
 };
 use kvistcode_core::{providers, Core};
 use tauri::State;
@@ -52,18 +52,6 @@ pub async fn project_config(core: State<'_, Core>, project: String) -> CmdResult
     let root = known_project(&core, &project)?;
     blocking(move || project_config::load(&root, providers::home_dir().as_deref()).map_err(err))
         .await
-}
-
-/// Saves `CLAUDE.md` or `AGENTS.md` at the project root (created if missing).
-#[tauri::command]
-pub async fn project_save_instruction(
-    core: State<'_, Core>,
-    project: String,
-    file: String,
-    content: String,
-) -> CmdResult<InstructionDoc> {
-    let root = known_project(&core, &project)?;
-    blocking(move || project_config::write_instruction(&root, &file, &content).map_err(err)).await
 }
 
 /// Replaces the allow / ask / deny lists in `.claude/settings.json` (shared) or

@@ -12,6 +12,7 @@ pub mod providers;
 pub mod questions;
 pub mod redact;
 pub mod scripts;
+pub mod skill_prefs;
 pub mod skills;
 pub mod toolchain;
 pub mod voice;
