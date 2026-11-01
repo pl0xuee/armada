@@ -196,5 +196,40 @@ export function buildExtras(now: number, flags: ReadonlySet<string>): Extras {
     ];
   }
 
+  if (flags.has("hold")) {
+    // Held at a limit: a dollar limit with queued messages, and a limit kind this app has no wording for.
+    agents.push(
+      agent(now, "h1", "Refactor the invoice exporter", "claude", "acc-work", "idle", {
+        agoMin: 3,
+        projectPath: WEB,
+        costUsd: 3.08,
+        unread: true,
+        queuedPrompts: 2,
+        queue: [
+          { id: "hq1", text: "Now add CSV export.", attachments: 0 },
+          { id: "hq2", text: "And update the docs.", attachments: 0 },
+        ],
+        queuePaused: true,
+        lastMessage: "The exporter now streams rows instead of building the whole file in memory.",
+        budgetHold: { scope: "agent", metric: "cost", spent: 3.08, cap: 3, since: now - 3 * MIN },
+      }),
+      agent(now, "h2", "Triage the flaky e2e suite", "codex", "acc-openai", "idle", {
+        agoMin: 8,
+        projectPath: WEB,
+        lastMessage: "Three of the five flaky specs share a race in the cart fixture.",
+        // A kind the core may add later: it must still read sensibly.
+        budgetHold: { scope: "project", metric: "turns", spent: 41, cap: 40, since: now - 8 * MIN } as unknown as Agent["budgetHold"],
+      }),
+    );
+    timelines.h1 = [
+      { ...base("h1", at(20)), kind: "user_message", text: "Refactor the invoice exporter to stream rows." },
+      { ...base("h1", at(4)), kind: "agent_message", text: "The exporter now streams rows instead of building the whole file in memory." },
+    ];
+    timelines.h2 = [
+      { ...base("h2", at(30)), kind: "user_message", text: "Find out why the e2e suite is flaky." },
+      { ...base("h2", at(9)), kind: "agent_message", text: "Three of the five flaky specs share a race in the cart fixture." },
+    ];
+  }
+
   return { agents, timelines };
 }

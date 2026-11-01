@@ -519,6 +519,9 @@ export const useApp = create<AppStore>((set, get) => ({
         case "update_progress":
           patch.updateProgress = { downloaded: e.downloaded, total: e.total };
           break;
+        case "settings_changed":
+          patch.settings = e.settings;
+          break;
         // attention / terminal / navigate are UI concerns, handled in store/events.ts
         default:
           break;

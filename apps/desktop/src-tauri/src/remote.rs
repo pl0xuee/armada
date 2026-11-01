@@ -24,6 +24,7 @@
 //! - Traffic is plain HTTP; the UI explains that it is not encrypted on the local
 //!   network and recommends a VPN such as Tailscale away from home.
 
+mod phone;
 mod tailscale;
 mod view;
 
@@ -1463,6 +1464,10 @@ impl Remote {
             .route("/api/agents/{id}/commit", post(commit))
             .route("/api/agents/{id}/ship", post(ship))
             .route("/api/agents/{id}/image", get(image))
+            .route("/api/agents/{id}/budget", post(phone::budget_resolve))
+            .route("/api/agents/{id}/pr", get(phone::pr))
+            .route("/api/search", get(phone::search))
+            .route("/api/response-style", post(phone::set_response_style))
             .route("/api/permissions", get(permissions))
             .route("/api/events", get(events))
             .layer(DefaultBodyLimit::max(256 * 1024))
@@ -2146,6 +2151,9 @@ async fn state(
     } else {
         (Vec::new(), Vec::new(), false, String::new())
     };
+    let response_style = (scope == Scope::Owner)
+        .then(|| core.settings().map(|s| s.response_style))
+        .transpose()?;
     Ok(Json(json!({
         "agents": agents,
         "accounts": accounts,
@@ -2154,6 +2162,7 @@ async fn state(
         "templates": templates,
         "defaultWorktree": default_worktree,
         "defaultPermissionMode": default_mode,
+        "responseStyle": response_style,
     })))
 }
 

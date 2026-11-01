@@ -4,6 +4,7 @@ import { AppMark, Icon } from "@/components/Icon";
 import { Sheet } from "@/components/Sheet";
 import { ConnectionPill, TopBar } from "@/components/TopBar";
 import { Button, IconButton } from "@/components/ui";
+import { holdLabel } from "@/lib/budgetHold";
 import { cn } from "@/lib/cn";
 import { retryState, stopAgent, unpair } from "@/lib/controller";
 import { confirmAction } from "@/lib/confirm";
@@ -17,7 +18,9 @@ import { storage } from "@/lib/storage";
 import { groupByProject, needsYouLabel, projectSummary, type NeedsReason, type ProjectGroup, type TriageEntry } from "@/lib/triage";
 import { useStore } from "@/lib/store";
 import type { Agent } from "@/lib/types";
+import { ConversationSearch } from "@/components/ConversationSearch";
 import { InstallTip, installTipApplies } from "@/components/InstallTip";
+import { ResponseStyleRow } from "@/components/ResponseStyleRow";
 import { EmptyState, ErrorState } from "./States";
 
 /** Fleet scroll position, restored when coming back from an agent. */
@@ -77,18 +80,18 @@ export function Fleet() {
     body = (
       <div className="space-y-6">
         {owner && <InstallTip />}
-        {list.length > 5 && (
+        {(list.length > 5 || owner) && (
           <div className="relative">
             <Icon name="search" size={17} className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-steel" />
             <label htmlFor="fleet-search" className="sr-only">
-              Search agents
+              {owner ? "Search agents and conversations" : "Search agents"}
             </label>
             <input
               id="fleet-search"
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search agents"
+              placeholder={owner ? "Search agents and conversations" : "Search agents"}
               autoComplete="off"
               className="block h-11 w-full rounded-xl border border-line bg-panel pr-3 pl-10 text-[16px] text-fg outline-none placeholder:text-steel focus:border-accent/60"
             />
@@ -131,6 +134,7 @@ export function Fleet() {
             )}
           </section>
         )}
+        {owner && query && <ConversationSearch query={query} />}
       </div>
     );
   }
@@ -300,7 +304,7 @@ const AgentRow = memo(function AgentRow({ agent, now, reason }: { agent: Agent; 
     <button
       type="button"
       onClick={() => navigate({ name: "agent", agentId: agent.id })}
-      aria-label={`${agent.title}, ${limited ? USAGE_LIMIT_LABEL : statusMeta(agent.status).label}${pending ? `, ${pending} waiting for approval` : ""}`}
+      aria-label={`${agent.title}, ${limited ? USAGE_LIMIT_LABEL : agent.budgetHold ? holdLabel(agent.budgetHold) : statusMeta(agent.status).label}${pending ? `, ${pending} waiting for approval` : ""}`}
       className={cn("press-row relative flex w-full items-start gap-3 px-3.5 py-3 text-left", needs && "bg-warn/[0.035]")}
     >
       {needs && <span className="absolute inset-y-3 left-0 w-[3px] rounded-r-full bg-warn" aria-hidden />}
@@ -318,6 +322,8 @@ const AgentRow = memo(function AgentRow({ agent, now, reason }: { agent: Agent; 
         <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[13px] leading-snug">
           {limited ? (
             <span className="shrink-0 font-medium text-warn">{USAGE_LIMIT_LABEL}</span>
+          ) : agent.budgetHold ? (
+            <span className="shrink-0 font-medium text-warn">{holdLabel(agent.budgetHold)}</span>
           ) : (
             <StatusText status={agent.status} className="shrink-0" />
           )}
@@ -428,6 +434,7 @@ function SettingsSheet({ open, onClose }: { open: boolean; onClose: () => void }
         <Row label="Access">{session?.scope === "owner" ? "Full control" : "Read-only"}</Row>
         {session?.version && <Row label="Kvistcode version">{session.version}</Row>}
       </dl>
+      {session?.scope === "owner" && <ResponseStyleRow />}
       {installTipApplies() && (
         <div className="mt-4">
           <InstallTip dismissible={false} />

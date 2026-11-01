@@ -7,7 +7,7 @@
 import { basename } from "./format";
 import type { Agent } from "./types";
 
-export type NeedsReason = "permission" | "rate_limited" | "error" | "done";
+export type NeedsReason = "permission" | "budget" | "rate_limited" | "error" | "done";
 
 /**
  * Why an agent needs the owner, or null. `pending` is the number of approvals/questions still open once
@@ -20,6 +20,8 @@ export function needsReason(a: Agent, pending?: number): NeedsReason | null {
   const answered = pending !== undefined && a.pendingPermissions > 0 && pending === 0;
   // An approval is still blocking, even if the agent was marked done.
   if (!answered && (a.pendingPermissions > 0 || a.status === "needs_permission")) return "permission";
+  // Held at a limit: stays until the owner chooses, like an approval ("Done" doesn't dismiss it).
+  if (a.budgetHold) return "budget";
   // "Done" dismisses until the agent does something new.
   if (a.acknowledgedAt != null && a.acknowledgedAt >= a.lastActivityAt) return null;
   if (a.rateLimited) return "rate_limited";
@@ -29,7 +31,7 @@ export function needsReason(a: Agent, pending?: number): NeedsReason | null {
 }
 
 /** Most urgent first. */
-export const NEED_RANK: Record<NeedsReason, number> = { permission: 0, rate_limited: 1, error: 2, done: 3 };
+export const NEED_RANK: Record<NeedsReason, number> = { permission: 0, budget: 1, rate_limited: 2, error: 3, done: 4 };
 
 export interface TriageEntry {
   agent: Agent;
@@ -64,6 +66,7 @@ export function triageSections(queue: readonly TriageEntry[]): TriageSection[] {
 
 export const REASON_LABEL: Record<NeedsReason, string> = {
   permission: "Needs approval",
+  budget: "Limit reached",
   rate_limited: "Usage limit",
   error: "Error",
   done: "Done · unread",
@@ -133,7 +136,7 @@ export function groupByProject(
   const byActivity = (x: Agent, y: Agent) => y.lastActivityAt - x.lastActivityAt;
   const rank = (a: Agent) => {
     const reason = reasonOf(a);
-    return reason ? NEED_RANK[reason] : isWorking(a) ? 4 : 5;
+    return reason ? NEED_RANK[reason] : isWorking(a) ? 5 : 6;
   };
   const projects: ProjectGroup[] = [];
   for (const [path, list] of byPath) {

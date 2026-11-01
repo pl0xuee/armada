@@ -51,6 +51,7 @@ import { commitResult, conflictPrompt, isSecretsRefusal, needsResultSheet, shipR
 import { throttledProgress } from "./outcomes";
 import { loadLocalImage } from "./localImages";
 import { applyConfigValue } from "./config";
+import { isResponseStyle } from "./responseStyle";
 import { buildAddRequests } from "./together";
 import { rememberGroup } from "./togetherStore";
 import {
@@ -73,6 +74,8 @@ import type {
 } from "./types";
 
 let backend: Backend | null = null;
+/** The live connection, for actions kept in their own modules (`phoneActions`). */
+export const activeBackend = () => backend;
 let connection: ConnectionHandle | null = null;
 let generation = 0; // bumped on every (re)connect/unpair so late responses are discarded
 
@@ -428,7 +431,7 @@ function resetData() {
   lru.length = 0;
 }
 
-function handleAuthError(e: unknown): boolean {
+export function handleAuthError(e: unknown): boolean {
   if (e instanceof ApiError && e.isUnauthorized) {
     onUnauthorized();
     return true;
@@ -744,6 +747,7 @@ export async function refreshState() {
           snap.defaultPermissionMode === "ask"
             ? snap.defaultPermissionMode
             : null,
+        responseStyle: isResponseStyle(snap.responseStyle) ? snap.responseStyle : null,
         timelines,
         stateStatus: "ready",
         stateError: null,
