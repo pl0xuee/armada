@@ -251,6 +251,19 @@ cargo test --workspace
 
 Add a user-facing entry under `## Unreleased` in [`CHANGELOG.md`](CHANGELOG.md) for anything people using the app will notice, written for them rather than as a commit subject.
 
+## Support
+
+Kvistcode is free and open source. If it saves you time, you can help keep it maintained. It is entirely optional and unlocks nothing.
+
+| Network | Address |
+|---|---|
+| Bitcoin | `bc1qytsjzn85eax5th8qdfvspluzlnfmempzcr7e8g` |
+| Litecoin | `ltc1q29q307pv35z8sz8n0mtuvhz7xxeweuuf0vyfez` |
+| Ethereum (ETH, and USDC on the Ethereum network) | `0x494b9d0Da5E587cF41468183Aa26a9B54432bF42` |
+| Solana | `GNXW4PiETBs8tXNstYfhKsjQ2xkyfL3YosZ2Qm6a2Sts` |
+
+The same addresses are listed, with QR codes, at [kvistcode.com/support](https://kvistcode.com/support/). If the two ever differ, don't send anything and open an issue. Crypto transfers can't be reversed, so check the network before you send.
+
 ## License
 
 [MIT](LICENSE)
