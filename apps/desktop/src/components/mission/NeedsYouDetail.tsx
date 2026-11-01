@@ -32,6 +32,7 @@ import { QuestionCard } from "@/components/timeline/QuestionCard";
 import { useUi } from "@/store/ui";
 import { REASON_TONE, reasonLabel, type TriageEntry } from "@/components/triage/useTriage";
 import { CodeText } from "@/components/CodeText";
+import { BudgetHoldPanel } from "./BudgetHoldPanel";
 
 type Permission = Extract<TimelineItem, { kind: "permission" }>;
 
@@ -132,6 +133,8 @@ export function NeedsYouDetail({
           ) : (
             <p className="text-[13px] text-muted">The request was answered elsewhere. Mark this done to move on.</p>
           )
+        ) : reason === "budget" ? (
+          <BudgetHoldPanel agent={agent} />
         ) : reason === "rate_limited" ? (
           <RecoveryPanel
             tone="warn"
@@ -204,16 +207,18 @@ export function NeedsYouDetail({
             size="sm"
             variant={reason === "done" ? "warn" : "secondary"}
             onClick={onDone}
-            // An approval is still blocking the agent: answer it rather than marking it done.
-            aria-disabled={reason === "permission" || undefined}
+            // An approval or a spending limit is still blocking the agent: answer it rather than marking it done.
+            aria-disabled={reason === "permission" || reason === "budget" || undefined}
             title={
-              reason === "permission"
-                ? question && !pending
-                  ? "Answer the question first"
-                  : "Answer the approval first (A / D)"
-                : undefined
+              reason === "budget"
+                ? "Choose how to go on first"
+                : reason === "permission"
+                  ? question && !pending
+                    ? "Answer the question first"
+                    : "Answer the approval first (A / D)"
+                  : undefined
             }
-            className={cn(reason === "permission" && "cursor-not-allowed opacity-45")}
+            className={cn((reason === "permission" || reason === "budget") && "cursor-not-allowed opacity-45")}
           >
             <CircleCheck className="!h-3.5 !w-3.5" /> Done
             <Kbd

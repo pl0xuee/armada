@@ -276,6 +276,10 @@ export function seedSettings(onboarded: boolean): Settings {
     dailyBudgetUsd: 15,
     agentBudgetUsd: 3,
     budgetAction: "notify",
+    dailyBudgetTokens: null,
+    agentBudgetTokens: null,
+    projectBudgets: {},
+    alertTargets: [],
     remote: { enabled: false, lan: false, port: 47821, tailscale: false, lanAddress: null },
     voice: { inputDevice: null, model: "base.en", language: "auto", autoSend: false },
     voiceAssistant: {

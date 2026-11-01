@@ -334,13 +334,15 @@ export function changedFiles(items: TimelineItem[] | undefined): string[] {
     : [];
 }
 
-export type NeedsReason = "permission" | "error" | "rate_limited" | "done";
+export type NeedsReason = "permission" | "budget" | "error" | "rate_limited" | "done";
 
 /** Why an agent needs the user, in triage priority order (null if it doesn't). */
 export function needsAttention(a: Agent): NeedsReason | null {
   if (a.archived) return null;
   // An approval is still blocking, even if acknowledged.
   if (a.pendingPermissions > 0 || a.status === "needs_permission") return "permission";
+  // Held at a spending limit: stays until you choose, like an approval.
+  if (a.budgetHold) return "budget";
   // "Done" in triage dismisses until the agent does something new.
   if (a.acknowledgedAt !== null && a.acknowledgedAt >= a.lastActivityAt) return null;
   if (a.rateLimited) return "rate_limited";
@@ -349,8 +351,8 @@ export function needsAttention(a: Agent): NeedsReason | null {
   return null;
 }
 
-const NEED_RANK: Record<NeedsReason, number> = { permission: 0, rate_limited: 1, error: 2, done: 3 };
-const NEED_RANK_END = 4;
+const NEED_RANK: Record<NeedsReason, number> = { permission: 0, budget: 1, rate_limited: 2, error: 3, done: 4 };
+const NEED_RANK_END = 5;
 
 /** Agents that need the user, most urgent first, then oldest activity first (FIFO within a reason). */
 export function triageQueue(agents: Agent[]): { agent: Agent; reason: NeedsReason }[] {

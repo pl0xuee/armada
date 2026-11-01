@@ -36,7 +36,9 @@ import type {
   Schedule,
   SearchResults,
   Settings,
+  BudgetChoice,
   BudgetStatus,
+  AlertKind,
   ShareLink,
   ShipResult,
   BaseBranchStatus,
@@ -306,12 +308,20 @@ const tauriApi = {
 
   // settings & attention
   updateSettings: (settings: Settings) => invoke<Settings>("update_settings", { settings }),
-  /** Today's spend (since local midnight) against the daily budget cap. */
+  /** Today's spend (since local midnight) against the daily budget limits. */
   budgetStatus: () => invoke<BudgetStatus>("budget_status"),
+  /**
+   * Answers an agent held at a spending limit (raise the limit that was hit, continue one turn, or stop).
+   * Returns the settings, since a raised project or daily limit is stored there.
+   */
+  budgetResolve: (agentId: string, choice: BudgetChoice) => invoke<Settings>("budget_resolve", { agentId, choice }),
   setInterfaceZoom: (percent: number) => invoke<void>("set_interface_zoom", { percent }),
   previewSound: (reason: AttentionReason) => invoke<void>("preview_sound", { reason }),
   /** Shows a test notification; also sends a phone push to `ntfyUrl` (or the saved one) when set. */
   testNotification: (ntfyUrl?: string | null) => invoke<void>("test_notification", { ntfyUrl: ntfyUrl ?? null }),
+  /** Posts a test message to a Slack, Discord or webhook target: `url` (not saved yet) or the saved `targetId`. */
+  testAlertTarget: (kind: AlertKind, opts: { url?: string | null; targetId?: string | null }) =>
+    invoke<void>("test_alert_target", { kind, url: opts.url ?? null, targetId: opts.targetId ?? null }),
   openPath: (path: string) => invoke<void>("open_path", { path }),
 
   // schedules
