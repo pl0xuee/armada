@@ -14,6 +14,7 @@ import {
 } from "@/lib/agents";
 import { planIsLive } from "@/lib/pinned";
 import type { TimelineItem } from "@/lib/types";
+import { recentWorkflowCalls, type WorkflowCall } from "@/lib/workflows";
 
 type Tool = Extract<TimelineItem, { kind: "tool_call" }>;
 
@@ -26,6 +27,8 @@ export interface AgentDerived {
   plan: Extract<TimelineItem, { kind: "plan" }> | null;
   /** The plan belongs to the current turn (after the last user message): worth pinning while unfinished. */
   planLive: boolean;
+  /** Workflow runs the agent launched recently (newest first); their progress lives in lib/workflows. */
+  workflows: WorkflowCall[];
 }
 
 interface Entry {
@@ -49,6 +52,7 @@ const EMPTY: AgentDerived = {
   subagents: NO_RUNS,
   plan: null,
   planLive: false,
+  workflows: [],
 };
 const cache = new Map<string, Entry>();
 const TOOL = 1;
@@ -156,6 +160,7 @@ export function agentDerived(
     subagents,
     plan: latestPlan(items),
     planLive: planIsLive(items),
+    workflows: recentWorkflowCalls(items, clock?.now ?? Date.now()),
   };
   cache.set(agentId, { list: items, sig: signature(items), busy, live, bucket, hasBg: hasBackground(items), value });
   return value;

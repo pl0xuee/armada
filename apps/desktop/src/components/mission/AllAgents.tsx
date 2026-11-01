@@ -6,6 +6,7 @@ import { AgentRowCompact } from "@/components/mission/AgentRowCompact";
 import { AgentTile } from "@/components/mission/AgentTile";
 import { EMPTY_SUMMARY, useTileSummaries } from "@/components/mission/useTileSummaries";
 import { LIVE, matchesFilter, type Filter } from "@/components/mission/useFleet";
+import { useBackgroundIds } from "@/store/background";
 import { Button } from "@/components/ui/button";
 import type { Agent } from "@/lib/types";
 import {
@@ -92,7 +93,11 @@ export function AllAgentsPane({
   const openAgent = useUi((s) => s.openAgent);
   const openNewAgent = useUi((s) => s.openNewAgent);
 
-  const visible = useMemo(() => agents.filter((a) => matchesFilter(a, filter)), [agents, filter]);
+  const background = useBackgroundIds();
+  const visible = useMemo(
+    () => agents.filter((a) => matchesFilter(a, filter, background)),
+    [agents, filter, background],
+  );
   const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
 
   const pendingByAgent = useMemo(() => {

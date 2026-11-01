@@ -146,6 +146,8 @@ export interface TurnEnd {
   label: string;
   /** Turn duration for "done" (null when unknown). */
   elapsedMs: number | null;
+  /** What is still going after the turn ("Workflow still running"), when anything is. */
+  note?: string | null;
 }
 
 /** How the latest turn (after the last prompt) ended: a user cancel leaves a "Turn cancelled" notice. */

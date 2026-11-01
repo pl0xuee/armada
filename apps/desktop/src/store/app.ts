@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { api } from "@/lib/api";
+import { hasBackgroundWork } from "@/lib/background";
 import type {
   Account,
   Agent,
@@ -209,14 +210,16 @@ const LIVE = new Set(["working", "starting", "needs_permission"]);
 
 /**
  * Drop cached timelines of agents not opened recently. Never evicts the selected agent, live
- * agents (Mission Control shows their activity) or agents with pending approvals (Needs you).
+ * agents (Mission Control shows their activity), agents with pending approvals (Needs you) or agents
+ * with a workflow still running (the background tracker needs their items to see it end).
  */
 function evictTimelines(items: Record<string, TimelineItem[]>, agents: Record<string, Agent>, selected: string | null) {
   const keep = new Set(recent.slice(0, MAX_CACHED));
   let out: Record<string, TimelineItem[]> | null = null;
   for (const id of Object.keys(items)) {
     const a = agents[id];
-    if (keep.has(id) || id === selected || (a && (LIVE.has(a.status) || a.pendingPermissions > 0))) continue;
+    if (keep.has(id) || id === selected || (a && (LIVE.has(a.status) || a.pendingPermissions > 0)) || hasBackgroundWork(id))
+      continue;
     out ??= { ...items };
     delete out[id];
     forgetAgentDerived(id);

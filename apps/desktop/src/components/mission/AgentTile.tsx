@@ -9,8 +9,7 @@ import { findOption, respondPermission } from "@/lib/actions";
 import { RelTime } from "@/components/RelTime";
 import { agentCostText, formatTokens } from "@/lib/format";
 import type { QuestionItem } from "@/lib/question";
-import { DONE_META, STATUS } from "@/lib/providers";
-import { useIsDone } from "@/store/completion";
+import { useStatusView } from "@/store/background";
 import type { Account, Agent, PermissionOption, TimelineItem } from "@/lib/types";
 import type { TileSummary } from "./useTileSummaries";
 import { basename, cn } from "@/lib/utils";
@@ -49,8 +48,8 @@ export const AgentTile = memo(function AgentTile({
   onOpen: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const done = useIsDone(agent);
-  const meta = done ? DONE_META : STATUS[agent.status];
+  const view = useStatusView(agent);
+  const { done, meta, background } = view;
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const live = meta.live;
   const working = agent.status === "working" || agent.status === "starting";
@@ -118,15 +117,16 @@ export const AgentTile = memo(function AgentTile({
 
       <div className="relative flex items-center gap-1.5 px-3.5 pt-3">
         <span
-          className="flex h-5 shrink-0 items-center gap-1.5 rounded-full border px-1.5 text-[10.5px] font-medium"
+          title={view.detail ?? undefined}
+          className="flex h-5 min-w-0 items-center gap-1.5 rounded-full border px-1.5 text-[10.5px] font-medium"
           style={{
-            color: !done && (agent.status === "idle" || agent.status === "stopped") ? "var(--text-2)" : color,
+            color: !done && !background && (agent.status === "idle" || agent.status === "stopped") ? "var(--text-2)" : color,
             borderColor: `color-mix(in srgb, ${color} 30%, var(--border))`,
             background: `color-mix(in srgb, ${color} 8%, transparent)`,
           }}
         >
-          <StatusDot status={agent.status} size={6} done={done} />
-          {meta.label}
+          <StatusDot status={view.dot} size={6} done={done} />
+          <span className="truncate">{meta.label}</span>
         </span>
         {agent.rateLimited && (
           <span className="flex h-5 shrink-0 items-center gap-1 rounded-full border border-warn/35 bg-warn/10 px-1.5 text-[10.5px] font-medium text-warn">
@@ -144,9 +144,12 @@ export const AgentTile = memo(function AgentTile({
           </span>
         )}
         {summary.subagents > 0 && (
-          <span className="flex h-5 shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-1.5 text-[10.5px] font-medium text-accent">
+          <span
+            title={`${summary.subagents} sub-agent${summary.subagents === 1 ? "" : "s"} running`}
+            className="flex h-5 shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-1.5 text-[10.5px] font-medium text-accent"
+          >
             <Workflow className="h-3 w-3" />
-            {summary.subagents} sub-agent{summary.subagents === 1 ? "" : "s"}
+            {background ? summary.subagents : `${summary.subagents} sub-agent${summary.subagents === 1 ? "" : "s"}`}
           </span>
         )}
         <span className="ml-auto flex items-center gap-1.5 text-[11px] text-steel">

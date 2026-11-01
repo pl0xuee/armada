@@ -16,6 +16,7 @@ import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { usePrPolling } from "@/hooks/usePrPolling";
 import { useWindowActivity } from "@/hooks/useWindowActivity";
 import { useWindowTitle } from "@/hooks/useWindowTitle";
+import { installBackgroundTracker } from "@/store/background";
 import { installCompletionTracker } from "@/store/completion";
 import { api } from "@/lib/api";
 import { applyDevLinks } from "@/lib/devlinks";
@@ -111,6 +112,8 @@ export function App() {
 
   // "Done" pill state + chime when the watched agent finishes.
   useEffect(() => installCompletionTracker(), []);
+  // Workflow runs and background agents still going after a turn ended (for every agent, not only the open one).
+  useEffect(() => installBackgroundTracker(), []);
   useWindowTitle(booted);
   useWindowActivity();
 

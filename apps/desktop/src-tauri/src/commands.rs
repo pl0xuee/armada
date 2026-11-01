@@ -367,6 +367,18 @@ pub async fn chime_watched(attention: State<'_, Arc<Attention>>) -> CmdResult<()
     Ok(())
 }
 
+/// The last workflow an agent launched ended after its turn did (the UI saw it end and the user
+/// isn't looking at that agent): a quiet "everything finished" alert.
+#[tauri::command]
+pub async fn background_finished(
+    attention: State<'_, Arc<Attention>>,
+    agent_id: String,
+    agents: Option<u32>,
+) -> CmdResult<()> {
+    attention.background_finished(&agent_id, agents);
+    Ok(())
+}
+
 /// Sets the main window's title (taskbar, alt-tab, tiling-WM bars).
 #[tauri::command]
 pub async fn set_window_title(app: AppHandle, title: String) -> CmdResult<()> {

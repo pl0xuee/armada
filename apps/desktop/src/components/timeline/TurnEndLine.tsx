@@ -45,6 +45,25 @@ export function TurnEndLine({ end, lastActivityAt }: { end: TurnEnd; lastActivit
         {end.elapsedMs !== null && end.elapsedMs >= 1000 && (
           <span className="tabular text-2xs font-normal text-steel">· {formatElapsed(end.elapsedMs)}</span>
         )}
+        {end.note && <span className="text-2xs font-normal text-accent">· {end.note}</span>}
+      </span>
+    </div>
+  );
+}
+
+/** Calm closing line once the background work that outlived the turn is over too. */
+export function EverythingFinishedLine({ detail }: { detail?: string }) {
+  return (
+    <div role="status" className="flex items-center gap-2.5 pb-2 pt-1">
+      <span
+        aria-hidden
+        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-ok/40 bg-ok/15 text-ok"
+      >
+        <Check className="h-3.5 w-3.5" strokeWidth={3} />
+      </span>
+      <span className="flex items-baseline gap-1.5 text-[12.5px] font-medium text-ok">
+        Everything finished
+        {detail && <span className="text-2xs font-normal text-steel">· {detail}</span>}
       </span>
     </div>
   );

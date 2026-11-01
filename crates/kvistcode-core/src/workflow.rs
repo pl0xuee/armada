@@ -41,7 +41,7 @@ use parking_lot::Mutex;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::model::WorkflowLaunch;
+use crate::model::{ItemBody, SubAgent, TimelineItem, WorkflowLaunch};
 
 /// How much of the end of an agent transcript is read for its latest action.
 pub const TAIL_BYTES: u64 = 256 * 1024;
@@ -710,6 +710,127 @@ pub fn progress_for(
 ) -> anyhow::Result<WorkflowProgress> {
     let dir = resolve_dir(&launch.transcript_dir, roots)?;
     Ok(progress(&dir, SystemTime::now()))
+}
+
+// ---- the turn ends while a run goes on ------------------------------------------------
+
+/// How the "turn ended" alert starts when work the agent launched is still running. The UI
+/// recognises it (`TURN_ONLY_PREFIX` in `lib/background.ts`), so keep the two in step.
+pub const TURN_ONLY_PREFIX: &str = "Finished its turn.";
+
+/// Only runs launched this recently are asked about at a turn's end.
+const LAUNCH_MAX_AGE_MS: i64 = 12 * 3600 * 1000;
+/// ... and at most this many of an agent's newest.
+const LAUNCH_MAX: usize = 3;
+
+/// What is known about one launched run when its agent's turn ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchedRun {
+    /// Its folder says it is running, with this many agents so far.
+    Running { agents: usize },
+    /// Launched during the turn, but its folder can't be read: it may well be running.
+    Unreadable,
+}
+
+/// The agent's newest Workflow launches among `items` (newest first), each flagged when it
+/// happened at or after `turn_started_at`; ones older than 12 hours are left out.
+pub fn recent_launches<'a>(
+    items: impl Iterator<Item = &'a TimelineItem>,
+    turn_started_at: i64,
+    now_ms: i64,
+) -> Vec<(WorkflowLaunch, bool)> {
+    let mut found: Vec<(i64, &WorkflowLaunch, bool)> = items
+        .filter_map(|it| match &it.body {
+            ItemBody::ToolCall {
+                subagent:
+                    Some(SubAgent {
+                        workflow: Some(launch),
+                        ..
+                    }),
+                ..
+            } if now_ms - it.ts < LAUNCH_MAX_AGE_MS => {
+                Some((it.seq, &**launch, it.ts >= turn_started_at))
+            }
+            _ => None,
+        })
+        .collect();
+    found.sort_by_key(|(seq, _, _)| std::cmp::Reverse(*seq));
+    found
+        .into_iter()
+        .take(LAUNCH_MAX)
+        .map(|(_, l, this_turn)| (l.clone(), this_turn))
+        .collect()
+}
+
+/// What a read of a launched run means at a turn's end. Only a run that says `Running` is
+/// claimed; a finished or quiet one is not, and a folder that can't be read counts (softly)
+/// only for a run launched in the turn that just ended.
+pub fn launched_run(
+    read: &anyhow::Result<WorkflowProgress>,
+    launched_this_turn: bool,
+) -> Option<LaunchedRun> {
+    match read {
+        Ok(p) if p.state == WorkflowState::Running => Some(LaunchedRun::Running {
+            agents: p.agents.len(),
+        }),
+        Ok(_) => None,
+        Err(_) if launched_this_turn => Some(LaunchedRun::Unreadable),
+        Err(_) => None,
+    }
+}
+
+/// The body of the "turn ended" alert when launched work is still going, so it never reads as
+/// "done": "Finished its turn. A workflow is still running (5 agents)." Runs that can't be
+/// read say "may still be running". `None`: nothing is known to run.
+pub fn turn_end_body(runs: &[LaunchedRun]) -> Option<String> {
+    let mut known = 0;
+    let mut agents = 0;
+    let mut unreadable = 0;
+    for r in runs {
+        match r {
+            LaunchedRun::Running { agents: n } => {
+                known += 1;
+                agents += n;
+            }
+            LaunchedRun::Unreadable => unreadable += 1,
+        }
+    }
+    let plural = |n: usize, one: &str, many: &str| {
+        if n == 1 {
+            one.to_string()
+        } else {
+            many.to_string()
+        }
+    };
+    if known > 0 {
+        let subject = if known == 1 {
+            "A workflow is".to_string()
+        } else {
+            format!("{known} workflows are")
+        };
+        let count = match agents {
+            0 => String::new(),
+            n => format!(" ({n} {})", plural(n, "agent", "agents")),
+        };
+        return Some(format!(
+            "{TURN_ONLY_PREFIX} {subject} still running{count}."
+        ));
+    }
+    (unreadable > 0).then(|| {
+        let subject = plural(unreadable, "A workflow may", "Workflows may");
+        format!("{TURN_ONLY_PREFIX} {subject} still be running.")
+    })
+}
+
+/// The body of the quiet alert sent when an agent's last launched work ended after its turn did.
+pub fn everything_finished_body(agents: Option<u32>) -> String {
+    match agents {
+        Some(n) if n > 0 => format!(
+            "Everything finished. Its workflow ({n} {}) is done.",
+            if n == 1 { "agent" } else { "agents" }
+        ),
+        _ => "Everything finished. Its workflow is done.".to_string(),
+    }
 }
 
 #[cfg(test)]
