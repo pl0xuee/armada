@@ -14,7 +14,7 @@ across all your accounts, with every project isolated in its own git worktree.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-<img width="100%" src="docs/screenshots/mission-control.png" alt="Kvistcode's Mission Control: a grid of agents from several providers, some working, some waiting for approval, with Allow and Deny buttons on the cards" />
+<img width="100%" src="docs/screenshots/mission-control.png" alt="Kvistcode's Mission Control: a grid of agents from several providers, some working, some waiting for an approval or an answer, with Allow, Deny and Answer buttons on the cards" />
 
 </div>
 
@@ -32,10 +32,11 @@ Coding agents are most useful when you can run several at once, but each vendor 
 - **Local models.** Run agents on Ollama, LM Studio or any OpenAI-compatible server (llama.cpp, vLLM, a GPU box on your network). Kvistcode detects Ollama and LM Studio, lists their models, and lets you pick one per agent. Local agents are free and need no sign-in; nothing leaves your computer unless you point at another machine, which Kvistcode warns about. See the [quickstart](#run-models-locally).
 - **Multiple accounts per provider.** Every account has its own isolated login, so you can run two Claude Max accounts and three ChatGPT accounts at once. API keys are kept in your OS keychain.
 - **Compare mode.** Send one prompt to several providers, read the answers side by side and keep the one you like. **Handoff** lets one agent review another's work ("have Codex review Claude's work").
+- **Many agents per project.** Start up to 8 on the same task. They open together as full conversations in a grid that fits the window, each in its own worktree so they can't overwrite each other, and **Add agents** in an agent's header starts more in the same project. The sidebar is organised by project.
 - Agents survive closing the window (Kvistcode lives in the tray), crashes and reboots, and can be resumed.
 - Messages typed while an agent is busy queue up and run in order; edit, drop or send one right now. Paste screenshots or attach images, and `@`-mention files with fuzzy search. Slash-command autocomplete shows each agent's own commands.
 
-<img width="100%" src="docs/screenshots/agent-conversation.png" alt="An agent conversation with syntax-highlighted code, a Done summary card with Review diff, Commit and Open PR buttons, and header chips for plan, branch and pull request status" />
+<img width="100%" src="docs/screenshots/compare.png" alt="Compare mode showing one prompt answered by Claude, ChatGPT (Codex) and Grok in three columns, each with a Keep this one button" />
 
 ### A calmer conversation
 
@@ -43,6 +44,8 @@ Coding agents are most useful when you can run several at once, but each vendor 
 - **Clear signals.** A thinking indicator while the agent works, then a "Done" line with the turn's time, a green status pill, a window title that shows what the selected agent is doing, and an optional chime for long tasks.
 - **Syntax highlighting** in code blocks, diffs and commands, matching each theme (Gunmetal, Carbon and Titanium).
 - **Images inline.** Screenshots that agents take or view appear as pictures, not file paths.
+
+<img width="100%" src="docs/screenshots/agent-conversation.png" alt="An agent conversation with syntax-highlighted code, a Done summary card with Review diff, Commit, Commit and merge and Open PR buttons, and a header showing the branch, a budget meter and the pull request" />
 
 <img width="100%" src="docs/screenshots/agent-activity.png" alt="The top of a conversation where tool calls are collapsed into one-line groups such as 'Read 1 file, 1 search' and 'Edited 1 file, ran 1 command, used 1 other tool'" />
 
@@ -61,20 +64,35 @@ Each agent has a workspace panel (`` Ctrl/Cmd+` ``) in its own folder:
 
 - **Worktree isolation.** Every agent gets its own branch and working copy.
 - **Diff review.** A review sheet with syntax-highlighted diffs, per-file and per-hunk revert, a "Viewed" checkbox, and line comments that go back to the agent.
-- **Commit, merge and PR.** Commit, Commit & merge or Open PR right from the end-of-turn summary (files changed, commands run, time, cost).
+- **Commit, merge and PR.** Commit, Commit & merge or Open PR right from the end-of-turn summary (files changed, commands run, time, cost). Open a PR as a draft or against another base branch, with a description that already has the size of the change and "Closes #N".
 - **PR and CI status.** Each agent shows its pull request, check results and review state. "Fix CI" sends the failing logs to the agent and "Address comments" sends reviewers' feedback; you see and can edit the message first.
+- **Merge from the PR panel.** Squash, merge or rebase, with a heads-up if checks are failing or review comments are still open. The panel shows the base branch and whether GitHub considers the PR ready, and can take a draft out of draft.
+- **Work from GitHub issues.** Browse a project's open issues and start an agent on one, in its own worktree with a branch named after the issue.
 - **Checkpoints.** Every message you send snapshots the agent's files first. "Restore to here" puts them back (with a preview, and restores can be undone) and "Restore and edit prompt" lets you try again. Your branch, commits and staged changes are never touched.
 
-<img width="100%" src="docs/screenshots/review-diff.png" alt="The review sheet showing a syntax-highlighted diff of a new test file, with Commit, Discard, Open PR and Commit and merge buttons" />
+<img width="100%" src="docs/screenshots/review-diff.png" alt="The review sheet showing a syntax-highlighted diff of a new test file, with Commit, Discard, GitHub, Open PR, Merge and Commit and merge buttons" />
+
+<img width="100%" src="docs/screenshots/pr-merge.png" alt="The pull request panel opened from an agent's header: PR #91 into main, approved, ready to merge with three passing CI checks, and Address comments and Merge buttons" />
 
 ### Visibility: know what every agent is doing
 
-- **Mission Control** is one view with two tabs. **Needs you** is the queue of every pending approval, question, error and finished task, with keyboard triage (J / K / E). **All agents** shows the whole fleet live, with a grid or list view and filters. The rail badge, tab count and window title all show the same number.
+- **One Mission Control**, with two tabs. **Needs you** is the queue of every pending approval, question, error, spending hold and finished task, with keyboard triage (J / K / E). **All agents** shows the whole fleet live, with a grid or list view and filters. The rail badge, tab count, window title and tray all show the same number.
+- **What needs you stays pinned** above the message box wherever you have scrolled: approvals, questions with one-tap answers, blockers (usage limit, error, spending limit, merge conflict), live plan progress, and sub-agents with a timer.
 - **Sub-agents you can see.** When Claude or Codex hands work to a sub-agent it appears as its own card with its tool calls nested inside, and the title bar counts running sub-agents across the fleet.
-- **Usage and limits.** The agent header shows your plan and your 5-hour and weekly usage (where the provider reports them), with per-account meters and a Usage page.
-- **Notifications** the moment an agent needs you: sounds and custom sound packs, Approve / Deny in the notification on Linux (plain notifications on macOS and Windows), a phone push via ntfy, and re-pings when an approval goes stale.
+- **Usage.** The agent header shows your plan and your 5-hour and weekly usage (where the provider reports them), with per-account meters and a Usage page.
+- **Notifications** the moment an agent needs you: sounds and custom sound packs, Approve / Deny in the notification on Linux (plain notifications on macOS and Windows), a phone push via ntfy, and re-pings when an approval goes stale. Alerts can also go to Slack, Discord or any webhook (see below).
 
-<img width="100%" src="docs/screenshots/compare.png" alt="Compare mode showing one prompt answered by Claude, ChatGPT (Codex) and Grok in three columns, each with a Keep this one button" />
+<img width="100%" src="docs/screenshots/agent-grid.png" alt="Four agents on the same task tiled in a grid, each with its own conversation, a pinned plan showing 2 of 4 steps done above the message box, and a Stop button" />
+
+### Search and spending limits
+
+- **Search every conversation.** Press `Ctrl/Cmd+Shift+F`, or type `?` in the command palette. It finds messages, commands, file paths and summaries, including archived agents, and jumps to the exact spot. Search runs on your computer only.
+- **Spending limits.** Set a limit per agent, per project or per day, in dollars or tokens. When one is reached the agent finishes its turn (nothing is cut off), then waits in Needs you: raise the limit, continue once, or stop. A meter in the agent header shows whenever a limit applies.
+- **Alerts to Slack, Discord or any webhook**, next to ntfy, with a switch for each kind of event and a Send test button. The addresses are kept in your OS keychain.
+
+<img width="100%" src="docs/screenshots/search.png" alt="Conversation search in the command palette: the query 'retry' with matches grouped by agent, each showing the highlighted message, command or plan text and how long ago it happened" />
+
+<img width="100%" src="docs/screenshots/spending-limit.png" alt="Mission Control's Needs you queue with an agent paused at a spending limit: $3.08 of $3.00, with Raise limit by $5, Raise by $10, Continue once and Stop buttons" />
 
 ### Voice dictation
 
@@ -86,9 +104,9 @@ Optional and off by default. Press Ctrl/Cmd+Shift+A and just talk: ask what your
 
 ### Phone companion
 
-Pair your phone with a QR code and run the fleet from it, from anywhere over Tailscale or on the same Wi-Fi as your computer: start agents in any project, send prompts with photos, approve or deny requests, switch mode, model and account, stop, resume or remove agents, manage queued messages, review diffs and Commit & merge, and follow sub-agents and turn summaries live. **Read-only share links** let a teammate follow one agent live.
+Pair your phone with a QR code and run the fleet from it, from anywhere over Tailscale or on the same Wi-Fi as your computer: start agents in any project, send prompts with photos, approve or deny requests, switch mode, model and account, stop, resume or remove agents, manage queued messages, review diffs and Commit & merge, and follow sub-agents and turn summaries live. The pinned dock is there too, so what needs you stays in reach. **Read-only share links** let a teammate follow one agent live.
 
-<img width="100%" src="docs/screenshots/phone-companion.png" alt="Three phone screens of the companion app: the agent list with pending approvals, an agent working with a sub-agent and queued messages, and a finished agent with a Done summary" />
+<img width="100%" src="docs/screenshots/phone-companion.png" alt="Three phone screens of the companion app: the agent list with a Needs you banner, an agent working with two sub-agents and queued messages, and a finished agent with a Done summary" />
 
 > **Remote-control safety.** Choose **Tailscale** in Settings → Remote & mobile: Kvistcode stays on this computer only and Tailscale Serve shares it with your own devices over HTTPS, with nothing opened on your network. Local network access is plain HTTP, for networks you trust. Don't expose the port to the internet.
 
@@ -96,14 +114,14 @@ Pair your phone with a QR code and run the fleet from it, from anywhere over Tai
 
 - **Schedules.** "Every weekday at 9:00, check for dependency updates."
 - **Prompt templates** with fill-in placeholders.
-- **MCP servers, configured once** and given to every agent on every provider. Paste a config snippet and test the connection in Settings.
+- **Tools & instructions.** One Settings page to edit `CLAUDE.md` and `AGENTS.md` (with a warning if the file changed on disk), configure **MCP servers** once for every agent on every provider (or per project) with a connection test, and browse your skills and plugins.
 - **Rate-limit failover.** When an account hits its usage limit, continue on another signed-in account (ask first, or switch automatically; off by default).
 - **Auto mode by default** for agents that offer one (Claude, Codex and any ACP agent with an "auto" mode); pick Ask per agent. New agents start without a prompt and wait for you.
-- **Export** any conversation as Markdown or JSON, and search across your whole history.
+- **Export** any conversation as Markdown or JSON.
 
 ### Accounts
 
-<img width="100%" src="docs/screenshots/accounts-local.png" alt="The Accounts page listing Claude, ChatGPT and Grok accounts with usage meters, and a Local model section with an on-device Ollama account marked Free" />
+<img width="100%" src="docs/screenshots/accounts-local.png" alt="The Accounts page listing ChatGPT and Grok accounts with usage meters and sign-in state, and a Local model section with an on-device Ollama account marked Free" />
 
 ### Privacy and security
 
@@ -125,6 +143,8 @@ Download the installer for your OS from the [latest release](https://github.com/
 | Linux | `.AppImage`, `.deb` or `.rpm` |
 
 Kvistcode checks GitHub Releases for updates (shortly after launch, then every 6 hours, and from Settings, About). Windows, macOS and AppImage installs update in place with signed updates; `.deb` and `.rpm` installs are told when a new version exists and link to the release page.
+
+Upgrading from Armada? Kvistcode is the same app under a new name: your agents, settings and sign-ins carry over, and updates keep working. The command is now `kvistcode` (on Linux, `kvistcode --new-agent` opens the New agent dialog, handy for a window-manager keybinding), and new agent branches start with `kvistcode/`.
 
 On first run Kvistcode's setup installs the agent CLIs for you. If you have no Node.js it downloads a private, checksum-verified copy; no admin rights needed. Then sign in to each account from the Accounts page.
 
@@ -168,6 +188,7 @@ Kvistcode is fully usable from the keyboard. Press `Ctrl/Cmd+/` (or `?`) in the 
 | `Ctrl/Cmd+J` | Mission Control: Needs you (again for the next one) |
 | `Ctrl/Cmd+I` | Mission Control: Needs you (same as J) |
 | `Ctrl/Cmd+Shift+M` | Mission Control: All agents |
+| `Ctrl/Cmd+Shift+F` | Search every conversation (or type `?` in the palette) |
 | `Ctrl/Cmd+B` | Show or hide the agent list |
 | `Ctrl/Cmd+1` to `9` | Jump to an agent |
 | `Ctrl/Cmd+,` | Settings |
@@ -206,7 +227,7 @@ cd apps/desktop
 npm ci
 npm run tauri dev      # run the app with hot reload
 npm run dev            # UI only, in a browser, with a realistic mock backend
-npm run tauri build    # produce installers for your OS
+npm run tauri build    # produce installers for your OS (the binary is named kvistcode)
 ```
 
 `npm run dev` is how the screenshots above were made: a browser build backed by an in-memory mock with fictional data. The phone companion has the same (`cd apps/remote && npm run dev`).
@@ -229,7 +250,7 @@ KVISTCODE_GROK_COMMAND="python3 my_agent.py" npm run tauri dev
 ## Project layout
 
 ```
-crates/kvistcode-core/        agent supervisor, ACP + Codex clients, storage, accounts, installer
+crates/kvistcode-core/     agent supervisor, ACP + Codex clients, storage, accounts, installer
 apps/desktop/src-tauri/    Tauri shell: commands, tray, sounds, notifications, terminals, git review
 apps/desktop/src/          React UI
 apps/remote/               phone companion (single-file web app served by the desktop app)
