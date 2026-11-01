@@ -76,6 +76,7 @@ macro_rules! handler {
             voice_assistant::va_voices,
             clipboard::read_clipboard_images,
             commands::list_items,
+            commands::workflow_progress,
             commands::search_conversations,
             commands::create_agent,
             commands::send_prompt,

@@ -26,6 +26,7 @@ import { messageRole } from "./collapse";
 import { stitchMessages } from "./messageFlow";
 import { UNFOLLOW_EVENT } from "./MessageFold";
 import { SubagentCard } from "./SubagentCard";
+import { WorkflowCard } from "./WorkflowCard";
 import { useRunningSubagentCount, useSubagentRuns } from "../agent/useSubagents";
 import { useHeld, WAITING_HOLD_MS } from "@/hooks/useHeld";
 import { LiveStatus } from "./LiveStatus";
@@ -897,6 +898,7 @@ function renderItem(
     case "thought":
       return <ThoughtBlock item={it} live={liveTail} agentId={agent.id} />;
     case "tool_call":
+      if (it.subagent?.workflow) return <WorkflowCard item={it} agentId={agent.id} />;
       if (it.subagent) {
         // Same rule as the sub-agent counts: a background sub-agent's call completes at launch but
         // it keeps running while subagentRuns counts it.

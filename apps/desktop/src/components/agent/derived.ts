@@ -106,7 +106,9 @@ function signature(items: TimelineItem[]): unknown[] {
 }
 
 const hasBackground = (items: TimelineItem[]) =>
-  items.some((it) => it.kind === "tool_call" && it.subagent?.background && !it.subagent.control);
+  items.some(
+    (it) => it.kind === "tool_call" && it.subagent?.background && !it.subagent.control && !it.subagent.workflow,
+  );
 
 /**
  * `busy`: the agent is working (open sub-agent calls only count then); see `subagentRuns`.
