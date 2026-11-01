@@ -51,7 +51,8 @@ export const REASON_LABEL: Record<NeedsReason, string> = {
 };
 
 /** The pill text: a question is not an approval, so it reads "Needs you". */
-export function reasonLabel(reason: NeedsReason, asksQuestion = false): string {
+export function reasonLabel(reason: NeedsReason, asksQuestion = false, backgroundRunning = false): string {
+  if (reason === "done" && backgroundRunning) return "Turn finished · unread";
   return asksQuestion && reason === "permission" ? "Needs you" : REASON_LABEL[reason];
 }
 

@@ -30,6 +30,8 @@ import { basename, cn } from "@/lib/utils";
 import { useApp, usePendingPermissions, usePendingQuestions } from "@/store/app";
 import { QuestionCard } from "@/components/timeline/QuestionCard";
 import { useUi } from "@/store/ui";
+import { backgroundActive, backgroundDetail, backgroundShort } from "@/lib/background";
+import { useBackground } from "@/store/background";
 import { REASON_TONE, reasonLabel, type TriageEntry } from "@/components/triage/useTriage";
 import { CodeText } from "@/components/CodeText";
 import { BudgetHoldPanel } from "./BudgetHoldPanel";
@@ -82,7 +84,7 @@ export function NeedsYouDetail({
   const pending = usePendingPermissions().find((p) => p.agent.id === agent.id)?.item;
   const question = usePendingQuestions().find((p) => p.agent.id === agent.id)?.item;
   const openAgent = useUi((s) => s.openAgent);
-  const label = reasonLabel(reason, !pending && !!question);
+  const label = reasonLabel(reason, !pending && !!question, backgroundActive(useBackground(agent.id)));
 
   return (
     <article data-agent-id={agent.id} aria-label={`${agent.title}: ${label}`} className="flex min-h-0 flex-1 flex-col">
@@ -379,8 +381,14 @@ function DonePanel({
   const message = [...(items ?? [])].reverse().find((i) => i.kind === "agent_message" && i.text.trim()) as
     Extract<TimelineItem, { kind: "agent_message" }> | undefined;
   const summary = lastOf(items, "turn_summary");
+  const bg = useBackground(agentId);
   return (
     <div className="space-y-3">
+      {backgroundActive(bg) && (
+        <p className="text-[12px] text-accent" title={backgroundDetail(bg)}>
+          Its turn finished, but not everything: {backgroundShort(bg).toLowerCase()}.
+        </p>
+      )}
       {summary && (
         <p className="flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-steel tabular">
           <span>{formatDuration(summary.durationMs)}</span>

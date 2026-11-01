@@ -47,7 +47,7 @@ import { StatusDot, StatusPill } from "../StatusDot";
 import { AddAgents } from "./AddAgents";
 import { BudgetChip } from "./BudgetChip";
 import { STATUS } from "@/lib/providers";
-import { useIsDone } from "@/store/completion";
+import { useStatusView } from "@/store/background";
 import { ConfirmDialog } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/misc";
@@ -111,7 +111,8 @@ export interface HeaderTile {
 
 function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
   const account = useApp((s) => s.accounts.find((a) => a.id === agent.accountId));
-  const done = useIsDone(agent);
+  const view = useStatusView(agent);
+  const { done } = view;
   const wide = useMediaQuery(INSPECTOR_DOCK_QUERY);
   const list = useAgentListLayout();
   const [ref, width] = useElementWidth<HTMLElement>();
@@ -221,13 +222,19 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {tile || (tier === "compact" && inGroup) ? (
-            <Tooltip content={done ? "Done" : STATUS[agent.status].label}>
+            <Tooltip content={view.detail ? `${view.pill}. ${view.detail}` : view.meta.label}>
               <span
                 className="flex h-6 w-5 items-center justify-center"
                 role="img"
-                aria-label={STATUS[agent.status].label}
+                aria-label={view.background ? view.pill : STATUS[agent.status].label}
               >
-                <StatusDot status={agent.status} size={8} done={done} />
+                <StatusDot status={view.dot} size={8} done={done} />
+              </span>
+            </Tooltip>
+          ) : view.background ? (
+            <Tooltip content={view.detail}>
+              <span className="inline-flex min-w-0 max-w-[280px]">
+                <StatusPill status="working" label={view.pill} />
               </span>
             </Tooltip>
           ) : (

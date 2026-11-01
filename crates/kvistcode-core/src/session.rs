@@ -1454,6 +1454,7 @@ impl AgentCtx {
         let dropped: usize;
         let next: Option<Prompt>;
         let summary;
+        let launches: Vec<(WorkflowLaunch, bool)>;
         let finish_epoch: u64;
         let turn_tree: Option<String>;
         {
@@ -1480,6 +1481,11 @@ impl AgentCtx {
             );
             // Computed now, from this turn's items (the next turn clears them).
             summary = completed.then(|| self.turn_summary_locked(&st)).flatten();
+            launches = if completed {
+                crate::workflow::recent_launches(st.items.values(), st.turn_started_at, now_ms())
+            } else {
+                Vec::new()
+            };
             turn_tree = st.turn_tree.take();
             let normal = !matches!(outcome, TurnOutcome::Failed(_) | TurnOutcome::Cancelled);
             let advance =
@@ -1596,8 +1602,13 @@ impl AgentCtx {
                     a.unread = true;
                     a.last_activity_at = now_ms();
                 });
-                let body = agent
-                    .and_then(|a| a.last_message)
+                // A workflow the agent launched may outlive its turn: then the alert says so
+                // instead of reading as "everything is done".
+                let body = self
+                    .core
+                    .upgrade()
+                    .and_then(|core| core.turn_end_note(&self.agent_id, &launches))
+                    .or_else(|| agent.and_then(|a| a.last_message))
                     .unwrap_or_else(|| "Finished".into());
                 // A held agent already asked for you; "finished" on top would be noise.
                 if hold.is_none() {

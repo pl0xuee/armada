@@ -19,6 +19,8 @@ import { archiveAgent, findOption, respondPermission, attempt } from "@/lib/acti
 import { api } from "@/lib/api";
 import { approvalActionFor, createArm, shouldIgnoreApprovalKey } from "@/lib/approvalKeys";
 import type { NeedsReason } from "@/lib/agents";
+import { backgroundActive } from "@/lib/background";
+import { useBackground } from "@/store/background";
 import type { Agent } from "@/lib/types";
 import { cn, isEditableTarget, modKey } from "@/lib/utils";
 import { collectPending, useApp } from "@/store/app";
@@ -250,6 +252,7 @@ const QueueRow = memo(function QueueRow({
   onSelect: (id: string) => void;
 }) {
   const ref = useRef<HTMLLIElement>(null);
+  const backgroundRunning = backgroundActive(useBackground(agent.id));
   useEffect(() => {
     if (active) ref.current?.scrollIntoView({ block: "nearest" });
   }, [active]);
@@ -277,7 +280,7 @@ const QueueRow = memo(function QueueRow({
           <span className="block truncate text-[12.5px] font-medium text-fg">{agent.title}</span>
           <span className="mt-1 flex items-center gap-1.5">
             <span className={cn("rounded-full border px-1.5 text-[10.5px] font-medium", REASON_TONE[reason])}>
-              {reasonLabel(reason, asking)}
+              {reasonLabel(reason, asking, backgroundRunning)}
             </span>
             <span className="text-[11px] text-steel">
               <RelTime ts={agent.lastActivityAt} side="right" />

@@ -147,6 +147,20 @@ impl Attention {
         notify::close_for_request(request_id);
     }
 
+    /// The last work an agent launched (a workflow) ended after its turn did: a second, quiet
+    /// "everything finished" alert (the turn-end one said work was still running). The UI only
+    /// asks when the user isn't looking at that agent; the usual switches, quiet hours and smart
+    /// mute still apply, and the sound is softer.
+    pub fn background_finished(&self, agent_id: &str, agents: Option<u32>) {
+        let title = self
+            .core()
+            .agent(agent_id)
+            .map(|a| a.title)
+            .unwrap_or_else(|_| "Agent".into());
+        let body = kvistcode_core::workflow::everything_finished_body(agents);
+        self.alert_scaled(agent_id, AttentionReason::Done, &title, &body, None, 0.45);
+    }
+
     /// Plays/shows/pushes the alert. Returns false if it was suppressed (quiet hours,
     /// or smart mute because the user is looking at that agent).
     fn alert(
@@ -156,6 +170,19 @@ impl Attention {
         title: &str,
         body: &str,
         request_id: Option<&str>,
+    ) -> bool {
+        self.alert_scaled(agent_id, reason, title, body, request_id, 1.0)
+    }
+
+    /// [`alert`](Self::alert) with the sound at `volume` times the configured level.
+    fn alert_scaled(
+        &self,
+        agent_id: &str,
+        reason: AttentionReason,
+        title: &str,
+        body: &str,
+        request_id: Option<&str>,
+        volume: f32,
     ) -> bool {
         let settings = self.settings();
         let window_focused = self.window_focused.load(Ordering::Relaxed);
@@ -196,7 +223,7 @@ impl Attention {
         };
 
         if sound_on {
-            self.audio.play(reason, &settings.sounds);
+            self.audio.play_scaled(reason, &settings.sounds, volume);
         }
         if settings.notifications.enabled && notify_reason_on {
             notify::show(
@@ -499,6 +526,10 @@ fn push_text(detail: &str, reason: AttentionReason, title: &str, body: &str) -> 
     }
     let generic = match reason {
         AttentionReason::Permission => "Needs you",
+        // Not "Finished" when the turn ended with launched work still going.
+        AttentionReason::Done if body.starts_with(kvistcode_core::workflow::TURN_ONLY_PREFIX) => {
+            "Finished its turn; work is still running"
+        }
         AttentionReason::Done => "Finished",
         AttentionReason::Error => "Stopped with an error",
     };
@@ -748,6 +779,15 @@ mod tests {
             b.starts_with("run: curl") && !b.contains("abcdefghijklmnop1234"),
             "{b}"
         );
+    }
+
+    #[test]
+    fn minimal_push_does_not_say_finished_while_work_still_runs() {
+        let running = "Finished its turn. A workflow is still running (5 agents).";
+        let (_, b) = push_text("minimal", AttentionReason::Done, "x", running);
+        assert_eq!(b, "Finished its turn; work is still running");
+        let (_, b) = push_text("minimal", AttentionReason::Done, "x", "All 6 tests pass");
+        assert_eq!(b, "Finished");
     }
 
     fn t(s: &str) -> NaiveTime {

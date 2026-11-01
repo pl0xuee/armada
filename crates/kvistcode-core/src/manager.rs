@@ -784,14 +784,41 @@ impl Core {
             }) => launch,
             _ => return Err(anyhow!("That isn't a workflow run")),
         };
+        let roots = self.workflow_roots(agent_id)?;
+        crate::workflow::progress_for(&launch, &roots)
+    }
+
+    /// The Claude config dirs the agent's workflow runs may live in.
+    fn workflow_roots(&self, agent_id: &str) -> Result<Vec<std::path::PathBuf>> {
         let agent = self.agent(agent_id)?;
         let account = self.account(&agent.account_id).ok();
         let config_dir = account
             .as_ref()
             .filter(|a| !a.is_system)
             .and_then(|a| a.config_dir.as_deref());
-        let roots = crate::workflow::config_roots(config_dir);
-        crate::workflow::progress_for(&launch, &roots)
+        Ok(crate::workflow::config_roots(config_dir))
+    }
+
+    /// The "turn ended" alert text for an agent whose turn just ended with workflows it launched
+    /// possibly still going (see `workflow::turn_end_body`); `None` when none is known to run.
+    /// Each launch is flagged when it happened during the turn that ended.
+    pub fn turn_end_note(
+        &self,
+        agent_id: &str,
+        launches: &[(WorkflowLaunch, bool)],
+    ) -> Option<String> {
+        if launches.is_empty() {
+            return None;
+        }
+        let roots = self.workflow_roots(agent_id).ok()?;
+        let runs: Vec<_> = launches
+            .iter()
+            .filter_map(|(launch, this_turn)| {
+                let read = crate::workflow::progress_for(launch, &roots);
+                crate::workflow::launched_run(&read, *this_turn)
+            })
+            .collect();
+        crate::workflow::turn_end_body(&runs)
     }
 
     /// The last `limit` timeline items with `seq < before_seq` (the newest ones when

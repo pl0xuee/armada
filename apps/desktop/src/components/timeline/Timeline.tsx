@@ -30,8 +30,10 @@ import { WorkflowCard } from "./WorkflowCard";
 import { useRunningSubagentCount, useSubagentRuns } from "../agent/useSubagents";
 import { useHeld, WAITING_HOLD_MS } from "@/hooks/useHeld";
 import { LiveStatus } from "./LiveStatus";
+import { backgroundActive, backgroundShort } from "@/lib/background";
+import { useBackground, useBackgroundStore } from "@/store/background";
 import { shouldShowThinking, turnEndOf, turnStart, waitingStatus } from "./thinking";
-import { TurnEndLine } from "./TurnEndLine";
+import { EverythingFinishedLine, TurnEndLine } from "./TurnEndLine";
 import { TurnSummaryCard, TurnSummaryLine } from "./TurnSummaryCard";
 import { QuestionCard, questionCardSelector } from "./QuestionCard";
 import { isPlanApproval } from "@/lib/planApproval";
@@ -416,7 +418,14 @@ export function Timeline({
     MESSAGE_SETTLE_MS,
   );
   const showThinking = !(loading && !items) && (waiting || shouldShowThinking(agent.status, lastRowItem));
-  const turnEnd = !loading && !showThinking ? turnEndOf(agent.status, list, lastRowItem, agent.lastActivityAt) : null;
+  const ended = !loading && !showThinking ? turnEndOf(agent.status, list, lastRowItem, agent.lastActivityAt) : null;
+  // The turn is over but a workflow / background agents are not: "Done" would overstate it.
+  const bg = useBackground(agent.id);
+  const bgNote = backgroundActive(bg) ? backgroundShort(bg) : null;
+  const turnEnd = ended && bgNote && ended.tone === "done" ? { ...ended, label: "Turn finished", note: bgNote } : ended;
+  // All of it ended after the turn did (this session): a calm closing line, until the next turn.
+  const everythingAt = useBackgroundStore((s) => s.finishedAt[agent.id]);
+  const everything = !bgNote && agent.status === "idle" && everythingAt !== undefined;
   const fallbackStart = useRef(Date.now());
   useLayoutEffect(() => {
     if (!showThinking) fallbackStart.current = Date.now();
@@ -525,6 +534,7 @@ export function Timeline({
             />
           )}
           {turnEnd && <TurnEndLine end={turnEnd} lastActivityAt={agent.lastActivityAt} />}
+          {everything && !showThinking && <EverythingFinishedLine />}
           {footer}
         </div>
       </div>

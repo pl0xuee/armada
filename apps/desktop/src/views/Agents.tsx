@@ -53,6 +53,7 @@ import {
 import { cn } from "@/lib/utils";
 import { previewOf, usePreview, usePreviewDetection } from "@/store/preview";
 import { useApp } from "@/store/app";
+import { useBackgroundIds } from "@/store/background";
 import { useUi } from "@/store/ui";
 
 export function AgentsView() {
@@ -411,7 +412,8 @@ function Welcome() {
   const list = useMemo(() => Object.values(agents), [agents]);
   const interrupted = list.filter((a) => a.status === "interrupted" && !a.archived);
   const needs = useMemo(() => triageQueue(list).length, [list]);
-  const live = list.filter((a) => a.status === "working").length;
+  const background = useBackgroundIds();
+  const live = list.filter((a) => a.status === "working" || (a.status === "idle" && background.has(a.id))).length;
   const fleetCost = useMemo(() => list.reduce((sum, a) => sum + a.costUsd, 0), [list]);
   const budget = useBudgetStatus(fleetCost);
   const [confirmResume, setConfirmResume] = useState(false);

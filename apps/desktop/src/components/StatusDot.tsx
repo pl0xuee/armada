@@ -66,10 +66,13 @@ export function StatusPill({
   status,
   className,
   done = false,
+  label,
 }: {
   status: AgentStatus;
   className?: string;
   done?: boolean;
+  /** Replaces the status word ("Turn finished · Workflow 3 of 5 running"). */
+  label?: string;
 }) {
   done = done && status === "idle";
   const meta = done ? DONE_META : STATUS[status];
@@ -86,7 +89,7 @@ export function StatusPill({
       }}
     >
       <StatusDot status={status} size={6} done={done} />
-      {meta.label}
+      <span className={label ? "truncate" : undefined}>{label ?? meta.label}</span>
     </span>
   );
 }
