@@ -334,3 +334,34 @@ async fn raising_a_project_limit_frees_every_agent_held_by_it() {
     assert!(env.core.agent(&first.id).unwrap().budget_hold.is_none());
     env.core.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unusable_limits_are_refused() {
+    let env = setup("invalid", |_, _| {}).await;
+    let good = env.core.settings().unwrap();
+    for bad in [
+        |s: &mut Settings| s.daily_budget_tokens = Some(0),
+        |s: &mut Settings| s.agent_budget_tokens = Some(-5),
+        |s: &mut Settings| s.daily_budget_usd = Some(f64::NAN),
+        |s: &mut Settings| {
+            s.project_budgets.insert(
+                "/work/app".into(),
+                armada_core::budget::BudgetCap {
+                    usd: Some(-1.0),
+                    tokens: None,
+                },
+            );
+        },
+    ] {
+        let mut s = good.clone();
+        bad(&mut s);
+        assert!(env.core.save_settings(s).is_err());
+    }
+    // Empty and valid limits are fine.
+    let mut s = good;
+    s.daily_budget_tokens = Some(2_000_000);
+    s.project_budgets
+        .insert("/work/app".into(), Default::default());
+    assert!(env.core.save_settings(s).is_ok());
+    env.core.shutdown().await;
+}

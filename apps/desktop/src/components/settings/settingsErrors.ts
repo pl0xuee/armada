@@ -3,7 +3,7 @@ import { create } from "zustand";
 import type { Settings } from "@/lib/types";
 import { useApp } from "@/store/app";
 
-export type SettingsField = "failover" | "permissionMode" | "port" | "quietHours" | "ntfy";
+export type SettingsField = "failover" | "permissionMode" | "port" | "quietHours" | "ntfy" | "alerts";
 
 /** Which field a backend error message belongs to (by its prefix). */
 export function fieldForError(message: string): SettingsField | null {
@@ -12,6 +12,7 @@ export function fieldForError(message: string): SettingsField | null {
   if (/^The remote control port/i.test(message)) return "port";
   if (/^Quiet hours/i.test(message)) return "quietHours";
   if (/^Phone push URL:/i.test(message)) return "ntfy";
+  if (/^Alerts:/i.test(message)) return "alerts";
   return null;
 }
 
@@ -23,6 +24,7 @@ export function fieldsOf(patch: Partial<Settings>): SettingsField[] {
   if ("remote" in patch) out.push("port");
   if ("quietHours" in patch) out.push("quietHours");
   if ("ntfyUrl" in patch) out.push("ntfy");
+  if ("alertTargets" in patch) out.push("alerts");
   return out;
 }
 

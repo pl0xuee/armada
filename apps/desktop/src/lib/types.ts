@@ -161,6 +161,10 @@ export interface Agent {
   parentId: string | null;
   /** Merge state with the main agent; only present on helpers. */
   helperSync: HelperSync | null;
+  /** This agent's own spending limits (set by "Raise limit"); they win over the per-agent defaults. */
+  budget?: BudgetCap | null;
+  /** Set while the agent waits at a spending limit for you to choose (a "Needs you" item). */
+  budgetHold?: BudgetHold | null;
 }
 
 export type HelperSyncState = "inSync" | "pendingToMain" | "pendingFromMain" | "merging" | "conflict";
@@ -503,20 +507,71 @@ export interface Settings {
   dailyBudgetUsd: number | null;
   /** Cap on one agent's total spend, in USD; null = no cap. */
   agentBudgetUsd: number | null;
-  /** What reaching a cap does: alert only, or also pause the agents. */
+  /** What reaching a cap does: alert only, or also hold the agent when its turn ends. */
   budgetAction: BudgetAction;
+  /** Token caps, like the dollar ones; null = no cap. */
+  dailyBudgetTokens: number | null;
+  agentBudgetTokens: number | null;
+  /** Caps on everything the agents of one project spend, by project folder. */
+  projectBudgets: Record<string, BudgetCap>;
+  /** Slack, Discord and webhook targets for alerts (ntfy has its own field above). */
+  alertTargets: AlertTarget[];
 }
 
 export type BudgetAction = "notify" | "pause";
 export type BudgetLevel = "under" | "warn" | "hit";
+export type BudgetScope = "daily" | "project" | "agent";
+export type BudgetMetric = "cost" | "tokens";
 
-/** Today's spend (since local midnight) against the daily cap. */
+/** A limit in cost and/or tokens (null = unlimited in that unit). */
+export interface BudgetCap {
+  usd: number | null;
+  tokens: number | null;
+}
+
+/** Why an agent waits: the limit it ran into. */
+export interface BudgetHold {
+  scope: BudgetScope;
+  metric: BudgetMetric;
+  spent: number;
+  cap: number;
+  /** When the hold began (ms). */
+  since: number;
+}
+
+/** How a held agent goes on: raise the limit that was hit by `by` (dollars or tokens), continue one turn, or stop. */
+export type BudgetChoice = { action: "raise"; by: number } | { action: "continue_once" } | { action: "stop" };
+
+/** Today's spend (since local midnight) against the daily limits. */
 export interface BudgetStatus {
   /** Local date, YYYY-MM-DD. */
   day: string;
   todayUsd: number;
   dailyBudgetUsd: number | null;
+  todayTokens: number;
+  dailyBudgetTokens: number | null;
+  /** The worse of the cost and token levels. */
   level: BudgetLevel;
+}
+
+export type AlertKind = "slack" | "discord" | "webhook";
+
+export interface AlertEvents {
+  needsYou: boolean;
+  finished: boolean;
+  failed: boolean;
+  /** A spending limit paused an agent. */
+  budget: boolean;
+}
+
+/** Where alerts are posted besides the desktop and ntfy. The URL is a secret (kept in the OS keychain). */
+export interface AlertTarget {
+  id: string;
+  name: string;
+  kind: AlertKind;
+  url: string;
+  enabled: boolean;
+  events: AlertEvents;
 }
 
 /** The OpenAI Realtime voice assistant (off by default; audio is sent to OpenAI). */

@@ -33,6 +33,7 @@ import { HelperSettings } from "@/components/settings/HelperSettings";
 import { ResponseStyleSettings } from "@/components/settings/ResponseStyleSettings";
 import { RememberedChoicesRow } from "@/components/settings/RememberedChoicesRow";
 import { AgentsSection } from "@/components/settings/AgentsSection";
+import { AlertTargets } from "@/components/settings/AlertTargets";
 import { BudgetsSection } from "@/components/settings/BudgetsSection";
 import { CustomSoundLine } from "@/components/settings/CustomSound";
 import { McpSection } from "@/components/settings/McpSection";
@@ -699,6 +700,8 @@ function Notifications({ settings }: { settings: Settings }) {
             />
           </SettingRow>
         </SettingGroup>
+
+        <AlertTargets targets={settings.alertTargets} />
       </div>
     </>
   );
