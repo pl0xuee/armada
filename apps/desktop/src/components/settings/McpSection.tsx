@@ -1,7 +1,6 @@
-import { ClipboardPaste, Globe, Pencil, Plug, Plus, SquareTerminal, Trash2 } from "lucide-react";
+import { ClipboardPaste, Globe, ListChecks, Pencil, Plug, Plus, SquareTerminal, Trash2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { EmptyState } from "@/components/EmptyState";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogContent, DialogFooter } from "@/components/ui/dialog";
@@ -10,14 +9,15 @@ import { Badge, Spinner } from "@/components/ui/misc";
 import { Segmented } from "@/components/ui/segmented";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip } from "@/components/ui/tooltip";
+import { mcpPickup, pickupSummary, scopeServers } from "@/lib/toolkit";
 import type { McpServer, McpTransport } from "@/lib/types";
-import { cn, errorMessage, uuid } from "@/lib/utils";
+import { basename, cn, errorMessage, uuid } from "@/lib/utils";
 import { useApp } from "@/store/app";
 import { cleanKeyValues, KeyValueEditor, validateKeyValues, type KeyValueRow } from "./KeyValueEditor";
-import { SectionHeader } from "./SettingRow";
 import { FieldError } from "./TemplatesSection";
 import { McpPasteDialog } from "./McpPasteDialog";
 import { McpTestButton, McpTestOutcome } from "./McpTestResult";
+import { useMcpTestResult, useMcpTests } from "./mcpTest";
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
@@ -34,12 +34,17 @@ async function saveServers(mcpServers: McpServer[], failure: string): Promise<bo
   }
 }
 
-export function McpSection({ servers }: { servers: McpServer[] }) {
-  const [editing, setEditing] = useState<McpServer | "new" | null>(null);
+export function McpSection({ servers, project }: { servers: McpServer[]; project?: string | null }) {
+  // `scope` is where a new server goes to: "" = every project, else that project's folder.
+  const [editing, setEditing] = useState<{ server: McpServer | null; scope: string } | null>(null);
   const [deleting, setDeleting] = useState<McpServer | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
-  const [pasting, setPasting] = useState(false);
-  const enabled = servers.filter((s) => s.enabled).length;
+  const [pasting, setPasting] = useState<string | null>(null);
+  const tests = useMcpTests((s) => s.results);
+  const scoped = scopeServers(servers, project ?? null);
+  const visible = [...scoped.project, ...scoped.global];
+  const enabled = visible.filter((s) => s.enabled).length;
+  const testing = visible.some((s) => tests[s.id]?.state === "running");
 
   const toggle = async (server: McpServer, on: boolean) => {
     setToggling(server.id);
@@ -63,71 +68,102 @@ export function McpSection({ servers }: { servers: McpServer[] }) {
     if (ok) toast(`Removed ${server.name}`);
   };
 
-  return (
-    <>
-      <SectionHeader
-        title="Tools (MCP)"
-        description="Servers here are available to every agent, on every provider. Changes apply to agents started (or resumed) afterwards."
-        right={
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <Button variant="ghost" onClick={() => setPasting(true)}>
-              <ClipboardPaste /> Paste config
-            </Button>
-            <Button variant="secondary" onClick={() => setEditing("new")}>
-              <Plus /> Add server
-            </Button>
-          </div>
-        }
-      />
+  /** Tests every enabled server, a few at a time (each one starts a process or opens a connection). */
+  const testAll = async () => {
+    const queue = visible.filter((s) => s.enabled);
+    const worker = async () => {
+      for (let s = queue.shift(); s; s = queue.shift()) await useMcpTests.getState().run(s.id, s);
+    };
+    await Promise.all([worker(), worker(), worker()]);
+  };
 
-      {servers.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-line-strong bg-card/40">
-          <EmptyState
-            icon={<Plug />}
-            title="No MCP servers"
-            description="Connect databases, issue trackers and internal tools once, and every agent can use them, whichever provider it runs on."
-            action={
-              <div className="flex flex-wrap justify-center gap-2">
-                <Button variant="primary" onClick={() => setEditing("new")}>
-                  <Plus /> Add a server
-                </Button>
-                <Button variant="secondary" onClick={() => setPasting(true)}>
-                  <ClipboardPaste /> Paste config
-                </Button>
-              </div>
-            }
-          />
+  const projectName = project ? basename(project) || project : "";
+  const group = (scope: string, list: McpServer[], title: string, hint: string) => (
+    <section aria-label={title} className="mb-6">
+      <div className="mb-2 flex flex-wrap items-end justify-between gap-x-3 gap-y-2 px-0.5">
+        <div className="min-w-0">
+          <h3 className="text-[13px] font-semibold leading-[18px] tracking-tight text-fg">{title}</h3>
+          <p className="text-[12px] leading-[18px] text-muted">{hint}</p>
+        </div>
+        <div className="flex shrink-0 gap-1.5">
+          <Button size="sm" variant="ghost" onClick={() => setPasting(scope)}>
+            <ClipboardPaste /> Paste config
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => setEditing({ server: null, scope })}>
+            <Plus /> Add server
+          </Button>
+        </div>
+      </div>
+      {list.length === 0 ? (
+        <div className="flex items-center gap-3 rounded-xl border border-dashed border-line-strong bg-card/40 px-4 py-4">
+          <Plug className="h-4 w-4 shrink-0 text-steel" />
+          <p className="text-[12.5px] leading-[18px] text-muted">
+            {scope
+              ? `No servers only for ${projectName}. Add one that this project's agents should get on top of the shared ones.`
+              : "No shared servers. Connect databases, issue trackers and internal tools once and every agent can use them."}
+          </p>
         </div>
       ) : (
-        <>
-          <div className="mb-2.5 px-0.5 text-[12px] text-muted">
-            <span className="tabular text-fg">{enabled}</span> of <span className="tabular">{servers.length}</span>{" "}
-            enabled
-          </div>
-          <ul
-            aria-label="MCP servers"
-            className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-card edge"
-          >
-            {servers.map((s) => (
-              <ServerRow
-                key={s.id}
-                server={s}
-                busy={toggling === s.id}
-                onToggle={(on) => void toggle(s, on)}
-                onEdit={() => setEditing(s)}
-                onDelete={() => setDeleting(s)}
-              />
-            ))}
-          </ul>
-        </>
+        <ul
+          aria-label={title}
+          className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-card edge"
+        >
+          {list.map((s) => (
+            <ServerRow
+              key={s.id}
+              server={s}
+              shadowed={scoped.shadowed.has(s.id)}
+              busy={toggling === s.id}
+              onToggle={(on) => void toggle(s, on)}
+              onEdit={() => setEditing({ server: s, scope: s.projectPath ?? "" })}
+              onDelete={() => setDeleting(s)}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+
+  return (
+    <>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <p className="min-w-0 flex-1 basis-[260px] text-[13px] leading-[20px] text-muted">
+          Every agent, on every provider, can use these. Changes apply to agents started or resumed afterwards.
+          {visible.length > 0 && (
+            <>
+              {" "}
+              <span className="tabular text-fg">{enabled}</span> of <span className="tabular">{visible.length}</span>{" "}
+              on.
+            </>
+          )}
+        </p>
+        <Button size="sm" variant="ghost" disabled={enabled === 0 || testing} onClick={() => void testAll()}>
+          {testing ? <Spinner className="h-3.5 w-3.5" /> : <ListChecks />} {testing ? "Testing…" : "Test all"}
+        </Button>
+      </div>
+
+      {project &&
+        group(project, scoped.project, `Only ${projectName}`, "Only agents running in this project get these.")}
+      {group("", scoped.global, "All projects", "Every agent gets these, wherever it runs.")}
+
+      {scoped.elsewhere > 0 && (
+        <p className="-mt-2 mb-4 px-0.5 text-[12px] leading-[18px] text-steel">
+          {scoped.elsewhere} more {scoped.elsewhere === 1 ? "server belongs" : "servers belong"} to other projects.
+        </p>
       )}
 
-      <McpPasteDialog open={pasting} onOpenChange={setPasting} existing={servers} />
+      <McpPasteDialog
+        open={pasting !== null}
+        onOpenChange={(o) => !o && setPasting(null)}
+        existing={servers.filter((s) => (s.projectPath ?? "") === (pasting ?? ""))}
+        scope={pasting ?? ""}
+      />
 
       <McpDialog
-        key={editing === null ? "closed" : editing === "new" ? "new" : editing.id}
+        key={editing === null ? "closed" : (editing.server?.id ?? `new:${editing.scope}`)}
         editing={editing}
         servers={servers}
+        projectName={projectName}
         onClose={() => setEditing(null)}
       />
 
@@ -146,12 +182,15 @@ export function McpSection({ servers }: { servers: McpServer[] }) {
 
 function ServerRow({
   server,
+  shadowed,
   busy,
   onToggle,
   onEdit,
   onDelete,
 }: {
   server: McpServer;
+  /** A same-named project server replaces this one for the project on screen. */
+  shadowed: boolean;
   busy: boolean;
   onToggle: (on: boolean) => void;
   onEdit: () => void;
@@ -161,6 +200,8 @@ function ServerRow({
   const Icon = stdio ? SquareTerminal : Globe;
   const secrets = stdio ? server.env.length : server.headers.length;
   const shownArgs = server.args.slice(0, 4);
+  const tested = useMcpTestResult(server.id, server);
+  const pickup = mcpPickup(server, shadowed);
   return (
     <li className="group px-4 py-3 transition-colors hover:bg-raised/40">
       <div className="flex items-center gap-3">
@@ -183,6 +224,13 @@ function ServerRow({
               {server.name}
             </span>
             <Badge tone={stdio ? "neutral" : "accent"}>{stdio ? "stdio" : "HTTP"}</Badge>
+            {!server.enabled ? (
+              <Badge>Off</Badge>
+            ) : tested?.state === "ok" ? (
+              <Badge tone="ok">Connected</Badge>
+            ) : tested?.state === "error" ? (
+              <Badge tone="err">Failed</Badge>
+            ) : null}
           </span>
           <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted">
             {stdio ? (
@@ -208,6 +256,13 @@ function ServerRow({
                 · {secrets} {stdio ? (secrets === 1 ? "env var" : "env vars") : secrets === 1 ? "header" : "headers"}
               </span>
             )}
+          </span>
+          <span
+            className="mt-0.5 block truncate text-[11.5px] leading-[16px] text-steel"
+            title={pickup.note ?? undefined}
+          >
+            {pickup.agents.length > 0 ? `Used by ${pickupSummary(pickup.agents)}` : pickup.note}
+            {pickup.agents.length > 0 && pickup.note && " · " + pickup.note}
           </span>
         </button>
         <McpTestButton testKey={server.id} server={server} className="shrink-0 max-sm:px-2" />
@@ -260,13 +315,16 @@ function validUrl(raw: string): boolean {
 function McpDialog({
   editing,
   servers,
+  projectName,
   onClose,
 }: {
-  editing: McpServer | "new" | null;
+  editing: { server: McpServer | null; scope: string } | null;
   servers: McpServer[];
+  projectName: string;
   onClose: () => void;
 }) {
-  const initial = editing && editing !== "new" ? editing : null;
+  const initial = editing?.server ?? null;
+  const scope = editing?.scope ?? "";
   const [name, setName] = useState(initial?.name ?? "");
   const [transport, setTransport] = useState<McpTransport>(initial?.transport ?? "stdio");
   const [command, setCommand] = useState(initial?.command ?? "");
@@ -295,8 +353,13 @@ function McpDialog({
   const errors = {
     name: !name.trim()
       ? "Give the server a name."
-      : servers.some((s) => s.id !== initial?.id && s.name.trim().toLowerCase() === name.trim().toLowerCase())
-        ? "Another server already uses this name."
+      : servers.some(
+            (s) =>
+              s.id !== initial?.id &&
+              (s.projectPath ?? "") === scope &&
+              s.name.trim().toLowerCase() === name.trim().toLowerCase(),
+          )
+        ? "Another server here already uses this name."
         : null,
     command: stdio && !command.trim() ? "Enter the command that starts the server." : null,
     url: !stdio
@@ -326,6 +389,7 @@ function McpDialog({
     env: stdio ? cleanKeyValues(env) : [],
     url: stdio ? "" : url.trim(),
     headers: stdio ? [] : cleanKeyValues(headers),
+    projectPath: scope,
   };
   const testable = stdio ? !errors.command && !kvInvalid : !errors.url && !kvInvalid;
 
@@ -358,7 +422,9 @@ function McpDialog({
     <Dialog open={editing !== null} onOpenChange={(o) => !o && onClose()}>
       <DialogContent
         title={initial ? `Edit ${initial.name}` : "Add MCP server"}
-        description="Shared with every agent on every provider."
+        description={
+          scope ? `Only agents running in ${projectName} get it.` : "Shared with every agent on every provider."
+        }
         className="w-[min(620px,calc(100vw-32px))]"
         onOpenAutoFocus={(e) => {
           e.preventDefault();

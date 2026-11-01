@@ -59,6 +59,7 @@ import type {
   SettingsFile,
   SettingsScope,
 } from "./projectConfig";
+import type { InstructionSave, SkillDoc, SkillInfo, SkillScope } from "./toolkit";
 import { onVoiceBus } from "./voiceBus";
 import type { VaEvent } from "./voiceAssistant";
 
@@ -111,6 +112,28 @@ const tauriApi = {
   /** Replaces the allow/ask/deny lists in settings.json or settings.local.json, keeping all other keys. */
   projectSaveRules: (project: string, scope: SettingsScope, rules: PermissionRules) =>
     invoke<SettingsFile>("project_save_rules", { project, scope, rules }),
+  // tools & instructions: safe instruction-file saves and the skills Claude Code loads
+  /** Reads CLAUDE.md / AGENTS.md fresh from disk (to reload after an outside edit). */
+  instructionsRead: (project: string, file: InstructionFileName) =>
+    invoke<InstructionDoc>("instructions_read", { project, file }),
+  /**
+   * Saves unless the file changed on disk since `expectedStamp` (the stamp loaded; null = it didn't exist) and
+   * `force` is off: then nothing is written and `saved` is false with the file as it is now.
+   */
+  instructionsSave: (
+    project: string,
+    file: InstructionFileName,
+    content: string,
+    expectedStamp: string | null,
+    force: boolean,
+  ) => invoke<InstructionSave>("instructions_save", { project, file, content, expectedStamp, force }),
+  /** Your skills, the project's (when given) and installed plugins'. */
+  skillsList: (project: string | null) => invoke<SkillInfo[]>("skills_list", { project }),
+  /** A skill's SKILL.md by the id skillsList returned. */
+  skillsRead: (project: string | null, id: string) => invoke<SkillDoc>("skills_read", { project, id }),
+  /** Creates SKILL.md from a template for you ("user") or the project ("project"); never replaces a skill. */
+  skillsCreate: (project: string | null, scope: Exclude<SkillScope, "plugin">, name: string, description: string) =>
+    invoke<SkillInfo>("skills_create", { project, scope, name, description }),
   /** Starts a helper agent beside a busy one: runs now, in parallel, on a copy of the main agent's files. */
   spawnHelper: (parentId: string, prompt: string, attachments?: Attachment[]) =>
     invoke<Agent>("spawn_helper", { parentId, prompt, attachments: attachments ?? [] }),

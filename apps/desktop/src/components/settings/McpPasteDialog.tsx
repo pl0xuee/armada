@@ -32,10 +32,14 @@ export function McpPasteDialog({
   open,
   onOpenChange,
   existing,
+  scope = "",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Servers in the same scope as the ones being added (names must be unique among them). */
   existing: McpServer[];
+  /** "" = every project; otherwise the project folder the pasted servers are limited to. */
+  scope?: string;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -45,13 +49,13 @@ export function McpPasteDialog({
         className="w-[min(660px,calc(100vw-32px))]"
         sheet
       >
-        {open && <PasteBody existing={existing} onDone={() => onOpenChange(false)} />}
+        {open && <PasteBody existing={existing} scope={scope} onDone={() => onOpenChange(false)} />}
       </DialogContent>
     </Dialog>
   );
 }
 
-function PasteBody({ existing, onDone }: { existing: McpServer[]; onDone: () => void }) {
+function PasteBody({ existing, scope, onDone }: { existing: McpServer[]; scope: string; onDone: () => void }) {
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -95,6 +99,7 @@ function PasteBody({ existing, onDone }: { existing: McpServer[]; onDone: () => 
       id: uuid(),
       name: r.name.trim(),
       enabled: true,
+      projectPath: scope,
     }));
     try {
       await useApp.getState().setSettings({ ...settings, mcpServers: [...settings.mcpServers, ...added] });

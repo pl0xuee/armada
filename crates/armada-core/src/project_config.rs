@@ -19,8 +19,8 @@ use crate::Result;
 /// Largest file read or written (an instruction file or a settings file).
 pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 /// How much of a command / skill file is read to find its description.
-const HEADER_BYTES: u64 = 16 * 1024;
-const MAX_LISTED: usize = 500;
+pub(crate) const HEADER_BYTES: u64 = 16 * 1024;
+pub(crate) const MAX_LISTED: usize = 500;
 const MAX_DEPTH: usize = 6;
 const MAX_RULES_PER_LIST: usize = 500;
 const MAX_RULE_CHARS: usize = 1000;
@@ -79,6 +79,18 @@ pub struct InstructionDoc {
     pub content: String,
     /// Why the file can't be shown or edited (too large, outside the project…).
     pub error: Option<String>,
+    /// Opaque fingerprint of the file on disk (change time and size); `None` when it
+    /// doesn't exist. A checked save compares it to notice edits made elsewhere.
+    pub stamp: Option<String>,
+}
+
+/// The result of a checked save: the file as it is now. `saved` is false when the file
+/// changed on disk since `expected` and nothing was written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstructionSave {
+    pub saved: bool,
+    pub doc: InstructionDoc,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -166,7 +178,7 @@ fn existing_file_in(root: &Path, path: &Path) -> Result<Option<PathBuf>> {
 
 /// The path a write may go to: no symlink anywhere between the project root and the
 /// file, and an existing target must be a regular file.
-fn writable_target(root: &Path, rel: &[&str]) -> Result<PathBuf> {
+pub(crate) fn writable_target(root: &Path, rel: &[&str]) -> Result<PathBuf> {
     let mut cur = root.to_path_buf();
     for (i, part) in rel.iter().enumerate() {
         cur.push(part);
@@ -193,13 +205,13 @@ fn writable_target(root: &Path, rel: &[&str]) -> Result<PathBuf> {
     Ok(cur)
 }
 
-fn file_label(path: &Path) -> String {
+pub(crate) fn file_label(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
 }
 
-fn read_capped(path: &Path, cap: u64) -> Result<(String, bool)> {
+pub(crate) fn read_capped(path: &Path, cap: u64) -> Result<(String, bool)> {
     let mut bytes = Vec::new();
     std::fs::File::open(path)
         .with_context(|| format!("Can't open {}", file_label(path)))?
@@ -212,7 +224,7 @@ fn read_capped(path: &Path, cap: u64) -> Result<(String, bool)> {
 }
 
 /// Whole-file read; refuses files over the cap and non-UTF-8 text.
-fn read_text(path: &Path) -> Result<String> {
+pub(crate) fn read_text(path: &Path) -> Result<String> {
     let mut bytes = Vec::new();
     std::fs::File::open(path)
         .with_context(|| format!("Can't open {}", file_label(path)))?
@@ -227,7 +239,7 @@ fn read_text(path: &Path) -> Result<String> {
 
 /// Writes through a temporary file in the same folder, so a crash never leaves a
 /// half-written config behind. An existing file keeps its permissions.
-fn write_atomic(path: &Path, content: &str) -> Result<()> {
+pub(crate) fn write_atomic(path: &Path, content: &str) -> Result<()> {
     if content.len() as u64 > MAX_FILE_BYTES {
         bail!("{} would be larger than 1 MiB", file_label(path));
     }
@@ -288,11 +300,13 @@ fn read_doc(root: &Path, file: &str, path: &Path) -> InstructionDoc {
         exists: false,
         content: String::new(),
         error: None,
+        stamp: None,
     };
     match existing_file_in(root, path) {
         Ok(None) => {}
         Ok(Some(real)) => {
             doc.exists = true;
+            doc.stamp = stamp_of(&real);
             match read_text(&real) {
                 Ok(text) => doc.content = text,
                 Err(e) => doc.error = Some(format!("{e:#}")),
@@ -316,9 +330,11 @@ pub fn read_user_instructions(home: &Path) -> InstructionDoc {
         exists: false,
         content: String::new(),
         error: None,
+        stamp: None,
     };
     if std::fs::symlink_metadata(&path).is_ok() {
         doc.exists = true;
+        doc.stamp = stamp_of(&path);
         if !path.is_file() {
             doc.error = Some("CLAUDE.md is not a regular file".into());
         } else {
@@ -336,6 +352,45 @@ pub fn write_instruction(root: &Path, name: &str, content: &str) -> Result<Instr
     let target = writable_target(root, &[file])?;
     write_atomic(&target, content)?;
     read_instruction(root, file)
+}
+
+/// Change time + size, so an edit made elsewhere shows up even within the same second.
+fn stamp_of(path: &Path) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    let nanos = meta
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some(format!("{nanos}-{}", meta.len()))
+}
+
+/// Saves like `write_instruction`, unless the file on disk no longer matches `expected`
+/// (the stamp the editor loaded; `None` = it didn't exist) and `force` is off. Then
+/// nothing is written and the current file comes back so the editor can offer a reload
+/// or an overwrite.
+pub fn save_instruction_checked(
+    root: &Path,
+    name: &str,
+    content: &str,
+    expected: Option<&str>,
+    force: bool,
+) -> Result<InstructionSave> {
+    let file = check_instruction_name(name)?;
+    if !force {
+        let current = read_doc(root, file, &join(root, &[file]));
+        if current.stamp.as_deref() != expected {
+            return Ok(InstructionSave {
+                saved: false,
+                doc: current,
+            });
+        }
+    }
+    Ok(InstructionSave {
+        saved: true,
+        doc: write_instruction(root, file, content)?,
+    })
 }
 
 // ---- settings.json -----------------------------------------------------------
@@ -552,7 +607,7 @@ pub fn write_rules(
 
 /// `key: value` pairs of a leading `---` frontmatter block. Handles quoted values and
 /// the `>` / `|` block scalars; nested structures are ignored.
-fn frontmatter(text: &str) -> BTreeMap<String, String> {
+pub(crate) fn frontmatter(text: &str) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     let mut lines = text.lines();
     if lines.next().map(str::trim_end) != Some("---") {
@@ -602,7 +657,7 @@ fn unquote(value: &str) -> &str {
 }
 
 /// The first non-empty line after the frontmatter that isn't a heading marker only.
-fn first_body_line(text: &str) -> Option<String> {
+pub(crate) fn first_body_line(text: &str) -> Option<String> {
     let mut lines = text.lines().peekable();
     if lines.peek().map(|l| l.trim_end()) == Some("---") {
         lines.next();
@@ -618,7 +673,7 @@ fn first_body_line(text: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn clip(text: &str) -> String {
+pub(crate) fn clip(text: &str) -> String {
     let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if flat.chars().count() <= MAX_DESCRIPTION_CHARS {
         return flat;
@@ -629,7 +684,7 @@ fn clip(text: &str) -> String {
 }
 
 /// Sub-entries of `dir`, name-sorted, without following symlinks.
-fn child_entries(dir: &Path) -> Vec<(String, PathBuf, std::fs::FileType)> {
+pub(crate) fn child_entries(dir: &Path) -> Vec<(String, PathBuf, std::fs::FileType)> {
     let Ok(read) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -1053,5 +1108,68 @@ mod tests {
         assert!(cfg.user_instructions.is_none());
         assert!(load(&root.join("missing"), None).is_err());
         assert!(load(&root.join("AGENTS.md"), None).is_err());
+    }
+
+    #[test]
+    fn creating_a_file_that_appeared_meanwhile_is_a_conflict() {
+        let root = tmp("create");
+        std::fs::write(root.join("AGENTS.md"), "someone else's").unwrap();
+        let out = save_instruction_checked(&root, "AGENTS.md", "mine", None, false).unwrap();
+        assert!(!out.saved);
+        assert_eq!(out.doc.content, "someone else's");
+        assert_eq!(
+            std::fs::read_to_string(root.join("AGENTS.md")).unwrap(),
+            "someone else's"
+        );
+        let forced = save_instruction_checked(&root, "AGENTS.md", "mine", None, true).unwrap();
+        assert!(forced.saved);
+        assert_eq!(forced.doc.content, "mine");
+    }
+
+    #[test]
+    fn saving_with_the_current_stamp_works_and_a_stale_stamp_conflicts() {
+        let root = tmp("stamp");
+        let first = save_instruction_checked(&root, "CLAUDE.md", "one", None, false).unwrap();
+        assert!(first.saved);
+        let stamp = first.doc.stamp.clone();
+        assert!(stamp.is_some());
+
+        let second =
+            save_instruction_checked(&root, "CLAUDE.md", "two", stamp.as_deref(), false).unwrap();
+        assert!(second.saved);
+
+        // An edit elsewhere changes the size, so the old stamp no longer matches.
+        std::fs::write(root.join("CLAUDE.md"), "edited elsewhere").unwrap();
+        let stale =
+            save_instruction_checked(&root, "CLAUDE.md", "three", stamp.as_deref(), false).unwrap();
+        assert!(!stale.saved);
+        assert_eq!(stale.doc.content, "edited elsewhere");
+        assert_eq!(
+            std::fs::read_to_string(root.join("CLAUDE.md")).unwrap(),
+            "edited elsewhere"
+        );
+    }
+
+    #[test]
+    fn only_the_two_instruction_files_can_be_saved() {
+        let root = tmp("names");
+        for bad in ["../CLAUDE.md", "notes.md", "sub/CLAUDE.md", ""] {
+            assert!(save_instruction_checked(&root, bad, "x", None, true).is_err());
+        }
+        assert!(!root.join("notes.md").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_instruction_file_is_never_written_through() {
+        let root = tmp("link");
+        let outside = tmp("outside");
+        std::fs::write(outside.join("target.md"), "keep").unwrap();
+        std::os::unix::fs::symlink(outside.join("target.md"), root.join("CLAUDE.md")).unwrap();
+        assert!(save_instruction_checked(&root, "CLAUDE.md", "x", None, true).is_err());
+        assert_eq!(
+            std::fs::read_to_string(outside.join("target.md")).unwrap(),
+            "keep"
+        );
     }
 }

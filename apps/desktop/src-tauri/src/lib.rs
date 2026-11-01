@@ -21,6 +21,7 @@ mod remote;
 mod sound;
 mod state;
 mod terminal;
+mod toolkit;
 mod tools;
 mod tray;
 mod updater;
@@ -172,6 +173,11 @@ macro_rules! handler {
             project_settings::project_config,
             project_settings::project_save_instruction,
             project_settings::project_save_rules,
+            toolkit::instructions_read,
+            toolkit::instructions_save,
+            toolkit::skills_list,
+            toolkit::skills_read,
+            toolkit::skills_create,
             commands::read_image,
             commands::remote_status,
             commands::remote_rotate_token,

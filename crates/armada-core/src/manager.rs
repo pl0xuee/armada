@@ -1157,7 +1157,10 @@ impl Core {
         };
         let children_file = self.inner.data_dir.join("children.json");
         let attachments_dir = self.attachments_dir();
-        let mcp_servers = self.inner.settings.lock().mcp_servers.clone();
+        let mcp_servers = crate::mcp::servers_for_project(
+            &self.inner.settings.lock().mcp_servers,
+            &agent.project_path,
+        );
         let ctx = self.ctx(agent_id);
         let label = format!(
             "{}:{}",

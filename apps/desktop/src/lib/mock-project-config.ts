@@ -80,9 +80,22 @@ function projectFor(project: string): MockProject {
 
 const rootOf = (project: string) => project.trim().replace(/\/+$/, "");
 
+/** Per-file change counters: the demo's stand-in for the stamp (mtime + size) the backend returns. */
+const stamps = new Map<string, number>();
+const stampKey = (root: string, file: string) => `${root}\0${file}`;
+const bump = (root: string, file: string) =>
+  stamps.set(stampKey(root, file), (stamps.get(stampKey(root, file)) ?? 0) + 1);
+
 function doc(root: string, p: MockProject, file: InstructionFileName): InstructionDoc {
   const content = p.instructions[file];
-  return { file, path: `${root}/${file}`, exists: content !== null, content: content ?? "", error: null };
+  return {
+    file,
+    path: `${root}/${file}`,
+    exists: content !== null,
+    content: content ?? "",
+    error: null,
+    stamp: content === null ? null : `${stamps.get(stampKey(root, file)) ?? 0}`,
+  };
 }
 
 function settingsFile(root: string, p: MockProject, scope: SettingsScope): SettingsFile {
@@ -126,7 +139,19 @@ export function mockSaveInstruction(project: string, file: InstructionFileName, 
   if (content.length > 1024 * 1024) throw new Error(`${file} would be larger than 1 MiB`);
   const p = projectFor(project);
   p.instructions[file] = content;
+  bump(rootOf(project), file);
   return doc(rootOf(project), p, file);
+}
+
+export function mockReadInstruction(project: string, file: InstructionFileName): InstructionDoc {
+  return doc(rootOf(project), projectFor(project), file);
+}
+
+/** Demo only: an edit made "in another editor", so the conflict flow can be tried in the browser. */
+export function mockExternalEdit(project: string, file: InstructionFileName, content: string) {
+  const p = projectFor(project);
+  p.instructions[file] = content;
+  bump(rootOf(project), file);
 }
 
 export function mockSaveRules(project: string, scope: SettingsScope, rules: PermissionRules): SettingsFile {
