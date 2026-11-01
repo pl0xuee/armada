@@ -13,6 +13,7 @@ across all your accounts, with every project isolated in its own git worktree.
 [![Latest release](https://img.shields.io/github/v/release/pl0xuee/kvistcode?include_prereleases&sort=semver)](https://github.com/pl0xuee/kvistcode/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
+[![Support](https://img.shields.io/badge/Support-the%20project-4FC3F7?logo=githubsponsors&logoColor=white)](https://kvistcode.com/support/)
 
 <img width="100%" src="docs/screenshots/mission-control.png" alt="Kvistcode's Mission Control: a grid of agents from several providers, some working, some waiting for an approval or an answer, with Allow, Deny and Answer buttons on the cards" />
 
@@ -276,9 +277,9 @@ Add a user-facing entry under `## Unreleased` in [`CHANGELOG.md`](CHANGELOG.md) 
 
 Kvistcode is free and open source. If it saves you time, you can help keep it maintained. It is entirely optional and unlocks nothing.
 
-[![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/pl0xuee) &nbsp; [Other ways to support: kvistcode.com/support](https://kvistcode.com/support/)
+**By card (USD):** [GitHub Sponsors](https://github.com/sponsors/pl0xuee), one-time or monthly.
 
-Or send crypto directly:
+**With crypto:**
 
 | Network | Address |
 |---|---|
