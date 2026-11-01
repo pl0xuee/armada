@@ -308,6 +308,7 @@ async fn raising_a_project_limit_frees_every_agent_held_by_it() {
             kvistcode_core::budget::BudgetCap {
                 usd: Some(0.6),
                 tokens: None,
+                turns: None,
             },
         );
     })
@@ -357,7 +358,7 @@ async fn unusable_limits_are_refused() {
                 "/work/app".into(),
                 kvistcode_core::budget::BudgetCap {
                     usd: Some(-1.0),
-                    tokens: None,
+                    ..Default::default()
                 },
             );
         },

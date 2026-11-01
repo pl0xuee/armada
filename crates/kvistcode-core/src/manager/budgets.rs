@@ -7,6 +7,9 @@
 //!   agent finishes it, and at that turn boundary it is *held*: queued messages stay
 //!   queued, `Agent::budget_hold` says why, and a "Needs you" item offers to raise the
 //!   limit, continue once, or stop.
+//! * A turn limit counts completed turns (`Agent::turns`, kept in the database, so a
+//!   restart doesn't reset it). The turn that reaches the limit is the one the agent
+//!   is held after, like any other limit.
 //! * Continuing starts the next turn; at its boundary the limit is checked again.
 
 use super::*;
@@ -57,6 +60,7 @@ fn caps_of(s: &Settings, agent: &Agent) -> Caps {
         daily: BudgetCap {
             usd: s.daily_budget_usd,
             tokens: s.daily_budget_tokens,
+            turns: s.daily_budget_turns,
         },
         project: s
             .project_budgets
@@ -66,6 +70,7 @@ fn caps_of(s: &Settings, agent: &Agent) -> Caps {
         agent: BudgetCap {
             usd: own.usd.or(s.agent_budget_usd),
             tokens: own.tokens.or(s.agent_budget_tokens),
+            turns: own.turns.or(s.agent_budget_turns),
         },
     }
 }
@@ -74,12 +79,18 @@ fn spend_of(agents: &[&Agent]) -> Spend {
     Spend {
         usd: agents.iter().map(|a| a.cost_usd).sum(),
         tokens: agents.iter().map(|a| a.tokens_used as f64).sum(),
+        turns: agents.iter().map(|a| a.turns.unwrap_or(0) as f64).sum(),
     }
 }
 
 impl Core {
     /// Where `agent_id` stands against each limit (None if it no longer exists).
-    fn budget_readings(&self, agent_id: &str) -> Option<(Agent, BudgetAction, Vec<Reading>)> {
+    /// `pending_turn`: also count the turn that is just ending for it.
+    fn budget_readings(
+        &self,
+        agent_id: &str,
+        pending_turn: bool,
+    ) -> Option<(Agent, BudgetAction, Vec<Reading>)> {
         let agent = self.agent(agent_id).ok()?;
         let (caps, action) = {
             let s = self.inner.settings.lock();
@@ -94,13 +105,19 @@ impl Core {
                 .collect();
             spend_of(&same)
         };
-        let daily = self
+        let mut daily = self
             .inner
             .budget
             .lock()
             .tracker
             .today(Local::now().date_naive());
-        let readings = budget::readings(&caps, spend_of(&[&agent]), project, daily);
+        let (mut own, mut project) = (spend_of(&[&agent]), project);
+        if pending_turn {
+            own.turns += 1.0;
+            project.turns += 1.0;
+            daily.turns += 1.0;
+        }
+        let readings = budget::readings(&caps, own, project, daily);
         Some((agent, action, readings))
     }
 
@@ -122,7 +139,31 @@ impl Core {
             .lock()
             .tracker
             .add_spend(today, usd, tokens);
-        let Some((agent, action, readings)) = self.budget_readings(agent_id) else {
+        self.budget_check(agent_id, true);
+    }
+
+    /// An agent finished a turn (called once the turn is known to be live, after
+    /// `budget_gate` decided the hold): counts it for the agent, its project and the
+    /// day, and raises the notices for limits that crossed. The hold itself was placed
+    /// by the gate.
+    pub(crate) fn budget_turn_done(&self, agent_id: &str) {
+        let Ok(_) = self.update_agent(agent_id, |a| a.turns = Some(a.turns.unwrap_or(0) + 1))
+        else {
+            return;
+        };
+        self.inner
+            .budget
+            .lock()
+            .tracker
+            .add_turns(Local::now().date_naive(), 1);
+        self.budget_check(agent_id, false);
+    }
+
+    /// Raises the notices for limits `agent_id` newly crossed. With `hold_idle`, a hit
+    /// under the Pause action holds an agent that is not running.
+    fn budget_check(&self, agent_id: &str, hold_idle: bool) {
+        let today = Local::now().date_naive();
+        let Some((agent, action, readings)) = self.budget_readings(agent_id, false) else {
             return;
         };
         let alerts = {
@@ -141,7 +182,7 @@ impl Core {
         }
         // A limit crossed while nothing is running (a late usage report) holds the
         // agent now; while a turn runs, the hold waits for the turn to end.
-        if hit && action == BudgetAction::Pause && !agent.status.is_busy() {
+        if hold_idle && hit && action == BudgetAction::Pause && !agent.status.is_busy() {
             if let Some(hold) = BudgetHold::worst(&readings, now_ms()) {
                 self.budget_hold_agent(agent_id, hold);
             }
@@ -180,8 +221,9 @@ impl Core {
 
     /// Whether `agent_id` must be held now (Pause action, some limit hit). Checked when
     /// a turn ends, before the queue would carry on.
-    pub(crate) fn budget_gate(&self, agent_id: &str) -> Option<BudgetHold> {
-        let (_, action, readings) = self.budget_readings(agent_id)?;
+    /// `completed_turn`: the turn that is ending counts toward turn limits.
+    pub(crate) fn budget_gate(&self, agent_id: &str, completed_turn: bool) -> Option<BudgetHold> {
+        let (_, action, readings) = self.budget_readings(agent_id, completed_turn)?;
         if action != BudgetAction::Pause {
             return None;
         }
@@ -214,6 +256,7 @@ impl Core {
             BudgetCap {
                 usd: s.daily_budget_usd,
                 tokens: s.daily_budget_tokens,
+                turns: s.daily_budget_turns,
             }
         };
         self.inner
@@ -226,7 +269,7 @@ impl Core {
     /// Startup: an interrupted agent over a limit (with the Pause action) stays
     /// stopped instead of auto-resuming into more spend.
     pub(super) fn budget_blocks_resume(&self, agent_id: &str) -> bool {
-        self.budget_readings(agent_id)
+        self.budget_readings(agent_id, false)
             .is_some_and(|(_, action, readings)| budget::blocks_resume(action, &readings))
     }
 
@@ -267,10 +310,11 @@ impl Core {
 
     /// Makes the hit limit `new_cap`: this agent's own, its project's, or the day's.
     fn budget_raise(&self, agent: &Agent, hold: BudgetHold, new_cap: f64) -> Result<()> {
-        let tokens = new_cap.ceil() as i64;
+        let whole = new_cap.ceil() as i64;
         let set = |cap: &mut BudgetCap| match hold.metric {
             BudgetMetric::Cost => cap.usd = Some((new_cap * 100.0).ceil() / 100.0),
-            BudgetMetric::Tokens => cap.tokens = Some(tokens),
+            BudgetMetric::Tokens => cap.tokens = Some(whole),
+            BudgetMetric::Turns => cap.turns = Some(whole),
         };
         match hold.scope {
             BudgetScope::Agent => {
@@ -293,10 +337,12 @@ impl Core {
                     let mut cap = BudgetCap {
                         usd: s.daily_budget_usd,
                         tokens: s.daily_budget_tokens,
+                        turns: s.daily_budget_turns,
                     };
                     set(&mut cap);
                     s.daily_budget_usd = cap.usd;
                     s.daily_budget_tokens = cap.tokens;
+                    s.daily_budget_turns = cap.turns;
                 })?;
             }
         }
@@ -314,7 +360,7 @@ impl Core {
             .map(|r| r.agent.id.clone())
             .collect();
         for id in held {
-            if self.budget_gate(&id).is_some() {
+            if self.budget_gate(&id, false).is_some() {
                 continue;
             }
             if self.update_agent(&id, |a| a.budget_hold = None).is_err() {
