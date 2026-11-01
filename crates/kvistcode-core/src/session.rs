@@ -1784,7 +1784,13 @@ impl AgentCtx {
         if !current {
             return;
         }
-        self.update_agent(|a| a.running = false);
+        // Whether the process had come up before it died (a start that never got that far
+        // is retried from the timeline, see below).
+        let mut was_running = false;
+        self.update_agent(|a| {
+            was_running = a.running;
+            a.running = false;
+        });
         // Starting: the starter sees the failed handshake and reports it.
         // Cancelled mid-start (Stop, cancel, "send now"): killing it was the point;
         // whoever cancelled settles the turn (the exit can land after the starter
@@ -1801,11 +1807,13 @@ impl AgentCtx {
                 }
                 // A process that died before producing anything for the turn may
                 // never have got the message: keep it, on hold, rather than lose it.
+                // Only if the process had come up: a start that never got that far is retried
+                // from the timeline (and briefed), so queueing it too would run it twice.
                 let unheard = {
                     let st = self.st.lock();
                     st.turn_prompt
                         .as_ref()
-                        .filter(|(_, seq)| *seq == st.seq)
+                        .filter(|(_, seq)| was_running && *seq == st.seq)
                         .map(|(p, _)| p.clone())
                 };
                 self.turn_finished_by(generation, TurnOutcome::Failed(msg));
