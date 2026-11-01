@@ -9,7 +9,7 @@
 //! If the keychain is unavailable a value stays in the database as plaintext (with a
 //! warning) so nothing is lost.
 
-use crate::model::{KeyValue, Settings};
+use crate::model::Settings;
 use parking_lot::Mutex;
 use std::collections::BTreeMap;
 
@@ -139,7 +139,7 @@ impl SecretStore for Memory {
 }
 
 /// Every secret-bearing slot with its stable keychain account name.
-fn slots(settings: &mut Settings) -> Vec<(String, &mut KeyValue)> {
+fn slots(settings: &mut Settings) -> Vec<(String, &mut String)> {
     let mut out = Vec::new();
     for (i, s) in settings.mcp_servers.iter_mut().enumerate() {
         let id = if s.id.is_empty() {
@@ -148,10 +148,16 @@ fn slots(settings: &mut Settings) -> Vec<(String, &mut KeyValue)> {
             s.id.clone()
         };
         for kv in s.env.iter_mut() {
-            out.push((format!("{ACCOUNT_PREFIX}mcp/{id}/env/{}", kv.name), kv));
+            out.push((
+                format!("{ACCOUNT_PREFIX}mcp/{id}/env/{}", kv.name),
+                &mut kv.value,
+            ));
         }
         for kv in s.headers.iter_mut() {
-            out.push((format!("{ACCOUNT_PREFIX}mcp/{id}/header/{}", kv.name), kv));
+            out.push((
+                format!("{ACCOUNT_PREFIX}mcp/{id}/header/{}", kv.name),
+                &mut kv.value,
+            ));
         }
     }
     for (i, a) in settings.custom_agents.iter_mut().enumerate() {
@@ -161,8 +167,19 @@ fn slots(settings: &mut Settings) -> Vec<(String, &mut KeyValue)> {
             a.id.clone()
         };
         for kv in a.env.iter_mut() {
-            out.push((format!("{ACCOUNT_PREFIX}agent/{id}/env/{}", kv.name), kv));
+            out.push((
+                format!("{ACCOUNT_PREFIX}agent/{id}/env/{}", kv.name),
+                &mut kv.value,
+            ));
         }
+    }
+    for (i, t) in settings.alert_targets.iter_mut().enumerate() {
+        let id = if t.id.is_empty() {
+            i.to_string()
+        } else {
+            t.id.clone()
+        };
+        out.push((format!("{ACCOUNT_PREFIX}alert/{id}/url"), &mut t.url));
     }
     out
 }
@@ -172,24 +189,23 @@ fn slots(settings: &mut Settings) -> Vec<(String, &mut KeyValue)> {
 pub(crate) fn resolve(settings: &mut Settings, vault: &Vault) -> bool {
     let mut plaintext = false;
     let mut slots = slots(settings);
-    if slots.iter().all(|(_, kv)| kv.value.is_empty()) {
+    if slots.iter().all(|(_, v)| v.is_empty()) {
         return false; // nothing stored: don't touch the keychain
     }
-    for (slot_key, kv) in slots.iter_mut() {
+    for (slot_key, value) in slots.iter_mut() {
         // Only a reference to the field's own key is one (a value typed as
         // `keychain:other` must not read another field's secret; it is plain text).
-        if kv.value.strip_prefix(REF_PREFIX) == Some(slot_key.as_str()) {
+        if value.strip_prefix(REF_PREFIX) == Some(slot_key.as_str()) {
             match vault.get(slot_key.as_str()) {
-                Ok(Some(v)) => kv.value = v,
+                Ok(Some(v)) => **value = v,
                 Ok(None) => {
-                    tracing::warn!("a stored secret ({}) is missing from the keychain", kv.name)
+                    tracing::warn!("a stored secret ({slot_key}) is missing from the keychain")
                 }
                 Err(e) => tracing::warn!(
-                    "couldn't read the keychain for a stored secret ({}): {e:#}",
-                    kv.name
+                    "couldn't read the keychain for a stored secret ({slot_key}): {e:#}"
                 ),
             }
-        } else if !kv.value.is_empty() {
+        } else if !value.is_empty() {
             plaintext = true;
         }
     }
@@ -201,20 +217,20 @@ pub(crate) fn resolve(settings: &mut Settings, vault: &Vault) -> bool {
 pub(crate) fn externalize(settings: &Settings, vault: &Vault) -> Settings {
     let mut out = settings.clone();
     let mut slots = slots(&mut out);
-    if slots.iter().all(|(_, kv)| kv.value.is_empty()) && vault.cache.lock().is_none() {
+    if slots.iter().all(|(_, v)| v.is_empty()) && vault.cache.lock().is_none() {
         return out; // no secrets, keychain never needed
     }
     let mut next = BTreeMap::new();
     // Set when a reference couldn't be resolved because the keychain failed: the
     // item is then left exactly as it is (rewriting it would lose those entries).
     let mut unreadable = false;
-    for (key, kv) in slots.iter() {
-        if kv.value.is_empty() {
+    for (key, value) in slots.iter() {
+        if value.is_empty() {
             continue;
         }
         // Unresolved reference to this very slot (keychain was unavailable at load):
         // keep the stored value, never store the reference text as the secret.
-        if kv.value.strip_prefix(REF_PREFIX) == Some(key.as_str()) {
+        if value.strip_prefix(REF_PREFIX) == Some(key.as_str()) {
             match vault.get(key) {
                 Ok(Some(v)) => {
                     next.insert(key.clone(), v);
@@ -227,23 +243,21 @@ pub(crate) fn externalize(settings: &Settings, vault: &Vault) -> Settings {
             }
             continue;
         }
-        next.insert(key.clone(), kv.value.clone());
+        next.insert(key.clone(), (*value).clone());
     }
     if unreadable {
         return out;
     }
     match vault.replace(next) {
         Ok(()) => {
-            for (key, kv) in slots.iter_mut() {
-                if !kv.value.is_empty() && kv.value.strip_prefix(REF_PREFIX) != Some(key.as_str()) {
-                    kv.value = format!("{REF_PREFIX}{key}");
+            for (key, value) in slots.iter_mut() {
+                if !value.is_empty() && value.strip_prefix(REF_PREFIX) != Some(key.as_str()) {
+                    **value = format!("{REF_PREFIX}{key}");
                 }
             }
         }
         Err(e) => {
-            tracing::warn!(
-                "keychain unavailable, keeping MCP/agent secrets in the database: {e:#}"
-            );
+            tracing::warn!("keychain unavailable, keeping secrets in the database: {e:#}");
             // Plaintext fallback; unresolved refs stay refs.
         }
     }
@@ -253,7 +267,7 @@ pub(crate) fn externalize(settings: &Settings, vault: &Vault) -> Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::McpServer;
+    use crate::model::{KeyValue, McpServer};
 
     fn settings() -> Settings {
         let mut s = Settings::default();
@@ -311,6 +325,27 @@ mod tests {
         assert_eq!(back.mcp_servers[0].headers[0].value, "Bearer xyz");
         assert_eq!(vault.load().unwrap().len(), 2);
         // Removing the server drops its secrets from the item.
+        externalize(&Settings::default(), &vault);
+        assert!(vault.load().unwrap().is_empty());
+    }
+
+    #[test]
+    fn alert_webhook_urls_live_in_the_keychain() {
+        let vault = Vault::new(Box::new(Memory::default()));
+        let mut s = Settings::default();
+        s.alert_targets.push(crate::model::AlertTarget {
+            id: "t1".into(),
+            url: "https://hooks.slack.com/services/T0/B0/hunter2".into(),
+            ..Default::default()
+        });
+        let stored = externalize(&s, &vault);
+        let json = serde_json::to_string(&stored).unwrap();
+        assert!(!json.contains("hunter2"), "{json}");
+        assert_eq!(stored.alert_targets[0].url, "keychain:secret/alert/t1/url");
+        let mut back = stored.clone();
+        assert!(!resolve(&mut back, &vault));
+        assert_eq!(back.alert_targets[0].url, s.alert_targets[0].url);
+        // Removing the target drops its secret.
         externalize(&Settings::default(), &vault);
         assert!(vault.load().unwrap().is_empty());
     }
