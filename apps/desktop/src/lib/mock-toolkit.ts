@@ -3,7 +3,15 @@
 
 import type { InstructionFileName } from "./projectConfig";
 import { mockExternalEdit, mockReadInstruction, mockSaveInstruction } from "./mock-project-config";
-import { skillNameProblem, type InstructionSave, type SkillDoc, type SkillInfo } from "./toolkit";
+import {
+  skillKey,
+  skillNameProblem,
+  type InstructionSave,
+  type SkillDoc,
+  type SkillInfo,
+  type SkillToggles,
+  type SwitchScope,
+} from "./toolkit";
 
 const HOME = "/home/sam";
 
@@ -98,6 +106,46 @@ export function mockSkillsCreate(
     `---\nname: ${info.name}\ndescription: >\n  ${desc}\n---\n\n# ${title}\n\n## When to use\n\nSay when this skill applies. Claude reads the description above to decide.\n\n## Steps\n\n1. First step.\n2. Second step.\n\n## Notes\n\nAnything Claude should avoid, or where to find supporting files in this folder.\n`,
   );
   return info;
+}
+
+// Switched-off skills, by folder name (the real backend keeps this in skill-prefs.json).
+const offGlobal = new Set<string>();
+const offByProject = new Map<string, Set<string>>();
+
+const togglesFor = (project: string | null): SkillToggles => ({
+  global: [...offGlobal].sort(),
+  project: project ? [...(offByProject.get(project) ?? [])].sort() : [],
+});
+
+export function mockSkillsToggles(project: string | null): SkillToggles {
+  return togglesFor(project);
+}
+
+/** Same rules as the backend: plugin skills and unknown skills can't be switched off. */
+export function mockSkillsSetEnabled(
+  project: string | null,
+  scope: SwitchScope,
+  id: string,
+  enabled: boolean,
+): SkillToggles {
+  const skill = all(project).find((s) => s.id === id);
+  const key = skillKey(skill ?? { id, scope: id.startsWith("plugin:") ? "plugin" : "user" });
+  if (key === null)
+    throw new Error("That skill belongs to a plugin: turn it off from the plugin's own settings");
+  if (!enabled) {
+    if (!skill) throw new Error("That skill no longer exists");
+    if (scope === "global" && skill.scope !== "user")
+      throw new Error("Only your own skills can be switched off in every project");
+  }
+  if (scope === "project" && !project) throw new Error("Choose a project first");
+  const set = scope === "global" ? offGlobal : (offByProject.get(project as string) ?? new Set<string>());
+  if (enabled) set.delete(key);
+  else set.add(key);
+  if (scope === "project") {
+    if (set.size) offByProject.set(project as string, set);
+    else offByProject.delete(project as string);
+  }
+  return togglesFor(project);
 }
 
 export function mockInstructionsSave(

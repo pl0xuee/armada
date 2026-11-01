@@ -2,7 +2,7 @@
 // Types mirror crates/kvistcode-core/src/{project_config,skills}.rs; the helpers are pure.
 
 import type { InstructionDoc, InstructionFileName } from "./projectConfig";
-import type { McpServer, Provider } from "./types";
+import type { Agent, McpServer, Provider } from "./types";
 
 export type ToolkitTab = "instructions" | "mcp" | "skills";
 
@@ -165,4 +165,94 @@ export function groupSkills(skills: SkillInfo[]): { scope: SkillScope; skills: S
   return (["project", "user", "plugin"] as const)
     .map((scope) => ({ scope, skills: skills.filter((s) => s.scope === scope) }))
     .filter((g) => g.skills.length > 0);
+}
+
+// ---------------------------------------------------------------- skill switches
+
+/** Skills switched off, by folder name: everywhere, and in the project on screen. */
+export interface SkillToggles {
+  global: string[];
+  project: string[];
+}
+
+export const NO_TOGGLES: SkillToggles = { global: [], project: [] };
+
+export type SwitchScope = "global" | "project";
+
+/** The folder name Claude Code knows a skill by (the id's tail); plugin skills have none. */
+export function skillKey(skill: Pick<SkillInfo, "id" | "scope">): string | null {
+  if (skill.scope === "plugin") return null;
+  const at = skill.id.indexOf(":");
+  return at < 0 ? null : skill.id.slice(at + 1) || null;
+}
+
+export interface SkillSwitch {
+  /** Whether agents get the skill. */
+  on: boolean;
+  /** Where it is switched off. */
+  offGlobal: boolean;
+  offProject: boolean;
+  /** Plugin skills belong to their plugin; Kvistcode can't switch them. */
+  managedBy: string | null;
+}
+
+export function skillSwitch(skill: SkillInfo, toggles: SkillToggles): SkillSwitch {
+  const key = skillKey(skill);
+  if (key === null) return { on: true, offGlobal: false, offProject: false, managedBy: skill.plugin ?? "its plugin" };
+  // The global list is for your own skills; a project skill only answers to its project's list.
+  const offGlobal = skill.scope === "user" && toggles.global.includes(key);
+  const offProject = toggles.project.includes(key);
+  return { on: !offGlobal && !offProject, offGlobal, offProject, managedBy: null };
+}
+
+/**
+ * Where switching a skill off goes. A project's own skill only has its project; without a
+ * project everything is global; otherwise it is the user's choice.
+ */
+export function offScope(skill: SkillInfo, choice: SwitchScope, project: string | null): SwitchScope {
+  if (skill.scope === "project") return "project";
+  return project ? choice : "global";
+}
+
+/** Everywhere a skill is off, to switch it back on. */
+export function onScopes(sw: SkillSwitch): SwitchScope[] {
+  return [...(sw.offGlobal ? (["global"] as const) : []), ...(sw.offProject ? (["project"] as const) : [])];
+}
+
+/** "Off in every project" and the like; null while it is on. */
+export function offNote(sw: SkillSwitch, projectName: string | null): string | null {
+  if (sw.on || sw.managedBy) return null;
+  const here = projectName ?? "this project";
+  if (sw.offGlobal && sw.offProject) return `Off in every project and in ${here}`;
+  if (sw.offGlobal) return "Off in every project";
+  return `Off in ${here}`;
+}
+
+const RUNNING: ReadonlySet<Agent["status"]> = new Set(["starting", "working", "needs_permission", "idle"]);
+
+/**
+ * Agents already started: they keep the tools they started with until restarted. `provider`
+ * narrows to one provider (skills reach Claude only), `project` to one project's agents.
+ */
+export function runningAgents(
+  agents: Pick<Agent, "status" | "provider" | "projectPath">[],
+  filter: { provider?: Provider; project?: string | null } = {},
+): number {
+  const project = filter.project ? normProject(filter.project) : null;
+  return agents.filter(
+    (a) =>
+      RUNNING.has(a.status) &&
+      (!filter.provider || a.provider === filter.provider) &&
+      (project === null || normProject(a.projectPath) === project),
+  ).length;
+}
+
+export const RESTART_NOTE = "Applies to new agents; running agents keep their tools until restarted.";
+
+/** Who is affected right now ("2 agents are running now; restart them to pick this up."), or null when nobody. */
+export function restartNote(running: number): string | null {
+  if (running <= 0) return null;
+  return running === 1
+    ? "1 agent is running now; restart it to pick this up."
+    : `${running} agents are running now; restart them to pick this up.`;
 }

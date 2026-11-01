@@ -1,37 +1,30 @@
-import { FileText, FolderCog, FolderOpen, RefreshCw, Shield, Workflow } from "lucide-react";
+import { FolderCog, FolderOpen, RefreshCw, Shield, Workflow, Wrench } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { attempt } from "@/lib/actions";
 import { api } from "@/lib/api";
-import {
-  projectChoices,
-  ruleCount,
-  type InstructionDoc,
-  type ProjectConfig,
-  type SettingsFile,
-} from "@/lib/projectConfig";
+import { projectChoices, ruleCount, type ProjectConfig, type SettingsFile } from "@/lib/projectConfig";
 import { basename, errorMessage, prettyPath } from "@/lib/utils";
 import { useApp } from "@/store/app";
-import { draftKey, useProjectSettings } from "@/store/projectSettings";
+import { useProjectSettings } from "@/store/projectSettings";
+import { openToolkit } from "@/store/toolkit";
 import { Button } from "../ui/button";
 import { Select } from "../ui/select";
 import { Segmented } from "../ui/segmented";
 import { Skeleton } from "../ui/skeleton";
 import { ProjectAutomation } from "./ProjectAutomation";
-import { ProjectInstructions } from "./ProjectInstructions";
 import { InlineError } from "./ProjectNotice";
 import { ProjectPermissions } from "./ProjectPermissions";
 import { SectionHeader } from "./SettingRow";
 
-type Tab = "instructions" | "permissions" | "automation";
+type Tab = "permissions" | "automation";
 
-/** Settings → Projects: the files Claude Code and Codex read from a project. */
+/** Settings → Projects: the permission rules, hooks, commands and skills Claude Code reads from a project. */
 export function ProjectSettingsSection() {
   const agents = useApp((s) => s.agents);
   const recent = useApp((s) => s.settings?.recentProjects);
   const chosen = useProjectSettings((s) => s.project);
   const setProject = useProjectSettings((s) => s.setProject);
-  const drafts = useProjectSettings((s) => s.drafts);
 
   const choices = useMemo(
     () =>
@@ -45,7 +38,7 @@ export function ProjectSettingsSection() {
   const options = chosen && !choices.includes(chosen) ? [chosen, ...choices] : choices;
   const project = chosen && options.includes(chosen) ? chosen : (options[0] ?? null);
 
-  const [tab, setTab] = useState<Tab>("instructions");
+  const [tab, setTab] = useState<Tab>("permissions");
   const [config, setConfig] = useState<ProjectConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -76,23 +69,13 @@ export function ProjectSettingsSection() {
     };
   }, [project, load]);
 
-  const savedDoc = (doc: InstructionDoc) =>
-    setConfig((c) => c && { ...c, instructions: c.instructions.map((d) => (d.file === doc.file ? doc : d)) });
   const savedSettings = (file: SettingsFile) =>
     setConfig((c) => c && { ...c, settings: c.settings.map((s) => (s.scope === file.scope ? file : s)) });
-
-  const unsaved = project
-    ? (["CLAUDE.md", "AGENTS.md"] as const).some((f) => {
-        const text = drafts[draftKey(project, f)];
-        const saved = config?.instructions.find((d) => d.file === f)?.content;
-        return text !== undefined && text !== saved;
-      })
-    : false;
 
   const header = (
     <SectionHeader
       title="Projects"
-      description="Instructions, permission rules, hooks, commands and skills that Claude Code and Codex read from a project."
+      description="Permission rules, hooks, commands and skills that Claude Code reads from a project."
     />
   );
 
@@ -104,7 +87,7 @@ export function ProjectSettingsSection() {
           <EmptyState
             icon={<FolderCog />}
             title="No projects yet"
-            description="Start an agent in a folder and it shows up here, with its CLAUDE.md, AGENTS.md and permission rules."
+            description="Start an agent in a folder and it shows up here, with its permission rules, hooks and commands."
           />
         </div>
       </>
@@ -148,23 +131,24 @@ export function ProjectSettingsSection() {
         </Button>
       </div>
 
+      <p className="mb-4 flex flex-wrap items-center gap-x-1.5 text-[12.5px] leading-[20px] text-muted">
+        CLAUDE.md and AGENTS.md now live in
+        <button
+          type="button"
+          onClick={() => openToolkit("instructions", project)}
+          className="inline-flex items-center gap-1 rounded font-medium text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+        >
+          <Wrench className="h-3.5 w-3.5" /> Tools &amp; instructions
+        </button>
+        for this project.
+      </p>
+
       <Segmented<Tab>
         aria-label="Project settings"
         className="mb-5"
         value={tab}
         onChange={setTab}
         options={[
-          {
-            value: "instructions",
-            label: (
-              <>
-                <FileText className="h-3.5 w-3.5" /> Instructions
-                {unsaved && (
-                  <span className="h-1.5 w-1.5 rounded-full bg-warn" role="img" aria-label="unsaved changes" />
-                )}
-              </>
-            ),
-          },
           {
             value: "permissions",
             label: (
@@ -201,13 +185,6 @@ export function ProjectSettingsSection() {
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-56 w-full" />
         </div>
-      ) : tab === "instructions" ? (
-        <ProjectInstructions
-          project={project}
-          instructions={config.instructions}
-          userInstructions={config.userInstructions}
-          onSaved={savedDoc}
-        />
       ) : tab === "permissions" ? (
         <ProjectPermissions project={project} files={config.settings} onSaved={savedSettings} />
       ) : (

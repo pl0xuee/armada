@@ -14,6 +14,7 @@ import type { McpServer, McpTransport } from "@/lib/types";
 import { basename, cn, errorMessage, uuid } from "@/lib/utils";
 import { useApp } from "@/store/app";
 import { cleanKeyValues, KeyValueEditor, validateKeyValues, type KeyValueRow } from "./KeyValueEditor";
+import { RestartNote } from "@/components/toolkit/RestartNote";
 import { FieldError } from "./TemplatesSection";
 import { McpPasteDialog } from "./McpPasteDialog";
 import { McpTestButton, McpTestOutcome } from "./McpTestResult";
@@ -40,6 +41,8 @@ export function McpSection({ servers, project }: { servers: McpServer[]; project
   const [deleting, setDeleting] = useState<McpServer | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
   const [pasting, setPasting] = useState<string | null>(null);
+  // The list as this screen opened with: a different one later means the user changed something.
+  const firstServers = useRef(servers);
   const tests = useMcpTests((s) => s.results);
   const scoped = scopeServers(servers, project ?? null);
   const visible = [...scoped.project, ...scoped.global];
@@ -128,7 +131,7 @@ export function McpSection({ servers, project }: { servers: McpServer[]; project
     <>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <p className="min-w-0 flex-1 basis-[260px] text-[13px] leading-[20px] text-muted">
-          Every agent, on every provider, can use these. Changes apply to agents started or resumed afterwards.
+          Every agent, on every provider, can use these.
           {visible.length > 0 && (
             <>
               {" "}
@@ -141,6 +144,8 @@ export function McpSection({ servers, project }: { servers: McpServer[]; project
           {testing ? <Spinner className="h-3.5 w-3.5" /> : <ListChecks />} {testing ? "Testing…" : "Test all"}
         </Button>
       </div>
+
+      <RestartNote className="mb-5" changed={servers !== firstServers.current} />
 
       {project &&
         group(project, scoped.project, `Only ${projectName}`, "Only agents running in this project get these.")}

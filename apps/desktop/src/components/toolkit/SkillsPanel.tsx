@@ -9,17 +9,27 @@ import { Input, Label, Textarea } from "@/components/ui/input";
 import { Badge, Spinner } from "@/components/ui/misc";
 import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { Tooltip } from "@/components/ui/tooltip";
 import { attempt } from "@/lib/actions";
 import { api } from "@/lib/api";
 import {
   groupSkills,
+  NO_TOGGLES,
+  offNote,
+  offScope,
+  onScopes,
   SKILL_SCOPE_LABEL,
   skillNameProblem,
+  skillSwitch,
   slugifySkill,
   type SkillDoc,
   type SkillInfo,
+  type SkillToggles,
+  type SwitchScope,
 } from "@/lib/toolkit";
 import { basename, cn, errorMessage, prettyPath } from "@/lib/utils";
+import { RestartNote } from "./RestartNote";
 
 /** The skills Claude Code loads: yours, the project's and installed plugins'. View, create, locate. */
 export function SkillsPanel({ project }: { project: string | null }) {
@@ -28,6 +38,11 @@ export function SkillsPanel({ project }: { project: string | null }) {
   const [open, setOpen] = useState<SkillInfo | null>(null);
   const [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [toggles, setToggles] = useState<SkillToggles>(NO_TOGGLES);
+  // Where switching one of your own skills off goes, when a project is open.
+  const [offIn, setOffIn] = useState<SwitchScope>("global");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [changed, setChanged] = useState(false);
   const latest = useRef(0);
 
   const load = useCallback(async () => {
@@ -35,8 +50,11 @@ export function SkillsPanel({ project }: { project: string | null }) {
     setLoading(true);
     setError(null);
     try {
-      const list = await api.skillsList(project);
-      if (ticket === latest.current) setSkills(list);
+      const [list, off] = await Promise.all([api.skillsList(project), api.skillsToggles(project)]);
+      if (ticket === latest.current) {
+        setSkills(list);
+        setToggles(off);
+      }
     } catch (e) {
       if (ticket === latest.current) setError(errorMessage(e));
     } finally {
@@ -52,12 +70,35 @@ export function SkillsPanel({ project }: { project: string | null }) {
     };
   }, [load]);
 
+  const projectName = project ? basename(project) || project : null;
+
+  /** Switch off in the chosen scope, or back on everywhere it is off. */
+  const setOn = async (skill: SkillInfo, on: boolean) => {
+    const sw = skillSwitch(skill, toggles);
+    setBusy(skill.id);
+    try {
+      let next = toggles;
+      if (on) {
+        for (const scope of onScopes(sw)) next = await api.skillsSetEnabled(project, scope, skill.id, true);
+      } else {
+        next = await api.skillsSetEnabled(project, offScope(skill, offIn, project), skill.id, false);
+      }
+      setToggles(next);
+      setChanged(true);
+    } catch (e) {
+      toast.error(`Couldn't switch ${skill.name} ${on ? "on" : "off"}`, { description: errorMessage(e) });
+      void load();
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <p className="min-w-0 flex-1 basis-[260px] text-[13px] leading-[20px] text-muted">
-          Skills Claude Code can load on demand. To turn one off, move or rename its folder; Kvistcode won't delete or
-          change your files.
+          Skills Claude Code can load on demand. Switch one off to hide it from Claude agents; Kvistcode only keeps a
+          list, so your skill files are never moved, renamed or changed.
         </p>
         <div className="flex shrink-0 gap-1.5">
           <Button
@@ -74,6 +115,24 @@ export function SkillsPanel({ project }: { project: string | null }) {
           </Button>
         </div>
       </div>
+
+      <RestartNote provider="claude" project={project} changed={changed} className="mb-4" />
+
+      {project && skills?.some((s) => s.scope === "user") && (
+        <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <span className="text-xs font-medium text-muted">Switching off one of yours applies to</span>
+          <Segmented<SwitchScope>
+            size="sm"
+            aria-label="Where switching a skill off applies"
+            value={offIn}
+            onChange={setOffIn}
+            options={[
+              { value: "global", label: "Every project" },
+              { value: "project", label: `Only ${projectName}` },
+            ]}
+          />
+        </div>
+      )}
 
       {error ? (
         <InlineError message={error} />
@@ -98,29 +157,57 @@ export function SkillsPanel({ project }: { project: string | null }) {
               <span className="tabular ml-2 text-[11.5px] font-normal text-steel">{g.skills.length}</span>
             </h3>
             <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-card edge">
-              {g.skills.map((s) => (
-                <li key={s.id}>
-                  <button
-                    type="button"
-                    onClick={() => setOpen(s)}
-                    className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-raised/40"
-                    aria-label={`View ${s.name}`}
-                  >
-                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line-strong bg-raised text-accent">
-                      <BookOpen className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2">
-                        <span className="truncate text-[13px] font-medium leading-[20px] text-fg">{s.name}</span>
-                        {s.plugin && <Badge>{s.plugin}</Badge>}
+              {g.skills.map((s) => {
+                const sw = skillSwitch(s, toggles);
+                const note = offNote(sw, projectName);
+                return (
+                  <li key={s.id} className="flex items-start">
+                    <button
+                      type="button"
+                      onClick={() => setOpen(s)}
+                      className="flex min-w-0 flex-1 items-start gap-3 py-3 pl-4 pr-2 text-left transition-colors hover:bg-raised/40"
+                      aria-label={`View ${s.name}`}
+                    >
+                      <span
+                        className={cn(
+                          "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line-strong bg-raised",
+                          sw.on ? "text-accent" : "text-steel",
+                        )}
+                      >
+                        <BookOpen className="h-4 w-4" />
                       </span>
-                      <span className="line-clamp-2 text-[12px] leading-[18px] text-muted">
-                        {s.description || "No description"}
+                      <span className={cn("min-w-0 flex-1", !sw.on && "opacity-60")}>
+                        <span className="flex items-center gap-2">
+                          <span className="truncate text-[13px] font-medium leading-[20px] text-fg">{s.name}</span>
+                          {s.plugin && <Badge>{s.plugin}</Badge>}
+                        </span>
+                        <span className="line-clamp-2 text-[12px] leading-[18px] text-muted">
+                          {s.description || "No description"}
+                        </span>
                       </span>
-                    </span>
-                  </button>
-                </li>
-              ))}
+                    </button>
+                    <div className="flex shrink-0 flex-col items-end gap-1 py-3 pl-2 pr-4">
+                      {sw.managedBy ? (
+                        <Tooltip content="Turn it off from the plugin's own settings; Kvistcode can't switch plugin skills.">
+                          <span className="inline-flex h-[20px] cursor-default items-center text-[11.5px] text-steel">
+                            Managed by {sw.managedBy}
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        <>
+                          <Switch
+                            checked={sw.on}
+                            disabled={busy === s.id}
+                            aria-label={`${s.name} for Claude agents`}
+                            onCheckedChange={(on) => void setOn(s, on)}
+                          />
+                          {note && <span className="text-[11.5px] leading-[16px] text-steel">{note}</span>}
+                        </>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           </section>
         ))

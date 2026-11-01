@@ -7,13 +7,15 @@ import { emitVoiceBus } from "./voiceBus";
 import { budgetLevel } from "./budget";
 import { searchItems } from "./mock-search";
 import { validateAlertUrl } from "./alertTargets";
-import { mockProjectConfig, mockSaveInstruction, mockSaveRules } from "./mock-project-config";
+import { mockProjectConfig, mockSaveRules } from "./mock-project-config";
 import {
   mockInstructionsSave,
   mockReadInstruction,
   mockSkillsCreate,
   mockSkillsList,
   mockSkillsRead,
+  mockSkillsSetEnabled,
+  mockSkillsToggles,
 } from "./mock-toolkit";
 import { configDefaultsKey, isRememberableOption } from "./configMemory";
 import { isStressMode, STRESS_AGENTS, STRESS_TICK_MS, stressAgents, stressItems, stressWords } from "./mock-stress";
@@ -2577,11 +2579,6 @@ export const mockApi: KvistcodeApi = {
     return mockProjectConfig(project);
   },
 
-  async projectSaveInstruction(project, file, content) {
-    await sleep(rand(150, 350));
-    return mockSaveInstruction(project, file, content);
-  },
-
   async projectSaveRules(project, scope, rules) {
     await sleep(rand(150, 350));
     return mockSaveRules(project, scope, rules);
@@ -2610,6 +2607,16 @@ export const mockApi: KvistcodeApi = {
   async skillsCreate(project, scope, name, description) {
     await sleep(rand(150, 350));
     return mockSkillsCreate(project, scope, name, description);
+  },
+
+  async skillsToggles(project) {
+    await sleep(rand(40, 120));
+    return mockSkillsToggles(project);
+  },
+
+  async skillsSetEnabled(project, scope, id, enabled) {
+    await sleep(rand(80, 200));
+    return mockSkillsSetEnabled(project, scope, id, enabled);
   },
 
   async listFiles(agentId, query) {
