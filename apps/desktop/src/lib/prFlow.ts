@@ -75,8 +75,10 @@ export function mergeAdvice(pr: PrInfo): MergeAdvice {
   const cautions: string[] = [];
   const { failing, pending } = pr.summary;
   if (pr.mergeable === "conflicting") cautions.push("It has merge conflicts with the base branch.");
+  else if (pr.mergeable === null && pr.state === "open")
+    cautions.push("GitHub hasn't finished checking for merge conflicts.");
   if (failing > 0) cautions.push(`${failing} ${failing === 1 ? "check is" : "checks are"} failing.`);
-  else if (pending > 0) cautions.push(`${pending} ${pending === 1 ? "check is" : "checks are"} still running.`);
+  if (pending > 0) cautions.push(`${pending} ${pending === 1 ? "check is" : "checks are"} still running.`);
   if (pr.review === "changes_requested") cautions.push("A reviewer asked for changes.");
   else if (pr.review === "review_required") cautions.push("It still needs an approving review.");
   const open = pr.unresolvedThreads ?? 0;
@@ -84,6 +86,55 @@ export function mergeAdvice(pr: PrInfo): MergeAdvice {
   if (pr.mergeState === "behind") cautions.push("The branch is behind the base branch.");
   if (pr.mergeState === "blocked" && cautions.length === 0) cautions.push("GitHub is blocking this merge (a required check or review).");
   return { canMerge: pr.state === "open", cautions };
+}
+
+export interface MergeFact {
+  key: "checks" | "conflicts" | "review" | "comments";
+  tone: "ok" | "warn" | "err" | "muted";
+  text: string;
+}
+
+/**
+ * What is known about `pr` right now, one line per thing, for the merge panel. Says "not known"
+ * rather than "fine" whenever GitHub hasn't answered, and never calls pending checks passing.
+ */
+export function mergeFacts(pr: PrInfo): MergeFact[] {
+  const { passing, failing, pending } = pr.summary;
+  const parts = [
+    failing > 0 && `${failing} failing`,
+    pending > 0 && `${pending} running`,
+    passing > 0 && `${passing} passing`,
+  ].filter(Boolean);
+  const checks: MergeFact = {
+    key: "checks",
+    tone: failing > 0 ? "err" : pending > 0 ? "warn" : passing > 0 ? "ok" : "muted",
+    text: parts.length > 0 ? `Checks: ${parts.join(", ")}` : "Checks: none reported",
+  };
+  const conflicts: MergeFact =
+    pr.mergeable === "conflicting"
+      ? { key: "conflicts", tone: "err", text: "Conflicts with the base branch" }
+      : pr.mergeable === "mergeable"
+        ? { key: "conflicts", tone: "ok", text: "No conflicts" }
+        : { key: "conflicts", tone: "muted", text: "Conflicts: not known yet" };
+  const reviews: Record<NonNullable<PrInfo["review"]>, Pick<MergeFact, "tone" | "text">> = {
+    approved: { tone: "ok", text: "Approved" },
+    changes_requested: { tone: "warn", text: "Changes requested" },
+    review_required: { tone: "warn", text: "Review required" },
+  };
+  const review: MergeFact = { key: "review", ...(pr.review ? reviews[pr.review] : { tone: "muted", text: "No review decision" }) };
+  const n = pr.unresolvedThreads;
+  const comments: MergeFact =
+    n == null
+      ? { key: "comments", tone: "muted", text: "Review comments: not checked" }
+      : n > 0
+        ? { key: "comments", tone: "warn", text: `${n} unresolved ${n === 1 ? "thread" : "threads"}` }
+        : { key: "comments", tone: "ok", text: "No unresolved threads" };
+  return [checks, conflicts, review, comments];
+}
+
+/** The first seven characters of a commit id, as git shows it. */
+export function shortSha(sha: string | null | undefined): string {
+  return sha ? sha.slice(0, 7) : "";
 }
 
 /** A pull request's one-line readiness for the panel: "Ready to merge", "Checks failing", … */
@@ -97,6 +148,9 @@ export function readiness(pr: PrInfo): { tone: "ok" | "warn" | "err" | "muted"; 
   if (pr.summary.pending > 0) return { tone: "warn", text: "Checks running" };
   if ((pr.unresolvedThreads ?? 0) > 0) return { tone: "warn", text: "Unresolved comments" };
   if (pr.mergeState === "blocked" || pr.review === "review_required") return { tone: "warn", text: "Waiting on review" };
+  if (pr.mergeState === "behind") return { tone: "warn", text: "Behind the base branch" };
+  // "Ready" only when GitHub said so: an unanswered mergeability check is not a yes.
+  if (pr.mergeable === null && pr.mergeState !== "clean") return { tone: "muted", text: "Merge status unknown" };
   return { tone: "ok", text: "Ready to merge" };
 }
 

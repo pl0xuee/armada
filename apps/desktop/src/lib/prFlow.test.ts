@@ -6,9 +6,11 @@ import {
   issueLabels,
   labelInk,
   mergeAdvice,
+  mergeFacts,
   needsServerSearch,
   prefillPr,
   readiness,
+  shortSha,
 } from "./prFlow";
 import type { IssueSummary, PrInfo } from "./types";
 
@@ -146,5 +148,46 @@ describe("issue list", () => {
     expect(labelInk("ffffff")).toBe("dark");
     expect(labelInk("d73a4a")).toBe("light");
     expect(labelInk("")).toBe("light");
+  });
+});
+
+describe("merge dialog honesty", () => {
+  it("never calls pending or unknown things fine", () => {
+    // Pending alongside failing: both are listed.
+    expect(mergeAdvice(pr({}, { failing: 1, pending: 2, overall: "failing" })).cautions).toEqual([
+      "1 check is failing.",
+      "2 checks are still running.",
+    ]);
+    // GitHub hasn't answered about conflicts yet.
+    expect(mergeAdvice(pr({ mergeable: null })).cautions).toEqual(["GitHub hasn't finished checking for merge conflicts."]);
+    expect(readiness(pr({ mergeable: null })).text).toBe("Merge status unknown");
+    expect(readiness(pr({ mergeable: null })).tone).toBe("muted");
+    // GitHub's own "clean" verdict is enough to call it ready.
+    expect(readiness(pr({ mergeable: null, mergeState: "clean" })).text).toBe("Ready to merge");
+    expect(readiness(pr({ mergeState: "behind" })).text).toBe("Behind the base branch");
+  });
+  it("lists the facts, saying 'not known' when it isn't", () => {
+    const facts = (over: Partial<PrInfo>, s: Partial<PrInfo["summary"]> = {}) =>
+      Object.fromEntries(mergeFacts(pr(over, s)).map((f) => [f.key, `${f.tone}:${f.text}`]));
+    expect(facts({ review: "approved", unresolvedThreads: 0 }, { passing: 3 })).toEqual({
+      checks: "ok:Checks: 3 passing",
+      conflicts: "ok:No conflicts",
+      review: "ok:Approved",
+      comments: "ok:No unresolved threads",
+    });
+    expect(facts({ mergeable: null }, { passing: 1, pending: 2, failing: 1, overall: "failing" })).toMatchObject({
+      checks: "err:Checks: 1 failing, 2 running, 1 passing",
+      conflicts: "muted:Conflicts: not known yet",
+      review: "muted:No review decision",
+      comments: "muted:Review comments: not checked",
+    });
+    // Running checks are a warning, never "passing".
+    expect(facts({}, { passing: 0, pending: 1, overall: "pending" }).checks).toBe("warn:Checks: 1 running");
+    expect(facts({}, { passing: 0, overall: "none" }).checks).toBe("muted:Checks: none reported");
+    expect(facts({ unresolvedThreads: 2 }).comments).toBe("warn:2 unresolved threads");
+  });
+  it("shortens a commit id", () => {
+    expect(shortSha("3f2a9c1d5e7b4a6c8d0e1f2a3b4c5d6e7f8a9b0c")).toBe("3f2a9c1");
+    expect(shortSha(null)).toBe("");
   });
 });

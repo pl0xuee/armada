@@ -661,17 +661,19 @@ pub async fn pr_base_branches(core: State<'_, Core>, agent_id: String) -> CmdRes
     github_work::base_branches(&agent).await.map_err(err)
 }
 
-/// Merges the agent's pull request on GitHub (`merge`, `squash` or `rebase`).
+/// Merges the agent's pull request on GitHub (`merge`, `squash` or `rebase`). `sha` is the head
+/// commit the user reviewed; GitHub refuses the merge if the branch has moved on.
 #[tauri::command]
 pub async fn pr_merge(
     core: State<'_, Core>,
     cache: State<'_, PrCache>,
     agent_id: String,
     method: String,
+    sha: String,
 ) -> CmdResult<String> {
     let agent = core.agent(&agent_id).map_err(err)?;
     let _guard = git_review::try_lock_agent(&agent.id).map_err(err)?;
-    let done = github_work::merge_pr(&cache, &agent, &method)
+    let done = github_work::merge_pr(&cache, &agent, &method, &sha)
         .await
         .map_err(err)?;
     // Look again now: the next poll must not show the PR as still open.
