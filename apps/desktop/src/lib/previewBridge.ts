@@ -38,6 +38,7 @@ export type ShotResult =
 export type AgentEvent =
   | { type: "hello" }
   | { type: "ready"; url: string; title: string }
+  | { type: "nav"; url: string; title: string; canBack: boolean; canForward: boolean }
   | { type: "console"; entry: Omit<ConsoleEntry, "at"> }
   | { type: "shot"; id: string; result: ShotResult }
   | { type: "picked"; info: PickedElement }
@@ -70,6 +71,8 @@ export function parseAgentMessage(data: unknown, token: string): AgentEvent | nu
   switch (data.type) {
     case "ready":
       return { type: "ready", url: str(data.url, 2000), title: str(data.title, 200) };
+    case "nav":
+      return { type: "nav", url: str(data.url, 2000), title: str(data.title, 200), canBack: data.canBack === true, canForward: data.canForward === true };
     case "console": {
       const level: Level = data.level === "warn" ? "warn" : "error";
       const kind = (["console", "exception", "rejection", "resource"] as const).find((k) => k === data.kind) ?? "console";

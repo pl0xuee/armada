@@ -72,6 +72,7 @@ import { useUi, type SettingsSection } from "@/store/ui";
 import { previewOf, togglePreview, usePreview } from "@/store/preview";
 import { openTerminal } from "@/store/workspace";
 import { openShortcutHelp } from "./shell/ShortcutHelp";
+import { openTour } from "@/store/tour";
 import { ProviderGlyph } from "./ProviderGlyph";
 import { StatusDot } from "./StatusDot";
 import { Kbd } from "./ui/kbd";
@@ -555,6 +556,12 @@ function Palette({ onClose }: { onClose: () => void }) {
                 shortcut={[modKey, "/"]}
                 keywords={["help", "keys", "cheat sheet", "hotkeys"]}
                 onSelect={() => run(() => openShortcutHelp())}
+              />
+              <PaletteAction
+                icon={<Sparkles />}
+                label="Show the tour again"
+                keywords={["welcome", "intro", "onboarding", "what's new", "help"]}
+                onSelect={() => run(() => openTour())}
               />
               <PaletteAction
                 icon={<Sparkles />}

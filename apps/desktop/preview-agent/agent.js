@@ -413,6 +413,69 @@ import { toJpeg, toPng } from "html-to-image";
     post({ type: "inspect-state", on: on });
   }
 
+  // ---- location and history -----------------------------------------------------------------------
+  // Reports where the page is (links, pushState, hash changes, reloads) and whether it can go back or
+  // forward, so the app's address bar and Back / Forward buttons follow the page.
+  var NAV_GAP = 80; // pages that rewrite their URL constantly (scroll position...) are thinned out
+  var navTimer = null;
+  var lastNav = "";
+  var FWD_KEY = "__kvistcode_fwd__";
+
+  function readFwd() {
+    try {
+      return Math.max(0, parseInt(W.sessionStorage.getItem(FWD_KEY), 10) || 0);
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  function writeFwd(n) {
+    try {
+      W.sessionStorage.setItem(FWD_KEY, String(Math.max(0, n)));
+    } catch (_) {}
+  }
+
+  function historyState() {
+    var nav = W.navigation;
+    if (nav && typeof nav.canGoBack === "boolean") return { canBack: nav.canGoBack, canForward: nav.canGoForward };
+    // No Navigation API: back is "anything before this entry"; forward is counted from our own back presses.
+    return { canBack: W.history.length > 1, canForward: readFwd() > 0 };
+  }
+
+  function sendNav() {
+    navTimer = null;
+    if (token === null) return; // the app isn't listening yet; it gets the current location when it answers
+    var h = historyState();
+    var title = clip(document.title, 200);
+    var sig = location.href + "|" + h.canBack + "|" + h.canForward + "|" + title;
+    if (sig === lastNav) return;
+    lastNav = sig;
+    post({ type: "nav", url: location.href, title: title, canBack: h.canBack, canForward: h.canForward });
+  }
+
+  function scheduleNav() {
+    if (navTimer === null) navTimer = setTimeout(sendNav, NAV_GAP);
+  }
+
+  ["pushState", "replaceState"].forEach(function (fn) {
+    var proto = W.History && W.History.prototype;
+    var orig = proto && proto[fn];
+    if (typeof orig !== "function") return;
+    proto[fn] = function () {
+      var r = orig.apply(this, arguments);
+      try {
+        if (fn === "pushState") writeFwd(0); // a new entry drops the forward ones
+        scheduleNav();
+      } catch (_) {}
+      return r;
+    };
+  });
+  ["popstate", "hashchange", "pageshow", "load"].forEach(function (n) {
+    W.addEventListener(n, scheduleNav);
+  });
+  document.addEventListener("DOMContentLoaded", scheduleNav);
+  if (W.navigation && W.navigation.addEventListener) W.navigation.addEventListener("currententrychange", scheduleNav);
+
   // ---- parent link --------------------------------------------------------------------------------
   W.addEventListener("message", function (e) {
     var d = e.data;
@@ -424,6 +487,8 @@ import { toJpeg, toPng } from "html-to-image";
       var q = queue;
       queue = [];
       q.forEach(post);
+      lastNav = "";
+      sendNav();
       return;
     }
     if (d.token !== token) return;
@@ -437,11 +502,18 @@ import { toJpeg, toPng } from "html-to-image";
         break;
       case "ping":
         post({ type: "ready", url: location.href, title: clip(document.title, 200) });
+        lastNav = "";
+        sendNav();
         break;
       case "history":
         // The page's own back / forward (the app can't reach a cross-origin frame's history).
-        if (d.dir === "back") W.history.back();
-        else if (d.dir === "forward") W.history.forward();
+        if (d.dir === "back") {
+          if (!W.navigation) writeFwd(readFwd() + 1);
+          W.history.back();
+        } else if (d.dir === "forward") {
+          if (!W.navigation) writeFwd(readFwd() - 1);
+          W.history.forward();
+        }
         break;
     }
   });

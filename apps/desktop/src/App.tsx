@@ -9,6 +9,7 @@ import { VoiceAssistantPanel } from "@/components/voice/VoiceAssistantPanel";
 import { AppMark } from "@/components/AppMark";
 import { Rail } from "@/components/Rail";
 import { TitleBar } from "@/components/TitleBar";
+import { TourHost } from "@/components/tour/TourHost";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
@@ -186,6 +187,7 @@ export function App() {
                 <VoiceAssistantPanel />
                 <VoiceSetupDialog />
                 <Announcer />
+                <TourHost ready />
                 <WhenOpened open={(s) => s.reviewAgentId !== null} warm>
                   <ReviewSheet />
                 </WhenOpened>
