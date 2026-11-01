@@ -32,8 +32,6 @@
     <clipPath id="tile">
       <rect x="64" y="64" width="896" height="896" rx="200" ry="200"/>
     </clipPath>
-    <!-- notched dart / arrowhead, nose at (0,-1) -->
-    <path id="dart" d="M0,-1 L0.70,0.86 Q0.72,0.93 0.64,0.90 L0,0.52 L-0.64,0.90 Q-0.72,0.93 -0.70,0.86 Z"/>
   </defs>
 
   <!-- tile -->
@@ -44,17 +42,6 @@
   </g>
   <rect x="68" y="68" width="888" height="888" rx="196" ry="196" fill="none" stroke="url(#edge)" stroke-width="8"/>
 
-  <!-- anchor: the lead ship is the crown, the wingmen are the flukes -->
-  <g fill="url(#ice)">
-    <!-- crown arc -->
-    <path d="M276,628 C276,756 380,818 512,818 C644,818 748,756 748,628" fill="none" stroke="url(#ice)" stroke-width="42" stroke-linecap="round"/>
-    <!-- shank + stock -->
-    <rect x="493" y="430" width="38" height="384" rx="19"/>
-    <rect x="404" y="566" width="216" height="36" rx="18"/>
-    <!-- lead ship -->
-    <use href="#dart" transform="translate(512 352) scale(178)"/>
-    <!-- wingmen / flukes -->
-    <use href="#dart" transform="translate(268 612) rotate(-14) scale(96)"/>
-    <use href="#dart" transform="translate(756 612) rotate(14) scale(96)"/>
-  </g>
+  <!-- the K: a stem with two arms branching off it (kvist is Norwegian for twig) -->
+  <path d="M6 3H11.5V13.2L22 3H29L16.4 15.6L29.4 29H22.6L12.6 18.6L11.5 19.7V29H6Z" transform="translate(122 160) scale(22)" fill="url(#ice)" stroke="url(#ice)" stroke-width="0.9" stroke-linejoin="round"/>
 </svg>
