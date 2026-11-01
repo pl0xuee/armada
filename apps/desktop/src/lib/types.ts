@@ -835,8 +835,27 @@ export interface SearchHit {
   agentId: string;
   itemId: string;
   kind: TimelineKind;
+  /** An excerpt; each matched word sits between \u0001 and \u0002 (see `splitSnippet`). */
   snippet: string;
   ts: number;
+  /** The item's place in its agent's timeline. */
+  seq: number;
+}
+
+/** The best matches in one agent's conversation. */
+export interface SearchGroup {
+  agentId: string;
+  hits: SearchHit[];
+  /** How many items in the conversation matched. */
+  total: number;
+}
+
+export interface SearchResults {
+  groups: SearchGroup[];
+  /** Older conversations are still being indexed, so results may be incomplete. */
+  indexing: boolean;
+  /** More items matched than were looked at. */
+  truncated: boolean;
 }
 
 export interface CommitSummary {

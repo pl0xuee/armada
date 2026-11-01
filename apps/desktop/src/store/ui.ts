@@ -71,6 +71,8 @@ interface UiStore {
   /** Prefill for the schedule editor ("Schedule this" from an agent); consumed by the Schedules view. */
   schedulePrefill: Partial<Schedule> | null;
   paletteOpen: boolean;
+  /** Text the palette starts with the next time it opens (e.g. "? " for conversation search). */
+  paletteSeed: string | null;
   newAgent: { open: boolean; preset: NewAgentPreset | null };
   handoffAgent: Agent | null;
   deleteAgent: Agent | null;
@@ -115,6 +117,8 @@ interface UiStore {
   openScheduleFor: (prefill: Partial<Schedule>) => void;
   clearSchedulePrefill: () => void;
   setPaletteOpen: (open: boolean) => void;
+  /** Open the palette in "Search conversations" mode. */
+  openSearch: () => void;
   openNewAgent: (preset?: NewAgentPreset) => void;
   closeNewAgent: () => void;
   setHandoffAgent: (a: Agent | null) => void;
@@ -290,6 +294,7 @@ export const useUi = create<UiStore>((set) => ({
   reviewIntent: null,
   schedulePrefill: null,
   paletteOpen: false,
+  paletteSeed: null,
   newAgent: { open: false, preset: null },
   handoffAgent: null,
   deleteAgent: null,
@@ -373,7 +378,8 @@ export const useUi = create<UiStore>((set) => ({
     set({ reviewAgentId, reviewFile: reviewAgentId ? file : null, reviewIntent: reviewAgentId ? intent : null }),
   openScheduleFor: (schedulePrefill) => set({ schedulePrefill, view: "schedules" }),
   clearSchedulePrefill: () => set({ schedulePrefill: null }),
-  setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
+  setPaletteOpen: (paletteOpen) => set({ paletteOpen, paletteSeed: null }),
+  openSearch: () => set({ paletteOpen: true, paletteSeed: "? " }),
   openNewAgent: (preset) => set({ newAgent: { open: true, preset: preset ?? null } }),
   closeNewAgent: () => set((s) => ({ newAgent: { ...s.newAgent, open: false } })),
   setHandoffAgent: (handoffAgent) => set({ handoffAgent }),

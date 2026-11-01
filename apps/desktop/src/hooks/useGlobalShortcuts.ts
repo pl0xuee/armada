@@ -58,6 +58,14 @@ export function useGlobalShortcuts(enabled: boolean) {
         ui.setPaletteOpen(!ui.paletteOpen);
         return;
       }
+      if (key === "f" && e.shiftKey) {
+        // Search every conversation (the palette's "?" mode); pressed again, it closes.
+        if (!ui.paletteOpen && dialogOpen()) return;
+        e.preventDefault();
+        if (ui.paletteOpen) ui.setPaletteOpen(false);
+        else ui.openSearch();
+        return;
+      }
       // Never navigate out from under an open dialog, sheet or menu.
       if (dialogOpen()) return;
       if (key === "n" && !e.shiftKey) {

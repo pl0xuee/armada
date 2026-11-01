@@ -5,6 +5,7 @@
 import type { ArmadaApi } from "./api";
 import { emitVoiceBus } from "./voiceBus";
 import { budgetLevel } from "./budget";
+import { searchItems } from "./mock-search";
 import { mockProjectConfig, mockSaveInstruction, mockSaveRules } from "./mock-project-config";
 import { configDefaultsKey, isRememberableOption } from "./configMemory";
 import { isStressMode, STRESS_AGENTS, STRESS_TICK_MS, stressAgents, stressItems, stressWords } from "./mock-stress";
@@ -53,7 +54,6 @@ import type {
   ProviderInfo,
   QueuedPrompt,
   Schedule,
-  SearchHit,
   Settings,
   TimelineItem,
   ToolKind,
@@ -1102,34 +1102,8 @@ export const mockApi: ArmadaApi = {
     return delay(clone(list), 220);
   },
 
-  async search(query) {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    const hits: SearchHit[] = [];
-    for (const [agentId, list] of Object.entries(db.items)) {
-      for (const it of list) {
-        const text =
-          it.kind === "user_message" || it.kind === "agent_message" || it.kind === "thought" || it.kind === "notice"
-            ? it.text
-            : it.kind === "tool_call" || it.kind === "permission"
-              ? `${it.title} ${it.kind === "tool_call" ? it.output : (it.command ?? "")}`
-              : it.kind === "plan"
-                ? it.entries.map((e) => e.content).join(" ")
-                : "";
-        const idx = text.toLowerCase().indexOf(q);
-        if (idx >= 0) {
-          const start = Math.max(0, idx - 40);
-          hits.push({
-            agentId,
-            itemId: it.id,
-            kind: it.kind,
-            snippet: `${start > 0 ? "…" : ""}${text.slice(start, idx + q.length + 60).replace(/\s+/g, " ")}`,
-            ts: it.ts,
-          });
-        }
-      }
-    }
-    return delay(hits.sort((a, b) => b.ts - a.ts).slice(0, 30), 160);
+  async searchConversations(query) {
+    return delay(searchItems(db.items, query), 120);
   },
 
   async createAgent(req) {
