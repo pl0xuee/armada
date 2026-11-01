@@ -104,10 +104,19 @@ export function rankLive(ranked: DetectedUrl[], up: ReadonlySet<number>, prev: s
   return [...kept, ...ranked.filter((r) => up.has(r.port)).map((r) => r.url)];
 }
 
+function samePort(a: string, b: string): boolean {
+  try {
+    return urlPort(a) === urlPort(b);
+  } catch {
+    return false; // a stored URL that doesn't parse
+  }
+}
+
 /** URL detection should select: the most recently mentioned live server, unless the user chose one. */
 export function autoSelect(cur: Pick<PreviewState, "url" | "auto">, live: string[]): string | null {
   const newest = live[live.length - 1];
-  if (!newest || cur.url === newest) return null;
+  // The address follows the page as it navigates, so the same server on another path counts as the same.
+  if (!newest || cur.url === newest || (cur.url && samePort(cur.url, newest))) return null;
   return cur.auto || !cur.url ? newest : null;
 }
 
