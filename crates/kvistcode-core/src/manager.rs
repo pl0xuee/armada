@@ -1364,12 +1364,19 @@ impl Core {
             .live
             .lock()
             .insert(agent_id.to_string(), driver.clone());
-        self.update_agent(agent_id, |a| {
+        let ctx = self.ctx(agent_id);
+        ctx.update_agent_settled(|a, active| {
             a.session_id = Some(session_id);
             a.running = true;
             a.needs_briefing = false;
             a.guide_tag = guide_tag;
-        })?;
+            // A healthy process is up and no turn is waiting for it (the message that
+            // asked for it was set aside when the old one died): not "Error" any more.
+            if !active && a.status == AgentStatus::Error {
+                a.status = AgentStatus::Idle;
+            }
+        })
+        .ok_or_else(|| anyhow!("The agent no longer exists"))?;
         Ok(driver)
     }
 

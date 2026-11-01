@@ -115,6 +115,9 @@ struct CtxState {
     /// The timeline item of the most recent user message (its checkpoint is taken
     /// as its turn begins).
     last_user_item: Option<String>,
+    /// The running turn's prompt and the timeline `seq` right after its user message:
+    /// while `seq` is unchanged the agent has produced nothing for it.
+    turn_prompt: Option<(Prompt, i64)>,
     /// The queue doesn't advance until the user acts (after cancel/stop/failure).
     queue_paused: bool,
     /// When the current turn started, and the agent's cost/tokens at that point.
@@ -207,6 +210,7 @@ impl AgentCtx {
                 cancel_requested: false,
                 queue: VecDeque::new(),
                 last_user_item: None,
+                turn_prompt: None,
                 queue_paused: false,
                 turn_started_at: 0,
                 turn_tree: None,
@@ -255,7 +259,7 @@ impl AgentCtx {
     /// Updates the agent; `f` learns whether a turn is running *at that moment*
     /// (checked under the agent lock), so a late "idle" can't overwrite the
     /// "working" of a turn that started meanwhile.
-    fn update_agent_settled(&self, f: impl FnOnce(&mut Agent, bool)) -> Option<Agent> {
+    pub(crate) fn update_agent_settled(&self, f: impl FnOnce(&mut Agent, bool)) -> Option<Agent> {
         self.update_agent(|a| {
             let active = self.st.lock().turn_active;
             f(a, active)
@@ -1092,6 +1096,7 @@ impl AgentCtx {
             },
         );
         st.last_user_item = Some(id);
+        st.turn_prompt = Some((prompt.clone(), st.seq));
     }
 
     /// Snapshots the agent's folder just before the turn's prompt is forwarded to
@@ -1402,7 +1407,12 @@ impl AgentCtx {
             st.last_emit.clear();
             st.unsent.clear();
         }
-        self.update_agent(|a| {
+        // Unless the turn already ended meanwhile (the process exited right after
+        // `begin_turn` took the lock): "working" must not outlive its turn.
+        self.update_agent_settled(|a, active| {
+            if !active {
+                return;
+            }
             a.status = AgentStatus::Working;
             a.running = true;
             a.rate_limited = false;
@@ -1480,6 +1490,7 @@ impl AgentCtx {
             } else {
                 None
             };
+            st.turn_prompt = None;
             // This turn is over either way; its token is spent.
             finish_epoch = Self::next_token_locked(&mut st);
             if next.is_none() {
@@ -1788,7 +1799,25 @@ impl AgentCtx {
                     msg.push_str("\n\n");
                     msg.push_str(detail.trim());
                 }
+                // A process that died before producing anything for the turn may
+                // never have got the message: keep it, on hold, rather than lose it.
+                let unheard = {
+                    let st = self.st.lock();
+                    st.turn_prompt
+                        .as_ref()
+                        .filter(|(_, seq)| *seq == st.seq)
+                        .map(|(p, _)| p.clone())
+                };
                 self.turn_finished_by(generation, TurnOutcome::Failed(msg));
+                if let Some(prompt) = unheard {
+                    self.requeue_front_paused(prompt);
+                    self.notice(
+                        NoticeLevel::Info,
+                        "The agent exited before answering. Your message is back in the queue in case it never arrived; send it again to retry.",
+                    );
+                }
+                // `begin_turn` can have raced the exit handler and set this again.
+                self.update_agent(|a| a.running = false);
             }
             ExitIntent::Stop | ExitIntent::Shutdown => {
                 self.end_turn_early_for(Some(generation), intent)
