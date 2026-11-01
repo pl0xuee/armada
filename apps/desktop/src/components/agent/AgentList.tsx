@@ -3,6 +3,7 @@ import {
   ArchiveRestore,
   ArrowRightLeft,
   CalendarClock,
+  CircleDot,
   Download,
   Gauge,
   GitFork,
@@ -102,6 +103,7 @@ export function AgentList({
   const selected = useUi((s) => s.selectedAgentId);
   const openAgents = useUi((s) => s.openAgents);
   const openNewAgent = useUi((s) => s.openNewAgent);
+  const openIssues = useUi((s) => s.openIssues);
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [density, setDensity] = useState(readDensity);
@@ -337,6 +339,17 @@ export function AgentList({
                         </Button>
                       </Tooltip>
                     )}
+                    <Tooltip content="GitHub issues">
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        className="shrink-0 text-muted hover:text-accent"
+                        aria-label={`GitHub issues of ${p.name}`}
+                        onClick={() => openIssues(p.path)}
+                      >
+                        <CircleDot className="!h-3.5 !w-3.5" />
+                      </Button>
+                    </Tooltip>
                     <Tooltip content={`New agent in ${p.name}`}>
                       <Button
                         size="icon-sm"

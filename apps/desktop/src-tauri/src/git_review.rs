@@ -2275,13 +2275,24 @@ pub async fn push_base_branch(agent: &Agent) -> anyhow::Result<BaseBranchStatus>
     base_branch_status(agent).await
 }
 
-/// Pushes the agent's branch and opens a pull request into its base branch. Returns
-/// the new PR's URL, or "A pull request already exists: <url>" if the branch has one
-/// (the push has then updated it).
-pub async fn create_pr(agent: &Agent, title: &str, body: &str) -> anyhow::Result<String> {
-    let (Some(branch), Some(base)) = (agent.branch.as_deref(), agent.base_branch.as_deref()) else {
+/// Pushes the agent's branch and opens a pull request into `base` (default: the branch the
+/// agent started from), as a draft if asked. Returns the new PR's URL, or "A pull request
+/// already exists: <url>" if the branch has one (the push has then updated it).
+pub async fn create_pr(
+    agent: &Agent,
+    title: &str,
+    body: &str,
+    base: Option<&str>,
+    draft: bool,
+) -> anyhow::Result<String> {
+    let (Some(branch), Some(agent_base)) = (agent.branch.as_deref(), agent.base_branch.as_deref())
+    else {
         bail!("Pull requests need an agent running on its own branch (enable worktree)");
     };
+    let base = base
+        .map(str::trim)
+        .filter(|b| !b.is_empty())
+        .unwrap_or(agent_base);
     if !agent.worktree {
         bail!("Pull requests need an agent running on its own branch (enable worktree)");
     }
@@ -2295,9 +2306,23 @@ pub async fn create_pr(agent: &Agent, title: &str, body: &str) -> anyhow::Result
     if !dirty.trim().is_empty() {
         bail!("The agent has uncommitted changes. Commit them before opening a pull request, so they're part of it.");
     }
+    // A base the agent didn't start from must be a real branch here or on its remote.
+    let compare_base = if base == agent_base {
+        base.to_string()
+    } else {
+        let remote = push_remote(cwd, branch)
+            .await
+            .unwrap_or_else(|_| "origin".into());
+        resolve_base_ref(cwd, &remote, base).await?
+    };
     let ahead: i64 = git(
         cwd,
-        &["rev-list", "--count", &format!("{base}..{branch}"), "--"],
+        &[
+            "rev-list",
+            "--count",
+            &format!("{compare_base}..{branch}"),
+            "--",
+        ],
     )
     .await
     .map_err(|e| e.context(format!("comparing {branch} with {base}")))?
@@ -2349,10 +2374,13 @@ pub async fn create_pr(agent: &Agent, title: &str, body: &str) -> anyhow::Result
     if let Some(url) = existing {
         return Ok(format!("A pull request already exists: {url}"));
     }
-    let created = gh(vec![
+    let mut create = vec![
         "pr", "create", "--title", title, "--body", body, "--head", branch, "--base", base,
-    ])
-    .await;
+    ];
+    if draft {
+        create.push("--draft");
+    }
+    let created = gh(create).await;
     match created {
         Ok(out) => Ok(last_url(&out).unwrap_or_else(|| out.trim().to_string())),
         // Raced with someone else creating it (or `pr list` couldn't see it).
@@ -2364,6 +2392,32 @@ pub async fn create_pr(agent: &Agent, title: &str, body: &str) -> anyhow::Result
         }
         Err(e) => Err(e),
     }
+}
+
+/// The ref to measure a pull request's base by: the local branch, else the remote's.
+async fn resolve_base_ref(cwd: &Path, remote: &str, base: &str) -> anyhow::Result<String> {
+    // Also rejects names that could be taken for options or that git itself wouldn't allow.
+    git(cwd, &["check-ref-format", &format!("refs/heads/{base}")])
+        .await
+        .map_err(|_| anyhow!("“{base}” isn't a valid branch name."))?;
+    for candidate in [
+        format!("refs/heads/{base}"),
+        format!("refs/remotes/{remote}/{base}"),
+    ] {
+        let found = output(
+            "git",
+            cwd,
+            &["rev-parse", "--verify", "-q", &candidate],
+            Opts::default(),
+        )
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+        if found {
+            return Ok(candidate);
+        }
+    }
+    bail!("There is no branch called {base} to open the pull request against.")
 }
 
 /// The last http(s) URL that ends a line of `out`.
@@ -3255,11 +3309,13 @@ mod tests {
     async fn pull_requests_need_commits() {
         let (repo, wt, base) = worktree_setup();
         let agent = worktree_agent(&repo, &wt, "agent-x", &base);
-        let err = create_pr(&agent, "t", "b").await.unwrap_err();
+        let err = create_pr(&agent, "t", "b", None, false).await.unwrap_err();
         assert!(err.to_string().contains("no commits"), "{err}");
         let mut not_worktree = agent.clone();
         not_worktree.worktree = false;
-        let err = create_pr(&not_worktree, "t", "b").await.unwrap_err();
+        let err = create_pr(&not_worktree, "t", "b", None, false)
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains("enable worktree"), "{err}");
     }
 
@@ -3286,6 +3342,39 @@ mod tests {
         repo.git(&["remote", "add", "fork", "https://example.invalid/f.git"]);
         repo.git(&["config", "branch.feature.remote", "fork"]);
         assert_eq!(push_remote(&repo.dir, "feature").await.unwrap(), "fork");
+    }
+
+    #[tokio::test]
+    async fn a_pull_request_base_must_be_a_real_branch() {
+        let repo = Repo::new();
+        repo.write("a.txt", "a");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "one"]);
+        repo.git(&["branch", "release"]);
+        // Only on the remote, as after a fetch.
+        repo.git(&["update-ref", "refs/remotes/origin/staging", "HEAD"]);
+        let local = resolve_base_ref(&repo.dir, "origin", "release")
+            .await
+            .unwrap();
+        assert_eq!(local, "refs/heads/release");
+        let remote = resolve_base_ref(&repo.dir, "origin", "staging")
+            .await
+            .unwrap();
+        assert_eq!(remote, "refs/remotes/origin/staging");
+        let err = resolve_base_ref(&repo.dir, "origin", "nope")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no branch called nope"), "{err}");
+        // Malformed names are refused; an option-looking one is only ever a (missing) branch name.
+        for bad in ["a..b", "x y"] {
+            let err = resolve_base_ref(&repo.dir, "origin", bad)
+                .await
+                .unwrap_err();
+            assert!(
+                err.to_string().contains("valid branch name"),
+                "{bad}: {err}"
+            );
+        }
     }
 
     #[test]

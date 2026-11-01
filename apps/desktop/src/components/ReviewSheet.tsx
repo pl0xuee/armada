@@ -24,7 +24,8 @@ import { pluralize } from "@/lib/format";
 import { PatchIndex } from "@/lib/patchIndex";
 import { findFileSlice, hunkPatch } from "@/lib/patchSlices";
 import { createLatest, HIDE_COMPACT_DEFAULT_OVER, isCompactFile, orderReviewFiles } from "@/lib/reviewFiles";
-import type { Agent, AgentDiff, BaseBranchStatus } from "@/lib/types";
+import { prefillPr } from "@/lib/prFlow";
+import type { Agent, AgentDiff, BaseBranchStatus, ChangedFile } from "@/lib/types";
 import { basename, cn, errorMessage } from "@/lib/utils";
 import { useApp } from "@/store/app";
 import { refreshPrSoon } from "@/store/pr";
@@ -42,6 +43,8 @@ import { ConfirmDialog } from "./ui/alert-dialog";
 import { Button } from "./ui/button";
 import { Input, Label, Textarea } from "./ui/input";
 import { Spinner } from "./ui/misc";
+import { Select } from "./ui/select";
+import { Switch } from "./ui/switch";
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { FilePicker } from "./review/FilePicker";
 import { Skeleton } from "./ui/skeleton";
@@ -820,13 +823,14 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
           <PrPopover
             agent={agent}
             autoOpen={prIntent && !!diff}
+            files={diff?.files ?? null}
             busy={busy === "pr"}
             disabled={busy !== null || diffPending}
-            onSubmit={async (t, b) => {
+            onSubmit={async (t, b, base, draft) => {
               // Errors stay inline in the form (the popover keeps what you wrote).
               setBusy("pr");
               try {
-                toastPr(await api.createPr(agent.id, t, b));
+                toastPr(await api.createPr(agent.id, t, b, base, draft));
                 refreshPrSoon(agent.id);
                 return null;
               } catch (e) {
@@ -1107,6 +1111,7 @@ function MergePopover({
 
 function PrPopover({
   agent,
+  files,
   busy,
   disabled,
   onSubmit,
@@ -1114,23 +1119,37 @@ function PrPopover({
 }: {
   autoOpen?: boolean;
   agent: Agent;
+  /** The agent's changed files, for the size line in the description. */
+  files: ChangedFile[] | null;
   busy: boolean;
   disabled: boolean;
   /** Resolves to an error message to show inline, or null on success. */
-  onSubmit: (title: string, body: string) => Promise<string | null>;
+  onSubmit: (title: string, body: string, base: string | undefined, draft: boolean) => Promise<string | null>;
 }) {
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [draft, setDraft] = useState(false);
+  const [base, setBase] = useState(agent.baseBranch ?? "");
+  const [branches, setBranches] = useState<string[] | null>(null);
   // Fresh defaults each time the form opens (the agent may have been renamed or said more since).
   const onOpenChange = (next: boolean) => {
     if (!next && submitting) return;
     if (next) {
       setFormError(null);
-      setTitle(agent.title);
-      setBody(agent.lastMessage ? `## Summary\n\n${agent.lastMessage}\n\n_Opened from Armada._` : "");
+      const fill = prefillPr(agent, files);
+      setTitle(fill.title);
+      setBody(fill.body);
+      setDraft(false);
+      setBase(agent.baseBranch ?? "");
+      // The picker fills in a moment later; until then it shows just the default base.
+      setBranches(null);
+      api
+        .prBaseBranches(agent.id)
+        .then(setBranches)
+        .catch(() => setBranches(null));
     }
     setOpen(next);
   };
@@ -1161,7 +1180,12 @@ function PrPopover({
             setSubmitting(true);
             // Close only on success, so a failure (e.g. gh not signed in) keeps what you wrote.
             setFormError(null);
-            const err = await onSubmit(title.trim() || agent.title, body);
+            const err = await onSubmit(
+              title.trim() || agent.title,
+              body,
+              base && base !== agent.baseBranch ? base : undefined,
+              draft,
+            );
             setSubmitting(false);
             if (err === null) setOpen(false);
             else setFormError(err);
@@ -1189,6 +1213,25 @@ function PrPopover({
               className="min-h-28 font-mono text-[12px]"
             />
           </div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <Label htmlFor="pr-base" className="mb-0 shrink-0">
+                Into
+              </Label>
+              <Select
+                id="pr-base"
+                aria-label="Base branch"
+                className="h-8 max-w-[190px] font-mono text-[12px]"
+                value={base || undefined}
+                onValueChange={setBase}
+                options={(branches?.length ? branches : base ? [base] : []).map((b) => ({ value: b, label: b }))}
+              />
+            </div>
+            <label className="flex shrink-0 items-center gap-2 text-[12.5px] text-muted">
+              Draft
+              <Switch checked={draft} onCheckedChange={setDraft} aria-label="Open as a draft" />
+            </label>
+          </div>
           {formError && (
             <p role="alert" className="rounded-lg border border-err/30 bg-err/[0.07] px-2.5 py-2 text-[12px] text-err">
               {formError}
@@ -1199,7 +1242,8 @@ function PrPopover({
               Cancel
             </Button>
             <Button size="sm" variant="primary" type="submit" disabled={submitting}>
-              {submitting ? <Spinner className="h-3.5 w-3.5 text-current" /> : <GitPullRequest />} Create pull request
+              {submitting ? <Spinner className="h-3.5 w-3.5 text-current" /> : <GitPullRequest />}{" "}
+              {draft ? "Create draft" : "Create pull request"}
             </Button>
           </div>
         </form>
