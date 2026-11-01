@@ -319,6 +319,10 @@ pub struct Agent {
     /// Set while the agent waits at a spending limit (see `manager/budgets.rs`).
     #[serde(default)]
     pub budget_hold: Option<crate::budget::BudgetHold>,
+    /// Turns this agent has completed, for turn limits. None = not counted yet (an agent
+    /// from before turn limits): startup counts it from the stored messages.
+    #[serde(default)]
+    pub turns: Option<i64>,
     /// For a helper agent: the main agent it works for.
     #[serde(default)]
     pub parent_id: Option<String>,
@@ -1123,6 +1127,9 @@ pub struct Settings {
     /// Token caps, like the dollar ones (None = no cap).
     pub daily_budget_tokens: Option<i64>,
     pub agent_budget_tokens: Option<i64>,
+    /// Turn caps (completed turns), for accounts with no per-token cost (None = no cap).
+    pub daily_budget_turns: Option<i64>,
+    pub agent_budget_turns: Option<i64>,
     /// Caps on everything the agents of one project spend, by project folder.
     pub project_budgets: std::collections::BTreeMap<String, crate::budget::BudgetCap>,
     /// Slack, Discord and generic webhook targets for alerts (ntfy has its own field).
@@ -1400,6 +1407,8 @@ impl Settings {
         for (name, cap) in [
             ("daily token budget", self.daily_budget_tokens),
             ("agent token budget", self.agent_budget_tokens),
+            ("daily turn budget", self.daily_budget_turns),
+            ("agent turn budget", self.agent_budget_turns),
         ] {
             if cap.is_some_and(|c| c <= 0) {
                 return Err(format!(
@@ -1459,6 +1468,8 @@ impl Settings {
         for (cap, name) in [
             (&mut self.daily_budget_tokens, "dailyBudgetTokens"),
             (&mut self.agent_budget_tokens, "agentBudgetTokens"),
+            (&mut self.daily_budget_turns, "dailyBudgetTurns"),
+            (&mut self.agent_budget_turns, "agentBudgetTurns"),
         ] {
             if cap.is_some_and(|c| c <= 0) {
                 *cap = None;
@@ -1549,6 +1560,8 @@ impl Default for Settings {
             budget_action: Default::default(),
             daily_budget_tokens: None,
             agent_budget_tokens: None,
+            daily_budget_turns: None,
+            agent_budget_turns: None,
             project_budgets: Default::default(),
             alert_targets: Vec::new(),
         }

@@ -423,6 +423,11 @@ impl Core {
                 agent.queue_paused = false;
                 dirty = true;
             }
+            // An agent from before turn limits: its turns so far are its stored prompts.
+            if agent.turns.is_none() {
+                agent.turns = Some(db.count_prompts(&agent.id).unwrap_or(0));
+                dirty = true;
+            }
             if dirty {
                 db.put_agent(&agent)?;
             }
@@ -1767,6 +1772,7 @@ impl Core {
             needs_briefing: false,
             budget: None,
             budget_hold: None,
+            turns: Some(0),
             guide_tag: String::new(),
             parent_id: helper.as_ref().map(|h| h.parent_id.clone()),
             helper_sync: helper.as_ref().map(|_| HelperSync {

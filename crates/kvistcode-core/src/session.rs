@@ -1431,7 +1431,11 @@ impl AgentCtx {
         if matches!(outcome, TurnOutcome::Failed(_) | TurnOutcome::Cancelled) {
             return None;
         }
-        self.core.upgrade()?.budget_gate(&self.agent_id)
+        let completed = matches!(
+            outcome,
+            TurnOutcome::Completed | TurnOutcome::CompletedWithNote(_)
+        );
+        self.core.upgrade()?.budget_gate(&self.agent_id, completed)
     }
 
     fn finish_turn(&self, generation: Option<u64>, outcome: TurnOutcome) -> Option<Prompt> {
@@ -1487,6 +1491,14 @@ impl AgentCtx {
         }
         for id in &stale {
             self.cancel_pending(id);
+        }
+        if matches!(
+            outcome,
+            TurnOutcome::Completed | TurnOutcome::CompletedWithNote(_)
+        ) {
+            if let Some(core) = self.core.upgrade() {
+                core.budget_turn_done(&self.agent_id);
+            }
         }
         // What the finished turn did comes before whatever runs next.
         match &outcome {

@@ -582,6 +582,17 @@ impl Db {
         )?)
     }
 
+    /// How many prompts the user has sent (not counting messages slipped in mid-turn):
+    /// the turns an agent from before turn limits had already run.
+    pub fn count_prompts(&self, agent_id: &str) -> anyhow::Result<i64> {
+        Ok(self.reader.lock().query_row(
+            "SELECT COUNT(*) FROM items WHERE agent_id = ?1 AND kind = 'user_message'
+                 AND instr(data, '\"midTurn\":true') = 0",
+            params![agent_id],
+            |r| r.get(0),
+        )?)
+    }
+
     /// Whether `needle` occurs verbatim in any of the agent's stored items.
     pub fn items_contain(&self, agent_id: &str, needle: &str) -> anyhow::Result<bool> {
         if needle.is_empty() {
@@ -834,6 +845,42 @@ mod tests {
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600);
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prompts_are_counted_without_mid_turn_messages() {
+        let dir = temp("prompts");
+        let db = Db::open(&dir.join("armada.db")).unwrap();
+        let user = |seq: i64, agent: &str, mid_turn: bool| TimelineItem {
+            id: format!("{agent}{seq}"),
+            agent_id: agent.into(),
+            seq,
+            ts: seq,
+            body: ItemBody::UserMessage {
+                text: format!("m{seq}"),
+                attachments: Vec::new(),
+                mid_turn,
+            },
+        };
+        for (seq, mid) in [(1, false), (2, true), (3, false), (4, false)] {
+            db.put_item(&user(seq, "a", mid)).unwrap();
+        }
+        db.put_item(&user(1, "b", false)).unwrap();
+        db.put_item(&TimelineItem {
+            id: "reply".into(),
+            agent_id: "a".into(),
+            seq: 5,
+            ts: 5,
+            body: ItemBody::AgentMessage {
+                text: "hi".into(),
+                images: Vec::new(),
+            },
+        })
+        .unwrap();
+        assert_eq!(db.count_prompts("a").unwrap(), 3);
+        assert_eq!(db.count_prompts("b").unwrap(), 1);
+        assert_eq!(db.count_prompts("none").unwrap(), 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

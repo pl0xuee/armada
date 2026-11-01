@@ -165,6 +165,8 @@ export interface Agent {
   budget?: BudgetCap | null;
   /** Set while the agent waits at a spending limit for you to choose (a "Needs you" item). */
   budgetHold?: BudgetHold | null;
+  /** Turns this agent has completed (counted by the backend; null = not counted yet). Turn limits measure this. */
+  turns?: number | null;
 }
 
 export type HelperSyncState = "inSync" | "pendingToMain" | "pendingFromMain" | "merging" | "conflict";
@@ -514,6 +516,9 @@ export interface Settings {
   /** Token caps, like the dollar ones; null = no cap. */
   dailyBudgetTokens: number | null;
   agentBudgetTokens: number | null;
+  /** Turn caps (completed turns), for accounts with no per-token cost; null = no cap. */
+  dailyBudgetTurns: number | null;
+  agentBudgetTurns: number | null;
   /** Caps on everything the agents of one project spend, by project folder. */
   projectBudgets: Record<string, BudgetCap>;
   /** Slack, Discord and webhook targets for alerts (ntfy has its own field above). */
@@ -523,12 +528,14 @@ export interface Settings {
 export type BudgetAction = "notify" | "pause";
 export type BudgetLevel = "under" | "warn" | "hit";
 export type BudgetScope = "daily" | "project" | "agent";
-export type BudgetMetric = "cost" | "tokens";
+export type BudgetMetric = "cost" | "tokens" | "turns";
 
-/** A limit in cost and/or tokens (null = unlimited in that unit). */
+/** A limit in cost, tokens and/or turns (null = unlimited in that unit). */
 export interface BudgetCap {
   usd: number | null;
   tokens: number | null;
+  /** Absent in limits saved before turn limits. */
+  turns?: number | null;
 }
 
 /** Why an agent waits: the limit it ran into. */
@@ -541,7 +548,7 @@ export interface BudgetHold {
   since: number;
 }
 
-/** How a held agent goes on: raise the limit that was hit by `by` (dollars or tokens), continue one turn, or stop. */
+/** How a held agent goes on: raise the limit that was hit by `by` (dollars, tokens or turns), continue one turn, or stop. */
 export type BudgetChoice = { action: "raise"; by: number } | { action: "continue_once" } | { action: "stop" };
 
 /** Today's spend (since local midnight) against the daily limits. */
@@ -552,7 +559,9 @@ export interface BudgetStatus {
   dailyBudgetUsd: number | null;
   todayTokens: number;
   dailyBudgetTokens: number | null;
-  /** The worse of the cost and token levels. */
+  todayTurns: number;
+  dailyBudgetTurns: number | null;
+  /** The worst of the cost, token and turn levels. */
   level: BudgetLevel;
 }
 

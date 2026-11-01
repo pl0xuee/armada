@@ -694,7 +694,7 @@ mod tests {
             "/home/zed/secret-project".into(),
             kvistcode_core::budget::BudgetCap {
                 usd: Some(5.0),
-                tokens: None,
+                ..Default::default()
             },
         );
         let out = settings_section(&s);

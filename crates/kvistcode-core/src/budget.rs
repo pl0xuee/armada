@@ -1,5 +1,5 @@
 //! Spending limits: for one agent, for all the agents of a project, and for everything
-//! per day; each in cost (USD) and/or tokens. This is the pure part (what is over what,
+//! per day; each in cost (USD), tokens and/or turns. This is the pure part (what is over what,
 //! which threshold was crossed exactly once, what a hold says); `manager/budgets.rs`
 //! applies it (notices, desktop alerts, holding agents at a turn boundary).
 //!
@@ -8,6 +8,8 @@
 //! * "Today" is counted from the increases seen since local midnight, so a count that
 //!   goes down (a restarted process, a reset) never subtracts spend.
 //! * A count that falls back under a threshold (or a raised limit) re-arms it.
+//! * A turn is one completed prompt-and-reply (a failed or cancelled one doesn't count).
+//!   It is the limit for subscription accounts, where no per-token cost is known.
 //! * Cost is what each runtime reports. It is a bill for API-key accounts and an
 //!   API-equivalent figure for subscriptions; runtimes that report none (local models)
 //!   never move a cost limit, which is what a token limit is for.
@@ -54,19 +56,24 @@ pub enum BudgetScope {
 pub enum BudgetMetric {
     Cost,
     Tokens,
+    /// Completed turns.
+    Turns,
 }
 
-/// A limit in cost and/or tokens (None = unlimited in that unit).
+/// A limit in cost, tokens and/or turns (None = unlimited in that unit).
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct BudgetCap {
     pub usd: Option<f64>,
     pub tokens: Option<i64>,
+    pub turns: Option<i64>,
 }
 
 impl BudgetCap {
     pub fn is_empty(&self) -> bool {
-        valid_cap(self.usd).is_none() && self.tokens.is_none_or(|t| t <= 0)
+        valid_cap(self.usd).is_none()
+            && self.tokens.is_none_or(|t| t <= 0)
+            && self.turns.is_none_or(|t| t <= 0)
     }
 
     /// This cap for one unit, if usable.
@@ -74,6 +81,7 @@ impl BudgetCap {
         match metric {
             BudgetMetric::Cost => valid_cap(self.usd),
             BudgetMetric::Tokens => valid_cap(self.tokens.map(|t| t as f64)),
+            BudgetMetric::Turns => valid_cap(self.turns.map(|t| t as f64)),
         }
     }
 
@@ -84,6 +92,9 @@ impl BudgetCap {
         }
         if self.tokens.is_some_and(|t| t <= 0) {
             return Some("a token limit must be more than 0 (or empty for none)");
+        }
+        if self.turns.is_some_and(|t| t <= 0) {
+            return Some("a turn limit must be more than 0 (or empty for none)");
         }
         None
     }
@@ -97,6 +108,10 @@ impl BudgetCap {
         }
         if self.tokens.is_some_and(|t| t <= 0) {
             self.tokens = None;
+            changed = true;
+        }
+        if self.turns.is_some_and(|t| t <= 0) {
+            self.turns = None;
             changed = true;
         }
         changed
@@ -145,6 +160,7 @@ pub fn level(spent: f64, cap: Option<f64>) -> BudgetLevel {
 pub struct Spend {
     pub usd: f64,
     pub tokens: f64,
+    pub turns: f64,
 }
 
 impl Spend {
@@ -152,6 +168,7 @@ impl Spend {
         match metric {
             BudgetMetric::Cost => self.usd,
             BudgetMetric::Tokens => self.tokens,
+            BudgetMetric::Turns => self.turns,
         }
     }
 }
@@ -176,15 +193,21 @@ impl Reading {
     }
 }
 
+const METRICS: [BudgetMetric; 3] = [
+    BudgetMetric::Cost,
+    BudgetMetric::Tokens,
+    BudgetMetric::Turns,
+];
+
 /// Every scope and unit for one agent: the agent's own spend, its project's and the day's.
 pub fn readings(caps: &Caps, agent: Spend, project: Spend, daily: Spend) -> Vec<Reading> {
-    let mut out = Vec::with_capacity(6);
+    let mut out = Vec::with_capacity(9);
     for (scope, spend) in [
         (BudgetScope::Daily, daily),
         (BudgetScope::Project, project),
         (BudgetScope::Agent, agent),
     ] {
-        for metric in [BudgetMetric::Cost, BudgetMetric::Tokens] {
+        for metric in METRICS {
             out.push(Reading {
                 scope,
                 metric,
@@ -261,11 +284,12 @@ pub fn fmt_tokens(n: f64) -> String {
     }
 }
 
-/// "$1.20 of $5.00" or "12.3k of 50.0k tokens".
+/// "$1.20 of $5.00", "12.3k of 50.0k tokens" or "7 of 20 turns".
 pub fn amounts(metric: BudgetMetric, spent: f64, cap: f64) -> String {
     match metric {
         BudgetMetric::Cost => format!("${spent:.2} of ${cap:.2}"),
         BudgetMetric::Tokens => format!("{} of {} tokens", fmt_tokens(spent), fmt_tokens(cap)),
+        BudgetMetric::Turns => format!("{spent:.0} of {cap:.0} turns"),
     }
 }
 
@@ -378,7 +402,7 @@ impl BudgetHold {
 )]
 pub enum BudgetChoice {
     /// Raise the limit that was hit by `by` (dollars for a cost limit, tokens for a
-    /// token limit), then continue.
+    /// token limit, turns for a turn limit), then continue.
     Raise { by: f64 },
     /// Allow one more turn, even over the limit. It is checked again when that turn ends.
     ContinueOnce,
@@ -396,6 +420,8 @@ pub struct BudgetStatus {
     pub daily_budget_usd: Option<f64>,
     pub today_tokens: i64,
     pub daily_budget_tokens: Option<i64>,
+    pub today_turns: i64,
+    pub daily_budget_turns: Option<i64>,
     /// The worse of the cost and token levels.
     pub level: BudgetLevel,
 }
@@ -408,6 +434,7 @@ pub struct Tracker {
     day: String,
     today_usd: f64,
     today_tokens: f64,
+    today_turns: f64,
     /// Keyed by `scope:subject:metric`.
     fired: HashMap<String, Fired>,
 }
@@ -419,6 +446,7 @@ impl Tracker {
             self.day = day;
             self.today_usd = 0.0;
             self.today_tokens = 0.0;
+            self.today_turns = 0.0;
             self.fired.retain(|k, _| !k.starts_with("daily:"));
         }
     }
@@ -434,12 +462,19 @@ impl Tracker {
         }
     }
 
+    /// Adds `n` completed turns to the day.
+    pub fn add_turns(&mut self, today: NaiveDate, n: u32) {
+        self.roll(today);
+        self.today_turns += f64::from(n);
+    }
+
     /// Today's spend (zero when the last observation was another day).
     pub fn today(&self, today: NaiveDate) -> Spend {
         if self.day == today.to_string() {
             Spend {
                 usd: self.today_usd,
                 tokens: self.today_tokens,
+                turns: self.today_turns,
             }
         } else {
             Spend::default()
@@ -461,6 +496,7 @@ impl Tracker {
             let metric = match r.metric {
                 BudgetMetric::Cost => "cost",
                 BudgetMetric::Tokens => "tokens",
+                BudgetMetric::Turns => "turns",
             };
             let key = match r.scope {
                 BudgetScope::Daily => format!("daily::{metric}"),
@@ -486,7 +522,7 @@ impl Tracker {
 
     pub fn status(&self, today: NaiveDate, daily: &BudgetCap) -> BudgetStatus {
         let spend = self.today(today);
-        let worst = [BudgetMetric::Cost, BudgetMetric::Tokens]
+        let worst = METRICS
             .into_iter()
             .map(|m| level(spend.get(m), daily.get(m)))
             .max_by_key(|l| match l {
@@ -501,6 +537,8 @@ impl Tracker {
             daily_budget_usd: daily.get(BudgetMetric::Cost),
             today_tokens: spend.tokens.round() as i64,
             daily_budget_tokens: daily.tokens.filter(|t| *t > 0),
+            today_turns: spend.turns.round() as i64,
+            daily_budget_turns: daily.turns.filter(|t| *t > 0),
             level: worst,
         }
     }
@@ -523,14 +561,21 @@ mod tests {
     fn usd(c: f64) -> BudgetCap {
         BudgetCap {
             usd: Some(c),
-            tokens: None,
+            ..Default::default()
         }
     }
 
     fn tokens(t: i64) -> BudgetCap {
         BudgetCap {
-            usd: None,
             tokens: Some(t),
+            ..Default::default()
+        }
+    }
+
+    fn turns(t: i64) -> BudgetCap {
+        BudgetCap {
+            turns: Some(t),
+            ..Default::default()
         }
     }
 
@@ -543,7 +588,11 @@ mod tests {
     }
 
     fn spend(usd: f64, tokens: f64) -> Spend {
-        Spend { usd, tokens }
+        Spend {
+            usd,
+            tokens,
+            turns: 0.0,
+        }
     }
 
     fn levels(alerts: &[Alert]) -> Vec<(BudgetScope, BudgetMetric, BudgetLevel)> {
@@ -571,6 +620,7 @@ mod tests {
     const NONE: BudgetCap = BudgetCap {
         usd: None,
         tokens: None,
+        turns: None,
     };
 
     #[test]
@@ -699,6 +749,7 @@ mod tests {
             &BudgetCap {
                 usd: Some(5.0),
                 tokens: Some(1000),
+                turns: None,
             },
         );
         assert_eq!(
@@ -894,6 +945,7 @@ mod tests {
         let mut bad = BudgetCap {
             usd: Some(-1.0),
             tokens: Some(0),
+            turns: Some(-3),
         };
         assert!(bad.problem().is_some());
         assert!(bad.sanitize());
@@ -911,9 +963,143 @@ mod tests {
             &BudgetCap {
                 usd: Some(100.0),
                 tokens: Some(1000),
+                turns: None,
             },
         );
         assert_eq!(s.level, BudgetLevel::Warn);
         assert_eq!(s.today_tokens, 950);
+    }
+
+    /// An agent at `n` turns, in a project at `project_turns`, on a day at `daily_turns`.
+    fn turn_readings(c: &Caps, n: f64, project_turns: f64, daily_turns: f64) -> Vec<Reading> {
+        let at = |turns| Spend {
+            turns,
+            ..Spend::default()
+        };
+        readings(c, at(n), at(project_turns), at(daily_turns))
+    }
+
+    #[test]
+    fn turn_limits_warn_at_80_and_hit_at_100_percent() {
+        let c = caps(NONE, NONE, turns(20));
+        let r = |n| turn_readings(&c, n, n, n);
+        let level_of = |n| {
+            r(n).into_iter()
+                .find(|x| x.metric == BudgetMetric::Turns && x.scope == BudgetScope::Agent)
+                .unwrap()
+                .level()
+        };
+        assert_eq!(level_of(15.0), BudgetLevel::Under);
+        assert_eq!(level_of(16.0), BudgetLevel::Warn);
+        assert_eq!(level_of(19.0), BudgetLevel::Warn);
+        assert_eq!(level_of(20.0), BudgetLevel::Hit);
+        // A turn limit is its own unit: it never reads cost or tokens.
+        assert_eq!(turns(20).get(BudgetMetric::Cost), None);
+        assert_eq!(turns(20).get(BudgetMetric::Tokens), None);
+        assert_eq!(turns(20).get(BudgetMetric::Turns), Some(20.0));
+        assert!(!turns(20).is_empty() && turns(0).is_empty());
+    }
+
+    #[test]
+    fn turn_alerts_fire_once_per_threshold_and_are_worded_in_turns() {
+        let mut t = Tracker::default();
+        let c = caps(NONE, NONE, turns(10));
+        let mut fire = |n: f64| {
+            let r = turn_readings(&c, n, n, n);
+            t.alerts(day(1), "a", "p", &r)
+        };
+        assert!(fire(7.0).is_empty());
+        let warn = fire(8.0);
+        assert_eq!(
+            levels(&warn),
+            [(BudgetScope::Agent, BudgetMetric::Turns, BudgetLevel::Warn)]
+        );
+        assert!(fire(9.0).is_empty());
+        let hit = fire(10.0);
+        assert_eq!(
+            levels(&hit),
+            [(BudgetScope::Agent, BudgetMetric::Turns, BudgetLevel::Hit)]
+        );
+        let (title, body) = warn[0].text(BudgetAction::Pause, "Fix tests", "app", true);
+        assert_eq!(title, "Close to the agent limit");
+        // Turns are counts: no dollar sign, and never the "API-equivalent" note.
+        assert!(
+            body.contains("8 of 10 turns") && !body.contains('$') && !body.contains("equivalent"),
+            "{body}"
+        );
+        assert!(fire(10.0).is_empty());
+    }
+
+    #[test]
+    fn the_day_counts_turns_and_starts_over_at_midnight() {
+        let mut t = Tracker::default();
+        let c = caps(turns(3), NONE, NONE);
+        t.add_turns(day(1), 2);
+        t.add_turns(day(1), 1);
+        assert_eq!(t.today(day(1)).turns, 3.0);
+        let r = readings(&c, Spend::default(), Spend::default(), t.today(day(1)));
+        let a = t.alerts(day(1), "a", "p", &r);
+        assert_eq!(
+            levels(&a),
+            [(BudgetScope::Daily, BudgetMetric::Turns, BudgetLevel::Hit)]
+        );
+        assert_eq!(t.today(day(2)).turns, 0.0);
+        t.add_turns(day(2), 1);
+        assert_eq!(t.today(day(2)).turns, 1.0);
+        let s = t.status(day(2), &turns(5));
+        assert_eq!((s.today_turns, s.daily_budget_turns), (1, Some(5)));
+        assert_eq!(s.level, BudgetLevel::Under);
+        t.add_turns(day(2), 3);
+        assert_eq!(t.status(day(2), &turns(5)).level, BudgetLevel::Warn);
+    }
+
+    #[test]
+    fn a_turn_hold_says_how_many_turns_and_ranks_by_how_far_over() {
+        let c = caps(NONE, turns(10), turns(5));
+        // Agent 6/5 = 1.2x, project 11/10 = 1.1x.
+        let r = turn_readings(&c, 6.0, 11.0, 0.0);
+        let hold = BudgetHold::worst(&r, 7).unwrap();
+        assert_eq!(
+            (hold.scope, hold.metric, hold.spent, hold.cap),
+            (BudgetScope::Agent, BudgetMetric::Turns, 6.0, 5.0)
+        );
+        let (title, body) = hold.text("Fix tests", "app", true);
+        assert_eq!(title, "Paused at a spending limit");
+        assert!(
+            body.contains("6 of 5 turns") && !body.contains("equivalent"),
+            "{body}"
+        );
+        // The wire shape the UI and the phone read: metric is the unit.
+        let json = serde_json::to_value(hold).unwrap();
+        assert_eq!(json["metric"], "turns");
+        assert_eq!(json["scope"], "agent");
+        assert_eq!(
+            (json["spent"].as_f64(), json["cap"].as_f64()),
+            (Some(6.0), Some(5.0))
+        );
+        assert!(blocks_resume(BudgetAction::Pause, &r));
+    }
+
+    #[test]
+    fn turn_limits_load_from_old_data_and_round_trip() {
+        // Settings and agents saved before turn limits have no `turns`.
+        let old: BudgetCap = serde_json::from_str(r#"{"usd":2.5,"tokens":900}"#).unwrap();
+        assert_eq!(
+            (old.usd, old.tokens, old.turns),
+            (Some(2.5), Some(900), None)
+        );
+        let new = BudgetCap {
+            turns: Some(12),
+            ..old
+        };
+        let back: BudgetCap = serde_json::from_str(&serde_json::to_string(&new).unwrap()).unwrap();
+        assert_eq!(back, new);
+        // A tracker file from before turn limits still loads, with a zero turn count.
+        let t: Tracker =
+            serde_json::from_str(r#"{"day":"2026-03-01","today_usd":2.0,"today_tokens":5.0}"#)
+                .unwrap();
+        assert_eq!(t.today(day(1)).turns, 0.0);
+        let mut bad = turns(-2);
+        assert!(bad.problem().is_some() && bad.sanitize() && bad.is_empty());
     }
 }
