@@ -8,8 +8,11 @@ import { EMPTY_DRAFT, type QuestionDraft } from "@/lib/question";
 interface QuestionUiStore {
   drafts: Record<string, QuestionDraft>;
   visible: Record<string, boolean>;
+  /** The pinned dock answers this question with the number keys: the card in the timeline leaves them alone. */
+  docked: Record<string, boolean>;
   update: (requestId: string, fn: (d: QuestionDraft) => QuestionDraft) => void;
   setVisible: (requestId: string, visible: boolean) => void;
+  setDocked: (requestId: string, docked: boolean) => void;
   /** Forget a resolved request. */
   clear: (requestId: string) => void;
 }
@@ -17,15 +20,26 @@ interface QuestionUiStore {
 export const useQuestionUi = create<QuestionUiStore>((set) => ({
   drafts: {},
   visible: {},
+  docked: {},
   update: (id, fn) => set((s) => ({ drafts: { ...s.drafts, [id]: fn(s.drafts[id] ?? EMPTY_DRAFT) } })),
   setVisible: (id, v) => set((s) => (s.visible[id] === v ? s : { visible: { ...s.visible, [id]: v } })),
+  setDocked: (id, v) =>
+    set((s) => {
+      if (Boolean(s.docked[id]) === v) return s;
+      const docked = { ...s.docked };
+      if (v) docked[id] = true;
+      else delete docked[id];
+      return { docked };
+    }),
   clear: (id) =>
     set((s) => {
-      if (!(id in s.drafts) && !(id in s.visible)) return s;
+      if (!(id in s.drafts) && !(id in s.visible) && !(id in s.docked)) return s;
       const drafts = { ...s.drafts };
       const visible = { ...s.visible };
+      const docked = { ...s.docked };
       delete drafts[id];
       delete visible[id];
-      return { drafts, visible };
+      delete docked[id];
+      return { drafts, visible, docked };
     }),
 }));

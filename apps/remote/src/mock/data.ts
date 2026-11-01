@@ -2,7 +2,7 @@
 import type { Agent, AgentStatus, FileDiff, RemoteAccount, RemoteCustomAgent, TimelineItem } from "@/lib/types";
 import { CHECKOUT_PNG, ORDERS_PNG } from "./images";
 
-const MIN = 60_000;
+export const MIN = 60_000;
 
 export const accounts: RemoteAccount[] = [
   { id: "acc-work", name: "Work", provider: "claude", color: "#4FC3F7", label: "Claude Max" },
@@ -98,7 +98,7 @@ export const slashCommands = [
   { name: "remote-control", description: "Continue this session from claude.ai/code or the Claude mobile app", hint: null },
 ];
 
-function agent(
+export function agent(
   now: number,
   id: string,
   title: string,
@@ -374,12 +374,12 @@ const stripeUnified = `--- a/src/billing/CheckoutButton.tsx
 `;
 
 let seq = 0;
-function base(agentId: string, ts: number) {
+export function base(agentId: string, ts: number) {
   seq += 1;
   return { id: `${agentId}-i${seq}`, agentId, seq, ts };
 }
 
-function tool(
+export function tool(
   agentId: string,
   ts: number,
   toolKind: Extract<TimelineItem, { kind: "tool_call" }>["toolKind"],

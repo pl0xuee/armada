@@ -1,5 +1,28 @@
 const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "narrow" });
 
+// Building an Intl.DateTimeFormat is ~50x slower than formatting with one, and timestamps render per row.
+function dateFormat(options: Intl.DateTimeFormatOptions) {
+  let fmt: Intl.DateTimeFormat | undefined;
+  return (ts: number): string => {
+    const date = new Date(ts);
+    // toLocale*String returns this for bad input; Intl.DateTimeFormat#format would throw.
+    if (Number.isNaN(date.getTime())) return "Invalid Date";
+    return (fmt ??= new Intl.DateTimeFormat(undefined, options)).format(date);
+  };
+}
+
+const shortDay = dateFormat({ month: "short", day: "numeric" });
+const timeOfDay = dateFormat({ hour: "numeric", minute: "2-digit" });
+const shortDate = dateFormat({ month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const longDate = dateFormat({
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+  hour: "numeric",
+  minute: "numeric",
+  second: "numeric",
+});
+
 /** Compact relative time: "now", "3m", "2h", "Yesterday", "Mar 4". */
 export function relativeTime(ts: number, now = Date.now()): string {
   const diff = Math.max(0, now - ts);
@@ -12,7 +35,7 @@ export function relativeTime(ts: number, now = Date.now()): string {
   const d = Math.floor(h / 24);
   if (d === 1) return "1d";
   if (d < 7) return `${d}d`;
-  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return shortDay(ts);
 }
 
 /** Longer relative time for tooltips / headers: "3 min. ago". */
@@ -26,16 +49,16 @@ export function relativeTimeLong(ts: number, now = Date.now()): string {
 }
 
 export function clockTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return timeOfDay(ts);
 }
 
 export function fullDate(ts: number): string {
-  return new Date(ts).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return shortDate(ts);
+}
+
+/** Locale date and time with seconds, as `Date#toLocaleString()` prints it. */
+export function fullDateTime(ts: number): string {
+  return longDate(ts);
 }
 
 export function formatCost(usd: number): string {

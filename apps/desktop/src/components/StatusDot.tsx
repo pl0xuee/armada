@@ -30,6 +30,10 @@ export function StatusDot({
     );
   }
   const pulse = status === "working" || status === "needs_permission" || status === "starting";
+  // Every animated dot is its own compositor layer, and rows, pills and tile headers add up to dozens.
+  // Only the prominent dot moves; small ones keep the glow plus a still ring, which still reads as active.
+  const animated = pulse && size >= 8;
+  const still = animated ? "" : `0 0 0 2px color-mix(in srgb, ${meta.colorVar} 28%, transparent), `;
   return (
     <span
       role="img"
@@ -37,7 +41,7 @@ export function StatusDot({
       className={cn("relative inline-flex shrink-0 items-center justify-center", className)}
       style={{ width: size, height: size }}
     >
-      {pulse && (
+      {animated && (
         <span
           className="absolute inset-0 rounded-full animate-pulse-ring"
           style={{ background: meta.colorVar }}
@@ -45,13 +49,13 @@ export function StatusDot({
         />
       )}
       <span
-        className={cn("relative rounded-full", status === "starting" && "animate-breathe")}
+        className={cn("relative rounded-full", animated && status === "starting" && "animate-breathe")}
         style={{
           width: size,
           height: size,
           background: status === "stopped" ? "transparent" : meta.colorVar,
           border: status === "stopped" ? `1.5px solid ${meta.colorVar}` : undefined,
-          boxShadow: pulse ? `0 0 8px 1px color-mix(in srgb, ${meta.colorVar} 70%, transparent)` : undefined,
+          boxShadow: pulse ? `${still}0 0 8px 1px color-mix(in srgb, ${meta.colorVar} 70%, transparent)` : undefined,
         }}
       />
     </span>

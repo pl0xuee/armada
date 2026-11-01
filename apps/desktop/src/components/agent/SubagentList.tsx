@@ -17,7 +17,7 @@ function useNow(active: boolean): number {
   return now;
 }
 
-/** Sub-agents of one agent: running ones first, then those finished this turn (dimmed). */
+/** Sub-agents of one agent: running ones first, then those finished this turn (muted). */
 export function SubagentList({
   runs,
   onSelect,
@@ -40,7 +40,6 @@ export function SubagentList({
               onClick={() => onSelect(r)}
               className={cn(
                 "flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-gunmetal",
-                !running && "opacity-60 hover:opacity-100",
               )}
             >
               <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
@@ -49,23 +48,26 @@ export function SubagentList({
                 ) : r.state === "failed" ? (
                   <CircleX className="h-3.5 w-3.5 text-err" aria-label="Failed" />
                 ) : (
-                  <CircleCheck className="h-3.5 w-3.5 text-ok/80" aria-label="Done" />
+                  <CircleCheck className="h-3.5 w-3.5 text-ok" aria-label="Done" />
                 )}
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5">
-                  <span className="inline-flex h-4 shrink-0 items-center gap-1 rounded border border-violet/30 bg-violet/10 px-1 text-[10px] font-semibold uppercase tracking-[0.05em] text-violet">
+                  <span className="inline-flex h-4 shrink-0 items-center gap-1 rounded border border-violet/30 bg-violet/10 px-1 text-[11px] font-semibold uppercase tracking-[0.05em] text-violet">
                     <Bot className="h-2.5 w-2.5" />
                     {r.kind ?? "Sub-agent"}
                   </span>
-                  {running && r.background && <span className="text-[10.5px] text-steel">background</span>}
+                  {running && r.background && <span className="text-[11px] text-steel">background</span>}
                   {running && (
                     <span className="ml-auto shrink-0 text-[11px] text-steel tabular">
                       {formatElapsed(now - r.startedAt)}
                     </span>
                   )}
                 </span>
-                <span className="mt-0.5 block truncate text-[12.5px] text-fg" title={r.description}>
+                <span
+                  className={cn("mt-0.5 block truncate text-[12.5px]", running ? "text-fg" : "text-muted")}
+                  title={r.description}
+                >
                   {r.description}
                 </span>
                 {running && r.step && (

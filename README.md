@@ -69,8 +69,7 @@ Each agent has a workspace panel (`` Ctrl/Cmd+` ``) in its own folder:
 
 ### Visibility: know what every agent is doing
 
-- **Mission Control** shows the whole fleet live, with a grid or list view, filters and Allow / Deny right on the cards.
-- **Inbox and "Needs you"** collect every pending approval and finished task, with keyboard triage (J / K / E).
+- **Mission Control** is one view with two tabs. **Needs you** is the queue of every pending approval, question, error and finished task, with keyboard triage (J / K / E). **All agents** shows the whole fleet live, with a grid or list view and filters. The rail badge, tab count and window title all show the same number.
 - **Sub-agents you can see.** When Claude or Codex hands work to a sub-agent it appears as its own card with its tool calls nested inside, and the title bar counts running sub-agents across the fleet.
 - **Usage and limits.** The agent header shows your plan and your 5-hour and weekly usage (where the provider reports them), with per-account meters and a Usage page.
 - **Notifications** the moment an agent needs you: sounds and custom sound packs, Approve / Deny in the notification on Linux (plain notifications on macOS and Windows), a phone push via ntfy, and re-pings when an approval goes stale.
@@ -166,9 +165,9 @@ Armada is fully usable from the keyboard. Press `Ctrl/Cmd+/` (or `?`) in the app
 |---|---|
 | `Ctrl/Cmd+K` | Command palette (type `>` to start an agent) |
 | `Ctrl/Cmd+N` | New agent |
-| `Ctrl/Cmd+J` | Needs you (again for the next one) |
-| `Ctrl/Cmd+I` | Inbox |
-| `Ctrl/Cmd+Shift+M` | Mission Control |
+| `Ctrl/Cmd+J` | Mission Control: Needs you (again for the next one) |
+| `Ctrl/Cmd+I` | Mission Control: Needs you (same as J) |
+| `Ctrl/Cmd+Shift+M` | Mission Control: All agents |
 | `Ctrl/Cmd+B` | Show or hide the agent list |
 | `Ctrl/Cmd+1` to `9` | Jump to an agent |
 | `Ctrl/Cmd+,` | Settings |

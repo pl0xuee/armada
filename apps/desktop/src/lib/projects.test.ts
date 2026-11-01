@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupByProject, orderedAgents, projectKey } from "./agents";
+import { groupByProject, orderedAgents, projectKey, triageQueue } from "./agents";
 import type { Agent } from "./types";
 
 let n = 0;
@@ -11,6 +11,9 @@ const agent = (over: Partial<Agent>): Agent =>
     status: "idle",
     archived: false,
     pendingPermissions: 0,
+    unread: false,
+    rateLimited: false,
+    acknowledgedAt: null,
     lastActivityAt: 0,
     branch: null,
     lastMessage: null,
@@ -41,13 +44,33 @@ describe("groupByProject", () => {
     expect(projects[0].needs).toBe(1);
   });
 
+  it("counts what needs you the way the rail badge does", () => {
+    const { projects } = groupByProject([
+      agent({ status: "needs_permission" }),
+      agent({ status: "idle", pendingPermissions: 2 }),
+      agent({ status: "error", lastActivityAt: 10, acknowledgedAt: 10 }), // marked Done
+      agent({ status: "idle", unread: true }), // finished, not looked at
+      agent({ status: "idle" }),
+      agent({ status: "interrupted" }), // not waiting on you by itself
+    ]);
+    expect(projects[0].needs).toBe(3);
+    expect(projects[0].needs).toBe(triageQueue(projects[0].agents).length);
+  });
+
+  it("brings an acknowledged agent back when it does something new", () => {
+    const a = agent({ status: "error", lastActivityAt: 10, acknowledgedAt: 10 });
+    expect(groupByProject([a]).projects[0].needs).toBe(0);
+    expect(groupByProject([{ ...a, lastActivityAt: 11 }]).projects[0].needs).toBe(1);
+  });
+
   it("orders a project's agents: needs you, working, then recent", () => {
     const { projects } = groupByProject([
       agent({ id: "idle", lastActivityAt: 900 }),
       agent({ id: "work", status: "working", lastActivityAt: 100 }),
       agent({ id: "err", status: "error", lastActivityAt: 50 }),
+      agent({ id: "ask", status: "needs_permission", lastActivityAt: 10 }),
     ]);
-    expect(projects[0].agents.map((a) => a.id)).toEqual(["err", "work", "idle"]);
+    expect(projects[0].agents.map((a) => a.id)).toEqual(["ask", "err", "work", "idle"]);
     expect(projects[0].working).toBe(1);
   });
 

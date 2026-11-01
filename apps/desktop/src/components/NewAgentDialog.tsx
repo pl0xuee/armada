@@ -80,7 +80,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
   const settings = useApp((s) => s.settings);
   const openAgent = useUi((s) => s.openAgent);
   const openCompare = useUi((s) => s.openCompare);
-  const openProject = useUi((s) => s.openProject);
+  const openAgents = useUi((s) => s.openAgents);
   const setView = useUi((s) => s.setView);
 
   const recent = settings?.recentProjects ?? [];
@@ -294,9 +294,9 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
         onDone();
         if (groupId && allLaunched.length >= 2) {
           // A comparison (one agent per account) has its own page; several copies of one agent
-          // stay inside their project, where more can be started.
+          // are shown together as a grid of conversations.
           if (compare) openCompare(groupId);
-          else openProject(allLaunched[0].projectPath);
+          else openAgents(allLaunched.map((a) => a.id));
           toast.success(`Launched ${allLaunched.length} agents`, {
             description: compare ? "Comparing side by side." : "Each has its own worktree.",
           });
@@ -340,11 +340,11 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
           action:
             groupId && allLaunched.length > 0
               ? {
-                  label: compare ? "View comparison" : "View project",
+                  label: compare ? "View comparison" : "View agents",
                   onClick: () => {
                     onDone();
                     if (compare) openCompare(groupId);
-                    else openProject(allLaunched[0].projectPath);
+                    else openAgents(allLaunched.map((a) => a.id));
                   },
                 }
               : undefined,
@@ -526,7 +526,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                     <ProviderGlyph provider="custom" customAgentId={c.id} size="md" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[12.5px] font-medium">{c.name}</span>
-                      <span className="block truncate font-mono text-[10.5px] text-steel">
+                      <span className="block truncate font-mono text-[11px] text-steel">
                         {[c.command, ...c.args].join(" ")}
                       </span>
                     </span>

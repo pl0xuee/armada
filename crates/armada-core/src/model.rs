@@ -261,8 +261,10 @@ pub struct Agent {
     pub pending_permissions: i64,
     #[serde(default)]
     pub config_options: Vec<ConfigOption>,
-    /// The running agent takes messages into its current turn (steering), so
-    /// "Send now" doesn't have to stop it.
+    /// The running agent takes a message while it works and reads it at its next
+    /// step (Claude's queued prompts, Codex's turn/steer), so "Send now" doesn't
+    /// stop it. Without this "Send now" only moves the message to the front of
+    /// the queue; stopping the turn is always the separate "Stop and send".
     #[serde(default)]
     pub steerable: bool,
     /// Slash commands the agent advertises (ACP `available_commands_update`).
@@ -301,10 +303,11 @@ pub struct Agent {
     /// agent moved to another account; survives restarts until the brief is sent).
     #[serde(default)]
     pub needs_briefing: bool,
-    /// The agent has been told it can show pictures (see `guidance`): as its system prompt, or
-    /// as a note ahead of a prompt when its session was resumed.
+    /// Which version of Armada's guidance (see `guidance::tag`: it can show pictures, how to
+    /// write replies) the agent has been given, as its system prompt or as a note ahead of a
+    /// prompt when its session was resumed. Empty = none yet.
     #[serde(default)]
-    pub guided: bool,
+    pub guide_tag: String,
     /// The user's last choice per composer option (model, effort, …), re-applied
     /// whenever this agent's adapter restarts. Never holds permission options.
     #[serde(default)]
@@ -348,13 +351,29 @@ pub struct HelperSync {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum BusySend {
-    /// Ask each time.
+    /// Like Claude Code: hand the message to the running turn when the agent can take
+    /// it (it reads it at its next step), else queue it behind the turn. Older
+    /// settings called this "ask".
     #[default]
-    Ask,
-    /// Queue behind the running turn.
+    #[serde(alias = "ask")]
+    Deliver,
+    /// Hold it until the running turn ends.
     Queue,
     /// Start a helper agent right away.
     Helper,
+}
+
+/// How agents are told to write their replies. It shapes the reply, not the work done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ResponseStyle {
+    /// The outcome first, then only what the reader needs to decide, verify or act on.
+    #[default]
+    Concise,
+    /// The outcome, then a short account of what changed, how it was checked and what is left.
+    Balanced,
+    /// A structured, richer account: reasoning, verification and next steps.
+    Detailed,
 }
 
 /// Which agent a helper runs as; unset parts mean "same as the main agent".
@@ -654,6 +673,9 @@ pub enum ItemBody {
         text: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attachments: Vec<Attachment>,
+        /// Sent while the agent was working: it reads this at its next step.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        mid_turn: bool,
     },
     AgentMessage {
         text: String,
@@ -909,11 +931,27 @@ pub struct UpdateInfo {
     pub can_install: bool,
 }
 
+/// Which built-in set of attention sounds plays (custom files override per event).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SoundPack {
+    /// Warm mallet tones (the default).
+    #[default]
+    Soft,
+    /// Brighter bell and crystal tones with a longer shimmer.
+    Glass,
+    /// The original plain synthesized tones.
+    Classic,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SoundSettings {
     pub enabled: bool,
     pub volume: f32,
+    /// Built-in sound set; old settings files without it get the default.
+    #[serde(default)]
+    pub pack: SoundPack,
     pub on_permission: bool,
     pub on_done: bool,
     pub on_error: bool,
@@ -988,8 +1026,12 @@ pub struct Settings {
     /// applied to new agents of that provider. Never holds permission options.
     pub config_defaults:
         std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
-    /// What sending does while an agent is busy: "ask" | "queue" | "helper".
+    /// What sending does while an agent is busy: "deliver" | "queue" | "helper".
     pub busy_send: BusySend,
+    /// How agents are told to write their replies: "concise" | "balanced" | "detailed".
+    /// Read whenever an agent is briefed: new agents get it from the start, existing ones
+    /// the next time their session is resumed.
+    pub response_style: ResponseStyle,
     /// Which agent a helper runs as (unset = same as the main agent).
     pub helper_defaults: HelperDefaults,
     /// Cap on what all agents together spend per local day, in USD (None = no cap).
@@ -1179,6 +1221,7 @@ impl Default for SoundSettings {
         SoundSettings {
             enabled: true,
             volume: 0.7,
+            pack: SoundPack::default(),
             on_permission: true,
             on_done: true,
             on_error: true,
@@ -1376,7 +1419,8 @@ impl Default for Settings {
             voice: VoiceSettings::default(),
             voice_assistant: VoiceAssistantSettings::default(),
             config_defaults: Default::default(),
-            busy_send: BusySend::Ask,
+            busy_send: BusySend::Deliver,
+            response_style: ResponseStyle::Concise,
             helper_defaults: HelperDefaults::default(),
             daily_budget_usd: None,
             agent_budget_usd: None,
@@ -1437,6 +1481,40 @@ pub fn now_ms() -> i64 {
 }
 
 #[cfg(test)]
+mod sound_settings_tests {
+    use super::*;
+
+    #[test]
+    fn sound_pack_defaults_to_soft_for_old_settings() {
+        assert_eq!(SoundSettings::default().pack, SoundPack::Soft);
+        let old: SoundSettings =
+            serde_json::from_str(r#"{"enabled":false,"volume":0.3,"onDone":false}"#).unwrap();
+        assert_eq!(old.pack, SoundPack::Soft);
+        assert!(!old.enabled && !old.on_done);
+        assert_eq!(old.volume, 0.3);
+    }
+
+    #[test]
+    fn sound_pack_round_trips_as_lowercase() {
+        for (pack, name) in [
+            (SoundPack::Soft, "soft"),
+            (SoundPack::Glass, "glass"),
+            (SoundPack::Classic, "classic"),
+        ] {
+            let s = SoundSettings {
+                pack,
+                ..SoundSettings::default()
+            };
+            let json = serde_json::to_value(&s).unwrap();
+            assert_eq!(json["pack"], name);
+            let back: SoundSettings = serde_json::from_value(json).unwrap();
+            assert_eq!(back.pack, pack);
+        }
+        assert!(serde_json::from_str::<SoundPack>("\"loud\"").is_err());
+    }
+}
+
+#[cfg(test)]
 mod voice_settings_tests {
     use super::*;
 
@@ -1489,10 +1567,40 @@ mod voice_settings_tests {
     }
 
     #[test]
+    fn response_style_defaults_to_concise_and_round_trips() {
+        let old: Settings = serde_json::from_str(r#"{"theme":"gunmetal"}"#).unwrap();
+        assert_eq!(old.response_style, ResponseStyle::Concise);
+        assert_eq!(
+            serde_json::to_value(&old).unwrap()["responseStyle"],
+            "concise"
+        );
+        for (word, style) in [
+            ("concise", ResponseStyle::Concise),
+            ("balanced", ResponseStyle::Balanced),
+            ("detailed", ResponseStyle::Detailed),
+        ] {
+            let s: Settings =
+                serde_json::from_str(&format!(r#"{{"responseStyle":"{word}"}}"#)).unwrap();
+            assert_eq!(s.response_style, style);
+            let back: Settings = serde_json::from_value(serde_json::to_value(&s).unwrap()).unwrap();
+            assert_eq!(back.response_style, style);
+            assert!(back.validate().is_ok());
+        }
+        assert!(serde_json::from_str::<Settings>(r#"{"responseStyle":"nope"}"#).is_err());
+    }
+
+    #[test]
     fn helper_settings_round_trip_and_old_files_load() {
         let s: Settings = serde_json::from_str(r#"{"theme":"gunmetal"}"#).unwrap();
-        assert_eq!(s.busy_send, BusySend::Ask);
+        assert_eq!(s.busy_send, BusySend::Deliver);
         assert_eq!(s.helper_defaults, HelperDefaults::default());
+        // The old default "ask" (a chooser each time) now means deliver mid-turn.
+        let old: Settings = serde_json::from_str(r#"{"busySend":"ask"}"#).unwrap();
+        assert_eq!(old.busy_send, BusySend::Deliver);
+        assert_eq!(serde_json::to_value(&old).unwrap()["busySend"], "deliver");
+        // An explicit choice survives untouched.
+        let q: Settings = serde_json::from_str(r#"{"busySend":"queue"}"#).unwrap();
+        assert_eq!(q.busy_send, BusySend::Queue);
         let mut s = Settings {
             busy_send: BusySend::Helper,
             ..Settings::default()

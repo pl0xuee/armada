@@ -224,6 +224,15 @@ async function streamLines(
   updateItem(agentId, itemId, {});
 }
 
+/** A plan's entries with the first `done` completed and the next one in progress. */
+function planSteps(steps: readonly string[], done: number): PlanEntry[] {
+  return steps.map((content, i) => ({
+    content,
+    status: i < done ? "completed" : i === done ? "in_progress" : "pending",
+    priority: i === 0 ? "high" : "medium",
+  }));
+}
+
 async function pause(ms: number, turn: { cancelled: boolean }) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
@@ -328,6 +337,12 @@ async function scriptedTurn(agentId: string, prompt: string, turn: { cancelled: 
     1.6,
   );
 
+  // A short plan that ticks along (only for a real task, not "hi").
+  const steps = ["Read the relevant code", "Make the change", "Verify it", "Summarize what changed"];
+  const planned = prompt.trim().split(/\s+/).length >= 4;
+  const plan = planned ? addItem(agentId, { kind: "plan", entries: planSteps(steps, 0) }) : null;
+  const advance = (done: number) => plan && updateItem(agentId, plan.id, { entries: planSteps(steps, done) });
+
   // Read
   const target = READ_TARGETS[Math.floor(Math.random() * READ_TARGETS.length)];
   const read = addItem(agentId, {
@@ -343,6 +358,7 @@ async function scriptedTurn(agentId: string, prompt: string, turn: { cancelled: 
   });
   await pause(700, turn);
   updateItem(agentId, read.id, { status: "completed" });
+  advance(1);
 
   // Permission-gated command when the prompt sounds like it wants to run something.
   if (/\b(test|run|install|build|deploy|migrat|lint)\w*/i.test(prompt)) {
@@ -417,6 +433,7 @@ async function scriptedTurn(agentId: string, prompt: string, turn: { cancelled: 
       turn,
     );
     updateItem(agentId, exec.id, { status: "completed" });
+    advance(2);
   } else {
     // An edit with a diff
     const path = "src/lib/retry.ts";
@@ -437,12 +454,16 @@ async function scriptedTurn(agentId: string, prompt: string, turn: { cancelled: 
     await pause(900, turn);
     const diffs: FileDiff[] = [{ path, oldText, newText, unified: null }];
     updateItem(agentId, edit.id, { status: "completed", diffs });
+    advance(2);
   }
 
   bumpUsage(agentId, Math.round(rand(6000, 22000)));
+  await pause(900, turn);
+  advance(3);
   const reply = REPLIES[Math.floor(Math.random() * REPLIES.length)];
   const msg = addItem(agentId, { kind: "agent_message", text: "" });
   await streamField(agentId, msg.id, "text", reply, turn);
+  advance(4);
   finishTurn(agentId, reply);
 }
 
@@ -566,6 +587,16 @@ function startLiveActivity() {
           "Find recent (2025+) public benchmarks for Qdrant filtered vector search between 1M and 10M vectors. Summarize p50/p95 latency, hardware, and recall settings. Cite sources.",
       },
     });
+    // A plan that ticks along as the research proceeds.
+    const steps = [
+      "Collect Qdrant filtered-search benchmarks",
+      "Survey Turbopuffer limits and pricing",
+      "Price out pgvector on RDS for 4M vectors",
+      "Compare latency, cost and ops burden",
+      "Write the recommendation",
+    ];
+    const rplan = addItem("a-research", { kind: "plan", entries: planSteps(steps, 0) });
+    const advance = (done: number) => updateItem("a-research", rplan.id, { entries: planSteps(steps, done) });
     // Two background sub-agents (Claude's run_in_background): their calls complete at launch, yet
     // they keep working until the turn ends.
     const bgRuns = [
@@ -636,7 +667,9 @@ function startLiveActivity() {
     }
     appendDelta("a-research", sa.id, "output", "Qdrant p95 ≈ 9 ms at 4M × 1536 with payload filters (HNSW m=16).");
     updateItem("a-research", sa.id, { status: "completed" });
+    advance(1);
 
+    let fetched = 0;
     for (const [title, out] of sources) {
       await pause(rand(2500, 4500), turn);
       const kind: ToolKind = title.startsWith("Search") ? "search" : "fetch";
@@ -656,6 +689,7 @@ function startLiveActivity() {
       updateItem("a-research", tc.id, { status: "completed" });
       bumpUsage("a-research", 9000);
       patchAgent("a-research", { lastMessage: title.replace(/^Fetch /, "Reading ") });
+      advance(Math.min(4, 1 + ++fetched));
     }
     for (const id of bgChildren) updateItem("a-research", id, { status: "completed" });
     await pause(1500, turn);
@@ -663,6 +697,7 @@ function startLiveActivity() {
     const text =
       "## Recommendation: start with pgvector\n\n| | pgvector (HNSW) | Qdrant Cloud | Turbopuffer |\n|---|---|---|---|\n| p95 @ 4M × 1536 | ~18 ms | ~9 ms | ~25 ms (warm) |\n| Filtered search | good (0.8 iterative scans) | excellent | good |\n| Est. monthly cost | **~$410** | ~$690 | ~$140 + egress |\n| Ops burden | none new | new service | new vendor |\n\n**Why:** you already run Postgres, latency is well inside the 100 ms budget, and it keeps tickets and embeddings transactionally consistent. Revisit Qdrant if filtered queries exceed ~30% of traffic or the corpus passes 20M.";
     await streamField("a-research", msg.id, "text", text, turn, 0.6);
+    advance(5);
     finishTurn(
       "a-research",
       "Recommendation: start with pgvector. ~18 ms p95 at 4M vectors and no new infrastructure.",
@@ -865,25 +900,84 @@ async function runInstall(t: MockTerminal) {
 // ---------------------------------------------------------------- sound (WebAudio preview)
 
 let audioCtx: AudioContext | null = null;
+
+/** Rough WebAudio stand-ins for the native packs (same notes; the real ones are generated WAVs). */
+const MOCK_NOTES: Record<"soft" | "glass", Record<AttentionReason, [number, number, number][]>> = {
+  // [start s, Hz, ring s]
+  soft: {
+    done: [
+      [0, 440, 0.5],
+      [0.14, 587.33, 0.9],
+    ],
+    permission: [
+      [0, 659.25, 0.4],
+      [0.17, 987.77, 0.55],
+    ],
+    error: [
+      [0, 369.99, 0.25],
+      [0.17, 293.66, 0.35],
+    ],
+  },
+  glass: {
+    done: [
+      [0, 739.99, 0.6],
+      [0.1, 880, 0.7],
+      [0.2, 1174.66, 1.2],
+    ],
+    permission: [
+      [0, 739.99, 0.5],
+      [0.19, 987.77, 0.8],
+    ],
+    error: [
+      [0, 440, 0.3],
+      [0.19, 369.99, 0.4],
+    ],
+  },
+};
+
 function playTone(reason: AttentionReason) {
   try {
     audioCtx ??= new AudioContext();
     const ctx = audioCtx;
-    const vol = db.settings.sounds.volume * 0.18;
-    const notes = reason === "permission" ? [660, 990] : reason === "done" ? [523.25, 659.25, 783.99] : [196, 147];
-    notes.forEach((f, i) => {
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.type = reason === "error" ? "triangle" : "sine";
-      o.frequency.value = f;
-      const t0 = ctx.currentTime + i * 0.11;
-      g.gain.setValueAtTime(0, t0);
-      g.gain.linearRampToValueAtTime(vol, t0 + 0.012);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45);
-      o.connect(g).connect(ctx.destination);
-      o.start(t0);
-      o.stop(t0 + 0.5);
-    });
+    const { pack, volume } = db.settings.sounds;
+    const vol = volume * 0.18;
+    const out = (g: GainNode) => g.connect(ctx.destination);
+    if (pack === "classic") {
+      const notes = reason === "permission" ? [660, 990] : reason === "done" ? [523.25, 659.25, 783.99] : [196, 147];
+      notes.forEach((f, i) => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = reason === "error" ? "triangle" : "sine";
+        o.frequency.value = f;
+        const t0 = ctx.currentTime + i * 0.11;
+        g.gain.setValueAtTime(0, t0);
+        g.gain.linearRampToValueAtTime(vol, t0 + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45);
+        o.connect(g);
+        out(g);
+        o.start(t0);
+        o.stop(t0 + 0.5);
+      });
+      return;
+    }
+    const ratios = pack === "glass" ? [1, 2.756, 5.404] : [1, 4, 10];
+    const amps = pack === "glass" ? [1, 0.26, 0.1] : [1, 0.3, 0.07];
+    for (const [at, f, ring] of MOCK_NOTES[pack][reason]) {
+      ratios.forEach((r, k) => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.frequency.value = f * r;
+        const t0 = ctx.currentTime + at;
+        const len = ring / (1 + 3 * k);
+        g.gain.setValueAtTime(0, t0);
+        g.gain.linearRampToValueAtTime(vol * amps[k]!, t0 + 0.008);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + len);
+        o.connect(g);
+        out(g);
+        o.start(t0);
+        o.stop(t0 + len + 0.05);
+      });
+    }
   } catch {
     /* audio not available */
   }
@@ -1118,10 +1212,16 @@ export const mockApi: ArmadaApi = {
     return delay(clone(agent), 250);
   },
 
-  async sendPrompt(agentId, text, attachments) {
+  async sendPrompt(agentId, text, attachments, deliver = false) {
     const a = getAgent(agentId);
     if (!a.running) throw new Error("Agent is not running. Resume it first.");
-    // Like the real backend: messages sent mid-turn queue (outside the timeline) and run after it.
+    // Like the real backend: with `deliver`, an agent that takes messages mid-turn gets it in the running
+    // turn right away (shown in the timeline, marked mid-turn). Otherwise messages sent mid-turn queue
+    // (outside the timeline) and run after it; slash commands and a paused queue always queue.
+    if (BUSY.has(a.status) && deliver && a.steerable && !a.queuePaused && !text.trimStart().startsWith("/")) {
+      addItem(agentId, { kind: "user_message", text, midTurn: true, ...(attachments?.length ? { attachments } : {}) });
+      return delay(undefined, 40);
+    }
     if (BUSY.has(a.status)) {
       const q: QueuedPrompt = { id: newId("q"), text, attachments: attachments?.length ?? 0 };
       if (attachments?.length) queueImages.set(q.id, attachments);
@@ -1230,22 +1330,25 @@ export const mockApi: ArmadaApi = {
     const q = a.queue.find((x) => x.id === queuedId);
     if (!q) throw new Error("That message already ran.");
     const t = turns.get(agentId);
-    if (!interrupt && a.steerable && t && !t.cancelled && q.text.trimStart().startsWith("/")) {
-      // Commands only work at the start of a turn: first in line instead.
+    const running =
+      (!!t && !t.cancelled) || a.status === "working" || a.status === "starting" || a.status === "needs_permission";
+    if (!interrupt && running) {
+      if (a.steerable && !q.text.trimStart().startsWith("/")) {
+        // Delivered into the running turn: it shows where it was sent and the turn goes on.
+        setQueue(
+          agentId,
+          a.queue.filter((x) => x.id !== queuedId),
+          { queuePaused: false },
+        );
+        addItem(agentId, { kind: "user_message", text: q.text });
+        return delay(undefined, 60);
+      }
+      // Can't be delivered mid-turn (a slash command, or an agent that can't take messages meanwhile):
+      // first in line, runs the moment the turn ends. Nothing is stopped.
       setQueue(agentId, [q, ...a.queue.filter((x) => x.id !== queuedId)], { queuePaused: false });
       return delay(undefined, 60);
     }
-    if (!interrupt && a.steerable && t && !t.cancelled) {
-      // Steered into the running turn: it shows where it was sent and the turn goes on.
-      setQueue(
-        agentId,
-        a.queue.filter((x) => x.id !== queuedId),
-        { queuePaused: false },
-      );
-      addItem(agentId, { kind: "user_message", text: q.text });
-      return delay(undefined, 60);
-    }
-    // Move it to the front, stop the current turn, and let the queue run it.
+    // Idle (runs now) or "Stop & send": move it to the front, stop the current turn, and let the queue run it.
     setQueue(agentId, [q, ...a.queue.filter((x) => x.id !== queuedId)], { queuePaused: false });
     if (t) t.cancelled = true;
     for (const it of itemsOf(agentId)) {
@@ -1254,7 +1357,8 @@ export const mockApi: ArmadaApi = {
         updateItem(agentId, it.id, { status: "failed" });
       }
     }
-    addItem(agentId, { kind: "notice", level: "info", text: "Interrupted to run your queued message now." });
+    if (running)
+      addItem(agentId, { kind: "notice", level: "info", text: "Interrupted to run your queued message now." });
     patchAgent(agentId, { status: "idle", pendingPermissions: 0 });
     setTimeout(() => drainQueue(agentId), 300);
     return delay(undefined, 60);
@@ -1612,6 +1716,10 @@ export const mockApi: ArmadaApi = {
   },
 
   async chimeWatched() {
+    return undefined;
+  },
+
+  async setNeedsYouCount() {
     return undefined;
   },
 
@@ -2948,7 +3056,9 @@ function validateSettings(s: Settings): string | null {
   for (const cap of [s.dailyBudgetUsd, s.agentBudgetUsd]) {
     if (cap != null && (!Number.isFinite(cap) || cap <= 0)) return "Budgets must be more than $0 (or empty for no cap)";
   }
-  if (!["ask", "queue", "helper"].includes(s.busySend)) return `Unknown busy-send setting “${s.busySend}”`;
+  if (!["deliver", "queue", "helper"].includes(s.busySend)) return `Unknown busy-send setting “${s.busySend}”`;
+  if (!["concise", "balanced", "detailed"].includes(s.responseStyle))
+    return `Unknown response style “${s.responseStyle}”`;
   if (!["off", "ask", "auto"].includes(s.failover)) return `Unknown failover setting “${s.failover}”`;
   if (!["auto", "ask"].includes(s.defaultPermissionMode)) return `Unknown permission mode “${s.defaultPermissionMode}”`;
   if (!Number.isInteger(s.remote.port) || s.remote.port < 1 || s.remote.port > 65535) {

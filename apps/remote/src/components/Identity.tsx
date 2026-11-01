@@ -104,11 +104,8 @@ export function StatusDot({ status, size = 8, className }: { status: AgentStatus
   const hollow = status === "stopped";
   return (
     <span className={cn("relative inline-flex shrink-0", className)} style={{ width: size, height: size }} aria-hidden>
-      {meta.live && (
-        <span className="animate-pulse-ring absolute inset-0 rounded-full" style={{ background: meta.color }} />
-      )}
       <span
-        className={cn("relative h-full w-full rounded-full", status === "starting" && "animate-breathe")}
+        className="relative h-full w-full rounded-full"
         style={{
           background: hollow ? "transparent" : meta.color,
           border: hollow ? `1.5px solid ${meta.color}` : undefined,

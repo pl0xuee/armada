@@ -138,7 +138,6 @@ try {
   // [rail aria-label prefix, expected <h1> or null]
   const views = [
     ["Mission Control", "Mission Control"],
-    ["Inbox", "Inbox"],
     ["Schedules", "Schedules"],
     ["Usage", "Usage"],
     ["Accounts", "Accounts"],
@@ -172,6 +171,23 @@ try {
     }
     await sleep(500); // let the view's own loads (accounts list, usage, ...) settle
     await assertHealthy(label);
+  }
+
+  // ---- Mission Control tabs (the queue of agents that need you, and every agent) -----
+  await goRail("Mission Control");
+  for (const tab of ["Needs you", "All agents"]) {
+    log(`mission control tab: ${tab}`);
+    const radio = await browser.$(
+      `//*[@role="radiogroup" and @aria-label="Mission Control"]//button[@role="radio"][contains(normalize-space(.),"${tab}")]`,
+    );
+    await radio.waitForExist({ timeout: 10_000, timeoutMsg: `Mission Control tab "${tab}" missing` });
+    await radio.click();
+    await browser.waitUntil(async () => (await radio.getAttribute("aria-checked")) === "true", {
+      timeout: 5_000,
+      timeoutMsg: `Mission Control tab "${tab}" never became selected`,
+    });
+    await sleep(300);
+    await assertHealthy(`mission control/${tab}`);
   }
 
   // ---- command palette ------------------------------------------------------------

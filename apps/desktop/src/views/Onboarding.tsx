@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Bell,
+  BellOff,
   Check,
   FolderGit2,
   GitBranch,
@@ -81,6 +82,7 @@ export function Onboarding() {
   };
 
   const id = STEPS[step].id;
+  const hero = id === "welcome" || id === "done";
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -113,7 +115,7 @@ export function Onboarding() {
               >
                 <span
                   className={cn(
-                    "flex h-4 w-4 items-center justify-center rounded-full text-[9.5px] tabular",
+                    "flex h-4 w-4 items-center justify-center rounded-full text-[11px] tabular",
                     i < step
                       ? "bg-accent/90 text-accent-fg"
                       : i === step
@@ -141,7 +143,13 @@ export function Onboarding() {
       </div>
 
       <div className="relative z-10 min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex min-h-full w-full max-w-[680px] flex-col justify-center px-6 py-8">
+        <div
+          className={cn(
+            "mx-auto flex min-h-full w-full max-w-[680px] flex-col px-6 py-8",
+            // Welcome and Ready are centred; the steps with a form share one top offset so headings stay put.
+            hero ? "justify-center" : "pt-[clamp(24px,9vh,88px)]",
+          )}
+        >
           <div key={id} className="ob-step" style={{ "--ob-dx": `${dir * 28}px` } as React.CSSProperties}>
             {id === "welcome" && <Welcome onNext={() => go(1)} />}
             {id === "providers" && <ProvidersStep />}
@@ -186,11 +194,10 @@ function Backdrop() {
   );
 }
 
-function StepHeader({ eyebrow, title, description }: { eyebrow: string; title: ReactNode; description: ReactNode }) {
+function StepHeader({ title, description }: { title: ReactNode; description: ReactNode }) {
   return (
     <div className="mb-6">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-accent">{eyebrow}</p>
-      <h1 className="mt-1.5 text-[24px] font-semibold tracking-[-0.025em]">{title}</h1>
+      <h1 className="text-[24px] font-semibold tracking-[-0.025em]">{title}</h1>
       <p className="mt-1.5 max-w-[520px] text-[13.5px] leading-relaxed text-muted">{description}</p>
     </div>
   );
@@ -265,7 +272,6 @@ function ProvidersStep() {
   return (
     <>
       <StepHeader
-        eyebrow="Step 2 of 5 · Providers"
         title="Your agent runtimes"
         description="Armada drives each vendor's official CLI, so you get their newest features the day they ship. One click installs anything that's missing."
       />
@@ -301,7 +307,6 @@ function AccountsStep() {
   return (
     <>
       <StepHeader
-        eyebrow="Step 3 of 5 · Accounts"
         title="Sign in once, switch in one click"
         description="Armada found the logins your CLIs already use. Add more accounts (a second Claude Max, a work ChatGPT…) and run agents on all of them at once."
       />
@@ -338,7 +343,6 @@ function PrefsStep() {
   return (
     <>
       <StepHeader
-        eyebrow="Step 4 of 5 · Alerts"
         title="Attention, not babysitting"
         description="Armada pings you when an agent needs approval, finishes, or hits an error, and stays quiet otherwise."
       />
@@ -394,7 +398,7 @@ function PrefsStep() {
           }
         />
         <PrefCard
-          icon={<Bell className="opacity-60" />}
+          icon={<BellOff />}
           title="Smart mute"
           description="Stay silent about the agent you're already looking at."
           control={

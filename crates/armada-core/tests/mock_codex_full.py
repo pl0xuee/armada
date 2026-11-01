@@ -23,12 +23,14 @@ def note(method, params):
     send({"jsonrpc": "2.0", "method": method, "params": params})
 
 policy = None
+instructions = ""
 while True:
     msg = read(); method = msg.get("method"); mid = msg.get("id")
     if method == "initialize":
         send({"jsonrpc": "2.0", "id": mid, "result": {}})
     elif method == "thread/start":
         policy = msg["params"].get("approvalPolicy")
+        instructions = msg["params"].get("developerInstructions") or ""
         send({"jsonrpc": "2.0", "id": mid, "result": {"thread": {"id": "th1"}, "model": "m", "approvalPolicy": policy}})
     elif method == "model/list":
         send({"jsonrpc": "2.0", "id": mid, "result": {"data": []}})
@@ -50,7 +52,8 @@ while True:
         answers["elicit"] = ask(503, "mcpServer/elicitation/request", {"serverName": "srv", "threadId": "th1",
              "turnId": "t1", "message": "Need a token", "mode": "form", "requestedSchema": {"type": "object",
              "required": ["token"], "properties": {"token": {"type": "string", "title": "Token", "format": "password"}}}})
-        text = "policy=%s answers=%s" % (policy, json.dumps(answers, sort_keys=True))
+        text = "policy=%s style=%d pictures=%d answers=%s" % (policy, instructions.count("Armada response style: concise"),
+                                                            instructions.count("you CAN show pictures"), json.dumps(answers, sort_keys=True))
         note("item/completed", {"threadId": "th1", "item": {"id": "m1", "type": "agentMessage", "text": text}})
         note("turn/completed", {"threadId": "th1", "turn": {"id": "t1", "status": "completed"}})
     elif mid is not None and method is not None:

@@ -9,11 +9,13 @@ import {
   Repeat,
   ChevronRight,
   FolderOpen,
+  LayoutGrid,
   PanelLeftClose,
   Pencil,
   Play,
   Power,
   Plus,
+  Rows3,
   Search,
   Trash2,
   Workflow,
@@ -23,7 +25,7 @@ import { m, AnimatePresence } from "motion/react";
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { archiveAgent, exportConversation, renameAgent, resumeAgent, stopAgent } from "@/lib/actions";
 import { ARCHIVED_KEY, groupByProject, orderedAgents, projectKey } from "@/lib/agents";
-import { nestHelpers, syncPresentation } from "@/lib/helpers";
+import { MAX_TILES, nestHelpers, syncPresentation } from "@/lib/helpers";
 import { relativeTime, relativeTimeLong } from "@/lib/format";
 import { DONE_META, STATUS } from "@/lib/providers";
 import { useIsDone } from "@/store/completion";
@@ -38,10 +40,22 @@ import { ciSummary, listIndicator } from "@/lib/pr";
 import { useUi } from "@/store/ui";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { useRunningSubagentCount } from "./useSubagents";
+import { useAfterPaint } from "@/hooks/useAfterPaint";
 import { CiIcon } from "./PrChip";
 import { StatusDot } from "../StatusDot";
 import { Button } from "../ui/button";
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "../ui/menu";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+  DropdownMenu,
+  DropdownMenuCheckItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "../ui/menu";
 import { Kbd } from "../ui/kbd";
 import { Tooltip } from "../ui/tooltip";
 
@@ -58,6 +72,21 @@ function readCollapsed(): Record<string, boolean> {
   return { [ARCHIVED_KEY]: true };
 }
 
+const DENSITY_KEY = "armada.sidebarDensity";
+
+/** Comfortable also gives the open and waiting rows a preview line; compact never does. */
+type Density = "comfortable" | "compact";
+
+function readDensity(): Density {
+  try {
+    return localStorage.getItem(DENSITY_KEY) === "compact" ? "compact" : "comfortable";
+  } catch {
+    return "comfortable";
+  }
+}
+
+const NO_PROJECTS: never[] = [];
+
 export type AgentListVariant = "docked" | "drawer" | "full";
 
 export function AgentList({
@@ -71,13 +100,16 @@ export function AgentList({
   const agentsMap = useApp((s) => s.agents);
   const accounts = useApp((s) => s.accounts);
   const selected = useUi((s) => s.selectedAgentId);
-  const selectedProject = useUi((s) => s.selectedProjectPath);
-  const openProject = useUi((s) => s.openProject);
+  const openAgents = useUi((s) => s.openAgents);
   const openNewAgent = useUi((s) => s.openNewAgent);
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState(readCollapsed);
+  const [density, setDensity] = useState(readDensity);
   const searchRef = useRef<HTMLInputElement>(null);
   const now = useNow();
+  // Rows join the second frame at boot (header and filter paint first); later mounts are immediate.
+  const afterPaint = useAfterPaint();
+  const rowsReady = afterPaint || variant !== "docked";
 
   const agents = useMemo(() => Object.values(agentsMap), [agentsMap]);
   // Helpers nest under their main agent, except while filtering (then every match is its own row).
@@ -100,6 +132,15 @@ export function AgentList({
     setCollapsed(next);
     try {
       localStorage.setItem(COLLAPSE_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const chooseDensity = (d: Density) => {
+    setDensity(d);
+    try {
+      localStorage.setItem(DENSITY_KEY, d);
     } catch {
       /* ignore */
     }
@@ -158,17 +199,33 @@ export function AgentList({
             Projects
           </h2>
           <span className="rounded-md bg-raised px-1.5 text-[11px] font-medium text-steel tabular">{total}</span>
-          <Tooltip content="New agent" shortcut={[modKey, "N"]}>
-            <Button
-              size="sm"
-              variant="primary"
-              className={cn("ml-auto gap-1 px-2", variant === "full" ? "h-8 px-3" : "h-7")}
-              onClick={() => openNewAgent()}
-            >
-              <Plus className="!h-3.5 !w-3.5" strokeWidth={2.5} />
-              {variant === "full" ? "New agent" : "New"}
-            </Button>
-          </Tooltip>
+          <DropdownMenu>
+            <Tooltip content="Row density">
+              <DropdownMenuTrigger asChild>
+                <Button size="icon-xs" variant="ghost" className="ml-auto" aria-label="Row density">
+                  <Rows3 className="!h-3.5 !w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="min-w-[170px]">
+              <DropdownMenuLabel>Row density</DropdownMenuLabel>
+              <DropdownMenuCheckItem checked={density === "comfortable"} onSelect={() => chooseDensity("comfortable")}>
+                Comfortable
+              </DropdownMenuCheckItem>
+              <DropdownMenuCheckItem checked={density === "compact"} onSelect={() => chooseDensity("compact")}>
+                Compact
+              </DropdownMenuCheckItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {/* The full list sits under the home composer, which already starts agents. */}
+          {variant !== "full" && (
+            <Tooltip content="New agent" shortcut={[modKey, "N"]}>
+              <Button size="sm" variant="primary" className="h-7 gap-1 px-2" onClick={() => openNewAgent()}>
+                <Plus className="!h-3.5 !w-3.5" strokeWidth={2.5} />
+                New
+              </Button>
+            </Tooltip>
+          )}
         </div>
         <div className="px-3 pb-2">
           <div className="group relative">
@@ -199,74 +256,56 @@ export function AgentList({
                 <X className="h-3 w-3" />
               </button>
             ) : (
-              <Kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 opacity-70">/</Kbd>
+              <Kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2">/</Kbd>
             )}
           </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-          {projects.map((p) => {
+          {(rowsReady ? projects : NO_PROJECTS).map((p) => {
             const isCollapsed = collapsed[p.path] && !searching;
+            // The open agent lives in this project (as one of its agents or a helper under one).
+            const holdsOpen = p.agents.some(
+              (a) => a.id === selected || nesting?.children.get(a.id)?.some((h) => h.id === selected),
+            );
+            const together = p.agents.length >= 2;
             return (
               // One card per project: its header and its agents together, the agents hanging off a line.
               <div
                 key={p.path}
                 className={cn(
                   "mb-2.5 rounded-xl border bg-base/40 p-1 transition-colors",
-                  selectedProject === p.path && !selected ? "border-accent/30" : "border-line",
+                  holdsOpen ? "border-accent/30" : "border-line",
                 )}
               >
-                <div
-                  className={cn(
-                    "group/project relative mb-0.5 flex h-9 items-center gap-0.5 rounded-lg pr-1 transition-colors",
-                    selectedProject === p.path && !selected
-                      ? "bg-accent/[0.13] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent)_45%,transparent)]"
-                      : "hover:bg-raised/60",
-                  )}
-                >
-                  {selectedProject === p.path && !selected && (
-                    <span
-                      aria-hidden
-                      className="absolute -left-2 top-2 h-5 w-[3px] rounded-r-full bg-accent shadow-[0_0_8px_var(--accent)]"
-                    />
-                  )}
+                <div className="group/project @container/proj relative mb-0.5 flex h-9 items-center rounded-lg pr-1 transition-colors hover:bg-raised/60">
                   <button
                     type="button"
                     onClick={() => toggle(p.path)}
                     aria-expanded={!isCollapsed}
-                    aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${p.name}`}
-                    className="flex h-9 w-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:text-fg"
+                    title={p.path}
+                    className="flex h-9 min-w-0 flex-1 items-center gap-1.5 rounded-md pl-1.5 pr-1 text-[13px] font-semibold tracking-tight text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                   >
                     <ChevronRight
-                      className={cn("h-3 w-3 transition-transform duration-150", !isCollapsed && "rotate-90")}
-                    />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      openProject(p.path);
-                      onNavigate?.();
-                    }}
-                    aria-current={selectedProject === p.path && !selected ? "true" : undefined}
-                    title={`${p.path}: show all its agents`}
-                    className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-1 text-[13px] font-semibold tracking-tight text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                  >
-                    <FolderOpen
                       className={cn(
-                        "h-4 w-4 shrink-0",
-                        selectedProject === p.path && !selected ? "text-accent" : "text-muted",
+                        "h-3 w-3 shrink-0 text-muted transition-transform duration-150",
+                        !isCollapsed && "rotate-90",
                       )}
                     />
+                    <FolderOpen className={cn("h-4 w-4 shrink-0", holdsOpen ? "text-accent" : "text-muted")} />
                     <span className="truncate">{p.name}</span>
                     <span className="shrink-0 rounded-md bg-raised px-1.5 text-[11px] font-medium tabular text-muted">
                       {p.agents.length}
                     </span>
                     {p.needs > 0 && (
                       <span
-                        className="shrink-0 rounded-full bg-warn/20 px-2 py-px text-[11px] font-semibold text-warn ring-1 ring-warn/40 tabular"
+                        className="flex shrink-0 items-center gap-1 rounded-full bg-warn/20 px-1.5 py-px text-[11px] font-semibold text-warn ring-1 ring-warn/40 tabular"
                         title={`${p.needs} need${p.needs === 1 ? "s" : ""} you`}
                       >
-                        {p.needs} need{p.needs === 1 ? "s" : ""} you
+                        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-warn" />
+                        {p.needs}
+                        <span className="hidden @[286px]/proj:inline">need{p.needs === 1 ? "s" : ""} you</span>
+                        <span className="sr-only @[286px]/proj:hidden">need{p.needs === 1 ? "s" : ""} you</span>
                       </span>
                     )}
                     {p.needs === 0 && p.working > 0 && (
@@ -276,24 +315,40 @@ export function AgentList({
                       />
                     )}
                   </button>
-                  <Tooltip content={`Add agents to ${p.name}`}>
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      className="shrink-0 border border-line-strong/70 text-muted hover:border-accent/50 hover:text-accent"
-                      aria-label={`Add agents to ${p.name}`}
-                      onClick={() => {
-                        openProject(p.path);
-                        onNavigate?.();
-                        // The project page has its composer; focus it so you can type straight away.
-                        requestAnimationFrame(() =>
-                          document.querySelector<HTMLTextAreaElement>("#home-prompt-compact")?.focus(),
-                        );
-                      }}
-                    >
-                      <Plus className="!h-3.5 !w-3.5" />
-                    </Button>
-                  </Tooltip>
+                  {/* Rests hidden so the name keeps its room; fades in over the header's right edge. */}
+                  <div className="absolute inset-y-0 right-1 flex items-center gap-1 rounded-r-lg bg-gradient-to-l from-raised from-70% to-transparent pl-4 pointer-events-none opacity-0 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/project:pointer-events-auto group-hover/project:opacity-100">
+                    {together && (
+                      <Tooltip content="Show these together">
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          className="shrink-0 text-muted hover:text-accent"
+                          aria-label={`Show ${p.name}'s agents together`}
+                          onClick={() => {
+                            const ids = [...p.agents]
+                              .sort((x, y) => x.createdAt - y.createdAt || x.id.localeCompare(y.id))
+                              .slice(0, MAX_TILES)
+                              .map((a) => a.id);
+                            openAgents(ids, selected && ids.includes(selected) ? selected : ids[0]);
+                            onNavigate?.();
+                          }}
+                        >
+                          <LayoutGrid className="!h-3.5 !w-3.5" />
+                        </Button>
+                      </Tooltip>
+                    )}
+                    <Tooltip content={`New agent in ${p.name}`}>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        className="shrink-0 border border-line-strong/70 text-muted hover:border-accent/50 hover:text-accent"
+                        aria-label={`New agent in ${p.name}`}
+                        onClick={() => openNewAgent({ projectPath: p.path })}
+                      >
+                        <Plus className="!h-3.5 !w-3.5" />
+                      </Button>
+                    </Tooltip>
+                  </div>
                 </div>
                 <AnimatePresence initial={false}>
                   {!isCollapsed && (
@@ -304,7 +359,7 @@ export function AgentList({
                       transition={{ duration: 0.12 }}
                       className={cn(
                         "mb-0.5 ml-3 space-y-px border-l-2 pl-1",
-                        selectedProject === p.path && !selected ? "border-accent/45" : "border-line-strong/70",
+                        holdsOpen ? "border-accent/45" : "border-line-strong/70",
                       )}
                     >
                       {p.agents.map((a) => (
@@ -315,6 +370,7 @@ export function AgentList({
                             selected={a.id === selected}
                             now={now}
                             hotkey={hotkeys.get(a.id) ?? null}
+                            density={density}
                             onNavigate={onNavigate}
                           />
                           {nesting?.children.get(a.id)?.map((h) => (
@@ -326,6 +382,7 @@ export function AgentList({
                               selected={h.id === selected}
                               now={now}
                               hotkey={hotkeys.get(h.id) ?? null}
+                              density={density}
                               onNavigate={onNavigate}
                             />
                           ))}
@@ -337,7 +394,7 @@ export function AgentList({
               </div>
             );
           })}
-          {archived.length > 0 && (
+          {rowsReady && archived.length > 0 && (
             <div className="mb-1">
               <button
                 type="button"
@@ -352,7 +409,7 @@ export function AgentList({
                   )}
                 />
                 Archived
-                <span className="font-medium tabular text-steel/70">{archived.length}</span>
+                <span className="font-medium tabular text-steel">{archived.length}</span>
               </button>
               {(!collapsed[ARCHIVED_KEY] || searching) && (
                 <ul className="space-y-px">
@@ -364,6 +421,8 @@ export function AgentList({
                       selected={a.id === selected}
                       now={now}
                       hotkey={null}
+                      density={density}
+                      showProject
                       onNavigate={onNavigate}
                     />
                   ))}
@@ -443,10 +502,15 @@ const AgentRow = memo(function AgentRow({
   selected,
   now,
   hotkey,
+  density,
   onNavigate,
   nested = false,
+  showProject = false,
 }: {
   nested?: boolean;
+  /** Archived rows sit outside a project card, so they name their project. */
+  showProject?: boolean;
+  density: Density;
   agent: Agent;
   account: Account | undefined;
   selected: boolean;
@@ -521,7 +585,8 @@ const AgentRow = memo(function AgentRow({
               if (e.key === "F2") startRename();
             }}
             className={cn(
-              "group relative flex gap-2.5 rounded-xl px-2.5 py-2 outline-none transition-colors duration-100",
+              "group relative flex gap-2.5 rounded-xl px-2.5 outline-none transition-colors duration-100",
+              density === "compact" ? "py-1.5" : "py-2",
               selected ? "bg-gunmetal/70 shadow-[inset_0_0_0_1px_var(--border-strong)] edge" : "hover:bg-raised/60",
               "focus-visible:shadow-[inset_0_0_0_1.5px_color-mix(in_srgb,var(--accent)_70%,transparent)]",
             )}
@@ -595,7 +660,7 @@ const AgentRow = memo(function AgentRow({
                 )}
                 <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-steel">
                   {hotkey !== null && (
-                    <span aria-hidden className="hidden text-[10px] text-steel/70 group-hover:inline">
+                    <span aria-hidden className="hidden text-[11px] text-steel group-hover:inline">
                       {modKey}
                       {hotkey}
                     </span>
@@ -641,12 +706,16 @@ const AgentRow = memo(function AgentRow({
                 <PrIndicator agentId={agent.id} />
                 <span className="text-line-strong">·</span>
                 <span className="truncate">
-                  {agent.provider === "custom" ? identity.name : (account?.name ?? "—")} · {basename(agent.projectPath)}
+                  {agent.provider === "custom" ? identity.name : (account?.name ?? "—")}
+                  {showProject && ` · ${basename(agent.projectPath)}`}
                 </span>
               </div>
-              {agent.lastMessage && !nested && (
-                <p className="mt-1 line-clamp-1 text-[12px] leading-snug text-muted/90">{agent.lastMessage}</p>
-              )}
+              {agent.lastMessage &&
+                !nested &&
+                density === "comfortable" &&
+                (selected || agent.status === "needs_permission") && (
+                  <p className="mt-1 line-clamp-1 text-[12px] leading-snug text-muted">{agent.lastMessage}</p>
+                )}
               {resumable && (
                 <button
                   type="button"

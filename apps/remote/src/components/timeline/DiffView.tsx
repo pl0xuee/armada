@@ -27,7 +27,7 @@ export function FileBlock({ file, defaultOpen, id }: { file: ParsedDiff; default
         {file.status !== "modified" && (
           <span
             className={cn(
-              "rounded-md px-1.5 py-px text-[10.5px] font-semibold tracking-wide uppercase",
+              "rounded-md px-1.5 py-px text-[11px] font-semibold tracking-wide uppercase",
               file.status === "added" ? "bg-ok/12 text-ok" : "bg-err/12 text-err",
             )}
           >

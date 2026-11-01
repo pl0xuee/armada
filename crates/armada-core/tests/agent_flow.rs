@@ -1011,7 +1011,11 @@ async fn codex_server_requests_and_ask_mode() {
             _ => None,
         })
         .unwrap();
-    assert!(reply.starts_with("policy=untrusted "), "{reply}");
+    // The thread's developer instructions hold the pictures note and the style note, once each.
+    assert!(
+        reply.starts_with("policy=untrusted style=1 pictures=1 "),
+        "{reply}"
+    );
     let answers: serde_json::Value =
         serde_json::from_str(reply.split_once("answers=").unwrap().1).unwrap();
     assert_eq!(
@@ -1080,6 +1084,122 @@ async fn approve_next(rx: &mut mpsc::UnboundedReceiver<ArmadaEvent>, core: &Core
         .unwrap();
 }
 
+/// The response style note reaches the agent exactly once: in the system prompt of a new session
+/// (when the agent takes one), else ahead of its first prompt. A resumed session is briefed again
+/// only when the chosen style changed, with a note that replaces the earlier one.
+#[tokio::test]
+async fn agents_are_told_how_to_write_their_replies() {
+    const CONCISE: &str = "(Armada response style: concise)";
+    const BALANCED: &str = "(Armada response style: balanced)";
+    for (name, no_system_prompt) in [("style-sys", false), ("style-note", true)] {
+        let (core, mut rx, account, project) = custom_mock_core(name).await;
+        let log = project.join("mock.log");
+        let mut settings = core.settings().unwrap();
+        assert_eq!(settings.response_style, ResponseStyle::Concise);
+        settings.custom_agents[0].env = vec![KeyValue {
+            name: "MOCK_LOG".into(),
+            value: log.to_string_lossy().into_owned(),
+        }];
+        if no_system_prompt {
+            settings.custom_agents[0].env.push(KeyValue {
+                name: "MOCK_NO_SYSTEM_PROMPT".into(),
+                value: "1".into(),
+            });
+        }
+        core.save_settings(settings).unwrap();
+        let agent = core
+            .create_agent(CreateAgentRequest {
+                provider: Provider::Custom,
+                account_id: account,
+                project_path: project.to_string_lossy().into_owned(),
+                prompt: "hello".into(),
+                title: None,
+                worktree: false,
+                model: None,
+                group_id: None,
+                custom_agent_id: Some("mock".into()),
+                permission_mode: None,
+                attachments: vec![],
+            })
+            .await
+            .unwrap();
+        let done = |e: &ArmadaEvent| {
+            matches!(
+                e,
+                ArmadaEvent::Attention {
+                    reason: AttentionReason::Done,
+                    ..
+                }
+            )
+        };
+        let entries = |kind: &str| -> Vec<String> {
+            std::fs::read_to_string(&log)
+                .unwrap_or_default()
+                .lines()
+                .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+                .filter(|v| v["kind"] == kind)
+                .map(|v| v["text"].as_str().unwrap().to_string())
+                .collect()
+        };
+        approve_next(&mut rx, &core, &agent.id).await;
+        next_matching(&mut rx, done).await;
+        // Everything with the note in it, wherever it went.
+        let carrying = |needle: &str| -> usize {
+            entries("system")
+                .into_iter()
+                .chain(entries("prompt"))
+                .map(|t| t.matches(needle).count())
+                .sum()
+        };
+        let (sys, prompts) = (entries("system"), entries("prompt"));
+        assert_eq!(prompts.len(), 1);
+        if no_system_prompt {
+            assert!(sys.is_empty());
+            assert!(prompts[0].contains("[Note from Armada"));
+            assert!(!prompts[0].contains("replaces any earlier"));
+        } else {
+            assert_eq!(sys.len(), 1);
+            assert_eq!(prompts[0], "hello");
+        }
+        assert_eq!(carrying(CONCISE), 1, "{sys:?} {prompts:?}");
+        assert!(sys.iter().chain(&prompts).all(|t| !t.contains(BALANCED)));
+
+        // Same style, resumed session: nothing more is sent.
+        core.stop_agent(&agent.id).await.unwrap();
+        core.send_prompt(&agent.id, "again", vec![]).await.unwrap();
+        approve_next(&mut rx, &core, &agent.id).await;
+        next_matching(&mut rx, done).await;
+        assert_eq!(entries("prompt").last().unwrap(), "again");
+        assert_eq!(carrying(CONCISE), 1);
+
+        // A new style applies to the resumed session's next prompt, once.
+        let mut settings = core.settings().unwrap();
+        settings.response_style = ResponseStyle::Balanced;
+        core.save_settings(settings).unwrap();
+        core.stop_agent(&agent.id).await.unwrap();
+        core.send_prompt(&agent.id, "third", vec![]).await.unwrap();
+        approve_next(&mut rx, &core, &agent.id).await;
+        next_matching(&mut rx, done).await;
+        let last = entries("prompt").pop().unwrap();
+        assert!(last.contains("replaces any earlier"), "{last}");
+        assert_eq!(last.matches(BALANCED).count(), 1);
+        assert!(last.ends_with("third") || last.contains("third"));
+        assert_eq!(carrying(BALANCED), 1);
+        core.stop_agent(&agent.id).await.unwrap();
+        core.send_prompt(&agent.id, "fourth", vec![]).await.unwrap();
+        approve_next(&mut rx, &core, &agent.id).await;
+        next_matching(&mut rx, done).await;
+        assert_eq!(entries("prompt").last().unwrap(), "fourth");
+        assert_eq!(carrying(BALANCED), 1);
+        assert!(core
+            .agent(&agent.id)
+            .unwrap()
+            .guide_tag
+            .ends_with(":balanced"));
+        core.shutdown().await;
+    }
+}
+
 /// Agents are told they can show pictures: as the system prompt of a new session when the agent
 /// takes one (nothing visible in the prompt), otherwise as a note ahead of the first prompt, once.
 #[tokio::test]
@@ -1129,7 +1249,11 @@ async fn agents_are_told_they_can_show_pictures() {
         } else {
             assert_eq!(body, "You said: hello");
         }
-        assert!(core.agent(&agent.id).unwrap().guided);
+        assert!(core
+            .agent(&agent.id)
+            .unwrap()
+            .guide_tag
+            .ends_with(":concise"));
         // Only once: the next prompt is sent as is.
         core.send_prompt(&agent.id, "again", vec![]).await.unwrap();
         approve_next(&mut rx, &core, &agent.id).await;

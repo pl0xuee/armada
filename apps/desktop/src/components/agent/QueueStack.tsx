@@ -2,6 +2,8 @@ import { ChevronDown, CornerDownRight, ImageIcon, ListOrdered, Pause, Pencil, Pl
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { useIdentity } from "@/hooks/useIdentity";
+import { sendNowPlan, type SendNowPlan } from "@/lib/sendNow";
 import type { Agent, QueuedPrompt, Attachment } from "@/lib/types";
 import { cn, errorMessage } from "@/lib/utils";
 import { ConfirmDialog } from "../ui/alert-dialog";
@@ -15,15 +17,19 @@ import { Tooltip } from "../ui/tooltip";
 export function QueueStack({
   agent,
   onEdit,
+  embedded = false,
 }: {
   agent: Agent;
   onEdit: (text: string, attachments: Attachment[]) => void;
+  /** A row of the pinned dock: no card of its own. */
+  embedded?: boolean;
 }) {
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   const [expanded, setExpanded] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const name = useIdentity(agent.provider, agent.customAgentId).short;
 
   // Forget optimistic hides once the backend confirms the item is gone.
   useEffect(() => {
@@ -93,10 +99,13 @@ export function QueueStack({
   };
 
   const sendNow = async (q: QueuedPrompt, interrupt: boolean) => {
+    // Said plainly when it can't go into the running turn: it waits for the turn instead of stopping it.
+    const plan = sendNowPlan(agent, q.text, busy, name);
     try {
       await api.sendQueuedNow(agent.id, q.id, interrupt);
+      if (!interrupt && plan.note) toast(plan.note.title, { description: plan.note.description });
     } catch (e) {
-      toast.error("Couldn't send it now", { description: errorMessage(e) });
+      toast.error(interrupt ? "Couldn't stop and send" : "Couldn't send it now", { description: errorMessage(e) });
     }
   };
 
@@ -104,8 +113,10 @@ export function QueueStack({
     <section
       aria-label="Queued messages"
       className={cn(
-        "mb-2 shrink-0 overflow-hidden rounded-xl border bg-card/70 edge",
-        paused ? "border-warn/35" : "border-line-strong",
+        "shrink-0 overflow-hidden",
+        !embedded && "mb-2 rounded-xl border bg-card/70 edge",
+        !embedded && (paused ? "border-warn/35" : "border-line-strong"),
+        embedded && paused && "bg-warn/[0.04]",
       )}
     >
       <div
@@ -136,6 +147,9 @@ export function QueueStack({
               <>
                 <span className="tabular text-fg">{queue.length}</span> queued
                 <span className="text-steel"> · {busy ? "runs after the current turn" : "runs next"}</span>
+                {!expanded && queue[0].text && (
+                  <span className="text-steel/80"> · “{queue[0].text.replace(/\s+/g, " ").trim()}”</span>
+                )}
               </>
             )}
           </span>
@@ -173,7 +187,7 @@ export function QueueStack({
               item={q}
               busy={busy}
               canSendNow={canSendNow}
-              steerable={!!agent.steerable}
+              plan={sendNowPlan(agent, q.text, busy, name)}
               onEdit={() => void remove(q, true)}
               onRemove={() => void remove(q, false)}
               onSendNow={(interrupt) => sendNow(q, interrupt)}
@@ -200,7 +214,7 @@ function QueueRow({
   item,
   busy,
   canSendNow,
-  steerable,
+  plan,
   onEdit,
   onRemove,
   onSendNow,
@@ -209,8 +223,8 @@ function QueueRow({
   item: QueuedPrompt;
   busy: boolean;
   canSendNow: boolean;
-  /** The agent takes messages into its running turn, so sending now doesn't stop it. */
-  steerable: boolean;
+  /** What "Send now" will do for this message (see lib/sendNow.ts). */
+  plan: SendNowPlan;
   onEdit: () => void;
   onRemove: () => void;
   onSendNow: (interrupt: boolean) => Promise<void>;
@@ -239,11 +253,6 @@ function QueueRow({
     void send(true);
   };
 
-  // Steering agents: "Send now" goes into the running turn; stopping is its own button.
-  const steers = busy && steerable;
-  // A slash command only works at the start of a turn, so it goes first in line instead.
-  const isCommand = item.text.trimStart().startsWith("/");
-
   const iconBtn =
     "inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded-md px-1.5 text-[11.5px] text-muted transition-colors hover:bg-raised hover:text-fg focus-visible:bg-raised";
   const armedBtn = "bg-warn/15 text-warn hover:bg-warn/25 hover:text-warn";
@@ -270,77 +279,49 @@ function QueueRow({
             <Pencil className="h-3.5 w-3.5" />
           </button>
         </Tooltip>
-        {canSendNow && steers && (
+        {canSendNow && (
           <>
-            <Tooltip
-              content={
-                isCommand
-                  ? "Commands run at the start of a turn: this goes first in line and runs when the current turn ends"
-                  : "Add it to the running turn: the agent reads it at its next step and keeps working"
-              }
-            >
+            <Tooltip content={plan.hint}>
               <button
                 type="button"
                 className={iconBtn}
                 onClick={() => void send(false)}
                 disabled={sending}
                 aria-label={
-                  isCommand
-                    ? `Run next: message ${index}, when the current turn ends`
-                    : `Send now: add message ${index} to the running turn`
+                  plan.mode === "deliver"
+                    ? `Send now: add message ${index} to the running turn`
+                    : plan.mode === "front"
+                      ? `Run next: message ${index}, when the current turn ends`
+                      : `Send now: message ${index}`
                 }
               >
                 {sending ? <Spinner className="h-3.5 w-3.5" /> : <CornerDownRight className="h-3.5 w-3.5" />}
-                <span className="max-sm:hidden">{isCommand ? "Run next" : "Send now"}</span>
+                <span className="max-sm:hidden">{plan.label}</span>
               </button>
             </Tooltip>
-            <Tooltip content={armed ? "Click again to stop the current turn and run this instead" : "Stop & send: stop the current turn and run this instead"}>
-              <button
-                type="button"
-                className={cn(iconBtn, armed && armedBtn)}
-                onClick={clickInterrupt}
-                disabled={sending}
-                aria-label={armed ? `Stop the turn? Confirm sending message ${index} instead` : `Stop & send: message ${index}`}
+            {busy && (
+              <Tooltip
+                content={
+                  armed
+                    ? "Click again to stop the current turn and run this instead"
+                    : "Stop & send: stop the current turn (work in progress is lost) and run this instead"
+                }
               >
-                <Zap className="h-3.5 w-3.5" />
-                {armed && <span className="max-sm:hidden">Stop turn?</span>}
-              </button>
-            </Tooltip>
+                <button
+                  type="button"
+                  className={cn(iconBtn, armed && armedBtn)}
+                  onClick={clickInterrupt}
+                  disabled={sending}
+                  aria-label={
+                    armed ? `Stop the turn? Confirm sending message ${index} instead` : `Stop & send: message ${index}`
+                  }
+                >
+                  <Zap className="h-3.5 w-3.5" />
+                  <span className="max-sm:hidden">{armed ? "Stop turn?" : "Stop & send"}</span>
+                </button>
+              </Tooltip>
+            )}
           </>
-        )}
-        {canSendNow && !steers && (
-          <Tooltip
-            content={
-              armed
-                ? "Click again to stop the current turn and run this now"
-                : busy
-                  ? "This agent can't take messages mid-turn: stop the current turn and run this next"
-                  : "Run this next"
-            }
-          >
-            <button
-              type="button"
-              className={cn(iconBtn, armed && armedBtn)}
-              onClick={() => (busy ? clickInterrupt() : void send(false))}
-              disabled={sending}
-              aria-label={
-                armed
-                  ? `Interrupt? Confirm sending message ${index} now`
-                  : busy
-                    ? `Interrupt & send: message ${index}`
-                    : `Send now: message ${index}`
-              }
-            >
-              {sending ? (
-                <Spinner className="h-3.5 w-3.5" />
-              ) : armed ? (
-                <Zap className="h-3.5 w-3.5" />
-              ) : (
-                <CornerDownRight className="h-3.5 w-3.5" />
-              )}
-              <span className="max-sm:hidden">{armed ? "Interrupt?" : busy ? "Interrupt & send" : "Send now"}</span>
-            </button>
-          </Tooltip>
         )}
         <Tooltip content="Remove from queue">
           <button

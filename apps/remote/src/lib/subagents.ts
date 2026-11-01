@@ -135,7 +135,7 @@ const bucket = () => Math.floor(Date.now() / SUBAGENT_TICK_MS) * SUBAGENT_TICK_M
  * something (`expiry`, from clockExpiry): an idle agent with an old background launcher in its
  * history doesn't wake the timeline up forever.
  */
-function useSubagentNow(live: boolean, expiry: number): number {
+export function useSubagentNow(live: boolean, expiry: number): number {
   const [now, setNow] = useState(bucket);
   const enabled = live && expiry > now;
   useEffect(() => {
@@ -182,6 +182,8 @@ export interface RunningSubagent {
   startedAt: number;
   /** Tool calls it has made so far, counting those of sub-agents it started itself. */
   toolCalls: number;
+  /** Title of its newest call (descending into sub-agents it started), if it made any. */
+  step?: string | null;
 }
 
 /** The running sub-agents among `runs`, in launch order. */
@@ -203,10 +205,19 @@ export function runningSubagents(items: readonly TimelineItem[], runs: readonly 
     for (const c of byParent.get(toolCallId) ?? []) n += 1 + (c.subagent && !c.subagent.control ? count(c.toolCallId, seen) : 0);
     return n;
   };
+  const newest = (toolCallId: string, seen: Set<string>): string | null => {
+    if (seen.has(toolCallId)) return null;
+    seen.add(toolCallId);
+    const kids = byParent.get(toolCallId);
+    const last = kids?.[kids.length - 1];
+    if (!last) return null;
+    return (last.subagent && !last.subagent.control ? newest(last.toolCallId, seen) : null) ?? last.title;
+  };
   const out: RunningSubagent[] = [];
   for (const it of items) {
     if (it.kind !== "tool_call" || !running.has(it.id)) continue;
     const s = it.subagent;
+    const step = newest(it.toolCallId, new Set());
     out.push({
       id: it.id,
       kind: s?.kind?.trim() || "Sub-agent",
@@ -215,6 +226,7 @@ export function runningSubagents(items: readonly TimelineItem[], runs: readonly 
       effort: s?.effort?.trim() || null,
       startedAt: it.ts,
       toolCalls: count(it.toolCallId, new Set()),
+      ...(step ? { step } : {}),
     });
   }
   return out;
@@ -255,19 +267,6 @@ export function subagentChips(info: Pick<SubagentInfo, "model" | "effort"> | und
   return out;
 }
 
-/** Running sub-agent count for the header chip (a number, so streamed text doesn't re-render it). */
-export function useRunningSubagentCount(agentId: string): number {
-  const expiry = useStore((s) => clockExpiry(s.timelines[agentId]?.items));
-  const live = useStore((s) => (s.agents[agentId] ? isSubagentLive(s.agents[agentId].status) : false));
-  const now = useSubagentNow(live, expiry);
-  return useStore((s) => {
-    const agent = s.agents[agentId];
-    const items = s.timelines[agentId]?.items;
-    if (!agent || !items) return 0;
-    return runningCount(subagentRuns(items, isBusy(agent.status), { now, live: isSubagentLive(agent.status) }));
-  });
-}
-
 /** `value`, but a drop back to `empty` only takes effect after it stayed that way for `ms`. */
 export function useHeld<T>(value: T, empty: T, ms: number): T {
   const [held, setHeld] = useState(value);
@@ -281,4 +280,23 @@ export function useHeld<T>(value: T, empty: T, ms: number): T {
     return () => clearTimeout(t);
   }, [value, empty, isEmpty, ms]);
   return isEmpty ? held : value;
+}
+
+/**
+ * The running sub-agents for the dock chip. Subscribes to a string key of what the chip shows, so streamed
+ * text (which changes the items every frame) re-renders nothing while the list stays the same.
+ */
+export function useRunningSubagentList(agentId: string): RunningSubagent[] {
+  const expiry = useStore((s) => clockExpiry(s.timelines[agentId]?.items));
+  const live = useStore((s) => (s.agents[agentId] ? isSubagentLive(s.agents[agentId].status) : false));
+  const now = useSubagentNow(live, expiry);
+  const key = useStore((s) => {
+    const agent = s.agents[agentId];
+    const items = s.timelines[agentId]?.items;
+    if (!agent || !items) return "";
+    const runs = subagentRuns(items, isBusy(agent.status), { now, live: isSubagentLive(agent.status) });
+    if (!runs.some((r) => r.state === "running")) return "";
+    return JSON.stringify(runningSubagents(items, runs));
+  });
+  return useMemo(() => (key ? (JSON.parse(key) as RunningSubagent[]) : []), [key]);
 }

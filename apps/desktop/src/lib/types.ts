@@ -174,7 +174,10 @@ export interface HelperSync {
 }
 
 /** What Enter does while the agent is busy. */
-export type BusySend = "ask" | "queue" | "helper";
+export type BusySend = "deliver" | "queue" | "helper";
+
+/** How agents are told to write their replies (it shapes the reply, not the work done). */
+export type ResponseStyle = "concise" | "balanced" | "detailed";
 
 /** Where new helpers run; null = same as the main agent. */
 export interface HelperDefaults {
@@ -280,7 +283,7 @@ interface ItemBase {
 
 export type TimelineItem = ItemBase &
   (
-    | { kind: "user_message"; text: string; attachments?: Attachment[] }
+    | { kind: "user_message"; text: string; attachments?: Attachment[]; midTurn?: boolean }
     | {
         kind: "agent_message";
         text: string;
@@ -428,9 +431,14 @@ export interface ProviderInfo {
   docsUrl: string;
 }
 
+/** Built-in set of attention sounds. */
+export type SoundPack = "soft" | "glass" | "classic";
+
 export interface SoundSettings {
   enabled: boolean;
   volume: number; // 0..1
+  /** Which built-in sounds play (custom files still override per event). */
+  pack: SoundPack;
   onPermission: boolean;
   onDone: boolean;
   onError: boolean;
@@ -488,6 +496,8 @@ export interface Settings {
   voiceAssistant: VoiceAssistantSettings;
   /** Sending while an agent works: ask each time, queue it, or start a helper agent. */
   busySend: BusySend;
+  /** How agents write their replies: new agents from the start, others when their session next resumes. */
+  responseStyle: ResponseStyle;
   helperDefaults: HelperDefaults;
   /** Cap on all agents' spend per local day, in USD; null = no cap. */
   dailyBudgetUsd: number | null;

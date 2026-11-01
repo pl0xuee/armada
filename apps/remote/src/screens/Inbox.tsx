@@ -3,24 +3,24 @@ import { isPlanApproval, planTitle } from "@shared/planApproval";
 import { DenyReasonSheet } from "@/components/DenyReasonSheet";
 import { AccountDot, ProviderBadge } from "@/components/Identity";
 import { Icon } from "@/components/Icon";
-import { Sheet } from "@/components/Sheet";
+import { OptionsSheet } from "@/components/OptionsSheet";
+import { QuestionSheet, QuickAnswer } from "@/components/QuickAnswer";
 import { Swipeable } from "@/components/Swipeable";
-import { OPTION_VARIANT, PermissionSubject } from "@/components/timeline/Permission";
+import { PermissionSubject } from "@/components/timeline/Permission";
 import { TOOL_ICON } from "@/components/timeline/Items";
 import { ConnectionPill, TopBar } from "@/components/TopBar";
 import { Button, IconButton } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { loadPermissions, respondToPermission, respondWithUndo, retryState } from "@/lib/controller";
+import { acknowledgeAgent, loadPermissions, resumeAgent, respondToPermission, respondWithUndo, retryAgent, retryState } from "@/lib/controller";
 import { devParam } from "@/lib/dev";
 import { diffStats } from "@/lib/diff";
-import { basename, plural, relativeTime } from "@/lib/format";
+import { basename, plainPreview, plural, relativeTime } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
 import {
   agentIdentity,
   allowOnce,
   confirmOption,
   isAlways,
-  optionHint,
   primaryAllow,
   primaryReject,
   rejectOnce,
@@ -28,8 +28,12 @@ import {
   swipeable,
 } from "@/lib/meta";
 import { primaryFields } from "@/lib/question";
+import { switchableAccounts, AccountSheet } from "./AgentControls";
 import { goBack, navigate } from "@/lib/router";
-import { accountOf, useInbox, type InboxEntry } from "@/lib/selectors";
+import { accountOf, useInbox, useTriage, type InboxEntry } from "@/lib/selectors";
+import { reasonLabel, triageSections, needsYouLabel, type TriageEntry, type NeedsReason } from "@/lib/triage";
+import { questionHeadline } from "@/lib/dock";
+import { planChoices } from "@shared/planApproval";
 import { useStore } from "@/lib/store";
 import type { Agent, PermissionItem, PermissionOption, QuestionItem } from "@/lib/types";
 import { EmptyState, ErrorState } from "./States";
@@ -38,12 +42,15 @@ const EXIT_MS = 170;
 
 export function Inbox() {
   const inbox = useInbox();
+  const triage = useTriage();
   const resolving = useStore((s) => s.resolving);
   const stateStatus = useStore((s) => s.stateStatus);
   const stateError = useStore((s) => s.stateError);
   const now = useNow();
   const [optionsFor, setOptionsFor] = useState<string | null>(null);
   const [reasonFor, setReasonFor] = useState<string | null>(null);
+  const [questionFor, setQuestionFor] = useState<string | null>(null);
+  const [switchFor, setSwitchFor] = useState<string | null>(null);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -52,6 +59,12 @@ export function Inbox() {
 
   // Answered requests leave the list immediately (and come back if sending fails).
   const entries = useMemo(() => inbox.entries.filter((e) => !resolving[e.item.requestId]), [inbox.entries, resolving]);
+  const itemsByAgent = useMemo(() => {
+    const m = new Map<string, InboxEntry[]>();
+    for (const e of entries) m.set(e.agent.id, [...(m.get(e.agent.id) ?? []), e]);
+    return m;
+  }, [entries]);
+  const sections = useMemo(() => triageSections(triage.queue), [triage.queue]);
 
   const devSheet = devParam("sheet") === "options";
   useEffect(() => {
@@ -69,32 +82,54 @@ export function Inbox() {
     for (const e of entries) if (e.item.kind === "permission" && e.item.requestId === reasonFor) return e.item;
     return null;
   }, [entries, reasonFor]);
+  const questionEntry = useMemo(() => {
+    for (const e of entries) if (e.item.kind === "question" && e.item.requestId === questionFor) return e;
+    return null;
+  }, [entries, questionFor]);
+  const switchAgent = switchFor ? (triage.queue.find((e) => e.agent.id === switchFor)?.agent ?? null) : null;
 
+  const swipeHint = entries.some((e) => e.item.kind === "permission" && swipeable(e.item) && (allowOnce(e.item) || rejectOnce(e.item)));
   let body;
-  if (stateStatus !== "ready" && !entries.length) {
+  if (stateStatus !== "ready" && !triage.queue.length) {
     body = stateStatus === "error" ? <ErrorState title="Couldn't load requests" body={stateError} onRetry={retryState} /> : <InboxSkeleton count={2} />;
-  } else if (!entries.length && !inbox.loading && !inbox.failed) {
+  } else if (!triage.queue.length && !inbox.loading && !inbox.failed) {
     body = (
       <EmptyState
         icon="shieldCheck"
         tone="ok"
         title="You're all caught up"
-        body="When an agent needs permission or has a question for you, it shows up here."
+        body="When an agent needs approval, has a question, hits a limit or finishes, it shows up here."
         action={{ label: "Back to agents", onClick: () => navigate({ name: "fleet" }, { replace: true }) }}
       />
     );
   } else {
     body = (
-      <div className="space-y-3">
-        {entries.some((e) => e.item.kind === "permission" && swipeable(e.item) && (allowOnce(e.item) || rejectOnce(e.item))) && (
-          <p className="flex items-center justify-center gap-1.5 pb-1 text-center text-[12.5px] text-steel [@media(pointer:fine)]:hidden">
+      <div className="space-y-6">
+        {swipeHint && (
+          <p className="mb-3 flex items-center justify-center gap-1.5 text-center text-[12.5px] text-steel [@media(pointer:fine)]:hidden">
             Swipe right to approve, left to deny
           </p>
         )}
-        {entries.map((e) => (
-          <InboxCard key={e.item.requestId} entry={e} now={now} onMore={() => setOptionsFor(e.item.requestId)} />
+        {sections.map((sec) => (
+          <section key={sec.id} aria-labelledby={`needs-${sec.id}`} className="space-y-3">
+            <h2 id={`needs-${sec.id}`} className={cn("flex items-center gap-1.5 px-1 text-[12px] font-semibold tracking-[0.08em] uppercase", sec.id === "blocked" ? "text-warn" : "text-steel")}>
+              {sec.label}
+              <span className="tabular opacity-80">{sec.entries.length}</span>
+            </h2>
+            {sec.entries.map((e) => (
+              <QueueEntry
+                key={e.agent.id}
+                entry={e}
+                items={itemsByAgent.get(e.agent.id)}
+                loading={inbox.loading}
+                now={now}
+                onMore={setOptionsFor}
+                onForm={setQuestionFor}
+                onSwitch={setSwitchFor}
+              />
+            ))}
+          </section>
         ))}
-        {inbox.loading && <InboxSkeleton count={2} />}
         {inbox.failed && (
           <div className="flex items-center gap-3 rounded-2xl border border-err/30 bg-err/[0.06] p-3" role="alert">
             <Icon name="alertCircle" size={18} className="shrink-0 text-err" />
@@ -112,10 +147,8 @@ export function Inbox() {
     <div className="flex min-h-dvh flex-col">
       <TopBar left={<IconButton icon="chevronLeft" label="Back to agents" onClick={goBack} />} right={<ConnectionPill className="mr-2" />}>
         <div className="min-w-0">
-          <h1 className="text-[17px] leading-tight font-semibold text-fg">Inbox</h1>
-          <p className="text-[12px] leading-tight text-muted">
-            {inbox.count ? `${plural(inbox.count, "request")} waiting` : "Nothing waiting"}
-          </p>
+          <h1 className="text-[17px] leading-tight font-semibold text-fg">Needs you</h1>
+          <p className="text-[12px] leading-tight text-muted">{triage.count ? needsYouLabel(triage.count) : "Nothing waiting"}</p>
         </div>
       </TopBar>
       <main className="mx-auto w-full max-w-[860px] flex-1 px-safe pt-4 pb-[calc(24px+var(--safe-bottom))]">{body}</main>
@@ -128,8 +161,37 @@ export function Inbox() {
         }}
       />
       <DenyReasonSheet item={reasonItem} onClose={() => setReasonFor(null)} />
+      <QuestionSheet item={questionEntry?.item.kind === "question" ? questionEntry.item : null} title={questionEntry?.agent.title ?? ""} onClose={() => setQuestionFor(null)} />
+      {switchAgent && <AccountSheet agent={switchAgent} open onClose={() => setSwitchFor(null)} />}
     </div>
   );
+}
+
+/** One agent in the queue: its open requests (approvals, questions, a plan), or what blocks or finished it. */
+function QueueEntry({
+  entry,
+  items,
+  loading,
+  now,
+  onMore,
+  onForm,
+  onSwitch,
+}: {
+  entry: TriageEntry;
+  items: InboxEntry[] | undefined;
+  loading: boolean;
+  now: number;
+  onMore: (requestId: string) => void;
+  onForm: (requestId: string) => void;
+  onSwitch: (agentId: string) => void;
+}) {
+  const { agent, reason } = entry;
+  if (reason === "permission") {
+    if (items?.length) return <>{items.map((e) => <InboxCard key={e.item.requestId} entry={e} now={now} onMore={() => onMore(e.item.requestId)} onForm={() => onForm(e.item.requestId)} />)}</>;
+    return loading ? <InboxSkeleton count={1} /> : <WaitingCard agent={agent} now={now} />;
+  }
+  if (reason === "done") return <DoneCard agent={agent} now={now} />;
+  return <RecoveryCard agent={agent} reason={reason} now={now} onSwitch={() => onSwitch(agent.id)} />;
 }
 
 function useExit(): [boolean, (fn: () => void) => void] {
@@ -145,10 +207,10 @@ function useExit(): [boolean, (fn: () => void) => void] {
   return [leaving, run];
 }
 
-const InboxCard = memo(function InboxCard({ entry, now, onMore }: { entry: InboxEntry; now: number; onMore: () => void }) {
+const InboxCard = memo(function InboxCard({ entry, now, onMore, onForm }: { entry: InboxEntry; now: number; onMore: () => void; onForm: () => void }) {
   const { agent, item } = entry;
   return item.kind === "question" ? (
-    <QuestionInboxCard agent={agent} item={item} now={now} />
+    <QuestionInboxCard agent={agent} item={item} now={now} onForm={onForm} />
   ) : isPlanApproval(item) ? (
     <PlanInboxCard agent={agent} item={item} now={now} />
   ) : (
@@ -199,10 +261,10 @@ function CardHeader({ agent, ts, now }: { agent: Agent; ts: number; now: number 
 }
 
 /** A question isn't swipe-approvable: it shows what's asked and opens the agent to answer. */
-function QuestionInboxCard({ agent, item, now }: { agent: Agent; item: QuestionItem; now: number }) {
+function QuestionInboxCard({ agent, item, now, onForm }: { agent: Agent; item: QuestionItem; now: number; onForm: () => void }) {
   const fields = primaryFields(item.fields);
   const titles = fields.map((f) => f.title || f.description).filter(Boolean);
-  const message = item.message || (fields.length === 1 ? (fields[0].description ?? fields[0].title) : null) || "Your agent has a question";
+  const message = questionHeadline(item);
   return (
     <div className="animate-enter">
       <article
@@ -226,17 +288,16 @@ function QuestionInboxCard({ agent, item, now }: { agent: Agent; item: QuestionI
               )}
             </div>
           </div>
-          <Button size="lg" variant="primary" icon="chevronRight" className="w-full" onClick={() => navigate({ name: "agent", agentId: agent.id })}>
-            Answer
-          </Button>
+          <QuickAnswer item={item} onOpenForm={onForm} />
         </div>
       </article>
     </div>
   );
 }
 
-/** A plan needs reading, so it isn't approvable from the list: this opens the agent where the plan is. */
+/** A plan: approve it here with the adapter's preferred choice, or open the agent to read it first. */
 function PlanInboxCard({ agent, item, now }: { agent: Agent; item: PermissionItem; now: number }) {
+  const first = planChoices(item).approve[0];
   return (
     <div className="animate-enter">
       <article
@@ -254,8 +315,13 @@ function PlanInboxCard({ agent, item, now }: { agent: Agent; item: PermissionIte
               <p className="mt-0.5 line-clamp-2 text-[12.5px] text-muted">{planTitle(item.plan ?? "")}</p>
             </div>
           </div>
-          <Button size="lg" variant="primary" icon="chevronRight" className="w-full" onClick={() => navigate({ name: "agent", agentId: agent.id })}>
-            Review plan
+          {first && (
+            <Button size="lg" variant="primary" icon="check" className="w-full" onClick={() => void respondToPermission(agent.id, item.requestId, first.option.id)}>
+              <span className="truncate">{first.label}</span>
+            </Button>
+          )}
+          <Button size="md" variant="secondary" icon="bookText" className="w-full" onClick={() => navigate({ name: "agent", agentId: agent.id })}>
+            Read the plan
           </Button>
         </div>
       </article>
@@ -384,59 +450,117 @@ const PermissionInboxCard = memo(function PermissionInboxCard({
   );
 });
 
-function OptionsSheet({
-  entry,
-  onClose,
-  onDenyWithReason,
-}: {
-  entry: { agent: Agent; item: PermissionItem } | null;
-  onClose: () => void;
-  onDenyWithReason: (requestId: string) => void;
-}) {
-  // Keep showing the last entry while the sheet animates closed.
-  const [shown, setShown] = useState(entry);
-  useEffect(() => {
-    if (entry) setShown(entry);
-  }, [entry]);
-  const e = entry ?? shown;
+/** The agent says it waits on you but its request isn't known here (yet): open it to see. */
+function WaitingCard({ agent, now }: { agent: Agent; now: number }) {
   return (
-    <Sheet open={!!entry} onClose={onClose} title={e?.item.title ?? "Options"} description={e ? `${e.agent.title}` : undefined}>
-      {e && (
-        <div className="space-y-4">
-          <div data-noswipe className="space-y-2">
-            <PermissionSubject item={e.item} compact />
+    <article aria-label={`${agent.title}: waiting for you`} className="animate-enter overflow-hidden rounded-2xl border border-line-strong bg-card edge-strong">
+      <CardHeader agent={agent} ts={agent.lastActivityAt} now={now} />
+      <div className="p-4">
+        <Button size="lg" variant="primary" icon="chevronRight" className="w-full" onClick={() => navigate({ name: "agent", agentId: agent.id })}>
+          Open agent
+        </Button>
+      </div>
+    </article>
+  );
+}
+
+const lastNotice = (items: readonly { kind: string; level?: string; text?: string }[] | undefined): string | null => {
+  for (let i = (items?.length ?? 0) - 1; i >= 0; i--) {
+    const it = items![i];
+    if (it.kind === "notice" && it.level === "error" && it.text) return it.text;
+    if (it.kind === "user_message") return null;
+  }
+  return null;
+};
+
+/** A usage limit or an error: what happened, and the way out (switch account, retry or resume). */
+function RecoveryCard({ agent, reason, now, onSwitch }: { agent: Agent; reason: NeedsReason; now: number; onSwitch: () => void }) {
+  const accounts = useStore((s) => s.accounts);
+  const notice = useStore((s) => lastNotice(s.timelines[agent.id]?.items));
+  const resuming = useStore((s) => !!s.busy[`resume:${agent.id}`]);
+  const limited = reason === "rate_limited";
+  const canSwitch = switchableAccounts(agent, accounts).length > 1;
+  const text = notice ?? (agent.lastMessage ? plainPreview(agent.lastMessage) : limited ? "Paused until the limit resets, or switch to another account." : "Something went wrong.");
+  const color = limited ? "var(--warn)" : "var(--err)";
+  return (
+    <div className="animate-enter">
+      <article aria-label={`${agent.title}: ${reasonLabel(reason)}`} className="overflow-hidden rounded-2xl border border-line-strong bg-card shadow-[0_12px_32px_-20px_rgba(0,0,0,0.9)] edge-strong">
+        <CardHeader agent={agent} ts={agent.lastActivityAt} now={now} />
+        <div className="space-y-3 p-4">
+          <div className="flex items-start gap-2.5">
+            <span className="mt-px inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg" style={{ color, background: `color-mix(in srgb, ${color} 12%, transparent)` }}>
+              <Icon name={limited ? "gauge" : "alertCircle"} size={16} />
+            </span>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <h2 className="text-[15.5px] leading-snug font-semibold text-fg">{limited ? "This account hit its usage limit" : "The last turn failed"}</h2>
+              <p className="mt-0.5 line-clamp-3 text-[13px] leading-snug break-words text-muted">{text}</p>
+            </div>
           </div>
-          <div className="space-y-2" role="group" aria-label="Choose a response">
-            {e.item.options.map((o) => (
-              <Button
-                key={o.id}
-                size="lg"
-                variant={OPTION_VARIANT[o.kind]}
-                className="h-auto min-h-[56px] w-full flex-col !items-start gap-0 py-2.5 text-left"
-                onClick={async () => {
-                  onClose();
-                  if (await confirmOption(o)) void respondToPermission(e.agent.id, e.item.requestId, o.id);
-                }}
-              >
-                <span className="block w-full truncate">{o.name}</span>
-                <span className="block w-full truncate text-[12.5px] font-normal opacity-75">{optionHint(o)}</span>
+          <div className="grid grid-cols-2 gap-2">
+            {limited && canSwitch ? (
+              <Button size="lg" variant="primary" icon="user" onClick={onSwitch}>
+                Switch account
               </Button>
-            ))}
-            {primaryReject(e.item) && (
-              <Button
-                size="lg"
-                variant="ghost"
-                icon="pencil"
-                className="w-full"
-                onClick={() => onDenyWithReason(e.item.requestId)}
-              >
-                Deny with reason…
+            ) : (
+              <Button size="lg" variant="primary" icon={agent.running ? "refresh" : "play"} loading={resuming} onClick={() => void (agent.running ? retryAgent(agent.id) : resumeAgent(agent.id))}>
+                {agent.running ? "Retry" : "Resume"}
               </Button>
             )}
+            <Button size="lg" variant="secondary" onClick={() => void acknowledgeAgent(agent.id)}>
+              Mark done
+            </Button>
+          </div>
+          <CardFooter agent={agent} showSwitch={!limited && canSwitch} onSwitch={onSwitch} />
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function CardFooter({ agent, showSwitch, onSwitch }: { agent: Agent; showSwitch?: boolean; onSwitch?: () => void }) {
+  return (
+    <div className="-mx-2 -mb-2 flex items-center justify-between">
+      {showSwitch ? (
+        <button type="button" onClick={onSwitch} className="press inline-flex h-11 items-center gap-1 rounded-xl px-2 text-[13.5px] font-medium text-muted active:text-fg">
+          <Icon name="user" size={16} />
+          Switch account
+        </button>
+      ) : (
+        <span />
+      )}
+      <button type="button" onClick={() => navigate({ name: "agent", agentId: agent.id })} className="press inline-flex h-11 items-center gap-1 rounded-xl px-2 text-[13.5px] font-medium text-muted active:text-fg">
+        Open agent
+        <Icon name="chevronRight" size={16} />
+      </button>
+    </div>
+  );
+}
+
+/** Finished work waiting to be looked at: the last words, open it or mark it done. */
+function DoneCard({ agent, now }: { agent: Agent; now: number }) {
+  const preview = agent.lastMessage ? plainPreview(agent.lastMessage) : "The agent finished.";
+  return (
+    <div className="animate-enter">
+      <article aria-label={`${agent.title}: finished`} className="overflow-hidden rounded-2xl border border-line bg-card edge">
+        <CardHeader agent={agent} ts={agent.lastActivityAt} now={now} />
+        <div className="space-y-3 p-4">
+          <div className="flex items-start gap-2.5">
+            <span className="mt-px inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ok/12 text-ok">
+              <Icon name="check" size={16} strokeWidth={2.2} />
+            </span>
+            <p className="line-clamp-4 min-w-0 flex-1 pt-0.5 text-[14px] leading-[1.5] break-words text-fg/90">{preview}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Button size="lg" variant="secondary" icon="chevronRight" onClick={() => navigate({ name: "agent", agentId: agent.id })}>
+              Open
+            </Button>
+            <Button size="lg" variant="primary" icon="check" onClick={() => void acknowledgeAgent(agent.id)}>
+              Mark done
+            </Button>
           </div>
         </div>
-      )}
-    </Sheet>
+      </article>
+    </div>
   );
 }
 

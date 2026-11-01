@@ -1,7 +1,19 @@
-import { createContext, memo, useContext, useDeferredValue, useMemo, useRef, type ReactNode } from "react";
+import {
+  Children,
+  cloneElement,
+  createContext,
+  isValidElement,
+  memo,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ImageOff } from "lucide-react";
+import { ChevronDown, ImageOff } from "lucide-react";
 import { toast } from "sonner";
 import {
   isExternalUrl,
@@ -12,6 +24,7 @@ import {
   PREVIEW_LINK_HINT,
   resolveAgentId,
 } from "@/lib/external";
+import { useThrottledValue } from "@/hooks/useThrottledValue";
 import { cn } from "@/lib/utils";
 import { inlineImageSrc } from "@/lib/inlineImage";
 import { localImagePath } from "@/lib/images";
@@ -22,13 +35,28 @@ import { langFromFence } from "@/lib/highlight";
 import { commandText, findHiddenChars, isShellLang, looksLikeCommand, revealHidden } from "@/lib/shellRun";
 import { useApp } from "@/store/app";
 import { RunButton } from "./RunButton";
+import { CODE_PREVIEW_LINES, codeCollapses } from "./timeline/collapse";
 
 /** Agent whose terminal shell code blocks can run in; null (default) hides the Run button. */
 const RunContext = createContext<string | null>(null);
 
+/** The message this text belongs to is still streaming (its code blocks stay open: they'd jump under the reader). */
+const StreamingContext = createContext(false);
+
+/** Height of a folded code block's visible part: the preview lines plus the block's vertical padding. */
+const CODE_LINE_PX = 12.5 * 1.65;
+const CODE_PREVIEW_PX = Math.round(CODE_PREVIEW_LINES * CODE_LINE_PX + 24);
+
 function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
   const isDiff = lang === "diff" || lang === "patch";
   const lines = code.replace(/\n$/, "").split("\n");
+  const streaming = useContext(StreamingContext);
+  // A block that grew while the reader watched stays open.
+  const watched = useRef(false);
+  if (streaming) watched.current = true;
+  const foldable = !streaming && codeCollapses(lines.length, watched.current);
+  const [open, setOpen] = useState(false);
+  const folded = foldable && !open;
   const runAgent = useContext(RunContext);
   const platform = useApp((s) => s.platform);
   const shellish = useMemo(
@@ -43,7 +71,12 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
   return (
     <div className="group/code my-3 overflow-hidden rounded-xl border border-line bg-code">
       <div className="flex h-8 items-center justify-between border-b border-line/70 bg-panel/50 pl-3.5 pr-1.5">
-        <span className="font-mono text-[11px] lowercase tracking-wide text-steel/90">{lang ?? "text"}</span>
+        <span className="flex items-baseline gap-2">
+          <span className="font-mono text-[11px] lowercase tracking-wide text-steel">{lang ?? "text"}</span>
+          {lines.length > 12 && (
+            <span className="text-[11px] tabular-nums text-steel">{lines.length.toLocaleString()} lines</span>
+          )}
+        </span>
         <div className="flex items-center gap-0.5">
           {runAgent && command && (
             <RunButton
@@ -74,7 +107,12 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
               },
             }
           : {})}
-        className="selectable overflow-x-auto px-3.5 py-3 font-mono text-[12.5px] leading-[1.65] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/50"
+        style={folded ? { maxHeight: CODE_PREVIEW_PX } : undefined}
+        className={cn(
+          "selectable overflow-x-auto px-3.5 py-3 font-mono text-[12.5px] leading-[1.65] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/50",
+          folded && "overflow-y-hidden fold-fade-code",
+        )}
+        onFocusCapture={() => folded && setOpen(true)}
       >
         <code>
           {isDiff ? (
@@ -96,6 +134,17 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
           )}
         </code>
       </pre>
+      {foldable && (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={!folded}
+          className="flex h-8 w-full items-center justify-center gap-1.5 border-t border-line/70 text-[12px] text-steel transition-colors hover:bg-raised/40 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
+        >
+          <ChevronDown className={cn("h-3.5 w-3.5 transition-transform duration-150", !folded && "rotate-180")} />
+          {folded ? `Show all ${lines.length.toLocaleString()} lines` : "Show less"}
+        </button>
+      )}
     </div>
   );
 }
@@ -131,6 +180,59 @@ function textOf(node: ReactNode): string {
   return "";
 }
 
+/** The bits of a hast node that the table helpers read. */
+interface HastNode {
+  type?: string;
+  tagName?: string;
+  value?: string;
+  children?: HastNode[];
+}
+
+function hastText(n: HastNode): string {
+  return n.type === "text" ? (n.value ?? "") : (n.children ?? []).map(hastText).join("");
+}
+
+/** A number, optionally signed, with a currency sign, a percent sign or a short unit ("64.77", "-0.01", "182 ms", "12%"). */
+const NUMERIC_CELL_RE = /^[~≈<>+\-−–]?\s*[$€£¥]?\s*\d[\d,._]*\s*(?:[%x×]|[a-zA-Zµ]{1,3}(?:\/\w+)?)?$/;
+
+/** Columns whose body cells are all numbers (right-aligned with tabular figures). Empty cells and "-" are ignored. */
+export function numericColumns(table: HastNode | undefined): boolean[] {
+  const cols: (boolean | undefined)[] = [];
+  const visit = (n: HastNode, inHead: boolean) => {
+    if (n.tagName === "tr") {
+      if (inHead) return;
+      let i = 0;
+      for (const cell of n.children ?? []) {
+        if (cell.tagName !== "td" && cell.tagName !== "th") continue;
+        const t = hastText(cell).trim();
+        if (t && !/^[-–—]+$/.test(t)) cols[i] = (cols[i] ?? true) && NUMERIC_CELL_RE.test(t);
+        i++;
+      }
+      return;
+    }
+    for (const c of n.children ?? []) visit(c, inHead || n.tagName === "thead");
+  };
+  if (table) visit(table, false);
+  return Array.from(cols, (c) => c === true);
+}
+
+const NumericColumns = createContext<boolean[]>([]);
+
+/** Table row that marks the cells of numeric columns. */
+function NumericRow({ children }: { children?: ReactNode }) {
+  const numeric = useContext(NumericColumns);
+  let i = 0;
+  return (
+    <tr>
+      {Children.map(children, (child) => {
+        if (!isValidElement(child)) return child;
+        const flag = numeric[i++];
+        return flag ? cloneElement(child as ReactElement<Record<string, unknown>>, { "data-num": "" }) : child;
+      })}
+    </tr>
+  );
+}
+
 const components: Components = {
   pre: ({ children }) => <>{children}</>,
   code: ({ className, children }) => {
@@ -140,11 +242,14 @@ const components: Components = {
     if (!block) return <code>{children}</code>;
     return <CodeBlock lang={match ? match[1] : null} code={text} />;
   },
-  table: ({ children }) => (
+  table: ({ node, children }) => (
     <div className="md-table">
-      <table>{children}</table>
+      <NumericColumns.Provider value={numericColumns(node as HastNode | undefined)}>
+        <table>{children}</table>
+      </NumericColumns.Provider>
     </div>
   ),
+  tr: NumericRow,
   a: ({ href, children }) => (
     <a
       href={href}
@@ -259,7 +364,16 @@ function useComponents(agentId: string | undefined): Components {
       img: ({ src, alt }) => {
         const url = typeof src === "string" ? src : "";
         const inline = inlineImageSrc(url);
-        if (inline) return <img src={inline} alt={alt ?? ""} loading="lazy" decoding="async" className="my-1 block max-h-[28rem] max-w-full rounded-lg border border-line object-contain" />;
+        if (inline)
+          return (
+            <img
+              src={inline}
+              alt={alt ?? ""}
+              loading="lazy"
+              decoding="async"
+              className="my-1 block max-h-[28rem] max-w-full rounded-lg border border-line object-contain"
+            />
+          );
         const local = agentId ? localImagePath(url) : null;
         if (local && agentId) return <LocalImage agentId={agentId} path={local} alt={alt ?? ""} />;
         return <RemoteImageChip url={url} alt={alt ?? ""} />;
@@ -268,6 +382,9 @@ function useComponents(agentId: string | undefined): Components {
     [agentId],
   );
 }
+
+/** How often the streaming tail is re-parsed. */
+const STREAM_PARSE_MS = 100;
 
 /** One parsed block; memoized on its text so finished blocks never re-parse. */
 const Block = memo(function Block({ text, comps }: { text: string; comps: Components }) {
@@ -293,9 +410,8 @@ export const Markdown = memo(function Markdown({
   /** Shows a Run button on shell code blocks that runs them in this agent's workspace terminal. */
   runAgentId?: string;
 }) {
-  // Under load React may skip intermediate frames of the growing tail.
-  const deferred = useDeferredValue(text);
-  const src = streaming ? deferred : text;
+  // The growing tail is re-parsed on every change, so refresh it at ~10 Hz instead of per delta.
+  const src = useThrottledValue(text, STREAM_PARSE_MS, !!streaming);
   const comps = useComponents(agentId);
   // Incremental while streaming: only the last block is re-scanned as text appends.
   const prev = useRef<{ text: string; ranges: BlockRange[] } | null>(null);
@@ -315,14 +431,16 @@ export const Markdown = memo(function Markdown({
   // doesn't remount (and re-parse) the whole message: unchanged blocks keep their memo.
   return (
     <RunContext.Provider value={runAgentId && !streaming ? runAgentId : null}>
-      <div className={cn("prose-armada selectable", streaming && "[&>*:last-child>*:last-child]:caret", className)}>
-        {ranges.map((r, i) => (
-          // Index keys are stable: blocks only ever append or grow at the end.
-          <div key={i} className="md-block contents">
-            <Block text={src.slice(r.start, r.end).replace(/\n+$/, "")} comps={comps} />
-          </div>
-        ))}
-      </div>
+      <StreamingContext.Provider value={!!streaming}>
+        <div className={cn("prose-armada selectable", streaming && "[&>*:last-child>*:last-child]:caret", className)}>
+          {ranges.map((r, i) => (
+            // Index keys are stable: blocks only ever append or grow at the end.
+            <div key={i} className="md-block contents">
+              <Block text={src.slice(r.start, r.end).replace(/\n+$/, "")} comps={comps} />
+            </div>
+          ))}
+        </div>
+      </StreamingContext.Provider>
     </RunContext.Provider>
   );
 });

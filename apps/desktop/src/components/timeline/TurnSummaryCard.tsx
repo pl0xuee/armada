@@ -151,7 +151,7 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
           </span>
         </Tooltip>
         {stale && !shipped && (
-          <span className="rounded-md border border-line-strong px-1.5 text-[10.5px] font-medium text-muted">
+          <span className="rounded-md border border-line-strong px-1.5 text-[11px] font-medium text-muted">
             Earlier turn
           </span>
         )}
@@ -165,7 +165,7 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
                 <button
                   type="button"
                   onClick={() => setReviewAgent(agent.id, f)}
-                  className="inline-flex h-6 max-w-[240px] items-center gap-1.5 px-2 font-mono text-[11.5px] text-fg/85 transition-colors hover:bg-raised hover:text-fg"
+                  className="inline-flex h-6 max-w-[240px] items-center gap-1.5 px-2 font-mono text-[11.5px] text-fg transition-colors hover:bg-raised focus-visible:outline-offset-[-2px]"
                 >
                   <FileCode2 className="h-3 w-3 shrink-0 text-steel" />
                   <span className="truncate">{basename(f)}</span>
@@ -179,7 +179,7 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
                     disabled={agentBusy}
                     title={busyReason ?? undefined}
                     aria-label={`Revert changes to ${f}`}
-                    className="flex h-6 w-6 items-center justify-center border-l border-line text-steel transition-colors hover:bg-err/12 hover:text-err disabled:opacity-40"
+                    className="flex h-6 w-6 items-center justify-center border-l border-line text-steel transition-colors hover:bg-err/12 hover:text-err focus-visible:outline-offset-[-2px] disabled:opacity-40"
                   >
                     <Undo2 className="h-3 w-3" />
                   </button>

@@ -57,7 +57,7 @@ export const QuestionCard = memo(function QuestionCard({
   item,
   agent,
   compact,
-  keyboard,
+  keyboard: keyboardProp,
 }: {
   item: QuestionItem;
   agent: Agent;
@@ -65,6 +65,9 @@ export const QuestionCard = memo(function QuestionCard({
   /** Number keys, arrows and Enter act on this card (the latest pending one in the visible agent). */
   keyboard?: boolean;
 }) {
+  // The pinned dock answers with the number keys while it shows this question; then not the card.
+  const docked = useQuestionUi((s) => Boolean(s.docked[item.requestId]));
+  const keyboard = keyboardProp && !docked;
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const draft = useQuestionUi((s) => s.drafts[item.requestId]) ?? EMPTY_DRAFT;
   const groups = useMemo(() => questionGroups(item.fields), [item.fields]);
@@ -324,7 +327,7 @@ export const QuestionCard = memo(function QuestionCard({
   );
 });
 
-function FieldBlock({
+export function FieldBlock({
   group,
   draft,
   hideDescription,
@@ -333,6 +336,7 @@ function FieldBlock({
   dim,
   cursor,
   disabled,
+  dense,
   onFocus,
   onPick,
   onText,
@@ -348,6 +352,8 @@ function FieldBlock({
   dim: boolean;
   cursor: number | undefined;
   disabled: boolean;
+  /** Tighter rows, for the pinned dock. */
+  dense?: boolean;
   onFocus: () => void;
   onPick: (index: number) => void;
   onText: (id: string, text: string) => void;
@@ -382,7 +388,7 @@ function FieldBlock({
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             {field.title && (
-              <span className="rounded-md border border-warn/30 bg-warn/10 px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-warn">
+              <span className="rounded-md border border-warn/30 bg-warn/10 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-warn">
                 {field.title}
               </span>
             )}
@@ -403,7 +409,7 @@ function FieldBlock({
         <div
           role={field.kind === "single" ? "radiogroup" : "group"}
           aria-label={field.title ?? field.description ?? undefined}
-          className="space-y-1.5"
+          className={dense ? "space-y-1" : "space-y-1.5"}
         >
           {options.map((o, i) => (
             <OptionRow
@@ -415,6 +421,7 @@ function FieldBlock({
               focused={keys && cursor === i}
               hint={keys && i < 9 ? String(i + 1) : null}
               disabled={disabled}
+              dense={dense}
               onClick={() => onPick(i)}
             />
           ))}
@@ -428,6 +435,7 @@ function FieldBlock({
                 focused={keys && cursor === options.length}
                 hint={keys && options.length < 9 ? String(options.length + 1) : null}
                 disabled={disabled}
+                dense={dense}
                 onClick={() =>
                   otherOn && field.kind === "single" ? otherRef.current?.focus() : onPick(options.length)
                 }
@@ -528,6 +536,7 @@ function OptionRow({
   focused,
   hint,
   disabled,
+  dense,
   onClick,
 }: {
   label: string;
@@ -537,6 +546,7 @@ function OptionRow({
   focused: boolean;
   hint: string | null;
   disabled: boolean;
+  dense?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -548,7 +558,8 @@ function OptionRow({
       onClick={onClick}
       aria-keyshortcuts={hint ?? undefined}
       className={cn(
-        "group flex w-full items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors disabled:opacity-60",
+        "group flex w-full items-start gap-3 rounded-xl border px-3 text-left transition-colors disabled:opacity-60",
+        dense ? "py-1.5" : "py-2.5",
         selected
           ? "border-warn/55 bg-warn/[0.12]"
           : "border-line bg-base/40 hover:border-line-strong hover:bg-raised/60",
@@ -558,7 +569,8 @@ function OptionRow({
     >
       <span
         className={cn(
-          "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center border transition-colors",
+          "flex h-4 w-4 shrink-0 items-center justify-center border transition-colors",
+          dense ? "mt-px" : "mt-0.5",
           multi ? "rounded-[5px]" : "rounded-full",
           selected ? "border-warn bg-warn text-warn-fg" : "border-line-strong text-transparent",
         )}
@@ -566,10 +578,18 @@ function OptionRow({
       >
         <Check className="h-3 w-3" strokeWidth={3} />
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-[13.5px] font-medium text-fg">{label}</span>
-        {description && <span className="mt-0.5 block text-[12px] leading-snug text-muted">{description}</span>}
-      </span>
+      {dense ? (
+        // One line in the pinned dock; the whole description is in the tooltip and on the card.
+        <span className="flex min-w-0 flex-1 items-baseline gap-2" title={description ?? undefined}>
+          <span className="shrink-0 text-[13px] font-medium text-fg">{label}</span>
+          {description && <span className="min-w-0 truncate text-[12px] text-steel">{description}</span>}
+        </span>
+      ) : (
+        <span className="min-w-0 flex-1">
+          <span className="block text-[13.5px] font-medium text-fg">{label}</span>
+          {description && <span className="mt-0.5 block text-[12px] leading-snug text-muted">{description}</span>}
+        </span>
+      )}
       {hint && <Kbd className="mt-0.5 shrink-0">{hint}</Kbd>}
     </button>
   );

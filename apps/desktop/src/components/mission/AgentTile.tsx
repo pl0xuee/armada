@@ -112,7 +112,9 @@ export const AgentTile = memo(function AgentTile({
           }}
         />
       )}
-      {working && <div aria-hidden className="shimmer-bar absolute inset-x-0 top-0 h-[2px] bg-accent/15" />}
+      {working && (
+        <div aria-hidden className="shimmer-bar shimmer-calm absolute inset-x-0 top-0 h-[2px] bg-accent/15" />
+      )}
 
       <div className="relative flex items-center gap-1.5 px-3.5 pt-3">
         <span

@@ -90,8 +90,12 @@ const tauriApi = {
 
   // agents
   createAgent: (req: CreateAgentRequest) => invoke<Agent>("create_agent", { req }),
-  sendPrompt: (agentId: string, text: string, attachments?: Attachment[]) =>
-    invoke<void>("send_prompt", { agentId, text, attachments: attachments ?? [] }),
+  /**
+   * Sends a message. `deliver`: while the agent works, hand it to the running turn (it reads it at its
+   * next step, nothing is stopped) instead of queueing it; the backend queues it anyway when it can't.
+   */
+  sendPrompt: (agentId: string, text: string, attachments?: Attachment[], deliver?: boolean) =>
+    invoke<void>("send_prompt", { agentId, text, attachments: attachments ?? [], deliver: deliver ?? false }),
   /** Loads an image file an agent referenced (relative to its cwd; images ≤10 MB in the agent's folders or temp dir). */
   readImage: (agentId: string, path: string) => invoke<Attachment>("read_image", { agentId, path }),
   /** Images on the system clipboard, read natively (fallback when a paste event carries no image file; Linux only). */
@@ -183,6 +187,8 @@ const tauriApi = {
   chimeWatched: () => invoke<void>("chime_watched"),
   /** Window title for taskbars / WM bars / alt-tab. */
   setWindowTitle: (title: string) => invoke<void>("set_window_title", { title }),
+  /** How many agents need you (the rail badge's number) for the tray's tooltip and menu. */
+  setNeedsYouCount: (count: number) => invoke<void>("set_needs_you_count", { count }),
 
   // review / git
   getDiff: (agentId: string) => invoke<AgentDiff>("get_diff", { agentId }),

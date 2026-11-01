@@ -24,7 +24,6 @@ import {
   Columns3,
   CornerDownLeft,
   History,
-  Inbox,
   LayoutGrid,
   ListTodo,
   Rocket,
@@ -473,23 +472,17 @@ function Palette({ onClose }: { onClose: () => void }) {
               />
               <PaletteAction
                 icon={<ListTodo />}
-                label="Go to Needs you"
+                label="Go to Mission Control: Needs you"
                 shortcut={[modKey, "J"]}
-                keywords={["triage", "attention", "unread", "queue"]}
-                onSelect={() => run(() => ui.setView("triage"))}
+                keywords={["triage", "attention", "unread", "queue", "inbox", "approvals"]}
+                onSelect={() => run(() => ui.openMission("needs"))}
               />
               <PaletteAction
                 icon={<LayoutGrid />}
-                label="Go to Mission Control"
+                label="Go to Mission Control: All agents"
                 shortcut={[modKey, "⇧", "M"]}
-                onSelect={() => run(() => ui.setView("mission"))}
-              />
-              <PaletteAction
-                icon={<Inbox />}
-                label="Go to Inbox"
-                shortcut={[modKey, "I"]}
-                keywords={["approvals"]}
-                onSelect={() => run(() => ui.setView("inbox"))}
+                keywords={["fleet", "board", "tiles"]}
+                onSelect={() => run(() => ui.openMission("all"))}
               />
               <PaletteAction
                 icon={<Columns3 />}

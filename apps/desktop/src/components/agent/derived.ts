@@ -12,6 +12,7 @@ import {
   type SubagentClock,
   type SubagentRun,
 } from "@/lib/agents";
+import { planIsLive } from "@/lib/pinned";
 import type { TimelineItem } from "@/lib/types";
 
 type Tool = Extract<TimelineItem, { kind: "tool_call" }>;
@@ -23,6 +24,8 @@ export interface AgentDerived {
   /** Running sub-agents plus the ones finished this turn. */
   subagents: SubagentRun[];
   plan: Extract<TimelineItem, { kind: "plan" }> | null;
+  /** The plan belongs to the current turn (after the last user message): worth pinning while unfinished. */
+  planLive: boolean;
 }
 
 interface Entry {
@@ -39,7 +42,14 @@ interface Entry {
 }
 
 const NO_RUNS: SubagentRun[] = [];
-const EMPTY: AgentDerived = { files: [], changedCount: 0, runningSubagents: 0, subagents: NO_RUNS, plan: null };
+const EMPTY: AgentDerived = {
+  files: [],
+  changedCount: 0,
+  runningSubagents: 0,
+  subagents: NO_RUNS,
+  plan: null,
+  planLive: false,
+};
 const cache = new Map<string, Entry>();
 const TOOL = 1;
 const PLAN = 2;
@@ -143,6 +153,7 @@ export function agentDerived(
     runningSubagents: runningCount(subagents),
     subagents,
     plan: latestPlan(items),
+    planLive: planIsLive(items),
   };
   cache.set(agentId, { list: items, sig: signature(items), busy, live, bucket, hasBg: hasBackground(items), value });
   return value;

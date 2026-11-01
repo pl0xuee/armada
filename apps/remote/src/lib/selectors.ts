@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 import { useStore, type State } from "./store";
+import { dockNeed } from "./dock";
+import { triageQueue, type NeedsReason, type TriageEntry } from "./triage";
 import type { Agent, PendingItem, RemoteAccount } from "./types";
 
 /** The agent's account, if known (share links don't include accounts). */
@@ -221,4 +223,64 @@ export function filterAgents(agents: Agent[], query: string): Agent[] {
       (a.branch ?? "").toLowerCase().includes(q) ||
       (a.lastMessage ?? "").toLowerCase().includes(q),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Needs you (see ./triage): one definition for the badge, the callout, the queue and the title.
+
+export interface TriageData {
+  queue: TriageEntry[];
+  /** Why each agent in the queue needs you. */
+  reasons: ReadonlyMap<string, NeedsReason>;
+  count: number;
+}
+
+let triageMemo: { agents: State["agents"]; permissions: State["permissions"]; status: State["permissionsStatus"]; resolving: State["resolving"]; data: TriageData } | null = null;
+
+/** The queue, memoised on the slices it reads so every subscriber shares one computation. */
+export function selectTriage(s: State): TriageData {
+  if (
+    triageMemo &&
+    triageMemo.agents === s.agents &&
+    triageMemo.permissions === s.permissions &&
+    triageMemo.status === s.permissionsStatus &&
+    triageMemo.resolving === s.resolving
+  ) {
+    return triageMemo.data;
+  }
+  const index = permissionIndex(s.permissions);
+  const loaded = s.permissionsStatus === "ready";
+  const queue = triageQueue(Object.values(s.agents), (a) => pendingCount(a, index.get(a.id), loaded, s.resolving));
+  const reasons = new Map(queue.map((e) => [e.agent.id, e.reason] as const));
+  const data = { queue, reasons, count: queue.length };
+  triageMemo = { agents: s.agents, permissions: s.permissions, status: s.permissionsStatus, resolving: s.resolving, data };
+  return data;
+}
+
+export function useTriage(): TriageData {
+  return useStore(selectTriage);
+}
+
+/** Just the number of agents that need you (a primitive: streamed text never re-renders its subscribers). */
+export function useNeedsYouCount(): number {
+  return useStore((s) => selectTriage(s).count);
+}
+
+/** Agents that need you other than `agentId` (the agent screen's badge). */
+export function useOtherNeedsYouCount(agentId: string | null): number {
+  return useStore((s) => {
+    const t = selectTriage(s);
+    return agentId && t.reasons.has(agentId) ? t.count - 1 : t.count;
+  });
+}
+
+/**
+ * Whether this request is the one the dock above the composer answers (the oldest open one): its card in the
+ * conversation then keeps the details and leaves the buttons to the dock, so there is one place to answer.
+ */
+export function useIsDocked(item: { agentId: string; requestId: string }): boolean {
+  return useStore((s) => {
+    const open = permissionIndex(s.permissions).get(item.agentId)?.filter((p) => !s.resolving[p.requestId]);
+    return dockNeed(open)?.item.requestId === item.requestId;
+  });
 }

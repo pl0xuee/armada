@@ -1,15 +1,17 @@
-//! System tray: quick navigation, waiting counts, quit.
+//! System tray: quick navigation, the "Needs you" count, quit.
+//!
+//! The count is pushed by the UI (`set_needs_you_count`), which is the single place that
+//! decides which agents need the user. The rail badge, window title and this tray all show
+//! that one number.
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::AppHandle;
-use armada_core::{Core, NavigateTarget};
+use armada_core::NavigateTarget;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
-use tokio::sync::Notify;
 
 use crate::window;
 
@@ -17,9 +19,11 @@ const TRAY_ID: &str = "armada-tray";
 
 pub struct TrayState {
     tray: TrayIcon<crate::Rt>,
-    inbox: MenuItem<crate::Rt>,
-    dirty: Arc<Notify>,
+    needs: MenuItem<crate::Rt>,
 }
+
+/// The count last shown (`usize::MAX` before the first), so unchanged pushes do nothing.
+static SHOWN: AtomicUsize = AtomicUsize::new(usize::MAX);
 
 /// Whether the tray icon was created (some Linux desktops have no tray host or
 /// lack the indicator library); without it, closing the window must quit.
@@ -32,7 +36,7 @@ pub fn available() -> bool {
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Show Armada", true, None::<&str>)?;
     let new_agent = MenuItem::with_id(app, "new_agent", "New Agent", true, None::<&str>)?;
-    let inbox = MenuItem::with_id(app, "inbox", "Inbox", true, None::<&str>)?;
+    let needs = MenuItem::with_id(app, "needs_you", "Needs you", true, None::<&str>)?;
     let mission = MenuItem::with_id(
         app,
         "mission_control",
@@ -42,7 +46,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     )?;
     let sep = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Armada", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &new_agent, &inbox, &mission, &sep, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &new_agent, &needs, &mission, &sep, &quit])?;
 
     // macOS menu bar icons are template images (black + alpha, tinted by the OS);
     // elsewhere use the ice-blue mark, which reads on both light and dark panels.
@@ -76,14 +80,9 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         })
         .build(app)?;
 
-    let dirty = Arc::new(Notify::new());
-    app.manage(TrayState {
-        tray,
-        inbox,
-        dirty: dirty.clone(),
-    });
-    spawn_updater(app.clone(), dirty);
-    mark_dirty(app);
+    app.manage(TrayState { tray, needs });
+    // A count pushed before the tray existed is shown now.
+    SHOWN.store(usize::MAX, Ordering::Relaxed);
     Ok(())
 }
 
@@ -91,7 +90,8 @@ fn on_menu_event(app: &AppHandle, event: MenuEvent) {
     match event.id().as_ref() {
         "show" => window::show_main(app),
         "new_agent" => window::navigate(app, NavigateTarget::NewAgent),
-        "inbox" => window::navigate(app, NavigateTarget::Inbox),
+        // The wire name is still "inbox"; the UI opens Mission Control on its Needs you tab.
+        "needs_you" => window::navigate(app, NavigateTarget::Inbox),
         "mission_control" => window::navigate(app, NavigateTarget::MissionControl),
         // Goes through RunEvent::ExitRequested, which shuts the core down first.
         "quit" => app.exit(0),
@@ -99,54 +99,34 @@ fn on_menu_event(app: &AppHandle, event: MenuEvent) {
     }
 }
 
-/// Schedules a (debounced) refresh of the tooltip and menu counts.
-pub fn mark_dirty(app: &AppHandle) {
-    if let Some(state) = app.try_state::<TrayState>() {
-        state.dirty.notify_one();
-    }
-}
-
-fn spawn_updater(app: AppHandle, dirty: Arc<Notify>) {
-    tauri::async_runtime::spawn(async move {
-        loop {
-            dirty.notified().await;
-            // Coalesce bursts of agent updates (streaming turns update often).
-            tokio::time::sleep(Duration::from_millis(400)).await;
-            let app2 = app.clone();
-            let counts = tauri::async_runtime::spawn_blocking(move || counts(&app2)).await;
-            if let Ok(Some((waiting, inbox))) = counts {
-                refresh(&app, waiting, inbox);
-            }
-        }
-    });
-}
-
-/// (agents waiting on the user, pending approvals in the inbox)
-fn counts(app: &AppHandle) -> Option<(usize, i64)> {
-    let c = app.try_state::<Core>()?.agent_counts();
-    Some((c.needs_permission, c.pending_permissions))
-}
-
-fn refresh(app: &AppHandle, waiting: usize, inbox: i64) {
+/// Shows how many agents need the user: tooltip, menu label and (macOS) the menu-bar count.
+/// Does nothing when the count is unchanged or the tray doesn't exist.
+pub fn set_needs_you(app: &AppHandle, count: usize) {
     let Some(state) = app.try_state::<TrayState>() else {
         return;
     };
-    let tooltip = if waiting == 0 {
+    if SHOWN.swap(count, Ordering::Relaxed) == count {
+        return;
+    }
+    let tooltip = if count == 0 {
         "Armada".to_string()
     } else {
-        format!("Armada — {waiting} waiting")
+        format!(
+            "Armada — {count} need{} you",
+            if count == 1 { "s" } else { "" }
+        )
     };
     let _ = state.tray.set_tooltip(Some(&tooltip));
-    let label = if inbox > 0 {
-        format!("Inbox ({inbox})")
+    let label = if count > 0 {
+        format!("Needs you ({count})")
     } else {
-        "Inbox".to_string()
+        "Needs you".to_string()
     };
-    let _ = state.inbox.set_text(label);
+    let _ = state.needs.set_text(label);
     #[cfg(target_os = "macos")]
     {
         // Menu-bar count next to the icon.
-        let title = (waiting > 0).then(|| waiting.to_string());
+        let title = (count > 0).then(|| count.to_string());
         let _ = state.tray.set_title(title.as_deref());
     }
 }

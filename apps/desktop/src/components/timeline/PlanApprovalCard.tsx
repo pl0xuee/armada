@@ -81,7 +81,9 @@ export const PlanApprovalCard = memo(function PlanApprovalCard({
           onClick={() => setExpanded((v) => !v)}
           className="flex h-9 w-full items-center gap-2 rounded-xl px-2.5 text-left text-[12.5px] hover:bg-raised/50"
         >
-          <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 text-steel transition-transform", expanded && "rotate-90")} />
+          <ChevronRight
+            className={cn("h-3.5 w-3.5 shrink-0 text-steel transition-transform", expanded && "rotate-90")}
+          />
           <ListChecks className="h-3.5 w-3.5 shrink-0 text-accent" />
           <span className="min-w-0 flex-1 truncate text-muted">{planTitle(plan)}</span>
           <span
@@ -150,7 +152,9 @@ export const PlanApprovalCard = memo(function PlanApprovalCard({
           <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-warn">
             {identity.short} has a plan for your approval
           </div>
-          <div className="mt-0.5 break-words text-[14px] font-medium text-fg">Review the plan, then choose how it goes ahead</div>
+          <div className="mt-0.5 break-words text-[14px] font-medium text-fg">
+            Review the plan, then choose how it goes ahead
+          </div>
         </div>
       </div>
       <div className="selectable mx-4 mb-3 max-h-[min(460px,55vh)] overflow-y-auto rounded-xl border border-line bg-base/40 px-4 py-3">
@@ -232,7 +236,9 @@ export const PlanApprovalCard = memo(function PlanApprovalCard({
             className="min-h-16"
           />
           <div className="mt-2 flex items-center justify-end gap-2">
-            <span className="mr-auto text-[11px] text-steel">Sends the plan back, then your note as the next message.</span>
+            <span className="mr-auto text-[11px] text-steel">
+              Sends the plan back, then your note as the next message.
+            </span>
             <Button size="sm" variant="ghost" type="button" onClick={() => setShowReason(false)}>
               Cancel
             </Button>

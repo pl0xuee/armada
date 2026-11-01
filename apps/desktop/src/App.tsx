@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { usePrPolling } from "@/hooks/usePrPolling";
+import { useWindowActivity } from "@/hooks/useWindowActivity";
 import { useWindowTitle } from "@/hooks/useWindowTitle";
 import { installCompletionTracker } from "@/store/completion";
 import { api } from "@/lib/api";
@@ -28,9 +29,7 @@ import { AgentsView } from "@/views/Agents";
 // (views, overlays, xterm) loads on first use and is prefetched when the app is idle.
 const load = {
   mission: () => import("@/views/MissionControl").then((m) => ({ default: m.MissionControlView })),
-  inbox: () => import("@/views/Inbox").then((m) => ({ default: m.InboxView })),
   compare: () => import("@/views/Compare").then((m) => ({ default: m.CompareView })),
-  triage: () => import("@/views/Triage").then((m) => ({ default: m.TriageView })),
   schedules: () => import("@/views/Schedules").then((m) => ({ default: m.SchedulesView })),
   usage: () => import("@/views/Usage").then((m) => ({ default: m.UsageView })),
   accounts: () => import("@/views/Accounts").then((m) => ({ default: m.AccountsView })),
@@ -55,23 +54,43 @@ const ShareDialog = lazy(load.share);
 const VIEWS: Record<View, ComponentType> = {
   agents: AgentsView,
   mission: lazy(load.mission),
-  inbox: lazy(load.inbox),
   compare: lazy(load.compare),
-  triage: lazy(load.triage),
   schedules: lazy(load.schedules),
   usage: lazy(load.usage),
   accounts: lazy(load.accounts),
   settings: lazy(load.settings),
 };
 
-/** Warm the chunks once the UI is idle so the first switch to a view is instant. */
+/** Most likely first. The terminal (xterm) is left out: it loads when a terminal is opened. */
+const PREFETCH_ORDER = [
+  "palette",
+  "newAgent",
+  "settings",
+  "review",
+  "mission",
+  "share",
+  "compare",
+  "usage",
+  "accounts",
+  "schedules",
+  "onboarding",
+] as const satisfies readonly (keyof typeof load)[];
+
+/** Warm the chunks one per idle slot, so evaluating them never lands as one long task. */
 function prefetchChunks() {
-  const idle =
-    (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback ??
-    ((cb: () => void) => window.setTimeout(cb, 1200));
-  idle(() => {
-    for (const fn of Object.values(load)) void fn().catch(() => {});
-  });
+  const idle = (cb: () => void, fallbackMs: number) => {
+    if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(cb, { timeout: 5000 });
+    else window.setTimeout(cb, fallbackMs);
+  };
+  let next = 0;
+  const step = () => {
+    const name = PREFETCH_ORDER[next++];
+    if (!name) return;
+    void load[name]()
+      .catch(() => {})
+      .then(() => idle(step, 250));
+  };
+  idle(step, 1200);
 }
 
 export function App() {
@@ -90,6 +109,7 @@ export function App() {
   // "Done" pill state + chime when the watched agent finishes.
   useEffect(() => installCompletionTracker(), []);
   useWindowTitle(booted);
+  useWindowActivity();
 
   // Links open externally; nothing navigates the webview.
   useEffect(() => installNavigationGuard(), []);
@@ -150,10 +170,10 @@ export function App() {
                   <Rail />
                   <Main />
                 </div>
-                <WhenOpened open={(s) => s.paletteOpen}>
+                <WhenOpened open={(s) => s.paletteOpen} warm>
                   <CommandPalette />
                 </WhenOpened>
-                <WhenOpened open={(s) => s.newAgent.open}>
+                <WhenOpened open={(s) => s.newAgent.open} warm>
                   <NewAgentDialog />
                 </WhenOpened>
                 <AgentDialogs />
@@ -201,7 +221,7 @@ function WhenOpened({
 }: {
   open: (s: ReturnType<typeof useUi.getState>) => boolean;
   children: ReactNode;
-  /** Mount (closed) once the UI is idle, so the first open doesn't wait on Suspense's reveal throttle. */
+  /** Load the chunk and mount (closed) once the UI is idle, so the first open doesn't wait on Suspense's reveal throttle. */
   warm?: boolean;
 }) {
   const isOpen = useUi(open);
@@ -211,9 +231,18 @@ function WhenOpened({
   }, [isOpen]);
   useEffect(() => {
     if (!warm || mounted) return;
-    // A plain timer is enough: it only has to land before the user's first click.
-    const t = window.setTimeout(() => setMounted(true), 2500);
-    return () => clearTimeout(t);
+    // Only has to land before the user's first click; the idle slot keeps the mount out of busy frames
+    // (the prefetch has normally loaded the chunk by then, so this renders the closed tree at once).
+    let idle = 0;
+    const t = window.setTimeout(() => {
+      const mount = () => setMounted(true);
+      if (typeof window.requestIdleCallback === "function") idle = window.requestIdleCallback(mount, { timeout: 3000 });
+      else mount();
+    }, 2500);
+    return () => {
+      clearTimeout(t);
+      if (idle) window.cancelIdleCallback(idle);
+    };
   }, [warm, mounted]);
   if (!mounted) return null;
   return <Suspense fallback={null}>{children}</Suspense>;

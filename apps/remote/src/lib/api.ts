@@ -260,12 +260,18 @@ export const api = {
     attachments: Attachment[],
     key: string,
     onProgress?: (f: number) => void,
+    /** While the agent works: true hands it to the running turn, false queues it behind the turn. Omitted: the desktop's setting. */
+    deliver?: boolean,
   ) =>
     requestIdempotent(
       b,
       "POST",
       agentPath(agentId, "/prompt"),
-      attachments.length ? { text, attachments } : { text },
+      {
+        text,
+        ...(attachments.length ? { attachments } : {}),
+        ...(deliver === undefined ? {} : { deliver }),
+      },
       key,
       onProgress,
     ) as Promise<void>,
@@ -305,6 +311,9 @@ export const api = {
     }) as Promise<void>,
   markRead: (b: Backend, agentId: string) =>
     b.request("POST", agentPath(agentId, "/read")) as Promise<void>,
+  /** "Done" in Needs you: dismisses an error / usage limit / finished agent until it does something new. Older servers: 404. */
+  acknowledge: (b: Backend, agentId: string) =>
+    b.request("POST", agentPath(agentId, "/acknowledge")) as Promise<void>,
   removeQueued: (b: Backend, agentId: string, qid: string) =>
     b.request(
       "DELETE",

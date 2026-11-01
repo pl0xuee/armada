@@ -7,6 +7,7 @@ import { ApiError, type Backend, type HttpMethod, type RequestOptions, type Stre
 import type { Agent, Attachment, AttentionReason, CreateAgentRequest, QuestionAnswers, RemoteEvent, Session, TimelineItem } from "@/lib/types";
 import { CHECKOUT_PNG, ORDERS_PNG } from "./images";
 import { mockDiff } from "./diff";
+import { buildExtras } from "./scenarios";
 import { streamChunk, stressAgent, stressTimeline } from "./stress";
 import { accounts, buildAgents, buildTimelines, customAgents, nextSeq, projects, providerConfig, STREAM_SCRIPT, templates } from "./data";
 
@@ -23,6 +24,8 @@ export interface Scenario {
   /** Stress test: items in agent s1's timeline (0 = off) and deltas per second. */
   stressItems: number;
   stressRate: number;
+  /** Optional extra agents for newer features (see ./scenarios). */
+  extras: Set<string>;
 }
 
 export function scenarioFromParams(p: URLSearchParams): Scenario {
@@ -39,6 +42,7 @@ export function scenarioFromParams(p: URLSearchParams): Scenario {
     pair: pair === "revoked" ? "revoked" : pair ? "plain" : null,
     stressItems: p.get("stress") === "1" ? Math.max(10, Number(p.get("items") ?? 3000) || 3000) : 0,
     stressRate: Math.max(1, Number(p.get("rate") ?? 60) || 60),
+    extras: new Set(["quick", "plan", "group", "md", "dock"].filter((k) => p.get(k) === "1")),
   };
 }
 
@@ -87,6 +91,7 @@ export class MockBackend implements Backend {
   /** `&fail=secretscheck`: the first secret-files look-ahead already failed. */
   private secretCheckFailed = false;
   private streamItemId: string | null = null;
+  private createSeq = 0;
 
   constructor(scenario: Scenario) {
     this.s = scenario;
@@ -94,6 +99,11 @@ export class MockBackend implements Backend {
     if (!scenario.empty) {
       for (const a of buildAgents(now)) this.agents.set(a.id, a);
       for (const [id, list] of Object.entries(buildTimelines(now))) this.items.set(id, list);
+      if (scenario.extras.size) {
+        const extra = buildExtras(now, scenario.extras);
+        for (const a of extra.agents) this.agents.set(a.id, a);
+        for (const [id, list] of Object.entries(extra.timelines)) this.items.set(id, list);
+      }
     }
     const a3 = this.items.get("a3");
     this.streamItemId = a3?.[a3.length - 1]?.id ?? null;
@@ -250,7 +260,7 @@ export class MockBackend implements Backend {
       return this.queueAction(agent, decodeURIComponent(q[2]), method === "POST" && !!q[3], interrupt);
     }
     const [pathOnly, query = ""] = path.split("?");
-    const m = /^\/api\/agents\/([^/]+)\/(items|prompt|permission|question|cancel|resume|stop|config|account|archive|read|diff|commit|ship|image|secret-files)$/.exec(pathOnly);
+    const m = /^\/api\/agents\/([^/]+)\/(items|prompt|permission|question|cancel|resume|stop|config|account|archive|read|acknowledge|diff|commit|ship|image|secret-files)$/.exec(pathOnly);
     if (!m) throw new ApiError(404, "not found");
     const id = decodeURIComponent(m[1]);
     const action = m[2];
@@ -357,6 +367,9 @@ export class MockBackend implements Backend {
       case "read":
         this.update(agent.id, { unread: false });
         return;
+      case "acknowledge":
+        this.update(agent.id, { unread: false, acknowledgedAt: Date.now() });
+        return;
       case "permission":
         return this.permission(agent, body as { requestId: string; optionId: string });
       case "question":
@@ -406,7 +419,13 @@ export class MockBackend implements Backend {
     if (!text.trim() && !attachments.length) throw new ApiError(400, "empty prompt");
     if (attachments.length > 4) throw new ApiError(400, "Attach at most 4 images");
     if (agent.status === "working" || agent.status === "starting" || agent.status === "needs_permission") {
-      // Mid-turn messages are queued and run after the current turn.
+      // Like the real server: an agent that takes messages mid-turn gets it in the running turn at once
+      // (shown in the timeline, marked mid-turn); otherwise (or for a command, or a paused queue) it is
+      // queued and runs after the current turn.
+      if (agent.steerable && !agent.queuePaused && !text.trimStart().startsWith("/")) {
+        this.push(this.newItem<"user_message">(agent.id, { kind: "user_message", text, midTurn: true, ...(attachments.length ? { attachments } : {}) }));
+        return;
+      }
       const queue = [...(agent.queue ?? []), { id: `q${Date.now()}`, text, attachments: attachments.length }];
       this.update(agent.id, { queue, queuedPrompts: queue.length, queuePaused: false });
       return;
@@ -438,7 +457,7 @@ export class MockBackend implements Backend {
       throw new ApiError(400, "Choose an enabled custom agent");
     }
     const now = Date.now();
-    const id = `n${now}`;
+    const id = `n${now}-${++this.createSeq}`;
     const title = req.title?.trim() || (req.prompt ? req.prompt.split(/\s+/).slice(0, 6).join(" ") : "New agent");
     const created: Agent = {
       ...structuredClone(this.agents.get("a5") ?? [...this.agents.values()][0]),
@@ -450,6 +469,7 @@ export class MockBackend implements Backend {
       projectPath: req.projectPath,
       cwd: req.projectPath,
       worktree: !!req.worktree,
+      groupId: req.groupId ?? null,
       branch: req.worktree ? `armada/${id}` : null,
       status: "starting",
       running: true,
@@ -493,9 +513,10 @@ export class MockBackend implements Backend {
     if (!entry) throw new ApiError(404, "That message is no longer queued");
     const rest = queue.filter((x) => x.id !== qid);
     const busy = agent.status === "working" || agent.status === "starting" || agent.status === "needs_permission";
-    if (sendNow && !interrupt && busy && agent.steerable) {
-      if (entry.text.trimStart().startsWith("/")) {
-        // A command only works at the start of a turn: first in line instead.
+    if (sendNow && !interrupt && busy) {
+      if (!agent.steerable || entry.text.trimStart().startsWith("/")) {
+        // Can't be delivered mid-turn (a command, or an agent that can't take messages meanwhile):
+        // first in line, runs when the turn ends. Nothing is stopped.
         const front = [entry, ...rest];
         this.update(agent.id, { queue: front, queuedPrompts: front.length, queuePaused: false });
         return undefined;

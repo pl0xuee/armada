@@ -5,6 +5,7 @@ import {
   CircleCheck,
   CirclePause,
   CircleX,
+  CornerDownRight,
   FilePen,
   FileSearch,
   Globe,
@@ -41,6 +42,7 @@ import { permissionKeyOptions } from "./usePermissionKeys";
 import { cheapStatsAll, parsedDiffs } from "./diffCache";
 import type { ParsedFileDiff } from "@/lib/diff";
 import { usePermissionUi } from "@/store/permissionUi";
+import { usePinnedUi } from "@/store/pinnedUi";
 
 const NO_PARSED: ParsedFileDiff[] = [];
 import { attachmentSrc } from "@/lib/attachments";
@@ -53,6 +55,9 @@ import { AttachmentStrip } from "../AttachmentStrip";
 import { CopyButton } from "../CopyButton";
 import { DiffStat, FileDiffView } from "../DiffView";
 import { Markdown } from "../Markdown";
+import type { MessageRole } from "./collapse";
+import { MessageFold } from "./MessageFold";
+import { runText } from "./messageFlow";
 import { CodeText } from "../CodeText";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { Button } from "../ui/button";
@@ -62,7 +67,14 @@ type Item<K extends TimelineItem["kind"]> = Extract<TimelineItem, { kind: K }>;
 
 // ---------------------------------------------------------------- user
 
-export const UserBubble = memo(function UserBubble({ item }: { item: Item<"user_message"> }) {
+export const UserBubble = memo(function UserBubble({
+  item,
+  awaiting = false,
+}: {
+  item: Item<"user_message">;
+  /** Sent while the agent worked and not answered yet: says when it will be read, until the agent's next output. */
+  awaiting?: boolean;
+}) {
   return (
     <div className="group flex justify-end">
       <div className="relative max-w-[80%]">
@@ -74,7 +86,13 @@ export const UserBubble = memo(function UserBubble({ item }: { item: Item<"user_
             {item.text}
           </div>
         )}
-        <div className="absolute right-0 top-full z-[1] flex gap-1 pt-0.5 text-[10.5px] text-steel opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+        {awaiting && (
+          <div className="mt-1 flex items-center justify-end gap-1 text-[11px] text-steel">
+            <CornerDownRight className="h-3 w-3" aria-hidden />
+            Sent while it was working · it reads this at its next step
+          </div>
+        )}
+        <div className="absolute right-0 top-full z-[1] flex gap-1 pt-0.5 text-[11px] text-steel opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
           {item.text && <CopyButton text={item.text} className="h-5" />}
           <RestoreAction item={item} />
           <RelTime ts={item.ts} long className="self-center" />
@@ -104,28 +122,42 @@ export const TurnHeader = memo(function TurnHeader({ agent, ts }: { agent: Agent
 
 export const AgentMessage = memo(function AgentMessage({
   item,
+  parts,
   agent,
-  interim = false,
+  role = "answer",
   streaming,
 }: {
+  /** The message (the first of a run of consecutive ones). */
   item: Item<"agent_message">;
+  /** All pieces of a run of consecutive messages (including `item`): rendered as one continuous text. */
+  parts?: readonly TimelineItem[];
   agent: Agent;
-  /** Narration between tool calls (not the answer that closes the turn): softer color, same size. */
-  interim?: boolean;
+  /** "narration": a working note between tool calls, quiet and compact. "answer"/"latest": what closes a turn. */
+  role?: MessageRole;
   streaming: boolean;
 }) {
   const images = item.images ?? [];
+  const text = useMemo(() => (parts ? runText(parts) : item.text), [parts, item.text]);
+  // Demoted while on screen (the answer in the making turned out to be a working note): ease into the new style.
+  const lastRole = useRef(role);
+  const demoted = useRef(false);
+  if (lastRole.current !== "narration" && role === "narration") demoted.current = true;
+  lastRole.current = role;
   return (
-    <div className="group relative">
+    // With text, the row's own bottom padding becomes a 20px gutter for the copy button, so it never
+    // prints over the last line (the negative margin keeps the gap to the next row at 20px).
+    <div className={cn("group relative", text && "-mb-3 pb-5")}>
       {images.length > 0 && <MessageImages images={images} />}
-      {item.text ? (
-        <Markdown
-          text={item.text}
-          streaming={streaming}
-          agentId={agent.id}
-          runAgentId={agent.cwd ? agent.id : undefined}
-          className={cn("prose-chat", interim && "prose-interim")}
-        />
+      {text ? (
+        <MessageFold id={item.id} role={role} streaming={streaming}>
+          <Markdown
+            text={text}
+            streaming={streaming}
+            agentId={agent.id}
+            runAgentId={agent.cwd ? agent.id : undefined}
+            className={cn("prose-chat", role === "narration" && "prose-narration", demoted.current && "prose-demote")}
+          />
+        </MessageFold>
       ) : images.length > 0 ? null : !streaming ? (
         <p className="text-[12.5px] italic text-steel">No reply (the turn ended before any text).</p>
       ) : (
@@ -139,10 +171,9 @@ export const AgentMessage = memo(function AgentMessage({
           ))}
         </div>
       )}
-      {!streaming && item.text && (
-        // Overlaid in the row's bottom padding, so showing it never changes the row's height.
-        <div className="absolute -bottom-1 left-0 z-[1] flex opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-          <CopyButton text={item.text} className="-ml-1.5" label="Copy message" />
+      {!streaming && text && (
+        <div className="absolute bottom-0 left-0 z-[1] flex opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+          <CopyButton text={text} className="-ml-1.5 h-5" label="Copy message" />
         </div>
       )}
     </div>
@@ -205,7 +236,7 @@ export const ThoughtBlock = memo(function ThoughtBlock({
         <Brain className={cn("h-3.5 w-3.5 shrink-0", live && "text-accent animate-breathe")} />
         <span className={cn("font-medium", live && "text-muted")}>Thought</span>
         <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform duration-150", open && "rotate-90")} />
-        {!open && <span className="min-w-0 truncate text-steel/80">{preview}</span>}
+        {!open && <span className="min-w-0 truncate text-steel">{preview}</span>}
       </button>
       <AnimatePresence initial={false}>
         {open && (
@@ -285,7 +316,12 @@ const LinkifiedText = memo(function LinkifiedText({ text }: { text: string }) {
         typeof p === "string" ? (
           p
         ) : (
-          <a key={i} href={p.url} title={PREVIEW_LINK_HINT} className="underline decoration-accent/50 underline-offset-2 hover:text-accent">
+          <a
+            key={i}
+            href={p.url}
+            title={PREVIEW_LINK_HINT}
+            className="underline decoration-accent/50 underline-offset-2 hover:text-accent"
+          >
             {p.url}
           </a>
         ),
@@ -363,7 +399,8 @@ export function TerminalOutput({
         {live && <span className="caret" />}
         {!text && !live && !command && <span className="text-steel">No output</span>}
       </pre>
-      {compact && footer.current &&
+      {compact &&
+        footer.current &&
         (lines.length > TAIL_LINES ? (
           <button
             type="button"
@@ -383,9 +420,32 @@ export function TerminalOutput({
 
 /** "exit 1" from the end of a failed command's output, when it says so. */
 function exitCodeOf(output: string): string | null {
-  const m = /(?:exit(?:ed)?(?: with)?(?: code| status)?|code)[:= ]+(-?\d+)\s*\)?\s*$/i.exec(stripOutputFence(output.slice(-400), output.length > 400).trimEnd().slice(-200));
+  const m = /(?:exit(?:ed)?(?: with)?(?: code| status)?|code)[:= ]+(-?\d+)\s*\)?\s*$/i.exec(
+    stripOutputFence(output.slice(-400), output.length > 400)
+      .trimEnd()
+      .slice(-200),
+  );
   return m ? m[1] : null;
 }
+
+const PATH_TITLE_RE = /^(Read|Edit|Write|Create|Update|Delete|Remove|Move|Rename|View|Open)\s+(\S+)$/i;
+
+/** "Read src/a/b.ts": the file as a tidy chip (folder muted, file name emphasised); other titles stay plain text. */
+const ToolTitle = memo(function ToolTitle({ title, kind }: { title: string; kind: ToolKind }) {
+  const m = kind === "execute" ? null : PATH_TITLE_RE.exec(title);
+  if (!m || !/[./\\]/.test(m[2])) return <>{title}</>;
+  const path = m[2];
+  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1;
+  return (
+    <>
+      {m[1]}{" "}
+      <span className="rounded-md bg-raised/60 px-1.5 py-px font-mono text-[11.5px] text-steel">
+        {path.slice(0, cut)}
+        <span className="font-medium text-fg/85">{path.slice(cut)}</span>
+      </span>
+    </>
+  );
+});
 
 export const ToolCallCard = memo(function ToolCallCard({
   item,
@@ -450,7 +510,7 @@ export const ToolCallCard = memo(function ToolCallCard({
             running ? "text-muted" : failed ? "text-err/90" : "",
           )}
         >
-          {item.title}
+          <ToolTitle title={item.title} kind={item.toolKind} />
         </span>
         {hasDiffs && <DiffStat additions={stats.additions} deletions={stats.deletions} />}
         {exit !== null && (
@@ -462,7 +522,7 @@ export const ToolCallCard = memo(function ToolCallCard({
         {hasBody && (
           <ChevronRight
             className={cn(
-              "h-3 w-3 shrink-0 text-steel/70 transition-transform duration-150 group-hover/row:text-muted",
+              "h-3 w-3 shrink-0 text-steel transition-transform duration-150 group-hover/row:text-muted",
               expanded && "rotate-90",
             )}
           />
@@ -526,6 +586,8 @@ export const PermissionCard = memo(function PermissionCard({
   // The draft lives in a store so it survives the row being virtualized out of view.
   const reason = usePermissionUi((s) => s.reasonDraft[item.requestId] ?? "");
   const armed = usePermissionUi((s) => Boolean(s.armed[item.requestId]));
+  // Its actions sit above the message box (ApprovalDock); this card keeps the details.
+  const docked = usePermissionUi((s) => Boolean(s.docked[item.requestId])) && !compact;
   const setReason = (text: string) => usePermissionUi.getState().setReasonDraft(item.requestId, text);
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const parsed = useMemo(
@@ -681,40 +743,46 @@ export const PermissionCard = memo(function PermissionCard({
           )}
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-2 border-t border-warn/15 bg-base/30 px-4 py-3">
-        {item.options.map((o, i) => {
-          const allow = o.kind.startsWith("allow");
-          const hint = keyHint(o);
-          return (
+      {docked ? (
+        <div className="border-t border-warn/15 bg-base/30 px-4 py-2 text-[12px] text-steel">
+          Answer with the buttons above the message box.
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2 border-t border-warn/15 bg-base/30 px-4 py-3">
+          {item.options.map((o, i) => {
+            const allow = o.kind.startsWith("allow");
+            const hint = keyHint(o);
+            return (
+              <Button
+                key={o.id}
+                size="sm"
+                disabled={busy !== null}
+                variant={allow ? (i === 0 ? "warn" : "secondary") : "danger"}
+                onClick={() => void answer(o)}
+                aria-keyshortcuts={shortcutFor(o)}
+                className={cn(o.kind === "reject_once" || o.kind === "reject_always" ? "sm:ml-auto" : "")}
+              >
+                {busy === o.id ? <Spinner className="h-3.5 w-3.5 text-current" /> : null}
+                {o.name}
+                {hint && <Kbd className="ml-0.5 border-current/25 bg-transparent text-current opacity-75">{hint}</Kbd>}
+              </Button>
+            );
+          })}
+          {keyed.deny && !showReason && (
             <Button
-              key={o.id}
               size="sm"
+              variant="ghost"
               disabled={busy !== null}
-              variant={allow ? (i === 0 ? "warn" : "secondary") : "danger"}
-              onClick={() => void answer(o)}
-              aria-keyshortcuts={shortcutFor(o)}
-              className={cn(o.kind === "reject_once" || o.kind === "reject_always" ? "sm:ml-auto" : "")}
+              onClick={() => setShowReason(true)}
+              aria-keyshortcuts={keyboard ? "Shift+D Shift+N" : undefined}
             >
-              {busy === o.id ? <Spinner className="h-3.5 w-3.5 text-current" /> : null}
-              {o.name}
-              {hint && <Kbd className="ml-0.5 border-current/25 bg-transparent text-current opacity-75">{hint}</Kbd>}
+              <MessageSquareX />
+              Deny with reason…
+              {keyboard && <Kbd className="ml-0.5">⇧D</Kbd>}
             </Button>
-          );
-        })}
-        {keyed.deny && !showReason && (
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={busy !== null}
-            onClick={() => setShowReason(true)}
-            aria-keyshortcuts={keyboard ? "Shift+D Shift+N" : undefined}
-          >
-            <MessageSquareX />
-            Deny with reason…
-            {keyboard && <Kbd className="ml-0.5">⇧D</Kbd>}
-          </Button>
-        )}
-      </div>
+          )}
+        </div>
+      )}
       {armed && keyed.always && (
         <div
           role="status"
@@ -774,7 +842,16 @@ export const PermissionCard = memo(function PermissionCard({
 
 // ---------------------------------------------------------------- plan
 
-export function PlanChecklist({ entries, dense }: { entries: Item<"plan">["entries"]; dense?: boolean }) {
+export function PlanChecklist({
+  entries,
+  dense,
+  still,
+}: {
+  entries: Item<"plan">["entries"];
+  dense?: boolean;
+  /** No pulsing dot on the current step (the plan is pinned above the composer, where it shows progress). */
+  still?: boolean;
+}) {
   return (
     <ul className={cn("space-y-1", dense && "space-y-0.5")}>
       {entries.map((e, i) => (
@@ -799,7 +876,9 @@ export function PlanChecklist({ entries, dense }: { entries: Item<"plan">["entri
                 />
               </svg>
             )}
-            {e.status === "in_progress" && <span className="h-1.5 w-1.5 rounded-full bg-accent animate-breathe" />}
+            {e.status === "in_progress" && (
+              <span className={cn("h-1.5 w-1.5 rounded-full bg-accent", !still && "animate-breathe")} />
+            )}
           </span>
           <span
             className={cn(
@@ -811,7 +890,7 @@ export function PlanChecklist({ entries, dense }: { entries: Item<"plan">["entri
             {e.content}
           </span>
           {e.priority === "high" && e.status !== "completed" && (
-            <span className="ml-auto mt-px shrink-0 rounded px-1 text-[10px] font-medium uppercase tracking-wide text-warn/80">
+            <span className="ml-auto mt-px shrink-0 rounded px-1 text-[11px] font-medium uppercase tracking-wide text-warn">
               high
             </span>
           )}
@@ -824,6 +903,8 @@ export function PlanChecklist({ entries, dense }: { entries: Item<"plan">["entri
 export const PlanCard = memo(function PlanCard({ item }: { item: Item<"plan"> }) {
   const done = item.entries.filter((e) => e.status === "completed").length;
   const total = item.entries.length;
+  // While the plan is pinned above the composer it is the live view; this card is the quiet record.
+  const pinned = usePinnedUi((s) => Boolean(s.planPinned[item.agentId]));
   return (
     <div className="rounded-xl border border-line bg-card/50 p-3.5">
       <div className="mb-2.5 flex items-center gap-2">
@@ -834,12 +915,12 @@ export const PlanCard = memo(function PlanCard({ item }: { item: Item<"plan"> })
         </span>
         <div className="ml-auto h-1 w-24 overflow-hidden rounded-full bg-raised">
           <div
-            className="h-full origin-left rounded-full bg-accent transition-transform duration-300"
+            className={cn("h-full origin-left rounded-full bg-accent", !pinned && "transition-transform duration-300")}
             style={{ transform: `scaleX(${total ? done / total : 0})` }}
           />
         </div>
       </div>
-      <PlanChecklist entries={item.entries} />
+      <PlanChecklist entries={item.entries} still={pinned} />
     </div>
   );
 });
@@ -896,7 +977,7 @@ export const NoticeBanner = memo(function NoticeBanner({
       <div className="flex items-start gap-2 px-3 py-2">
         <Icon className="mt-px h-3.5 w-3.5 shrink-0" />
         <span className="selectable">{item.text}</span>
-        <RelTime ts={item.ts} className="ml-auto shrink-0 text-[10.5px] opacity-60" />
+        <RelTime ts={item.ts} className="ml-auto shrink-0 text-[11px] text-steel" />
       </div>
       {recover && (
         <div className="flex flex-wrap items-center gap-1.5 border-t border-err/20 px-2 py-1.5">

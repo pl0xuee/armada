@@ -1,5 +1,6 @@
 import { toast } from "sonner";
 import { onArmadaEvent } from "@/lib/api";
+import { tileNeighbour } from "@/lib/helpers";
 import { publishScheduleEvent } from "@/lib/scheduleEvents";
 import { routeTerminalExit, routeTerminalOutput } from "@/lib/terminal-bus";
 import { switchAccount, switchCandidates } from "@/lib/actions";
@@ -19,7 +20,8 @@ function handleUiEvent(e: ArmadaEvent) {
     case "navigate": {
       const ui = useUi.getState();
       if (e.to.view === "agent") ui.openAgent(e.to.agentId);
-      else if (e.to.view === "inbox") ui.setView("inbox");
+      // "inbox" is the wire name the tray and the voice assistant still send for the Needs you tab.
+      else if (e.to.view === "inbox") ui.openMission("needs");
       else if (e.to.view === "mission_control") ui.setView("mission");
       else if (e.to.view === "new_agent") ui.openNewAgent();
       break;
@@ -38,7 +40,8 @@ function handleUiEvent(e: ArmadaEvent) {
     }
     case "item_upserted":
       // Drop the approval toast once the request is answered (here or elsewhere).
-      if ((e.item.kind === "permission" || e.item.kind === "question") && e.item.resolution !== null) toast.dismiss(`perm-${e.item.requestId}`);
+      if ((e.item.kind === "permission" || e.item.kind === "question") && e.item.resolution !== null)
+        toast.dismiss(`perm-${e.item.requestId}`);
       break;
     case "schedule_updated":
       publishScheduleEvent({ type: "updated", schedule: e.schedule });
@@ -48,7 +51,8 @@ function handleUiEvent(e: ArmadaEvent) {
       break;
     case "agent_removed": {
       const ui = useUi.getState();
-      if (ui.selectedAgentId === e.agentId) useUi.setState({ selectedAgentId: null });
+      if (ui.selectedAgentId === e.agentId)
+        useUi.setState({ selectedAgentId: tileNeighbour(useApp.getState().agents, ui.tileGroup, e.agentId) });
       if (ui.reviewAgentId === e.agentId) useUi.setState({ reviewAgentId: null });
       break;
     }

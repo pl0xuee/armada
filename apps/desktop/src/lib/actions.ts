@@ -4,8 +4,17 @@ import { markRemoved, suppressAgent, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { copyText } from "@/components/CopyButton";
 import { api } from "./api";
+import { tileNeighbour } from "./helpers";
 import { PROVIDERS } from "./providers";
-import type { Account, Agent, PermissionOption, PermissionOptionKind, Provider, TimelineItem } from "./types";
+import type {
+  Account,
+  Agent,
+  Attachment,
+  PermissionOption,
+  PermissionOptionKind,
+  Provider,
+  TimelineItem,
+} from "./types";
 import { errorMessage } from "./utils";
 
 type PermissionItem = Extract<TimelineItem, { kind: "permission" }>;
@@ -198,6 +207,19 @@ export async function attempt<T>(label: string, fn: () => Promise<T>): Promise<T
   }
 }
 
+/** Send the last message again (bringing a shut-down agent back first). True when it went out. */
+export async function retryLastPrompt(
+  agent: Pick<Agent, "id" | "running">,
+  prompt: { text: string; attachments?: Attachment[] },
+): Promise<boolean> {
+  const sent = await attempt("Couldn't retry", async () => {
+    if (!agent.running) await api.resumeAgent(agent.id, false);
+    await api.sendPrompt(agent.id, prompt.text, prompt.attachments ?? []);
+    return true;
+  });
+  return sent === true;
+}
+
 export function isShuttingDown(message: string): boolean {
   return message.includes("Armada is shutting down");
 }
@@ -354,7 +376,9 @@ export function deleteAgentWithUndo(agent: Agent, removeWorktree: boolean, force
   useApp.setState({ agents });
   const ui = useUi.getState();
   const wasSelected = ui.selectedAgentId === agent.id;
-  if (wasSelected) useUi.setState({ selectedAgentId: null });
+  // Among agents shown together, the rest of the grid stays open on a neighbour.
+  const movedTo = wasSelected ? tileNeighbour(agents, ui.tileGroup, agent.id) : null;
+  if (wasSelected) useUi.setState({ selectedAgentId: movedTo });
 
   // undo → restored; once the delete call starts, Undo is locked out.
   let state: "pending" | "undone" | "deleting" = "pending";
@@ -362,7 +386,7 @@ export function deleteAgentWithUndo(agent: Agent, removeWorktree: boolean, force
   const restore = async () => {
     suppressAgent(agent.id, false);
     useApp.setState((s) => ({ agents: { ...s.agents, [agent.id]: s.agents[agent.id] ?? snapshot } }));
-    if (wasSelected && useUi.getState().selectedAgentId === null) useUi.getState().openAgent(agent.id);
+    if (wasSelected && useUi.getState().selectedAgentId === movedTo) useUi.getState().openAgent(agent.id);
     // Re-sync what happened while events were suppressed.
     try {
       const fresh = (await api.getState()).agents.find((a) => a.id === agent.id);

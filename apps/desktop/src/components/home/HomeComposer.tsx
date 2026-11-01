@@ -2,7 +2,6 @@ import { ArrowUp, Check, ChevronDown, FolderOpen, GitBranch } from "lucide-react
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useIdentity } from "@/hooks/useIdentity";
-import type { Agent } from "@/lib/types";
 import { launchAgents, needsWorktree, resolveLaunch, type ResolvedLaunch } from "@/lib/launchDefaults";
 import { CUSTOM_ACCOUNT_ID, PROVIDER_ORDER, PROVIDERS } from "@/lib/providers";
 import { basename, cn, errorMessage, isMac, modKey, prettyPath } from "@/lib/utils";
@@ -37,32 +36,17 @@ const chipClass =
  * Prompt-first home: type what an agent should do, pick where, press ⌘⏎.
  * Remembers the last provider / account / folder / worktree (lib/launchDefaults).
  */
-export function HomeComposer({
-  compact = false,
-  autoFocus = true,
-  folder: lockedFolder,
-  onLaunched,
-  placeholder = "What should an agent do?",
-}: {
-  compact?: boolean;
-  autoFocus?: boolean;
-  /** Start agents in this project only (no folder picker), e.g. from a project's own page. */
-  folder?: string;
-  /** Called with the agents that started, instead of opening them (the project page stays put). */
-  onLaunched?: (agents: Agent[], groupId: string | null) => void;
-  placeholder?: string;
-}) {
+export function HomeComposer({ compact = false, autoFocus = true }: { compact?: boolean; autoFocus?: boolean }) {
   const [mode, setMode] = usePermissionMode();
   const accounts = useApp((s) => s.accounts);
   const settings = useApp((s) => s.settings);
   const openAgent = useUi((s) => s.openAgent);
-  const openProject = useUi((s) => s.openProject);
-  const [chosen, setTarget] = useState<ResolvedLaunch>(() => resolveLaunch(accounts, settings));
-  const target = useMemo(() => (lockedFolder ? { ...chosen, folder: lockedFolder } : chosen), [chosen, lockedFolder]);
+  const openAgents = useUi((s) => s.openAgents);
+  const [target, setTarget] = useState<ResolvedLaunch>(() => resolveLaunch(accounts, settings));
   const [prompt, setPrompt] = useState("");
   const [count, setCount] = useState(1);
   /** The agents already started for this prompt when some failed, so a retry joins them. */
-  const batchRef = useRef<{ groupId: string; started: number } | null>(null);
+  const batchRef = useRef<{ groupId: string; ids: string[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -118,7 +102,7 @@ export function HomeComposer({
     try {
       const batch = batchRef.current;
       const { groupId, created, failed } = await launchAgents(target, prompt, mode, count, batch?.groupId);
-      const started = (batch?.started ?? 0) + created.length;
+      const ids = [...(batch?.ids ?? []), ...created.map((a) => a.id)];
       for (const a of created) useApp.getState().upsertAgent(a);
       if (failed.length === 0) {
         setPrompt("");
@@ -127,20 +111,15 @@ export function HomeComposer({
       } else {
         // Keep the prompt, and only offer to start the ones that didn't, so a retry can't duplicate the rest.
         setCount(failed.length);
-        batchRef.current = groupId && started > 0 ? { groupId, started } : null;
+        batchRef.current = groupId && ids.length > 0 ? { groupId, ids } : null;
       }
-      if (onLaunched) {
-        if (created.length > 0) onLaunched(created, groupId);
-        if (failed.length === 0)
-          toast.success(created.length > 1 ? `Started ${created.length} agents` : "Agent started", {
-            description: created.length > 1 ? "Each has its own worktree." : undefined,
-          });
-      } else if (groupId && started > 1) {
-        // Several agents: show them all together in their project, where more can be started.
-        openProject(created[0]?.projectPath ?? target.folder.trim());
-        if (failed.length === 0)
-          toast.success(`Started ${started} agents`, { description: "Each has its own worktree." });
-      } else if (created[0]) openAgent(created[0].id);
+      if (created.length > 0) {
+        // Several agents are shown together as a grid of conversations.
+        if (ids.length > 1) openAgents(ids);
+        else openAgent(created[0].id);
+        if (failed.length === 0 && ids.length > 1)
+          toast.success(`Started ${ids.length} agents`, { description: "Each has its own worktree." });
+      }
       if (failed.length > 0) {
         toast.error(
           created.length > 0 ? `Started ${created.length}, ${failed.length} failed` : "Couldn't start the agent",
@@ -180,7 +159,7 @@ export function HomeComposer({
             void start();
           }
         }}
-        placeholder={placeholder}
+        placeholder="What should an agent do?"
         className={cn(
           "block w-full resize-none bg-transparent px-4 pt-3.5 leading-relaxed text-fg placeholder:text-steel focus:outline-none",
           compact ? "min-h-[56px] text-[13.5px]" : "min-h-[84px] text-[15px]",
@@ -188,9 +167,7 @@ export function HomeComposer({
       />
       <div className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2.5 pt-1.5">
         <AgentPicker target={target} onChange={(t) => setTarget((cur) => ({ ...cur, ...t }))} />
-        {!lockedFolder && (
-          <FolderPicker folder={target.folder} onChange={(folder) => setTarget((cur) => ({ ...cur, folder }))} />
-        )}
+        <FolderPicker folder={target.folder} onChange={(folder) => setTarget((cur) => ({ ...cur, folder }))} />
         <Tooltip
           content={
             parallel
@@ -315,7 +292,7 @@ function AgentPicker({
               >
                 <ProviderGlyph provider="custom" customAgentId={c.id} size="xs" />
                 <span className="min-w-0 flex-1 truncate">{c.name}</span>
-                <span className="truncate font-mono text-[10.5px] text-steel">{c.command}</span>
+                <span className="truncate font-mono text-[11px] text-steel">{c.command}</span>
                 {target.customAgentId === c.id && <Check className="!text-accent" />}
               </DropdownMenuItem>
             ))}

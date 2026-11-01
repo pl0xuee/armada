@@ -46,6 +46,8 @@ export interface PendingPrompt {
   progress: number | null;
   /** Last timeline seq when sent; the server's echo must be newer. */
   afterSeq: number;
+  /** How it was sent while the agent worked (see `SendMode`); a retry sends it the same way. */
+  mode?: "deliver" | "queue";
 }
 
 export type ToastTone = "info" | "ok" | "warn" | "err";

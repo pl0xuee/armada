@@ -3,20 +3,16 @@ import {
   Archive,
   ArchiveRestore,
   ArrowRightLeft,
-  CalendarClock,
   CalendarPlus,
   Shrink,
   Power,
-  Workflow,
   Radio,
   Download,
   Gauge,
   Repeat,
   Ellipsis,
   FolderOpen,
-  GitBranch,
   GitCompare,
-  LayoutGrid,
   Globe,
   PanelLeftOpen,
   PanelRightClose,
@@ -26,28 +22,27 @@ import {
   SquareTerminal,
   Trash2,
 } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { archiveAgent, attempt, exportConversation, renameAgent, resumeAgent, stopAgent } from "@/lib/actions";
 import { liveTail } from "@/lib/agents";
 import { agentDerived } from "./derived";
-import { useSubagentRuns } from "./useSubagents";
 import { canCompact, compactContext, contextRatio } from "./compact";
 import { api } from "@/lib/api";
 import { CUSTOM_ACCOUNT_ID, PROVIDERS } from "@/lib/providers";
-import type { Account, Agent, CustomAgent, Provider } from "@/lib/types";
-import { basename, cn, modKey, prettyPath } from "@/lib/utils";
-import { useIdentity } from "@/hooks/useIdentity";
+import type { Agent, CustomAgent, Provider } from "@/lib/types";
+import { basename, cn, modKey } from "@/lib/utils";
 import { useAgentListLayout } from "@/hooks/useAgentListLayout";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { INSPECTOR_DOCK_QUERY } from "@/lib/layout";
+import { selectFromAgents } from "@/lib/memoSelector";
 import { useApp } from "@/store/app";
 import { hasNewServer, previewOf, togglePreview, usePreview } from "@/store/preview";
 import { openProjectSettings } from "@/store/projectSettings";
 import { useUi } from "@/store/ui";
-import { AccountAvatar } from "../AccountAvatar";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { StatusDot, StatusPill } from "../StatusDot";
+import { AddAgents } from "./AddAgents";
 import { BudgetChip } from "./BudgetChip";
 import { STATUS } from "@/lib/providers";
 import { useIsDone } from "@/store/completion";
@@ -60,15 +55,14 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "../ui/menu";
 import { Tooltip } from "../ui/tooltip";
-import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { PrChip } from "./PrChip";
 import { HelperOfLine, HelpersChip, SyncChip, TileToggle } from "./HelperBits";
-import { SubagentList } from "./SubagentList";
-import { UsageMeters, pctTextTone, windowLabel } from "../UsageMeter";
-import { relativeTimeLong } from "@/lib/format";
 
 const EMPTY_CUSTOM: CustomAgent[] = [];
 
@@ -109,11 +103,12 @@ export interface HeaderTile {
   focused: boolean;
   /** First tile: carries the agent-list toggle. */
   first: boolean;
+  /** 1-based position among the agents shown together. */
+  index?: number;
 }
 
 function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
   const account = useApp((s) => s.accounts.find((a) => a.id === agent.accountId));
-  const identity = useIdentity(agent.provider, agent.customAgentId);
   const done = useIsDone(agent);
   const wide = useMediaQuery(INSPECTOR_DOCK_QUERY);
   const list = useAgentListLayout();
@@ -121,8 +116,16 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
   // full: labelled buttons · icons: icon buttons · compact: secondary actions live in ⋯
   const tier = tile ? "compact" : width === 0 || width >= 1000 ? "full" : width >= 600 ? "icons" : "compact";
   // Live helpers (for a main agent): drives the "N helpers" chip and the tile toggle.
-  const helperCount = useApp((s) =>
-    agent.parentId ? 0 : Object.values(s.agents).filter((a) => a.parentId === agent.id && !a.archived).length,
+  const agentId = agent.id;
+  const isHelper = !!agent.parentId;
+  const helperCount = useApp(
+    useMemo(
+      () =>
+        selectFromAgents((agents) =>
+          isHelper ? 0 : Object.values(agents).filter((a) => a.parentId === agentId && !a.archived).length,
+        ),
+      [agentId, isHelper],
+    ),
   );
   const inGroup = helperCount > 0 || !!agent.parentId;
   const inspectorPref = useUi((s) => s.inspectorOpen);
@@ -168,20 +171,13 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
             </Button>
           </Tooltip>
         )}
-        {(!tile || tile.first) && (
-          // Back to the project's grid of agents, with this one still selected there.
-          <Tooltip content={`All agents in ${basename(agent.projectPath)}`}>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="-ml-1 shrink-0 gap-1.5 px-2 text-muted"
-              aria-label={`Back to all agents in ${basename(agent.projectPath)}`}
-              onClick={() => useUi.getState().openProject(agent.projectPath, agent.id)}
-            >
-              <LayoutGrid />
-              {tier !== "compact" && <span className="max-w-[120px] truncate">{basename(agent.projectPath)}</span>}
-            </Button>
-          </Tooltip>
+        {tile?.index && (
+          <span
+            className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md border border-line-strong bg-card px-1 text-[11px] font-semibold text-muted tabular"
+            aria-label={`Agent ${tile.index}`}
+          >
+            {tile.index}
+          </span>
         )}
         <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="md" />
         <div className="min-w-0 flex-1">
@@ -235,7 +231,6 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
           ) : (
             <StatusPill status={agent.status} done={done} />
           )}
-          {!tile && <SubagentsChip agent={agent} />}
           {helperCount > 0 && <HelpersChip count={helperCount} label={tier !== "compact"} />}
           {agent.rateLimited && (
             <Chip className="border-warn/35 bg-warn/10 text-warn">
@@ -243,20 +238,8 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
               {tier === "compact" ? "Limit" : "Usage limit"}
             </Chip>
           )}
-          <BudgetChip agent={agent} compact={tier !== "full"} />
-          {tier === "full" && <PrChip agent={agent} />}
-          {tier === "full" && agent.provider !== "custom" && agent.provider !== "local" && account && (
-            <UsageChip account={account} compact={false} />
-          )}
-          {!tile && (
-            <DetailsPopover
-              agent={agent}
-              account={account}
-              identityName={identity.name}
-              identityColor={identity.color}
-              tier={tier}
-            />
-          )}
+          <BudgetChip agent={agent} compact={tier === "compact"} />
+          {!tile && tier !== "compact" && <PrChip agent={agent} />}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {resumable && !busy ? (
@@ -272,10 +255,48 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
           {agent.worktree && tier !== "compact" && (
             <ReviewPill tier={tier} count={changed} onClick={() => setReviewAgent(agent.id)} />
           )}
-          {tier !== "compact" && (
-            <HandoffMenu agent={agent} onCustom={() => setHandoffAgent(agent)} showLabel={tier === "full"} />
-          )}
           {(!tile || tile.focused) && <PreviewChip agentId={agent.id} showLabel={tier === "full"} />}
+          {(!tile || tile.focused) && <AddAgents agent={agent} showLabel={tier === "full"} />}
+          {agent.parentId && <TileToggle />}
+          {!tile && (
+            <>
+              <Tooltip
+                content={
+                  workspaceOpen
+                    ? workspaceRoom === 0
+                      ? "Hide workspace panel (not enough room to show it)"
+                      : "Hide workspace panel"
+                    : workspaceRoom === 0
+                      ? "Show workspace panel (window is small)"
+                      : "Show workspace panel"
+                }
+                shortcut={[modKey, "`"]}
+              >
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Toggle workspace panel"
+                  aria-pressed={workspaceOpen}
+                  onClick={() => useUi.getState().setWorkspaceOpen(!workspaceOpen)}
+                >
+                  <SquareTerminal />
+                </Button>
+              </Tooltip>
+            </>
+          )}
+          {(!tile || tile.focused) && (
+            <Tooltip content={inspectorOpen ? "Hide inspector" : "Show inspector"}>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Toggle inspector"
+                aria-pressed={inspectorOpen}
+                onClick={toggleInspector}
+              >
+                {inspectorOpen ? <PanelRightClose /> : <PanelRightOpen />}
+              </Button>
+            </Tooltip>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button size="icon-sm" variant="ghost" aria-label="More actions">
@@ -283,19 +304,13 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              {tier === "compact" && (
-                <>
-                  {agent.worktree && (
-                    <DropdownMenuItem onSelect={() => setReviewAgent(agent.id)}>
-                      <GitCompare /> Review diff{changed > 0 ? ` (${changed} file${changed === 1 ? "" : "s"})` : "…"}
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem onSelect={() => setHandoffAgent(agent)}>
-                    <ArrowRightLeft /> Hand off…
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                </>
+              {tier === "compact" && agent.worktree && (
+                <DropdownMenuItem onSelect={() => setReviewAgent(agent.id)}>
+                  <GitCompare /> Review diff{changed > 0 ? ` (${changed} file${changed === 1 ? "" : "s"})` : "…"}
+                </DropdownMenuItem>
               )}
+              <HandoffSub agent={agent} onCustom={() => setHandoffAgent(agent)} />
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 onSelect={() => void attempt("Couldn't open the folder", () => api.openPath(agent.cwd))}
               >
@@ -346,46 +361,6 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          {agent.parentId && <TileToggle />}
-          {!tile && (
-            <>
-              <Tooltip
-                content={
-                  workspaceOpen
-                    ? workspaceRoom === 0
-                      ? "Hide workspace panel (not enough room to show it)"
-                      : "Hide workspace panel"
-                    : workspaceRoom === 0
-                      ? "Show workspace panel (window is small)"
-                      : "Show workspace panel"
-                }
-                shortcut={[modKey, "`"]}
-              >
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Toggle workspace panel"
-                  aria-pressed={workspaceOpen}
-                  onClick={() => useUi.getState().setWorkspaceOpen(!workspaceOpen)}
-                >
-                  <SquareTerminal />
-                </Button>
-              </Tooltip>
-            </>
-          )}
-          {(!tile || tile.focused) && (
-            <Tooltip content={inspectorOpen ? "Hide inspector" : "Show inspector"}>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label="Toggle inspector"
-                aria-pressed={inspectorOpen}
-                onClick={toggleInspector}
-              >
-                {inspectorOpen ? <PanelRightClose /> : <PanelRightOpen />}
-              </Button>
-            </Tooltip>
-          )}
         </div>
       </div>
 
@@ -402,89 +377,6 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
         }}
       />
     </header>
-  );
-}
-
-/** "…" popover: everything secondary (account, project, branch, schedule, PR, usage) in one place. */
-function DetailsPopover({
-  agent,
-  account,
-  identityName,
-  identityColor,
-  tier,
-}: {
-  agent: Agent;
-  account: Account | undefined;
-  identityName: string;
-  identityColor: string;
-  tier: "full" | "icons" | "compact";
-}) {
-  return (
-    <Popover>
-      <Tooltip content="Details: account, project, branch">
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            aria-label="Agent details"
-            className="inline-flex h-6 items-center gap-1 rounded-full border border-line bg-card/60 px-2 text-[11.5px] text-muted transition-colors hover:bg-raised/60 hover:text-fg focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25"
-          >
-            <Ellipsis className="h-3.5 w-3.5" />
-          </button>
-        </PopoverTrigger>
-      </Tooltip>
-      <PopoverContent align="end" className="w-80 space-y-2.5 text-[12px]">
-        <div className="flex items-center gap-2">
-          {agent.provider === "custom" ? (
-            <>
-              <span className="h-2 w-2 rounded-full" style={{ background: identityColor }} />
-              <span className="text-fg">{identityName}</span>
-              <span className="text-muted">ACP</span>
-            </>
-          ) : (
-            account && (
-              <>
-                <AccountAvatar account={account} size={16} showProvider={false} />
-                <span className="text-fg">{account.name}</span>
-              </>
-            )
-          )}
-          {agent.scheduleId && (
-            <span className="ml-auto inline-flex items-center gap-1 text-steel">
-              <CalendarClock className="h-3 w-3" /> Scheduled
-            </span>
-          )}
-        </div>
-        <div className="flex items-start gap-2">
-          <FolderOpen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-steel" />
-          <div className="min-w-0">
-            <div className="text-fg">{basename(agent.projectPath)}</div>
-            <div className="selectable break-all font-mono text-[11px] text-steel">{prettyPath(agent.projectPath)}</div>
-          </div>
-        </div>
-        {agent.branch && (
-          <div className="flex items-start gap-2">
-            <GitBranch className="mt-0.5 h-3.5 w-3.5 shrink-0 text-steel" />
-            <div className="min-w-0">
-              <div className="selectable break-all font-mono text-[11.5px] text-fg">
-                {agent.branch}
-                {agent.baseBranch && <span className="text-steel"> → {agent.baseBranch}</span>}
-              </div>
-              {agent.worktree && (
-                <div className="selectable break-all font-mono text-[11px] text-steel">{prettyPath(agent.cwd)}</div>
-              )}
-            </div>
-          </div>
-        )}
-        {tier !== "full" && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <PrChip agent={agent} />
-            {agent.provider !== "custom" && agent.provider !== "local" && account && (
-              <UsageChip account={account} compact={false} />
-            )}
-          </div>
-        )}
-      </PopoverContent>
-    </Popover>
   );
 }
 
@@ -512,94 +404,16 @@ function ReviewPill({
         {tier === "full" && <span>Review</span>}
         {count > 0 &&
           (tier === "full" ? (
-            <span className="rounded-full bg-accent/15 px-1.5 text-[10.5px] font-semibold text-accent tabular">
+            <span className="rounded-full bg-accent/15 px-1.5 text-[11px] font-semibold text-accent tabular">
               {count}
             </span>
           ) : (
-            <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-accent px-0.5 text-[9px] font-bold text-accent-fg tabular">
+            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[11px] font-bold text-accent-fg tabular">
               {count}
             </span>
           ))}
       </Button>
     </Tooltip>
-  );
-}
-
-function UsageChip({ account, compact }: { account: Account; compact: boolean }) {
-  const usage = account.usage;
-  const rawPlan = usage?.plan ?? null;
-  const plan = account.status?.label ?? (rawPlan ? rawPlan.charAt(0).toUpperCase() + rawPlan.slice(1) : null);
-  const windows = [usage?.primary, usage?.secondary].filter((w): w is NonNullable<typeof w> => !!w);
-  if (!plan && windows.length === 0) return null;
-  const short = (w: (typeof windows)[number]) => (w.windowMins === 300 ? "5h" : windowLabel(w).replace(" window", ""));
-  const shortLabel = (w: (typeof windows)[number]) => (w.windowMins === 10080 ? "Week" : short(w));
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label={`Plan and usage limits${plan ? `, ${plan}` : ""}`}
-          className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border border-line bg-card/60 px-2 text-[11.5px] transition-colors hover:bg-raised/60 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25"
-        >
-          <Gauge className="h-3 w-3 shrink-0 text-steel" />
-          {!compact && plan && <span className="truncate text-fg/90">{plan}</span>}
-          {windows.map((w) => {
-            const pct = Math.max(0, Math.min(100, Math.round(w.usedPercent)));
-            return (
-              <span key={w.windowMins ?? "w"} className="tabular text-muted">
-                {!compact && <>{shortLabel(w)} </>}
-                <span className={cn("font-medium", pctTextTone(pct))}>{pct}%</span>
-              </span>
-            );
-          })}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-64">
-        <div className="mb-2 text-[12px] font-medium text-fg">{plan ?? "Usage limits"}</div>
-        {windows.length > 0 ? (
-          <UsageMeters usage={usage} compact />
-        ) : (
-          <div className="text-[11.5px] text-steel">Limits appear after the first reply.</div>
-        )}
-        {usage && windows.length > 0 && (
-          <div className="mt-2 text-[10.5px] text-steel">Updated {relativeTimeLong(usage.updatedAt)}</div>
-        )}
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-/** "N sub-agents running" chip; opens the list of this agent's sub-agents. Hidden when it has none. */
-function SubagentsChip({ agent }: { agent: Agent }) {
-  const runs = useSubagentRuns(agent.id);
-  const running = runs.filter((r) => r.state === "running").length;
-  if (running === 0) return null;
-  return (
-    <Popover>
-      <Tooltip content="Sub-agents working in parallel inside this turn">
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border border-accent/30 bg-accent/[0.08] px-2 text-[11.5px] text-accent transition-colors hover:border-accent/50 hover:bg-accent/15"
-          >
-            <Workflow className="h-3 w-3" />
-            <span className="tabular">{running}</span> sub-agent{running === 1 ? "" : "s"} running
-          </button>
-        </PopoverTrigger>
-      </Tooltip>
-      <PopoverContent align="start" className="w-[340px] p-1.5">
-        <div className="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel">
-          Sub-agents
-        </div>
-        <div className="max-h-[360px] overflow-y-auto">
-          <PopoverClose asChild>
-            <div>
-              <SubagentList runs={runs} onSelect={(r) => useUi.getState().revealItem(agent.id, r.itemId)} />
-            </div>
-          </PopoverClose>
-        </div>
-      </PopoverContent>
-    </Popover>
   );
 }
 
@@ -686,7 +500,8 @@ function EditableTitle({ agent }: { agent: Agent }) {
   );
 }
 
-function HandoffMenu({ agent, onCustom, showLabel }: { agent: Agent; onCustom: () => void; showLabel: boolean }) {
+/** "Hand off" submenu of the More menu: a quick second opinion from another account, or with instructions. */
+function HandoffSub({ agent, onCustom }: { agent: Agent; onCustom: () => void }) {
   const accounts = useApp((s) => s.accounts);
   const openAgent = useUi((s) => s.openAgent);
   const customAgents = useApp((s) => s.settings?.customAgents ?? EMPTY_CUSTOM);
@@ -702,37 +517,32 @@ function HandoffMenu({ agent, onCustom, showLabel }: { agent: Agent; onCustom: (
   };
 
   return (
-    <DropdownMenu>
-      <Tooltip content="Hand off to another agent">
-        <DropdownMenuTrigger asChild>
-          <Button size="sm" variant="ghost" aria-label="Hand off">
-            <ArrowRightLeft className="!h-3.5 !w-3.5" />
-            {showLabel && <span>Hand off</span>}
-          </Button>
-        </DropdownMenuTrigger>
-      </Tooltip>
-      <DropdownMenuContent align="end" className="w-72">
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <ArrowRightLeft /> Hand off
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent>
         <DropdownMenuLabel>Second opinion</DropdownMenuLabel>
         {others.slice(0, 5).map((a) => (
           <DropdownMenuItem key={a.id} onSelect={() => void quick(a.provider, a.id, null)}>
             <ProviderGlyph provider={a.provider} size="xs" />
             <span className="truncate">Ask {PROVIDERS[a.provider].short}</span>
-            <span className="ml-auto truncate text-[11px] text-steel">{a.name}</span>
+            <span className="ml-auto truncate pl-3 text-[11px] text-steel">{a.name}</span>
           </DropdownMenuItem>
         ))}
         {customs.slice(0, 3).map((c) => (
           <DropdownMenuItem key={c.id} onSelect={() => void quick("custom", CUSTOM_ACCOUNT_ID, c.id)}>
             <ProviderGlyph provider="custom" customAgentId={c.id} size="xs" />
             <span className="truncate">Ask {c.name}</span>
-            <span className="ml-auto truncate text-[11px] text-steel">ACP</span>
+            <span className="ml-auto truncate pl-3 text-[11px] text-steel">ACP</span>
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={onCustom}>
           <ArrowRightLeft /> Hand off with instructions…
         </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
   );
 }
 

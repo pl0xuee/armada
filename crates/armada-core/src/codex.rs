@@ -135,6 +135,8 @@ pub struct StartOptions<'a> {
     pub attachments_dir: &'a Path,
     pub version: &'a str,
     pub mcp_servers: &'a [McpServer],
+    /// Armada's note to the agent (see `guidance`), given as developer instructions.
+    pub guidance: &'a str,
     /// For local-model agents: the models the server offers (replaces the OpenAI
     /// model list in the model picker).
     pub local_models: Option<&'a [LocalModel]>,
@@ -184,6 +186,9 @@ impl CodexDriver {
                 if ctx.start_cancelled(generation) {
                     Err(StartCancelled.into())
                 } else {
+                    // Its exit may still be reported after the next prompt has begun a
+                    // turn: it must not fail that one.
+                    ctx.retire_generation(generation);
                     Err(auth_hint(peer.with_stderr(e, 0)))
                 }
             }
@@ -246,7 +251,7 @@ impl CodexDriver {
                         "approvalPolicy": opts.approval_policy,
                         "sandbox": "workspace-write",
                         "serviceName": "armada",
-                        "developerInstructions": crate::guidance::AGENT_GUIDANCE,
+                        "developerInstructions": opts.guidance,
                         "config": codex_config(opts.mcp_servers)
                     }),
                     Some(Duration::from_secs(60)),
@@ -587,6 +592,10 @@ impl CodexDriver {
         if let Some(a) = &answers {
             crate::questions::validate(&fields, a).map_err(|e| anyhow!(e))?;
         }
+        let _answering = self
+            .ctx
+            .begin_answer(request_id)
+            .ok_or_else(|| anyhow!("This question is no longer waiting for an answer."))?;
         let (rpc_id, question) = self
             .questions
             .lock()
@@ -617,6 +626,10 @@ impl CodexDriver {
         request_id: &str,
         option_id: &str,
     ) -> anyhow::Result<()> {
+        let _answering = self
+            .ctx
+            .begin_answer(request_id)
+            .ok_or_else(|| anyhow!("This approval is no longer pending."))?;
         let (rpc_id, kind) = self
             .perms
             .lock()
@@ -1386,27 +1399,31 @@ async fn event_loop(
     generation: u64,
 ) {
     while let Some(msg) = rx.recv().await {
-        // A retired process's leftovers must not touch the current turn.
+        // A retired process's leftovers must not touch the current turn: each event
+        // is applied inside `with_current_generation`, atomically with that check.
         if !ctx.is_current(generation) && !matches!(msg, Incoming::Closed | Incoming::Barrier(_)) {
             continue;
         }
         match msg {
             Incoming::Notification { method, params } => {
-                if let Some(d) = driver.upgrade() {
-                    d.on_notification(&method, &params);
-                }
+                ctx.with_current_generation(generation, || {
+                    if let Some(d) = driver.upgrade() {
+                        d.on_notification(&method, &params);
+                    }
+                });
             }
             Incoming::Request { id, method, params } => {
-                let reply = match driver.upgrade() {
+                // None: the process was retired meanwhile; nobody waits for a reply.
+                let reply = ctx.with_current_generation(generation, || match driver.upgrade() {
                     Some(d) => d.on_request(id.clone(), &method, &params),
                     None => RequestReply::Unsupported,
-                };
+                });
                 match reply {
-                    RequestReply::Deferred => {}
-                    RequestReply::Now(result) => {
+                    None | Some(RequestReply::Deferred) => {}
+                    Some(RequestReply::Now(result)) => {
                         let _ = peer.respond(id, result).await;
                     }
-                    RequestReply::Unsupported => {
+                    Some(RequestReply::Unsupported) => {
                         let _ = peer
                             .respond_error(
                                 id,

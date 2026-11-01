@@ -9,6 +9,7 @@ vi.mock("react", async (importOriginal) => {
 let sending: string | undefined;
 vi.mock("@/lib/store", () => ({ useStore: (sel: (s: unknown) => unknown) => sel({ resolving: sending ? { r1: sending } : {} }) }));
 vi.mock("@/lib/hooks", () => ({ useNow: () => 1000 }));
+vi.mock("@/lib/selectors", () => ({ useIsDocked: () => false }));
 vi.mock("@/lib/controller", () => ({ respondToPermission: () => Promise.resolve(true) }));
 vi.mock("../Markdown", () => ({ Markdown: ({ text }: { text: string }) => <div data-md={text} /> }));
 vi.mock("../Icon", () => ({ Icon: ({ name }: { name: string }) => <i data-icon={name} />, Spinner: () => <i data-spinner /> }));

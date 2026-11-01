@@ -129,10 +129,17 @@ pub async fn send_prompt(
     agent_id: String,
     text: String,
     attachments: Option<Vec<Attachment>>,
+    deliver: Option<bool>,
 ) -> CmdResult<()> {
-    core.send_prompt(&agent_id, &text, attachments.unwrap_or_default())
-        .await
-        .map_err(err)
+    let attachments = attachments.unwrap_or_default();
+    // `deliver`: while the agent works, hand the message to the running turn (see
+    // `Core::deliver_prompt`) instead of queueing it behind the turn.
+    if deliver.unwrap_or(false) {
+        core.deliver_prompt(&agent_id, &text, attachments).await
+    } else {
+        core.send_prompt(&agent_id, &text, attachments).await
+    }
+    .map_err(err)
 }
 
 /// Starts a helper agent for `parent_id` right away (the main agent is busy).
@@ -346,6 +353,14 @@ pub async fn set_window_title(app: AppHandle, title: String) -> CmdResult<()> {
     if let Some(w) = crate::window::main_window(&app) {
         w.set_title(&title).map_err(|e| e.to_string())?;
     }
+    Ok(())
+}
+
+/// The UI's count of agents that need the user (the same number as its badge and window
+/// title), shown in the tray's tooltip and menu. Harmless where there is no tray.
+#[tauri::command]
+pub async fn set_needs_you_count(app: AppHandle, count: usize) -> CmdResult<()> {
+    crate::tray::set_needs_you(&app, count);
     Ok(())
 }
 

@@ -7,6 +7,17 @@
 /** Smaller overlaps are browser chrome (toolbars collapsing), not a keyboard. */
 const KEYBOARD_MIN_PX = 80;
 
+/**
+ * Marks the page while it is hidden so CSS can pause what still animates (spinners, shimmer): a backgrounded
+ * phone page should cost no battery. (Browsers stop painting a hidden page anyway; this also stops the timers
+ * and compositor work some of them keep.)
+ */
+export function trackVisibility() {
+  const set = () => document.documentElement.classList.toggle("page-hidden", document.visibilityState === "hidden");
+  document.addEventListener("visibilitychange", set);
+  set();
+}
+
 export function trackKeyboard() {
   const vv = window.visualViewport;
   if (!vv) return;
@@ -23,6 +34,8 @@ export function trackKeyboard() {
       // for it then leaves an empty band above the keyboard.
       if (kb > KEYBOARD_MIN_PX) root.setProperty("--safe-bottom-kb", "0px");
       else root.removeProperty("--safe-bottom-kb");
+      // The dock's chips make room for the conversation while typing.
+      document.documentElement.classList.toggle("kb-open", kb > KEYBOARD_MIN_PX);
     }
   };
   const schedule = () => {

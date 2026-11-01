@@ -1,10 +1,13 @@
 """Configurable ACP agent for lifecycle tests.
-Modes: normal, die, badstderr, slowinit, hanginit, replay, noresume, flood, steer.
-Prompt keywords: CRASH, PERM, HANG, CANCELERR, NOOPTS, EXITLATER, COST, ECHO, ASK, LATEQ, PIC, SHOTS, WITHDRAW."""
+Modes: normal, die, badstderr, slowinit, hanginit, replay, noresume, flood, steer, queue.
+(queue: like claude-agent-acp, a session/prompt sent while a turn waits is queued and read by that turn;
+_session/steering is advertised too but would abort the response, so using it shows as "!steered".)
+Prompt keywords: BOUNCE (queue mode: a prompt sent mid-turn is refused), STEERFAIL (steer mode: a steer is refused), CRASH, PERM, HANG, CANCELERR, NOOPTS, EXITLATER, COST, ECHO, ASK, LATEQ, PIC, SHOTS, WITHDRAW."""
 import json, sys, os, time
 MODE = sys.argv[1] if len(sys.argv) > 1 else "normal"
 next_id = 1000
 steered = []
+queued = []  # (request id, text) of prompts that arrived while a turn was running (queue mode)
 forms = False  # the client can show form elicitations (claude-agent-acp's AskUserQuestion)
 def send(m):
     sys.stdout.write(json.dumps(m) + "\n"); sys.stdout.flush()
@@ -32,8 +35,10 @@ while True:
         caps = {"loadSession": True}
         if MODE != "replay":
             caps["sessionCapabilities"] = {"resume": {}, "systemPrompt": {"mode": {"override": {}}}}
+        if MODE == "queue":
+            caps["_meta"] = {"claudeCode": {"promptQueueing": True}}
         result = {"protocolVersion": 1, "agentCapabilities": caps}
-        if MODE == "steer":
+        if MODE in ("steer", "queue"):
             # claude-agent-acp's steering extension.
             result["_meta"] = {"steering": {"supported": True}}
         send({"jsonrpc": "2.0", "id": mid, "result": result})
@@ -140,20 +145,55 @@ while True:
                 # Keep the client's queue busy so our exit is processed late.
                 for i in range(30000):
                     update(sid, {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "."}})
+            cancelled = False
             while True:
                 r = read()
+                if r.get("method") == "_session/steering" and "STEERFAIL" in r["params"]["prompt"][0]["text"]:
+                    send({"jsonrpc": "2.0", "id": r["id"], "error": {"code": -32603, "message": "steering failed"}})
+                    continue
                 if r.get("method") == "_session/steering":
                     # Taken into this turn while it waits for the approval.
-                    steered.append(r["params"]["prompt"][0]["text"])
+                    steered.append(r["params"]["prompt"][0]["text"] + (" !steered" if MODE == "queue" else ""))
                     send({"jsonrpc": "2.0", "id": r["id"], "result": {"outcome": "injected"}})
                     continue
-                if r.get("id") == pid and "method" not in r:
+                if MODE == "queue" and r.get("method") == "session/prompt":
+                    # A prompt typed meanwhile: queued, read by this turn at its next step.
+                    if "BOUNCE" in r["params"]["prompt"][0]["text"]:
+                        # The agent refuses it (e.g. its queue is gone): an error reply.
+                        send({"jsonrpc": "2.0", "id": r["id"], "error": {"code": -32603, "message": "bounced"}})
+                        continue
+                    queued.append((r["id"], r["params"]["prompt"][0]["text"]))
+                    continue
+                if MODE == "queue" and r.get("method") == "session/cancel":
+                    cancelled = True
                     break
+                if r.get("id") == pid and "method" not in r:
+                    # The client cancelling the turn answers the approval with "cancelled".
+                    cancelled = MODE == "queue" and r["result"]["outcome"]["outcome"] == "cancelled"
+                    break
+            if cancelled:
+                for qid, _ in queued:
+                    send({"jsonrpc": "2.0", "id": qid, "result": {"stopReason": "cancelled"}})
+                queued.clear()
+                send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "cancelled"}})
+                continue
         if steered:
             text = text + " +steered " + ", ".join(steered)
             steered.clear()
+        folded = [(qid, t) for qid, t in queued if "AFTER" not in t]
+        later = [(qid, t) for qid, t in queued if "AFTER" in t]
+        queued.clear()
+        if folded:
+            text = text + " +queued " + ", ".join(t for _, t in folded)
         update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "reply to " + text}})
         send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+        for qid, _ in folded:
+            send({"jsonrpc": "2.0", "id": qid, "result": {"stopReason": "end_turn"}})
+        for qid, t in later:
+            # Not read by the first turn: the agent runs it as a turn of its own right after.
+            time.sleep(0.3)
+            update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "reply to " + t}})
+            send({"jsonrpc": "2.0", "id": qid, "result": {"stopReason": "end_turn"}})
         if "LATEQ" in text:
             # A form that arrives after the turn ended (an MCP server asking between turns).
             time.sleep(0.5)

@@ -30,6 +30,34 @@ enum ConfigSource {
     Model,
 }
 
+/// Messages delivered into the running turn as extra `session/prompt`s (see
+/// `AcpDriver::deliver_next`). The turn ends when the agent has answered all of them.
+#[derive(Default)]
+struct Extras {
+    /// Sent, not answered yet.
+    pending: usize,
+    /// The turn is over (or none started): nothing more can join it.
+    closed: bool,
+    /// The worst outcome among the answered ones.
+    outcome: Option<TurnOutcome>,
+}
+
+/// The more serious of two outcomes (the earlier one on a tie).
+fn worse(a: TurnOutcome, b: TurnOutcome) -> TurnOutcome {
+    let rank = |o: &TurnOutcome| match o {
+        TurnOutcome::Completed => 0,
+        TurnOutcome::CompletedWithNote(_) => 1,
+        TurnOutcome::Refused => 2,
+        TurnOutcome::Cancelled => 3,
+        TurnOutcome::Failed(_) => 4,
+    };
+    if rank(&b) > rank(&a) {
+        b
+    } else {
+        a
+    }
+}
+
 pub struct AcpDriver {
     peer: Arc<Peer>,
     ctx: Arc<AgentCtx>,
@@ -43,6 +71,13 @@ pub struct AcpDriver {
     accepts_images: std::sync::atomic::AtomicBool,
     /// The agent takes `_session/steering` (see `steer`).
     steering: std::sync::atomic::AtomicBool,
+    /// The agent queues a `session/prompt` that arrives while a turn runs and reads
+    /// it at the turn's next step, without stopping anything (claude-agent-acp's
+    /// `promptQueueing`; see `deliver_next`).
+    queueing: std::sync::atomic::AtomicBool,
+    /// Prompts sent into the running turn that the agent hasn't answered yet.
+    extras: Mutex<Extras>,
+    extras_wake: tokio::sync::Notify,
     /// Barriers waiting for the event loop to catch up (see `sync_events`).
     barriers: Mutex<HashMap<u64, tokio::sync::oneshot::Sender<()>>>,
     next_barrier: std::sync::atomic::AtomicU64,
@@ -62,6 +97,8 @@ pub struct StartOptions<'a> {
     pub resume: Option<&'a str>,
     pub version: &'a str,
     pub mcp_servers: &'a [McpServer],
+    /// Armada's note to the agent (see `guidance`).
+    pub guidance: &'a str,
 }
 
 impl AcpDriver {
@@ -90,6 +127,9 @@ impl AcpDriver {
                 if ctx.start_cancelled(generation) {
                     Err(StartCancelled.into())
                 } else {
+                    // Its exit may still be reported after the next prompt has begun a
+                    // turn: it must not fail that one.
+                    ctx.retire_generation(generation);
                     Err(e)
                 }
             }
@@ -112,6 +152,12 @@ impl AcpDriver {
             questions: Mutex::default(),
             accepts_images: std::sync::atomic::AtomicBool::new(false),
             steering: std::sync::atomic::AtomicBool::new(false),
+            queueing: std::sync::atomic::AtomicBool::new(false),
+            extras: Mutex::new(Extras {
+                closed: true,
+                ..Extras::default()
+            }),
+            extras_wake: tokio::sync::Notify::new(),
             barriers: Mutex::default(),
             next_barrier: std::sync::atomic::AtomicU64::new(FIRST_SYNC_BARRIER),
             config_src: Mutex::default(),
@@ -152,6 +198,12 @@ impl AcpDriver {
         );
         driver.steering.store(
             init["_meta"]["steering"]["supported"]
+                .as_bool()
+                .unwrap_or(false),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        driver.queueing.store(
+            caps["_meta"]["claudeCode"]["promptQueueing"]
                 .as_bool()
                 .unwrap_or(false),
             std::sync::atomic::Ordering::Relaxed,
@@ -200,7 +252,7 @@ impl AcpDriver {
             Some(s) => s,
             None => {
                 let mut params = json!({ "cwd": cwd, "mcpServers": mcp });
-                if let Some(prompt) = system_prompt(caps) {
+                if let Some(prompt) = system_prompt(caps, opts.guidance) {
                     params["systemPrompt"] = prompt;
                     driver
                         .guided
@@ -346,6 +398,7 @@ impl AcpDriver {
                         None => break,
                     }
                 }
+                me.open_extras();
                 me.peer.mark_turn();
                 let mark = me.peer.stderr_mark();
                 let preamble = me.ctx.take_preamble();
@@ -365,22 +418,7 @@ impl AcpDriver {
                     )
                     .await;
                 let outcome = match res {
-                    Ok(v) => {
-                        if let Some(t) = v["usage"]["totalTokens"].as_i64() {
-                            me.ctx.add_tokens(t);
-                        }
-                        match v["stopReason"].as_str().unwrap_or("end_turn") {
-                            "cancelled" => TurnOutcome::Cancelled,
-                            "refusal" => TurnOutcome::Refused,
-                            "max_tokens" => TurnOutcome::CompletedWithNote(
-                                "Stopped: the model hit its output token limit.".into(),
-                            ),
-                            "max_turn_requests" => TurnOutcome::CompletedWithNote(
-                                "Stopped: the agent reached its maximum number of steps for one turn.".into(),
-                            ),
-                            _ => TurnOutcome::Completed,
-                        }
-                    }
+                    Ok(v) => me.reply_outcome(&v),
                     // Some agents answer a cancelled prompt with an error.
                     Err(_) if me.ctx.cancel_was_requested() => TurnOutcome::Cancelled,
                     Err(e) => {
@@ -394,6 +432,8 @@ impl AcpDriver {
                         ))
                     }
                 };
+                // Messages delivered into the turn may still be being worked on.
+                let outcome = me.settle_extras(outcome).await;
                 // The prompt reply overtakes queued updates; let the timeline catch up
                 // so the turn ends after its last message.
                 me.sync_events().await;
@@ -441,14 +481,135 @@ impl AcpDriver {
         blocks
     }
 
+    /// The agent can take a message while it works without stopping what it is doing.
     pub fn steerable(&self) -> bool {
-        self.steering.load(std::sync::atomic::Ordering::Relaxed)
+        self.queueing() || self.steering.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Sends a message into the running turn: the agent reads it at its next step
-    /// and keeps going (a tool still running, e.g. a sub-agent, moves to the
-    /// background) instead of the turn being cancelled.
-    pub async fn steer(&self, prompt: &Prompt) -> anyhow::Result<Steer> {
+    fn queueing(&self) -> bool {
+        self.queueing.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// What a finished `session/prompt` means for the turn.
+    fn reply_outcome(&self, v: &Value) -> TurnOutcome {
+        if let Some(t) = v["usage"]["totalTokens"].as_i64() {
+            self.ctx.add_tokens(t);
+        }
+        match v["stopReason"].as_str().unwrap_or("end_turn") {
+            "cancelled" => TurnOutcome::Cancelled,
+            "refusal" => TurnOutcome::Refused,
+            "max_tokens" => TurnOutcome::CompletedWithNote(
+                "Stopped: the model hit its output token limit.".into(),
+            ),
+            "max_turn_requests" => TurnOutcome::CompletedWithNote(
+                "Stopped: the agent reached its maximum number of steps for one turn.".into(),
+            ),
+            _ => TurnOutcome::Completed,
+        }
+    }
+
+    /// A new turn starts: messages may join it.
+    fn open_extras(&self) {
+        let mut st = self.extras.lock();
+        st.pending = 0;
+        st.closed = false;
+        st.outcome = None;
+    }
+
+    /// The turn's own prompt was answered. Waits for the messages delivered into it
+    /// (the agent may run one as a turn of its own right after), then closes the turn
+    /// to newcomers. After a stop the wait is short: the agent settles them at once.
+    async fn settle_extras(&self, mut outcome: TurnOutcome) -> TurnOutcome {
+        let mut give_up = None;
+        loop {
+            {
+                let mut st = self.extras.lock();
+                if st.pending == 0 {
+                    st.closed = true;
+                    if let Some(o) = st.outcome.take() {
+                        outcome = worse(outcome, o);
+                    }
+                    return outcome;
+                }
+            }
+            let woken = self.extras_wake.notified();
+            if self.ctx.cancel_was_requested() || !self.ctx.is_current(self.generation) {
+                let until = *give_up
+                    .get_or_insert_with(|| tokio::time::Instant::now() + Duration::from_secs(5));
+                if tokio::time::timeout_at(until, woken).await.is_err() {
+                    let mut st = self.extras.lock();
+                    st.pending = 0;
+                    st.closed = true;
+                    st.outcome = None;
+                    return worse(outcome, TurnOutcome::Cancelled);
+                }
+            } else {
+                woken.await;
+            }
+        }
+    }
+
+    /// Sends a message into the running turn the way Claude Code takes a message typed
+    /// meanwhile: as another prompt, which the agent queues and reads at the turn's
+    /// next step (after the tool call in flight), without stopping anything.
+    /// `_session/steering` is no substitute here: claude-agent-acp delivers it at
+    /// priority `now`, which aborts the response being generated.
+    async fn deliver_next(self: &Arc<Self>, prompt: &Prompt) -> anyhow::Result<Steer> {
+        {
+            let mut st = self.extras.lock();
+            if st.closed {
+                return Ok(Steer::NotRunning);
+            }
+            st.pending += 1;
+        }
+        let blocks = self.blocks(prompt.text.clone(), &prompt.attachments);
+        let me = self.clone();
+        let mark = self.peer.stderr_mark();
+        let prompt = prompt.clone();
+        // Written before returning: what the user does next (answering the approval
+        // the turn waits on) must reach the agent after this message, not before.
+        let sent = self
+            .peer
+            .send_request(
+                "session/prompt",
+                json!({ "sessionId": self.session_id(), "prompt": blocks }),
+            )
+            .await;
+        tokio::spawn(async move {
+            let res = match sent {
+                Ok(reply) => reply.await,
+                Err(e) => Err(e),
+            };
+            let outcome = match res {
+                Ok(v) => me.reply_outcome(&v),
+                Err(_) if me.ctx.cancel_was_requested() => TurnOutcome::Cancelled,
+                Err(e) => {
+                    // The agent never took it: keep it in the queue (on hold) rather than lose it.
+                    me.ctx.requeue_front_paused(prompt);
+                    TurnOutcome::Failed(format!("{:#}", auth_hint(me.peer.with_stderr(e, mark))))
+                }
+            };
+            {
+                let mut st = me.extras.lock();
+                st.pending = st.pending.saturating_sub(1);
+                st.outcome = Some(match st.outcome.take() {
+                    Some(o) => worse(o, outcome),
+                    None => outcome,
+                });
+            }
+            me.extras_wake.notify_one();
+        });
+        Ok(Steer::Injected)
+    }
+
+    /// Sends a message into the running turn and keeps it running: as a queued
+    /// prompt where the agent has that (see `deliver_next`), else through the
+    /// steering extension (the agent reads it at its next step; a tool still running
+    /// moves to the background).
+    pub async fn steer(self: &Arc<Self>, prompt: &Prompt) -> anyhow::Result<Steer> {
+        if self.queueing() {
+            return self.deliver_next(prompt).await;
+        }
         if !self.steerable() {
             return Ok(Steer::Unsupported);
         }
@@ -523,6 +684,10 @@ impl AcpDriver {
         if let Some(a) = &answers {
             crate::questions::validate(&fields, a).map_err(|e| anyhow!(e))?;
         }
+        let _answering = self
+            .ctx
+            .begin_answer(request_id)
+            .ok_or_else(|| anyhow!("This question is no longer waiting for an answer."))?;
         let (rpc_id, schema) = self
             .questions
             .lock()
@@ -560,6 +725,10 @@ impl AcpDriver {
         request_id: &str,
         option_id: &str,
     ) -> anyhow::Result<()> {
+        let _answering = self
+            .ctx
+            .begin_answer(request_id)
+            .ok_or_else(|| anyhow!("This approval is no longer pending."))?;
         let rpc_id = self
             .perms
             .lock()
@@ -831,46 +1000,52 @@ async fn event_loop(
     generation: u64,
 ) {
     while let Some(msg) = rx.recv().await {
-        // A retired process's leftovers must not touch the current turn.
+        // A retired process's leftovers must not touch the current turn: each event
+        // is applied inside `with_current_generation`, atomically with that check.
         if !ctx.is_current(generation) && !matches!(msg, Incoming::Closed | Incoming::Barrier(_)) {
             continue;
         }
         match msg {
             Incoming::Notification { method, params } => {
-                // History replayed by session/load is already in the timeline; only
-                // timeline updates are skipped (commands, modes, config and usage
-                // still apply).
-                let skip = ctx.replaying() && is_timeline_update(&params["update"]);
-                if method == "session/update" && !skip {
-                    if let Some(d) = driver.upgrade() {
-                        d.handle_update(&params["update"]);
+                ctx.with_current_generation(generation, || {
+                    // History replayed by session/load is already in the timeline; only
+                    // timeline updates are skipped (commands, modes, config and usage
+                    // still apply).
+                    let skip = ctx.replaying() && is_timeline_update(&params["update"]);
+                    if method == "session/update" && !skip {
+                        if let Some(d) = driver.upgrade() {
+                            d.handle_update(&params["update"]);
+                        }
+                    } else if method == "$/cancel_request" {
+                        // The agent gave up on a request it made (an approval or a question):
+                        // nobody is listening for the answer anymore.
+                        if let Some(d) = driver.upgrade() {
+                            d.on_request_cancelled(&params["id"]);
+                        }
                     }
-                } else if method == "$/cancel_request" {
-                    // The agent gave up on a request it made (an approval or a question):
-                    // nobody is listening for the answer anymore.
-                    if let Some(d) = driver.upgrade() {
-                        d.on_request_cancelled(&params["id"]);
-                    }
-                }
+                });
             }
             Incoming::Request { id, method, params } => match method.as_str() {
                 "session/request_permission" => {
-                    let shown = match driver.upgrade() {
-                        Some(d) => d.on_permission_request(id.clone(), &params),
-                        None => false,
-                    };
-                    if !shown {
+                    // None: the process was retired meanwhile; nobody waits for a reply.
+                    let shown = ctx.with_current_generation(generation, || {
+                        driver
+                            .upgrade()
+                            .is_some_and(|d| d.on_permission_request(id.clone(), &params))
+                    });
+                    if shown == Some(false) {
                         let _ = peer
                             .respond(id, json!({ "outcome": { "outcome": "cancelled" } }))
                             .await;
                     }
                 }
                 "elicitation/create" => {
-                    let shown = match driver.upgrade() {
-                        Some(d) => d.on_question(id.clone(), &params),
-                        None => false,
-                    };
-                    if !shown {
+                    let shown = ctx.with_current_generation(generation, || {
+                        driver
+                            .upgrade()
+                            .is_some_and(|d| d.on_question(id.clone(), &params))
+                    });
+                    if shown == Some(false) {
                         let _ = peer.respond(id, json!({ "action": "decline" })).await;
                     }
                 }
@@ -950,11 +1125,11 @@ pub async fn probe(
 /// MCP servers in ACP's wire format (HTTP ones only if the agent supports them).
 /// Armada's note to the agent (see `guidance`), appended to its own system prompt, for agents that
 /// advertise `sessionCapabilities.systemPrompt`; others never see the field.
-fn system_prompt(caps: &Value) -> Option<Value> {
+fn system_prompt(caps: &Value, guidance: &str) -> Option<Value> {
     caps["sessionCapabilities"].get("systemPrompt")?;
     Some(json!({
         "mode": "append",
-        "content": [{ "type": "text", "text": crate::guidance::AGENT_GUIDANCE }],
+        "content": [{ "type": "text", "text": guidance }],
     }))
 }
 

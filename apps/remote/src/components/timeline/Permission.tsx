@@ -4,12 +4,14 @@ import { cn } from "@/lib/cn";
 import { relativeTime } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
 import { confirmOption, isAllow, primaryAllow, primaryReject, RESOLVED_LABEL } from "@/lib/meta";
+import { useIsDocked } from "@/lib/selectors";
 import { useStore } from "@/lib/store";
 import type { PermissionItem, PermissionOption } from "@/lib/types";
 import { DenyReasonSheet } from "../DenyReasonSheet";
 import { Icon, Spinner } from "../Icon";
 import { Button, type ButtonVariant } from "../ui";
 import { DiffList } from "./DiffView";
+import { DockedNote } from "./DockedNote";
 import { CommandBlock, TOOL_ICON } from "./Items";
 
 export const OPTION_VARIANT: Record<PermissionOption["kind"], ButtonVariant> = {
@@ -159,6 +161,7 @@ export const PermissionCard = memo(function PermissionCard({
   readOnly: boolean;
 }) {
   const sending = useStore((s) => s.resolving[item.requestId]);
+  const docked = useIsDocked(item) && !readOnly;
   const now = useNow();
   const [reasonOpen, setReasonOpen] = useState(false);
 
@@ -187,6 +190,8 @@ export const PermissionCard = memo(function PermissionCard({
               <Icon name="eye" size={16} className="shrink-0 text-steel" />
               Waiting for the owner to respond.
             </p>
+          ) : docked ? (
+            <DockedNote />
           ) : (
             <PermissionButtons agentId={item.agentId} item={item} onDenyWithReason={() => setReasonOpen(true)} />
           )}

@@ -21,7 +21,8 @@ export const useVa = create<VaStore>((set) => ({
 function applyNavigation(view: string, agentId: string | null) {
   const ui = useUi.getState();
   if (view === "mission_control") ui.setView("mission");
-  else if (view === "inbox") ui.setView("inbox");
+  else if (view === "inbox")
+    ui.openMission("needs"); // the tool's name for Needs you
   else if (view === "review" && agentId) {
     ui.openAgent(agentId);
     ui.setReviewAgent(agentId);

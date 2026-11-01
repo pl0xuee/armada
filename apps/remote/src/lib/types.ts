@@ -113,6 +113,8 @@ export interface CreateAgentRequest {
   prompt?: string;
   title?: string;
   worktree?: boolean;
+  /** Agents started together share one: added agents join their siblings'. Older servers ignore it. */
+  groupId?: string;
   customAgentId?: string;
   attachments?: Attachment[];
   /** Provider-specific model id passed to the agent at start (optional). */

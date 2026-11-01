@@ -30,8 +30,8 @@ import { basename, cn } from "@/lib/utils";
 import { useApp, usePendingPermissions, usePendingQuestions } from "@/store/app";
 import { QuestionCard } from "@/components/timeline/QuestionCard";
 import { useUi } from "@/store/ui";
-import { REASON_TONE, reasonLabel, type TriageEntry } from "./useTriage";
-import { CodeText } from "../CodeText";
+import { REASON_TONE, reasonLabel, type TriageEntry } from "@/components/triage/useTriage";
+import { CodeText } from "@/components/CodeText";
 
 type Permission = Extract<TimelineItem, { kind: "permission" }>;
 
@@ -61,7 +61,7 @@ const OPTION_ORDER: Record<PermissionOption["kind"], number> = {
   reject_always: 3,
 };
 
-export function TriageDetail({
+export function NeedsYouDetail({
   entry,
   onDone,
   onArchive,
@@ -164,13 +164,13 @@ export function TriageDetail({
                 {agent.running ? (
                   <Button
                     size="sm"
-                    variant="primary"
+                    variant="warn"
                     onClick={() => void attempt("Couldn't send", () => api.sendPrompt(agent.id, CONTINUE_PROMPT))}
                   >
                     <RotateCcw className="!h-3.5 !w-3.5" /> Retry
                   </Button>
                 ) : (
-                  <Button size="sm" variant="primary" onClick={() => void resumeAgent(agent)}>
+                  <Button size="sm" variant="warn" onClick={() => void resumeAgent(agent)}>
                     <Play className="!h-3.5 !w-3.5" /> Resume
                   </Button>
                 )}
@@ -202,7 +202,7 @@ export function TriageDetail({
           </Button>
           <Button
             size="sm"
-            variant="primary"
+            variant={reason === "done" ? "warn" : "secondary"}
             onClick={onDone}
             // An approval is still blocking the agent: answer it rather than marking it done.
             aria-disabled={reason === "permission" || undefined}
@@ -216,7 +216,14 @@ export function TriageDetail({
             className={cn(reason === "permission" && "cursor-not-allowed opacity-45")}
           >
             <CircleCheck className="!h-3.5 !w-3.5" /> Done
-            <Kbd className="ml-1 hidden border-accent-fg/30 bg-transparent text-accent-fg/80 @2xl:inline-flex">E</Kbd>
+            <Kbd
+              className={cn(
+                "ml-1 hidden bg-transparent @2xl:inline-flex",
+                reason === "done" && "border-warn-fg/30 text-warn-fg/80",
+              )}
+            >
+              E
+            </Kbd>
           </Button>
         </div>
       </footer>

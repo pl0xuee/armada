@@ -169,7 +169,7 @@ export function VoiceSection({ settings }: { settings: Settings }) {
                 <span className="inline-flex items-center gap-2">
                   {m.label}
                   {m.isDefault && (
-                    <span className="rounded bg-raised px-1.5 py-px text-[10.5px] font-normal text-steel">
+                    <span className="rounded bg-raised px-1.5 py-px text-[11px] font-normal text-steel">
                       Recommended
                     </span>
                   )}

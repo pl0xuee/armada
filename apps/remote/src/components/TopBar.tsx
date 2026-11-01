@@ -16,6 +16,7 @@ export function TopBar({ left, children, right, below }: { left?: ReactNode; chi
       </div>
       {below}
       <ConnectionBanner />
+      <div className="pointer-events-none absolute inset-x-0 top-full h-4 bg-gradient-to-b from-base to-transparent" aria-hidden />
     </header>
   );
 }
@@ -44,7 +45,6 @@ export function ConnectionPill({ className }: { className?: string }) {
     >
       {connection === "live" ? (
         <span className="relative inline-flex h-1.5 w-1.5">
-          <span className="animate-pulse-ring absolute inset-0 rounded-full" style={{ background: meta.color }} />
           <span className="relative h-1.5 w-1.5 rounded-full" style={{ background: meta.color }} />
         </span>
       ) : connection === "offline" ? (

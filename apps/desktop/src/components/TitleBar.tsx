@@ -21,12 +21,13 @@ import { SubagentList } from "./agent/SubagentList";
 import { VoiceAssistantButton } from "./voice/VoiceAssistantButton";
 import { useSubagentOverview } from "./agent/useSubagents";
 
+/** Below this the right-hand cluster would crowd the search box, so the sub-agents chip drops its label. */
+const NARROW_TITLEBAR_QUERY = "(max-width: 1499px)";
+
 const VIEW_LABEL: Record<View, string> = {
   agents: "Agents",
   mission: "Mission Control",
-  inbox: "Inbox",
   compare: "Compare",
-  triage: "Needs you",
   schedules: "Schedules",
   usage: "Usage",
   accounts: "Accounts",
@@ -40,36 +41,38 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
   const setPaletteOpen = useUi((s) => s.setPaletteOpen);
   const mac = platform === "macos";
   const compact = useMediaQuery(COMPACT_TITLEBAR_QUERY);
+  const narrow = useMediaQuery(NARROW_TITLEBAR_QUERY);
   const connectionLost = useApp((s) => s.connectionLost);
 
   return (
     <>
       <header
         data-tauri-drag-region
-        className="texture relative z-30 flex h-10 shrink-0 items-center border-b border-line bg-panel edge"
+        className={cn(
+          "texture relative z-30 grid h-10 shrink-0 items-center border-b border-line bg-panel edge",
+          compact ? "grid-cols-[1fr_auto_1fr]" : "grid-cols-[1fr_minmax(0,380px)_1fr]",
+        )}
         style={{ paddingLeft: mac ? 78 : 12 }}
       >
-        <div
-          data-tauri-drag-region
-          className={cn("flex min-w-0 shrink items-center gap-2", compact ? "w-auto" : "w-[200px]")}
-        >
+        {/* Three columns, so the search box sits at the same x on every view whatever the sides hold. */}
+        <div data-tauri-drag-region className="flex min-w-0 items-center gap-2">
           <AppMark size={18} />
           <span data-tauri-drag-region className="text-[13px] font-semibold tracking-[-0.01em] text-fg">
             Armada
           </span>
           {!minimal && (
             <>
-              <span data-tauri-drag-region className="text-line-strong max-[599px]:hidden">
+              <span data-tauri-drag-region className="text-line-strong max-[999px]:hidden">
                 /
               </span>
-              <span data-tauri-drag-region className="truncate text-[12.5px] text-muted max-[599px]:hidden">
+              <span data-tauri-drag-region className="truncate text-[12.5px] text-muted max-[999px]:hidden">
                 {VIEW_LABEL[view]}
               </span>
             </>
           )}
         </div>
 
-        <div data-tauri-drag-region className="@container flex min-w-0 flex-1 justify-center px-4">
+        <div data-tauri-drag-region className="@container flex min-w-0 justify-center px-4">
           {!minimal && compact ? (
             <Tooltip content="Search and commands" shortcut={[modKey, "K"]} side="bottom">
               <button
@@ -90,7 +93,8 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
                 aria-label="Open command palette"
               >
                 <Search className="h-3.5 w-3.5 shrink-0" />
-                <span className="hidden truncate @[250px]:inline">Search agents, actions, history…</span>
+                <span className="hidden truncate @[170px]:inline @[330px]:hidden">Search…</span>
+                <span className="hidden truncate @[330px]:inline">Search agents, actions, history…</span>
                 <span className="ml-auto hidden shrink-0 gap-0.5 @[140px]:flex">
                   <Kbd>{modKey}</Kbd>
                   <Kbd>K</Kbd>
@@ -100,9 +104,9 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
           )}
         </div>
 
-        <div data-tauri-drag-region className="flex h-full shrink-0 items-center gap-3">
+        <div data-tauri-drag-region className="flex h-full items-center justify-end gap-3">
           {!minimal && <VoiceAssistantButton />}
-          {!minimal && <SubagentsIndicator compact={compact} />}
+          {!minimal && <SubagentsIndicator compact={narrow} />}
           {!minimal && <UpdatePill />}
           {!minimal && accounts.length > 0 && <AccountSwitcher accounts={accounts} stacked={compact} />}
           {!mac && <WindowControls />}

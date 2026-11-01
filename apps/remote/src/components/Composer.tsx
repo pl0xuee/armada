@@ -18,6 +18,7 @@ import { cancelTurn, clearQueue, removeQueued, resumeQueue, sendPrompt, sendQueu
 import { confirmAction } from "@/lib/confirm";
 import { cn } from "@/lib/cn";
 import { agentIdentity, isBusy } from "@/lib/meta";
+import { busySendPlan, type BusySend } from "@/lib/sendOptions";
 import { draftKey } from "@/lib/drafts";
 import { useAgentAsking } from "@/lib/selectors";
 import { storage } from "@/lib/storage";
@@ -79,6 +80,12 @@ export const Composer = memo(function Composer({
   const busy = isBusy(agent.status);
   const name = agentIdentity(agent, customAgents).short;
   const canSend = value.trim().length > 0 || attachments.length > 0;
+  // While the agent works: where this message goes (into the running turn, or behind it).
+  const [chosen, setChosen] = useState<BusySend | null>(null);
+  const plan = busySendPlan(agent, value, busy, chosen);
+  useEffect(() => {
+    if (!canSend || !busy) setChosen(null);
+  }, [canSend, busy]);
 
   const query = slashQuery(value);
   const commands = useMemo(
@@ -88,7 +95,7 @@ export const Composer = memo(function Composer({
 
   // The longest placeholder that fits on one line (a wrapped one would make the empty box taller).
   const asking = useAgentAsking(agent.id);
-  const candidates = useMemo(() => composerPlaceholders(agent, name, asking), [agent.status, agent.unread, agent.availableCommands, name, asking]);
+  const candidates = useMemo(() => composerPlaceholders(agent, name, asking), [agent.status, agent.unread, agent.availableCommands, agent.steerable, name, asking]);
   const [placeholder, setPlaceholder] = useState(() => candidates[candidates.length - 1]);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -96,8 +103,13 @@ export const Composer = memo(function Composer({
     const pick = () => {
       const ctx = document.createElement("canvas").getContext("2d");
       if (!ctx || el.clientWidth <= 0) return setPlaceholder(candidates[candidates.length - 1]);
-      ctx.font = getComputedStyle(el).font;
-      setPlaceholder(pickPlaceholder(candidates, (t) => ctx.measureText(t).width <= el.clientWidth - 2));
+      const cs = getComputedStyle(el);
+      ctx.font = cs.font;
+      // The text area is the box minus its horizontal padding: measuring against the whole box let a
+      // placeholder that didn't fit through, and it was cut off.
+      const room = el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0) - 2;
+      // 8% slack: canvas metrics run a little narrower than the text area's own layout.
+      setPlaceholder(pickPlaceholder(candidates, (t) => ctx.measureText(t).width * 1.08 <= room));
     };
     pick();
     if (typeof ResizeObserver === "undefined") return;
@@ -135,10 +147,11 @@ export const Composer = memo(function Composer({
     onChange("");
     setAttachments([]);
     storage.remove(draftKey(agent.id));
-    void sendPrompt(agent.id, text, attachments);
+    void sendPrompt(agent.id, text, attachments, undefined, plan.mode);
+    setChosen(null);
     // Keep the keyboard up on phones so follow-ups are quick.
     ref.current?.focus({ preventScroll: true });
-  }, [agent.id, agent.availableCommands, attachments, onChange, value]);
+  }, [agent.id, agent.availableCommands, attachments, onChange, value, plan.mode]);
 
   /** Open the template list, remembering where the caret was (the box blurs when the sheet opens). */
   const openTemplates = () => {
@@ -159,6 +172,25 @@ export const Composer = memo(function Composer({
       el.focus({ preventScroll: true });
       el.setSelectionRange(next.caret, next.caret);
     }, 220);
+  };
+
+  /** The explicit way to interrupt: stop the turn, then run this message. Asks first. */
+  const stopAndSend = async () => {
+    const text = expandCommandShortcut(value.trim(), agent.availableCommands ?? []);
+    if (!text && !attachments.length) return;
+    const ok = await confirmAction({
+      title: "Stop the current turn?",
+      body: `${name} stops what it's doing and runs this message instead.`,
+      confirmLabel: "Stop & send",
+      destructive: true,
+    });
+    if (!ok) return;
+    const photos = attachments;
+    onChange("");
+    setAttachments([]);
+    storage.remove(draftKey(agent.id));
+    await cancelTurn(agent.id);
+    void sendPrompt(agent.id, text, photos, undefined, "queue");
   };
 
   const editQueued = useCallback(
@@ -205,6 +237,8 @@ export const Composer = memo(function Composer({
       className="chrome sticky z-20 border-t border-line/70 pb-[max(10px,var(--safe-bottom-kb))]"
       style={{ bottom: "var(--kb, 0px)" }}
     >
+      {/* Content fades out above the box instead of being cut off mid-line. */}
+      <div className="pointer-events-none absolute inset-x-0 -top-5 h-5 bg-gradient-to-t from-base to-transparent" aria-hidden />
       {banner}
       <QueueStack agent={agent} onEdit={editQueued} />
       {commands.length > 0 && (
@@ -237,8 +271,25 @@ export const Composer = memo(function Composer({
         onRemove={(i) => setAttachments((a) => a.filter((_, j) => j !== i))}
         className="mx-auto w-full max-w-[860px] px-safe pt-3 pr-3"
       />
+      {busy && canSend && plan.note && (
+        <div className="mx-auto flex w-full max-w-[860px] items-center gap-1 px-safe pt-1.5" role="group" aria-label="How to send while the agent works">
+          <p className="min-w-0 flex-1 truncate pl-1 text-[12.5px] text-steel">{plan.note}</p>
+          {plan.canToggle && (
+            <button
+              type="button"
+              onClick={() => setChosen(plan.mode === "deliver" ? "queue" : "deliver")}
+              className="press relative inline-flex h-11 shrink-0 items-center rounded-lg px-2 text-[13px] font-semibold text-accent"
+            >
+              {plan.mode === "deliver" ? "Queue instead" : "Send now"}
+            </button>
+          )}
+          <button type="button" onClick={() => void stopAndSend()} className="press relative inline-flex h-11 shrink-0 items-center rounded-lg px-2 text-[13px] font-semibold text-warn">
+            Stop &amp; send
+          </button>
+        </div>
+      )}
       <form
-        className="mx-auto flex w-full max-w-[860px] items-end gap-1.5 px-safe pt-2.5"
+        className={cn("mx-auto flex w-full max-w-[860px] items-end gap-1.5 px-safe", busy && canSend && plan.note ? "pt-0.5" : "pt-2.5")}
         onSubmit={(e) => {
           e.preventDefault();
           send();
@@ -301,7 +352,7 @@ export const Composer = memo(function Composer({
           <button
             type="submit"
             disabled={!canSend}
-            aria-label={busy ? "Queue message" : "Send"}
+            aria-label={busy ? (plan.mode === "deliver" ? "Send into the running turn" : "Queue message") : "Send"}
             className={cn(
               "press inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full",
               canSend ? "bg-accent text-accent-fg shadow-[0_6px_18px_-6px_var(--accent)]" : "bg-raised text-steel",
@@ -395,18 +446,17 @@ const QUEUE_ACTION = "press relative inline-flex h-11 min-w-0 flex-1 items-cente
 
 /** One queued message with its labelled actions: Send now, Stop & send, Edit, Remove. */
 function QueueItem({ agent, q, sending, onEdit }: { agent: Agent; q: QueuedPrompt; sending: boolean; onEdit: (q: QueuedPrompt) => void }) {
-  // Steering agents take it into the running turn; a slash command only works at
-  // the start of a turn, so it goes first in line instead.
+  // Send now never stops the turn: agents that take messages mid-turn get it in the running turn; for
+  // the rest (and slash commands, which only work at the start of a turn) it goes first in line and
+  // runs when the turn ends. Stopping is the separate, confirmed "Stop & send".
   const working = isBusy(agent.status);
-  const steers = !!agent.steerable && working;
   const isCommand = q.text.trimStart().startsWith("/");
+  const delivers = !!agent.steerable && !isCommand;
   const sendTitle = !working
     ? "Send now"
-    : !agent.steerable
-      ? "Send now (interrupts the current turn)"
-      : isCommand
-        ? "Run next (when the current turn ends)"
-        : "Send now (adds it to the running turn)";
+    : delivers
+      ? "Send now (adds it to the running turn, nothing is stopped)"
+      : "Run next (first in line, read as soon as the current turn ends; nothing is stopped)";
   return (
     <li className="animate-fade rounded-2xl border border-line-strong bg-card px-3.5 pt-2.5 pb-1 edge">
       <p className="line-clamp-2 text-[14px] leading-[1.35] break-words text-fg">{q.text || "(photos only)"}</p>
@@ -425,9 +475,9 @@ function QueueItem({ agent, q, sending, onEdit }: { agent: Agent; q: QueuedPromp
           aria-label={sendTitle}
           className={cn(QUEUE_ACTION, "text-accent")}
         >
-          {sending ? <Spinner size={15} /> : working && isCommand ? "Run next" : "Send now"}
+          {sending ? <Spinner size={15} /> : working && !delivers ? "Run next" : "Send now"}
         </button>
-        {steers && !isCommand && (
+        {working && (
           <button
             type="button"
             onClick={async () => {

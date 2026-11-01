@@ -209,7 +209,7 @@ const LIVE = new Set(["working", "starting", "needs_permission"]);
 
 /**
  * Drop cached timelines of agents not opened recently. Never evicts the selected agent, live
- * agents (Mission Control shows their activity) or agents with pending approvals (Inbox).
+ * agents (Mission Control shows their activity) or agents with pending approvals (Needs you).
  */
 function evictTimelines(items: Record<string, TimelineItem[]>, agents: Record<string, Agent>, selected: string | null) {
   const keep = new Set(recent.slice(0, MAX_CACHED));
@@ -274,7 +274,7 @@ export const useApp = create<AppStore>((set, get) => ({
         providers: s.providers,
         settings: s.settings,
       });
-      // Agents with pending approvals are always loaded so the Inbox can list them.
+      // Agents with pending approvals are always loaded so Needs you can list them.
       for (const a of s.agents) {
         if (a.pendingPermissions > 0) void get().ensureItems(a.id);
       }
@@ -484,7 +484,7 @@ export const useApp = create<AppStore>((set, get) => ({
           const loading = st.itemsLoading[agentId];
           if (loading) buffered.get(agentId)?.push(e);
           if (!items[agentId] && !working.has(agentId)) {
-            // Not loaded: permissions must reach the Inbox, everything else loads lazily.
+            // Not loaded: permissions must reach Needs you, everything else loads lazily.
             if (!loading && e.type === "item_upserted" && (e.item.kind === "permission" || e.item.kind === "question"))
               toLoad.add(agentId);
             break;

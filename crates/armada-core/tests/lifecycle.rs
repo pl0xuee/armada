@@ -643,6 +643,371 @@ async fn send_now_steers_into_the_running_turn() {
     env.core.shutdown().await;
 }
 
+/// Waits for the agent's first approval request and returns its id.
+async fn first_permission(env: &mut Env) -> String {
+    let ev = wait_for(&mut env.rx, 15, |e| {
+        matches!(e, ArmadaEvent::ItemUpserted { item } if matches!(item.body, ItemBody::Permission { resolution: None, .. }))
+    })
+    .await
+    .expect("permission");
+    let ArmadaEvent::ItemUpserted { item } = ev else {
+        unreachable!()
+    };
+    let ItemBody::Permission { request_id, .. } = item.body else {
+        unreachable!()
+    };
+    request_id
+}
+
+/// "Send now" on an agent that can't take a message mid-turn must NOT stop the
+/// turn: the message moves to the front of the queue and runs when the turn ends.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn send_now_without_mid_turn_support_does_not_cancel() {
+    let mut env = setup("send-now-safe", mode("normal")).await;
+    let agent = env
+        .core
+        .create_agent(request(&env, "PERM first"))
+        .await
+        .unwrap();
+    let perm = first_permission(&mut env).await;
+    assert!(!env.core.agent(&agent.id).unwrap().steerable);
+    for t in ["early", "urgent"] {
+        env.core.send_prompt(&agent.id, t, vec![]).await.unwrap();
+    }
+    let urgent = env.core.agent(&agent.id).unwrap().queue[1].id.clone();
+    env.core
+        .send_queued_now(&agent.id, &urgent, false)
+        .await
+        .unwrap();
+
+    // Still waiting on the same approval: nothing was cancelled or restarted.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let a = env.core.agent(&agent.id).unwrap();
+    assert_eq!(a.status, AgentStatus::NeedsPermission);
+    assert!(!a.queue_paused);
+    let queued: Vec<&str> = a.queue.iter().map(|q| q.text.as_str()).collect();
+    assert_eq!(queued, ["urgent", "early"], "it moved to the front");
+    assert_eq!(user_texts(&env, &agent.id), ["PERM first"]);
+
+    env.core
+        .respond_permission(&agent.id, &perm, "yes")
+        .await
+        .unwrap();
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
+        .await
+        .expect("all turns finish");
+    assert_eq!(
+        agent_texts(&env, &agent.id),
+        ["reply to PERM first", "reply to urgent", "reply to early"],
+        "the running turn finished by itself, then the moved message ran first"
+    );
+    env.core.shutdown().await;
+}
+
+/// For Claude (claude-agent-acp), "send now" while a turn runs hands the message to
+/// the agent as another prompt, which it reads at its next step: the turn is not
+/// stopped, and the steering extension (which aborts the response being generated)
+/// is not used.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn send_now_reaches_claude_as_a_queued_prompt() {
+    let mut env = setup("send-now-queued", mode("queue")).await;
+    let agent = env
+        .core
+        .create_agent(request(&env, "PERM first"))
+        .await
+        .unwrap();
+    let perm = first_permission(&mut env).await;
+    assert!(env.core.agent(&agent.id).unwrap().steerable);
+
+    env.core
+        .send_prompt(&agent.id, "also this", vec![])
+        .await
+        .unwrap();
+    let queued = env.core.agent(&agent.id).unwrap().queue[0].id.clone();
+    env.core
+        .send_queued_now(&agent.id, &queued, false)
+        .await
+        .unwrap();
+    let a = env.core.agent(&agent.id).unwrap();
+    assert!(a.queue.is_empty(), "it went to the agent, not back in line");
+    assert_eq!(
+        a.status,
+        AgentStatus::NeedsPermission,
+        "nothing was stopped"
+    );
+    assert_eq!(user_texts(&env, &agent.id), ["PERM first", "also this"]);
+
+    env.core
+        .respond_permission(&agent.id, &perm, "yes")
+        .await
+        .unwrap();
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
+        .await
+        .expect("the turn finishes");
+    assert_eq!(
+        agent_texts(&env, &agent.id),
+        ["reply to PERM first +queued also this"],
+        "the turn read the message at its next step; no steering was used"
+    );
+    let a = env.core.agent(&agent.id).unwrap();
+    assert_eq!(a.status, AgentStatus::Idle);
+    assert!(a.queue.is_empty());
+    env.core.shutdown().await;
+}
+
+/// A message delivered into a Claude turn that the agent runs as its own turn
+/// afterwards still counts as part of the working run: the agent isn't idle (and
+/// the queue doesn't advance) until the agent has answered it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn delivered_message_that_runs_after_keeps_the_run_going() {
+    let mut env = setup("send-now-after", mode("queue")).await;
+    let agent = env
+        .core
+        .create_agent(request(&env, "PERM first"))
+        .await
+        .unwrap();
+    let perm = first_permission(&mut env).await;
+    env.core
+        .send_prompt(&agent.id, "AFTER one", vec![])
+        .await
+        .unwrap();
+    env.core
+        .send_prompt(&agent.id, "plain follow-up", vec![])
+        .await
+        .unwrap();
+    let after = env.core.agent(&agent.id).unwrap().queue[0].id.clone();
+    env.core
+        .send_queued_now(&agent.id, &after, false)
+        .await
+        .unwrap();
+    env.core
+        .respond_permission(&agent.id, &perm, "yes")
+        .await
+        .unwrap();
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
+        .await
+        .expect("everything finishes");
+    assert_eq!(
+        agent_texts(&env, &agent.id),
+        [
+            // One stream: the agent answered the delivered message in the same run.
+            "reply to PERM firstreply to AFTER one",
+            "reply to plain follow-up"
+        ],
+        "the delivered message was answered before the queue moved on"
+    );
+    env.core.shutdown().await;
+}
+
+/// Stopping a Claude turn that has a message delivered into it settles that too,
+/// and a message still waiting in Armada's queue is kept (paused), not lost.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stop_settles_delivered_messages_and_keeps_the_queue() {
+    let mut env = setup("send-now-stop", mode("queue")).await;
+    let agent = env
+        .core
+        .create_agent(request(&env, "PERM first"))
+        .await
+        .unwrap();
+    first_permission(&mut env).await;
+    env.core
+        .send_prompt(&agent.id, "delivered", vec![])
+        .await
+        .unwrap();
+    env.core
+        .send_prompt(&agent.id, "waiting", vec![])
+        .await
+        .unwrap();
+    let delivered = env.core.agent(&agent.id).unwrap().queue[0].id.clone();
+    env.core
+        .send_queued_now(&agent.id, &delivered, false)
+        .await
+        .unwrap();
+    env.core.cancel_turn(&agent.id).await.unwrap();
+    for _ in 0..50 {
+        if env.core.agent(&agent.id).unwrap().status == AgentStatus::Idle {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let a = env.core.agent(&agent.id).unwrap();
+    assert_eq!(a.status, AgentStatus::Idle, "the stopped turn ended");
+    assert!(a.queue_paused, "the queue waits for you after a stop");
+    let queued: Vec<&str> = a.queue.iter().map(|q| q.text.as_str()).collect();
+    assert_eq!(queued, ["waiting"], "nothing queued was lost");
+    env.core.shutdown().await;
+}
+
+/// Enter while Claude works ("deliver"): the message goes into the running turn at
+/// once, shows in the timeline marked as sent mid-turn, and nothing is queued or stopped.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn deliver_prompt_goes_straight_into_the_running_turn() {
+    let mut env = setup("deliver-claude", mode("queue")).await;
+    let agent = env
+        .core
+        .create_agent(request(&env, "PERM first"))
+        .await
+        .unwrap();
+    let perm = first_permission(&mut env).await;
+    env.core
+        .deliver_prompt(&agent.id, "also this", vec![])
+        .await
+        .unwrap();
+    let a = env.core.agent(&agent.id).unwrap();
+    assert!(a.queue.is_empty(), "not held back");
+    assert_eq!(
+        a.status,
+        AgentStatus::NeedsPermission,
+        "nothing was stopped"
+    );
+    let mid: Vec<bool> = env
+        .core
+        .items(&agent.id)
+        .unwrap()
+        .into_iter()
+        .filter_map(|i| match i.body {
+            ItemBody::UserMessage { mid_turn, .. } => Some(mid_turn),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(mid, [false, true], "only the second is marked mid-turn");
+    env.core
+        .respond_permission(&agent.id, &perm, "yes")
+        .await
+        .unwrap();
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
+        .await
+        .expect("the turn finishes");
+    assert_eq!(
+        agent_texts(&env, &agent.id),
+        ["reply to PERM first +queued also this"]
+    );
+    env.core.shutdown().await;
+}
+
+/// An agent that can't take messages mid-turn: Enter queues, as before. So do slash
+/// commands (they only work at the start of a turn) and a queue on hold.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn deliver_prompt_queues_when_it_cannot_go_into_the_turn() {
+    let mut env = setup("deliver-queue", mode("normal")).await;
+    let agent = env
+        .core
+        .create_agent(request(&env, "PERM first"))
+        .await
+        .unwrap();
+    let perm = first_permission(&mut env).await;
+    env.core
+        .deliver_prompt(&agent.id, "later please", vec![])
+        .await
+        .unwrap();
+    let a = env.core.agent(&agent.id).unwrap();
+    assert_eq!(a.queue.len(), 1);
+    assert_eq!(user_texts(&env, &agent.id), ["PERM first"]);
+    env.core
+        .respond_permission(&agent.id, &perm, "yes")
+        .await
+        .unwrap();
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
+        .await
+        .expect("both run");
+    assert_eq!(
+        agent_texts(&env, &agent.id),
+        ["reply to PERM first", "reply to later please"]
+    );
+
+    // A slash command goes first in line even where delivery works.
+    let mut env = setup("deliver-slash", mode("queue")).await;
+    let agent = env
+        .core
+        .create_agent(request(&env, "PERM first"))
+        .await
+        .unwrap();
+    first_permission(&mut env).await;
+    env.core
+        .deliver_prompt(&agent.id, "/compact", vec![])
+        .await
+        .unwrap();
+    let a = env.core.agent(&agent.id).unwrap();
+    assert_eq!(a.queue.len(), 1, "a command waits for the start of a turn");
+    env.core.shutdown().await;
+}
+
+/// Nothing delivered is ever lost. The agent refuses the message (error reply): it
+/// is back in the queue, on hold, and the turn reports the error. When the turn has
+/// already ended, delivering is just a normal send.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failed_delivery_keeps_the_message() {
+    let mut env = setup("deliver-bounce", mode("queue")).await;
+    let agent = env
+        .core
+        .create_agent(request(&env, "PERM first"))
+        .await
+        .unwrap();
+    let perm = first_permission(&mut env).await;
+    env.core
+        .deliver_prompt(&agent.id, "BOUNCE me", vec![])
+        .await
+        .unwrap();
+    env.core
+        .respond_permission(&agent.id, &perm, "yes")
+        .await
+        .unwrap();
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Error))
+        .await
+        .expect("the refused message fails the turn visibly");
+    let a = env.core.agent(&agent.id).unwrap();
+    let queued: Vec<&str> = a.queue.iter().map(|q| q.text.as_str()).collect();
+    assert_eq!(queued, ["BOUNCE me"], "back in the queue, not dropped");
+    assert!(a.queue_paused, "on hold until you decide");
+    env.core.shutdown().await;
+
+    // The turn ended before the message arrived: it just runs.
+    let mut env = setup("deliver-idle", mode("queue")).await;
+    let agent = env.core.create_agent(request(&env, "first")).await.unwrap();
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
+        .await
+        .expect("first turn");
+    env.core
+        .deliver_prompt(&agent.id, "second", vec![])
+        .await
+        .unwrap();
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
+        .await
+        .expect("second turn");
+    assert_eq!(
+        agent_texts(&env, &agent.id),
+        ["reply to first", "reply to second"]
+    );
+    assert!(env.core.agent(&agent.id).unwrap().queue.is_empty());
+    env.core.shutdown().await;
+}
+
+/// A steer the agent refuses (error) is queued with a note instead of dropped.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refused_steer_is_queued_with_a_note() {
+    let mut env = setup("deliver-steerfail", mode("steer")).await;
+    let agent = env
+        .core
+        .create_agent(request(&env, "PERM first"))
+        .await
+        .unwrap();
+    first_permission(&mut env).await;
+    env.core
+        .deliver_prompt(&agent.id, "STEERFAIL please", vec![])
+        .await
+        .unwrap();
+    let a = env.core.agent(&agent.id).unwrap();
+    let queued: Vec<&str> = a.queue.iter().map(|q| q.text.as_str()).collect();
+    assert_eq!(queued, ["STEERFAIL please"]);
+    assert!(
+        notices(&env.core, &agent.id)
+            .iter()
+            .any(|n| n.contains("Couldn't add your message to the running turn")),
+        "the user is told why"
+    );
+    env.core.shutdown().await;
+}
+
 /// A question the agent asks (Claude's AskUserQuestion via a form elicitation) shows
 /// as a question item with its fields; the agent waits ("needs you") until it is
 /// answered, gets the answers in the form's shape, and a skip reaches it as declined.
@@ -1163,11 +1528,35 @@ async fn stop_then_new_prompt_during_start_runs_only_the_new_one() {
     env.core.shutdown().await;
 }
 
-/// M1: "send now" while the agent is still starting cancels the waiting prompt
+/// M1: "Stop and send" while the agent is still starting cancels the waiting prompt
 /// and runs the chosen one (instead of leaving the agent stuck "working").
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn send_now_during_start_runs_the_chosen_message() {
+async fn stop_and_send_during_start_runs_the_chosen_message() {
     let mut env = setup("m1", mode("slowinit")).await;
+    let agent = env.core.create_agent(request(&env, "A")).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    env.core.send_prompt(&agent.id, "B", vec![]).await.unwrap();
+    let queued = env.core.agent(&agent.id).unwrap().queue[0].id.clone();
+    env.core
+        .send_queued_now(&agent.id, &queued, true)
+        .await
+        .unwrap();
+    wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
+        .await
+        .expect("B runs");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_only_b_ran(&agent_texts(&env, &agent.id));
+    let a = env.core.agent(&agent.id).unwrap();
+    assert_eq!(a.status, AgentStatus::Idle);
+    assert!(a.queue.is_empty());
+    env.core.shutdown().await;
+}
+
+/// A plain "send now" while the agent is still starting drops nothing: the message
+/// the agent was about to get still runs, and the chosen one follows right after.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn send_now_during_start_does_not_drop_the_waiting_message() {
+    let mut env = setup("m1-safe", mode("slowinit")).await;
     let agent = env.core.create_agent(request(&env, "A")).await.unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;
     env.core.send_prompt(&agent.id, "B", vec![]).await.unwrap();
@@ -1178,9 +1567,12 @@ async fn send_now_during_start_runs_the_chosen_message() {
         .unwrap();
     wait_for(&mut env.rx, 20, |e| is_attention(e, AttentionReason::Done))
         .await
-        .expect("B runs");
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    assert_only_b_ran(&agent_texts(&env, &agent.id));
+        .expect("both run");
+    assert_eq!(
+        agent_texts(&env, &agent.id),
+        ["reply to A", "reply to B"],
+        "nothing was cancelled"
+    );
     let a = env.core.agent(&agent.id).unwrap();
     assert_eq!(a.status, AgentStatus::Idle);
     assert!(a.queue.is_empty());
@@ -1292,7 +1684,7 @@ async fn queue_survives_a_restart() {
     let items = core.items(&agent.id).unwrap();
     assert!(
         items.iter().any(|i| matches!(&i.body,
-        ItemBody::UserMessage { text, attachments } if text == "second" && attachments.len() == 1))
+        ItemBody::UserMessage { text, attachments, .. } if text == "second" && attachments.len() == 1))
     );
     let a = core.agent(&agent.id).unwrap();
     assert!(a.queue.is_empty() && !a.queue_paused);

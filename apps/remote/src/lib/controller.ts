@@ -51,6 +51,8 @@ import { commitResult, conflictPrompt, isSecretsRefusal, needsResultSheet, shipR
 import { throttledProgress } from "./outcomes";
 import { loadLocalImage } from "./localImages";
 import { applyConfigValue } from "./config";
+import { buildAddRequests } from "./together";
+import { rememberGroup } from "./togetherStore";
 import {
   applyDelta,
   mergeSnapshot,
@@ -1541,6 +1543,8 @@ export async function sendPrompt(
   text: string,
   attachments: Attachment[] = [],
   retryOf?: string,
+  /** While the agent works: "deliver" into the running turn, "queue" behind it; omitted follows the desktop's setting. */
+  mode?: "deliver" | "queue",
 ) {
   const body = text.trim();
   if (!body && !attachments.length) return;
@@ -1551,6 +1555,7 @@ export async function sendPrompt(
     ? getState().pendingPrompts[agentId]?.find((p) => p.id === retryOf)
     : undefined;
   const key = previous?.key ?? newIdempotencyKey();
+  const sendMode = mode ?? previous?.mode;
   const entry: PendingPrompt = {
     id,
     text: body,
@@ -1561,6 +1566,7 @@ export async function sendPrompt(
     attachments,
     key,
     progress: attachments.length ? 0 : null,
+    ...(sendMode ? { mode: sendMode } : {}),
   };
   setState((s) => {
     const list = (s.pendingPrompts[agentId] ?? []).filter((p) => p.id !== id);
@@ -1579,6 +1585,7 @@ export async function sendPrompt(
       attachments,
       key,
       onProgress,
+      sendMode === undefined ? undefined : sendMode === "deliver",
     );
     patchPending(agentId, id, { sent: true, progress: null });
     // It may already be in the queue (agent busy) or the timeline.
@@ -1623,6 +1630,34 @@ export function cancelTurn(agentId: string) {
   return busyAction(`cancel:${agentId}`, "Couldn't stop the agent", () =>
     api.cancel(requireBackend(), agentId),
   );
+}
+
+/** The desktop's "Retry": ask a stopped-on-error agent to carry on (its session is kept). */
+export const CONTINUE_PROMPT = "Please continue where you left off.";
+
+export function retryAgent(agentId: string) {
+  return sendPrompt(agentId, CONTINUE_PROMPT);
+}
+
+/**
+ * "Mark done" in Needs you. The agent leaves the queue at once (and comes back if it fails); an
+ * older server without the endpoint still clears "unread" with mark-read.
+ */
+export async function acknowledgeAgent(agentId: string) {
+  const before = getState().agents[agentId];
+  if (!before || !backend) return;
+  patchAgent(agentId, (a) => ({ ...a, unread: false, acknowledgedAt: Math.max(Date.now(), a.lastActivityAt) }));
+  try {
+    try {
+      await api.acknowledge(requireBackend(), agentId);
+    } catch (e) {
+      if (!(e instanceof ApiError && (e.status === 404 || e.status === 405))) throw e;
+      await api.markRead(requireBackend(), agentId);
+    }
+  } catch (e) {
+    patchAgent(agentId, (a) => ({ ...a, unread: before.unread, acknowledgedAt: before.acknowledgedAt }));
+    if (!handleAuthError(e)) toastError("Couldn't mark it done", e);
+  }
 }
 
 export function resumeAgent(agentId: string) {
@@ -1853,6 +1888,23 @@ export async function createAgent(
     );
   setState((s) => ({ agents: { ...s.agents, [agent.id]: agent } }));
   return agent.id;
+}
+
+/**
+ * "Add agents": start `count` more of the same agent in the same project, each in its own worktree and all
+ * in one group. Never rejects: the ones that couldn't start come back in `failed` (their messages), so a
+ * retry starts only those (pass the same `groupId`).
+ */
+export async function addAgents(agent: Agent, prompt: string, count: number, groupId: string): Promise<{ created: string[]; failed: string[] }> {
+  const results = await Promise.allSettled(buildAddRequests(agent, prompt, count, groupId).map((req) => createAgent(req, newIdempotencyKey())));
+  const created: string[] = [];
+  const failed: string[] = [];
+  for (const r of results) {
+    if (r.status === "fulfilled") created.push(r.value);
+    else failed.push(errorMessage(r.reason));
+  }
+  if (created.length && !agent.groupId) rememberGroup([agent.id, ...created]);
+  return { created, failed };
 }
 
 /** A screenshot the agent referenced by local path (owner only; cached). */

@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useNow } from "@/hooks/useNow";
-import { fullDate, relativeTime, relativeTimeLong } from "@/lib/format";
+import { fullDate, fullDateTime, relativeTime, relativeTimeLong } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "./ui/tooltip";
 
@@ -16,11 +17,23 @@ export function RelTime({
   side?: "top" | "right" | "bottom" | "left";
 }) {
   const now = useNow();
-  return (
-    <Tooltip content={new Date(ts).toLocaleString()} side={side}>
-      <time dateTime={new Date(ts).toISOString()} aria-label={fullDate(ts)} className={cn("tabular", className)}>
-        {long ? relativeTimeLong(ts, now) : relativeTime(ts, now)}
-      </time>
+  // A Radix tooltip is ~12 components; most timestamps are never hovered, so mount it on first hover.
+  const [hovered, setHovered] = useState(false);
+  const time = (
+    <time
+      dateTime={new Date(ts).toISOString()}
+      aria-label={fullDate(ts)}
+      className={cn("tabular", className)}
+      onPointerEnter={hovered ? undefined : () => setHovered(true)}
+    >
+      {long ? relativeTimeLong(ts, now) : relativeTime(ts, now)}
+    </time>
+  );
+  return hovered ? (
+    <Tooltip content={fullDateTime(ts)} side={side}>
+      {time}
     </Tooltip>
+  ) : (
+    time
   );
 }
