@@ -166,6 +166,7 @@ mod tests {
             mergeable: Some("MERGEABLE"),
             merge_state: Some("clean"),
             base: Some("main".into()),
+            head_sha: None,
             unresolved_threads: Some(3),
             checks: vec![crate::pr_status::Check {
                 name: "build".into(),
