@@ -631,7 +631,7 @@ pub async fn create_pr(
 /// Whether `gh` is installed and signed in, and whether git can use that sign-in.
 #[tauri::command]
 pub async fn github_status() -> CmdResult<github::GithubStatus> {
-    Ok(github::status().await)
+    github::status().await.map_err(err)
 }
 
 /// Runs `gh auth login` (browser sign-in) in a terminal window. While one is already open,
@@ -678,7 +678,7 @@ fn login_command_line_plain(exe: &std::path::Path, args: &[&str]) -> String {
 #[tauri::command]
 pub async fn github_setup_git() -> CmdResult<github::GithubStatus> {
     github::setup_git().await.map_err(err)?;
-    Ok(github::status().await)
+    github::status().await.map_err(err)
 }
 
 /// What publishing `path` would start from: repository or not, commits, remotes, a name.
