@@ -250,8 +250,8 @@ const tauriApi = {
     invoke<string>("create_pr", { agentId, title, body, base, draft }),
   /** Branches the agent's pull request could target (its own base first). */
   prBaseBranches: (agentId: string) => invoke<string[]>("pr_base_branches", { agentId }),
-  /** Merges the agent's pull request on GitHub. Resolves to a one-line summary. */
-  prMerge: (agentId: string, method: MergeMethod) => invoke<string>("pr_merge", { agentId, method }),
+  /** Merges the agent's pull request on GitHub. `sha` is the head commit that was reviewed: if the branch has moved, nothing is merged. Resolves to a one-line summary. */
+  prMerge: (agentId: string, method: MergeMethod, sha: string) => invoke<string>("pr_merge", { agentId, method, sha }),
   /** Takes the agent's draft pull request out of draft. */
   prMarkReady: (agentId: string) => invoke<void>("pr_mark_ready", { agentId }),
   /** Open issues of the project's GitHub repository. `search` (GitHub syntax) matters when the list was cut short. */

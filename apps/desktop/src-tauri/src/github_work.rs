@@ -8,10 +8,11 @@
 
 use std::path::Path;
 
-use anyhow::{anyhow, bail};
+use anyhow::bail;
 use kvistcode_core::Agent;
 use serde::{Deserialize, Serialize};
 
+use crate::gh_errors::{self, explain_gh_error, BRANCH_CHANGED};
 use crate::git_review::{agent_cwd, git, push_remote};
 use crate::pr_status::{self, PrCache};
 
@@ -19,28 +20,6 @@ use crate::pr_status::{self, PrCache};
 const ISSUE_LIMIT: usize = 100;
 /// Most characters of an issue's text handed to an agent.
 const MAX_ISSUE_CHARS: usize = 20_000;
-
-fn explain_gh_error(e: String) -> anyhow::Error {
-    let lower = e.to_lowercase();
-    if e == "gh_missing" {
-        anyhow!("The GitHub CLI (gh) is not installed. Get it from https://cli.github.com")
-    } else if lower.contains("gh auth login")
-        || lower.contains("not logged in")
-        || lower.contains("http 401")
-    {
-        anyhow!("Sign in to GitHub first (the GitHub button in an agent's Review panel).")
-    } else if lower.contains("none of the git remotes")
-        || lower.contains("no git remotes")
-        || lower.contains("could not resolve to a repository")
-        || lower.contains("unable to determine base repository")
-    {
-        anyhow!("This project has no GitHub repository to read issues from.")
-    } else if lower.contains("has disabled issues") {
-        anyhow!("Issues are turned off for this repository.")
-    } else {
-        anyhow!("{}", e.trim())
-    }
-}
 
 // ---------------------------------------------------------------- merge
 
@@ -54,40 +33,46 @@ pub fn merge_method(name: &str) -> anyhow::Result<&'static str> {
     }
 }
 
-/// Turns what `gh api` said about a refused merge into a sentence for the UI.
-pub fn explain_merge_error(stderr: &str) -> String {
-    let text = stderr.trim();
-    let lower = text.to_lowercase();
-    // "gh: Pull Request is not mergeable (HTTP 405)" -> "Pull Request is not mergeable"
-    let message = text
-        .lines()
-        .rev()
-        .find(|l| !l.trim().is_empty())
-        .unwrap_or(text)
-        .trim()
-        .trim_start_matches("gh:")
-        .trim();
-    let message = match message.rfind(" (HTTP ") {
-        Some(i) => &message[..i],
-        None => message,
-    };
-    if lower.contains("http 409") || lower.contains("head branch was modified") {
-        "The branch changed on GitHub while you were looking. Refresh and check it again.".into()
-    } else if lower.contains("http 403") || lower.contains("http 404") {
-        "GitHub didn't let Kvistcode merge this pull request. You may not have permission to merge here, or branch protection requires the merge to happen on GitHub.".into()
-    } else if lower.contains("http 405") || lower.contains("http 422") {
-        format!("GitHub can't merge this pull request right now: {message}.")
-    } else if lower.contains("gh auth login") || lower.contains("http 401") {
-        "Sign in to GitHub first (the GitHub button in the Review panel).".into()
-    } else {
-        message.to_string()
-    }
+/// A full commit id as GitHub reports it: 40 hex digits (64 for SHA-256 repositories).
+pub fn valid_sha(sha: &str) -> bool {
+    matches!(sha.len(), 40 | 64) && sha.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Whether the pull request's head, as just read, differs from the commit the user reviewed.
+/// An unreadable head is left to GitHub's own check.
+pub fn head_moved(current: Option<&str>, reviewed: &str) -> bool {
+    current.is_some_and(|head| !head.eq_ignore_ascii_case(reviewed))
+}
+
+/// The `gh api` arguments that merge pull request `number`. `sha` is the head commit the user
+/// reviewed: GitHub refuses the merge (409) if the branch has moved since. `-f` sends fields as
+/// strings, so a commit id made only of digits is not turned into a number.
+pub fn merge_request_args(number: u64, method: &str, sha: &str) -> Vec<String> {
+    vec![
+        "api".into(),
+        "-X".into(),
+        "PUT".into(),
+        format!("repos/{{owner}}/{{repo}}/pulls/{number}/merge"),
+        "-f".into(),
+        format!("merge_method={method}"),
+        "-f".into(),
+        format!("sha={sha}"),
+    ]
 }
 
 /// Merges the agent's open pull request on GitHub. Nothing changes locally: the agent's
 /// checkout and branch stay as they are.
-pub async fn merge_pr(cache: &PrCache, agent: &Agent, method: &str) -> anyhow::Result<String> {
+pub async fn merge_pr(
+    cache: &PrCache,
+    agent: &Agent,
+    method: &str,
+    sha: &str,
+) -> anyhow::Result<String> {
     let method = merge_method(method)?;
+    let sha = sha.trim().to_ascii_lowercase();
+    if !valid_sha(&sha) {
+        bail!("Kvistcode couldn't read the pull request's latest commit. Close this and open it again.");
+    }
     let cwd = agent_cwd(agent)?;
     let status = cache.status(agent, true).await;
     let Some(pr) = status.pr else {
@@ -99,20 +84,15 @@ pub async fn merge_pr(cache: &PrCache, agent: &Agent, method: &str) -> anyhow::R
         "merged" => bail!("Pull request #{} is already merged.", pr.number),
         _ => bail!("Pull request #{} is closed.", pr.number),
     }
-    let endpoint = format!("repos/{{owner}}/{{repo}}/pulls/{}/merge", pr.number);
-    pr_status::gh(
-        cwd,
-        &[
-            "api",
-            "-X",
-            "PUT",
-            &endpoint,
-            "-f",
-            &format!("merge_method={method}"),
-        ],
-    )
-    .await
-    .map_err(|e| anyhow!(explain_merge_error(&e)))?;
+    // GitHub checks the commit too, but a push we can already see needs no request at all.
+    if head_moved(pr.head_sha.as_deref(), &sha) {
+        bail!("{BRANCH_CHANGED}");
+    }
+    let args = merge_request_args(pr.number, method, &sha);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    pr_status::gh(cwd, &args)
+        .await
+        .map_err(|e| gh_errors::merge_failure(&e))?;
     let how = match method {
         "squash" => "squashed",
         "rebase" => "rebased",
@@ -436,27 +416,6 @@ mod tests {
     }
 
     #[test]
-    fn refused_merges_read_as_sentences() {
-        let blocked = "{\"message\":\"Pull Request is not mergeable\"}\ngh: Pull Request is not mergeable (HTTP 405)\n";
-        assert_eq!(
-            explain_merge_error(blocked),
-            "GitHub can't merge this pull request right now: Pull Request is not mergeable."
-        );
-        assert!(explain_merge_error(
-            "gh: Head branch was modified. Review and try the merge again. (HTTP 409)"
-        )
-        .contains("changed on GitHub"));
-        assert!(
-            explain_merge_error("gh: Resource not accessible (HTTP 403)").contains("permission")
-        );
-        assert!(
-            explain_merge_error("To get started with GitHub CLI, please run:  gh auth login")
-                .starts_with("Sign in to GitHub")
-        );
-        assert_eq!(explain_merge_error("boom"), "boom");
-    }
-
-    #[test]
     fn base_branches_are_cleaned_up() {
         let refs = "refs/heads/main\nrefs/heads/kvistcode/fix-ab12cd34\nrefs/heads/feature/x\nrefs/remotes/origin/HEAD\nrefs/remotes/origin/main\nrefs/remotes/origin/release\nrefs/remotes/other/nope\nrefs/heads/mine\n";
         assert_eq!(
@@ -524,18 +483,52 @@ mod tests {
         assert!(long.ends_with('…'));
     }
 
+    const SHA: &str = "3f2a9c1d5e7b4a6c8d0e1f2a3b4c5d6e7f8a9b0c";
+
     #[test]
-    fn missing_tools_and_logins_get_a_hint() {
-        assert!(explain_gh_error("gh_missing".into())
-            .to_string()
-            .contains("not installed"));
-        assert!(explain_gh_error("gh auth login required".into())
-            .to_string()
-            .starts_with("Sign in"));
-        assert!(
-            explain_gh_error("none of the git remotes point to a GitHub repo".into())
-                .to_string()
-                .contains("no GitHub repository")
+    fn merges_are_pinned_to_the_reviewed_commit() {
+        assert_eq!(
+            merge_request_args(128, "squash", SHA),
+            vec![
+                "api",
+                "-X",
+                "PUT",
+                "repos/{owner}/{repo}/pulls/128/merge",
+                "-f",
+                "merge_method=squash",
+                "-f",
+                &format!("sha={SHA}"),
+            ]
         );
+        // `-f` (string field), never `-F`: an all-digit id must not become a number.
+        let args = merge_request_args(1, "merge", &"1".repeat(40));
+        assert!(args.contains(&"-f".to_string()));
+        assert!(!args.contains(&"-F".to_string()));
+    }
+
+    #[test]
+    fn only_full_commit_ids_are_accepted() {
+        assert!(valid_sha(SHA));
+        assert!(valid_sha(&"A".repeat(64)));
+        for bad in [
+            "",
+            "abc123",
+            &SHA[..39],
+            &format!("{SHA}0"),
+            &format!("{}g", &SHA[..39]),
+            "main",
+            "HEAD; rm",
+        ] {
+            assert!(!valid_sha(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_new_head_is_caught_before_asking_github() {
+        assert!(head_moved(Some(&SHA.replace('3', "4")), SHA));
+        assert!(!head_moved(Some(SHA), SHA));
+        assert!(!head_moved(Some(&SHA.to_uppercase()), SHA));
+        // Head unknown: GitHub's own sha check decides.
+        assert!(!head_moved(None, SHA));
     }
 }

@@ -209,7 +209,7 @@ export const Inspector = memo(function Inspector({
             </Row>
           )}
           {hasPr && (
-            <Row label="Pull request">
+            <Row label="Pull request" stacked>
               <PrChip agent={agent} />
             </Row>
           )}
@@ -310,11 +310,12 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
+/** `stacked` puts the value under its label, for values too wide to share the line (the pull request chip). */
+function Row({ label, children, stacked }: { label: string; children: ReactNode; stacked?: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div className={stacked ? "space-y-1" : "flex items-center justify-between gap-3"}>
       <dt className="shrink-0 text-steel">{label}</dt>
-      <dd className="flex min-w-0 justify-end">{children}</dd>
+      <dd className={cn("flex min-w-0", !stacked && "justify-end")}>{children}</dd>
     </div>
   );
 }

@@ -80,8 +80,11 @@ const READY_TONE = { ok: "text-ok", warn: "text-warn", err: "text-err", muted: "
 
 type Draft = { kind: "ci" | "review"; text: string; omitted: number } | null;
 
-/** The pull request + CI chip in the agent header. Renders nothing without a PR. */
-export function PrChip({ agent }: { agent: Agent }) {
+/**
+ * The pull request + CI chip in the agent header. Renders nothing without a PR. `compact` keeps
+ * just the state icon, number and CI result, for narrow headers and tiles; the popover has the rest.
+ */
+export function PrChip({ agent, compact = false }: { agent: Agent; compact?: boolean }) {
   const status = usePr((s) => s.byAgent[agent.id]);
   const [draft, setDraft] = useState<Draft>(null);
   const [loading, setLoading] = useState<"ci" | "review" | "refresh" | "ready" | null>(null);
@@ -121,21 +124,21 @@ export function PrChip({ agent }: { agent: Agent }) {
           <button
             type="button"
             aria-label={`Pull request #${pr.number}, ${PR_STATE_LABEL[pr.state]}, ${ciSummary(pr)}${review ? `, ${PR_REVIEW_LABEL[review]}` : ""}`}
-            className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border border-line bg-card/60 px-2 text-[11.5px] transition-colors hover:bg-raised/60 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25"
+            className="inline-flex h-6 min-w-0 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-full border border-line bg-card/60 px-2 text-[11.5px] transition-colors hover:bg-raised/60 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25"
           >
             <StateIcon state={pr.state} />
-            <span className="tabular text-fg/90">#{pr.number}</span>
-            <span className="text-muted">{PR_STATE_LABEL[pr.state]}</span>
+            <span className="shrink-0 tabular text-fg/90">#{pr.number}</span>
+            {!compact && <span className="shrink-0 text-muted">{PR_STATE_LABEL[pr.state]}</span>}
             {open && pr.summary.overall !== "none" && (
-              <span className="inline-flex items-center gap-1">
+              <span className="inline-flex shrink-0 items-center gap-1">
                 <CiIcon pr={pr} />
-                {pr.summary.failing > 0 && (
+                {!compact && pr.summary.failing > 0 && (
                   <span className="tabular font-medium text-err">{pr.summary.failing} failing</span>
                 )}
               </span>
             )}
-            {open && review && (
-              <span className={cn("hidden sm:inline", review === "approved" ? "text-ok" : "text-warn")}>
+            {!compact && open && review && (
+              <span className={cn("min-w-0 truncate", review === "approved" ? "text-ok" : "text-warn")}>
                 {PR_REVIEW_LABEL[review]}
               </span>
             )}
