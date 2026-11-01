@@ -226,30 +226,39 @@ mod tests {
 
     // ---- the endpoints, over a real server --------------------------------------
 
+    #[cfg(unix)]
     use std::sync::Arc;
+    #[cfg(unix)]
     use std::time::Duration;
 
+    #[cfg(unix)]
     use kvistcode_core::budget::BudgetAction;
+    #[cfg(unix)]
     use kvistcode_core::{
         AgentStatus, Core, CreateAgentRequest, CustomAgent, EventSink, Provider, RemoteSettings,
     };
+    #[cfg(unix)]
     use parking_lot::Mutex;
 
+    #[cfg(unix)]
     use crate::remote::Remote;
 
+    #[cfg(unix)]
     const TESTS: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../../crates/kvistcode-core/tests"
     );
-
+    #[cfg(unix)]
     #[derive(Default)]
     struct Recorder(Mutex<Vec<KvistcodeEvent>>);
+    #[cfg(unix)]
     impl EventSink for Recorder {
         fn emit(&self, event: KvistcodeEvent) {
             self.0.lock().push(event);
         }
     }
 
+    #[cfg(unix)]
     struct Rig {
         core: Core,
         remote: Arc<Remote>,
@@ -261,6 +270,7 @@ mod tests {
 
     /// A core with a mock agent (each "COST" turn reports $0.50) that pauses at a limit,
     /// behind a real remote server, with one paired phone.
+    #[cfg(unix)]
     async fn rig() -> Rig {
         let dir = std::env::temp_dir().join(format!("kvistcode-phone-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(dir.join("data")).unwrap();
@@ -311,6 +321,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     impl Rig {
         async fn call(
             &self,
