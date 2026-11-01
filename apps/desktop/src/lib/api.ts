@@ -23,6 +23,9 @@ import type {
   CommitSummary,
   PrPrompt,
   PrStatus,
+  IssueList,
+  IssueStart,
+  MergeMethod,
   CreateAgentRequest,
   CustomAgent,
   LocalKind,
@@ -216,7 +219,19 @@ const tauriApi = {
     invoke<ShipResult>("ship_agent", { agentId, message, exclude }),
   baseBranchStatus: (agentId: string) => invoke<BaseBranchStatus>("base_branch_status", { agentId }),
   pushBaseBranch: (agentId: string) => invoke<BaseBranchStatus>("push_base_branch", { agentId }),
-  createPr: (agentId: string, title: string, body: string) => invoke<string>("create_pr", { agentId, title, body }),
+  /** `base` defaults to the branch the agent started from; `draft` opens it as a draft. */
+  createPr: (agentId: string, title: string, body: string, base?: string, draft?: boolean) =>
+    invoke<string>("create_pr", { agentId, title, body, base, draft }),
+  /** Branches the agent's pull request could target (its own base first). */
+  prBaseBranches: (agentId: string) => invoke<string[]>("pr_base_branches", { agentId }),
+  /** Merges the agent's pull request on GitHub. Resolves to a one-line summary. */
+  prMerge: (agentId: string, method: MergeMethod) => invoke<string>("pr_merge", { agentId, method }),
+  /** Takes the agent's draft pull request out of draft. */
+  prMarkReady: (agentId: string) => invoke<void>("pr_mark_ready", { agentId }),
+  /** Open issues of the project's GitHub repository. `search` (GitHub syntax) matters when the list was cut short. */
+  githubIssues: (path: string, search?: string) => invoke<IssueList>("github_issues", { path, search }),
+  /** The agent title and prompt for starting an agent on one issue (the issue is fenced as untrusted data). */
+  githubIssueStart: (path: string, number: number) => invoke<IssueStart>("github_issue_start", { path, number }),
   // GitHub
   githubStatus: () => invoke<GithubStatus>("github_status"),
   /** Starts `gh auth login` in a terminal (git is connected to the sign-in when it succeeds). */

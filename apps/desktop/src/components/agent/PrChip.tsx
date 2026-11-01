@@ -16,6 +16,7 @@ import { attempt } from "@/lib/actions";
 import { api } from "@/lib/api";
 import { openExternal } from "@/lib/external";
 import { agentHasBranch, ciSummary, failingChecks, formatDuration, PR_REVIEW_LABEL, PR_STATE_LABEL } from "@/lib/pr";
+import { commentsLabel, readiness } from "@/lib/prFlow";
 import type { Agent, PrCheck, PrInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { refreshPr, usePr } from "@/store/pr";
@@ -24,6 +25,7 @@ import { Dialog, DialogBody, DialogContent, DialogFooter } from "../ui/dialog";
 import { Textarea } from "../ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Spinner } from "../ui/misc";
+import { MergeDialog } from "./PrMerge";
 
 /** CI result glyph: green check, red x, or amber spinner. */
 export function CiIcon({ pr, className }: { pr: PrInfo; className?: string }) {
@@ -74,18 +76,33 @@ function CheckRow({ check }: { check: PrCheck }) {
   );
 }
 
+const READY_TONE = { ok: "text-ok", warn: "text-warn", err: "text-err", muted: "text-muted" } as const;
+
 type Draft = { kind: "ci" | "review"; text: string; omitted: number } | null;
 
 /** The pull request + CI chip in the agent header. Renders nothing without a PR. */
 export function PrChip({ agent }: { agent: Agent }) {
   const status = usePr((s) => s.byAgent[agent.id]);
   const [draft, setDraft] = useState<Draft>(null);
-  const [loading, setLoading] = useState<"ci" | "review" | "refresh" | null>(null);
+  const [loading, setLoading] = useState<"ci" | "review" | "refresh" | "ready" | null>(null);
+  const [mergeOpen, setMergeOpen] = useState(false);
   if (!agentHasBranch(agent) || status?.state !== "ok" || !status.pr) return null;
   const pr = status.pr;
   const failing = failingChecks(pr);
   const review = pr.review && pr.review !== "review_required" ? pr.review : null;
   const open = pr.state === "open" || pr.state === "draft";
+  const ready = readiness(pr);
+  const unresolved = pr.unresolvedThreads ?? 0;
+
+  const markReady = async () => {
+    setLoading("ready");
+    const ok = await attempt("Couldn't mark the pull request ready", () => api.prMarkReady(agent.id));
+    if (ok !== null) {
+      toast.success(`#${pr.number} is ready for review`);
+      await refreshPr(agent.id, true);
+    }
+    setLoading(null);
+  };
 
   const prepare = async (kind: "ci" | "review") => {
     setLoading(kind);
@@ -124,18 +141,27 @@ export function PrChip({ agent }: { agent: Agent }) {
             )}
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-80">
+        <PopoverContent align="start" className="w-96 max-w-[calc(100vw-16px)]">
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
               <div className="truncate text-[12.5px] font-medium text-fg">
                 {pr.title || `Pull request #${pr.number}`}
               </div>
-              <div className="mt-0.5 text-[11.5px] text-steel">
-                #{pr.number} · {PR_STATE_LABEL[pr.state]}
+              <div className="mt-0.5 truncate text-[11.5px] text-steel">
+                #{pr.number}
+                {pr.base ? ` into ${pr.base}` : ""}
                 {review ? ` · ${PR_REVIEW_LABEL[review]}` : ""}
-                {pr.mergeable === "conflicting" ? " · Has conflicts" : ""}
               </div>
             </div>
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              aria-label="Open on GitHub"
+              title="Open on GitHub"
+              onClick={() => void openExternal(pr.url)}
+            >
+              <ExternalLink className="!h-3 !w-3" />
+            </Button>
             <Button
               size="icon-xs"
               variant="ghost"
@@ -149,6 +175,15 @@ export function PrChip({ agent }: { agent: Agent }) {
             >
               <RefreshCw className={cn("!h-3 !w-3", loading === "refresh" && "animate-spin")} />
             </Button>
+          </div>
+          <div className={cn("mt-2 flex items-center gap-1.5 text-[12px] font-medium", READY_TONE[ready.tone])}>
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current" />
+            {ready.text}
+            {open && unresolved > 0 && ready.text !== "Unresolved comments" && (
+              <span className="font-normal text-steel">
+                · {unresolved} unresolved
+              </span>
+            )}
           </div>
           <div className="mt-2 text-[11px] font-medium uppercase tracking-wide text-steel">{ciSummary(pr)}</div>
           {pr.checks.length > 0 && (
@@ -172,17 +207,31 @@ export function PrChip({ agent }: { agent: Agent }) {
                 ) : (
                   <MessageSquareText className="!h-3.5 !w-3.5" />
                 )}
-                Address comments
+                {commentsLabel(pr)}
               </Button>
             )}
-            <Button size="sm" variant="ghost" onClick={() => void openExternal(pr.url)}>
-              <ExternalLink className="!h-3.5 !w-3.5" />
-              Open on GitHub
-            </Button>
+            {pr.state === "draft" && (
+              <Button size="sm" variant="secondary" disabled={loading !== null} onClick={() => void markReady()}>
+                {loading === "ready" && <Spinner className="h-3.5 w-3.5" />}
+                Mark ready
+              </Button>
+            )}
+            {pr.state === "open" && (
+              <Button
+                size="sm"
+                variant={ready.tone === "ok" ? "primary" : "secondary"}
+                disabled={loading !== null}
+                onClick={() => setMergeOpen(true)}
+              >
+                <GitMerge className="!h-3.5 !w-3.5" />
+                Merge…
+              </Button>
+            )}
           </div>
         </PopoverContent>
       </Popover>
       <SendPromptDialog agent={agent} pr={pr} draft={draft} onClose={() => setDraft(null)} />
+      <MergeDialog agent={agent} pr={pr} open={mergeOpen} onOpenChange={setMergeOpen} />
     </>
   );
 }

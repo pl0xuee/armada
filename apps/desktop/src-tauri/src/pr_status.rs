@@ -50,6 +50,12 @@ pub struct PrInfo {
     /// approved | changes_requested | review_required
     pub review: Option<&'static str>,
     pub mergeable: Option<&'static str>,
+    /// clean | behind | blocked | dirty | unstable | draft: GitHub's verdict on merging now.
+    pub merge_state: Option<&'static str>,
+    /// The branch the PR merges into.
+    pub base: Option<String>,
+    /// Review threads nobody has resolved yet. `None` until asked (see [`fetch_unresolved`]).
+    pub unresolved_threads: Option<u32>,
     pub checks: Vec<Check>,
     pub summary: ChecksSummary,
 }
@@ -111,6 +117,10 @@ struct RawPr {
     review_decision: Option<String>,
     #[serde(default)]
     mergeable: Option<String>,
+    #[serde(default)]
+    merge_state_status: Option<String>,
+    #[serde(default)]
+    base_ref_name: Option<String>,
     #[serde(default)]
     status_check_rollup: Option<Vec<RawCheck>>,
 }
@@ -223,7 +233,7 @@ pub fn summarize(checks: &[Check]) -> ChecksSummary {
     s
 }
 
-/// Parses `gh pr view --json number,url,state,isDraft,title,reviewDecision,mergeable,statusCheckRollup`.
+/// Parses `gh pr view --json` with the fields [`fetch`] asks for.
 pub fn parse_pr_view(json: &str) -> anyhow::Result<PrInfo> {
     let raw: RawPr = serde_json::from_str(json)?;
     let state = match raw.state.as_str() {
@@ -241,6 +251,15 @@ pub fn parse_pr_view(json: &str) -> anyhow::Result<PrInfo> {
     let mergeable = match raw.mergeable.as_deref() {
         Some("MERGEABLE") => Some("mergeable"),
         Some("CONFLICTING") => Some("conflicting"),
+        _ => None,
+    };
+    let merge_state = match raw.merge_state_status.as_deref() {
+        Some("CLEAN") => Some("clean"),
+        Some("BEHIND") => Some("behind"),
+        Some("BLOCKED") => Some("blocked"),
+        Some("DIRTY") => Some("dirty"),
+        Some("UNSTABLE") => Some("unstable"),
+        Some("DRAFT") => Some("draft"),
         _ => None,
     };
     let mut checks: Vec<Check> = raw
@@ -264,6 +283,9 @@ pub fn parse_pr_view(json: &str) -> anyhow::Result<PrInfo> {
         state,
         review,
         mergeable,
+        merge_state,
+        base: raw.base_ref_name.filter(|b| !b.is_empty()),
+        unresolved_threads: None,
         checks,
         summary,
     })
@@ -661,7 +683,7 @@ pub fn review_prompt(number: u64, feedback: &str) -> String {
 
 // ---------------------------------------------------------------- gh plumbing
 
-async fn gh(cwd: &Path, args: &[&str]) -> Result<String, String> {
+pub(crate) async fn gh(cwd: &Path, args: &[&str]) -> Result<String, String> {
     let exe =
         armada_core::providers::resolve_program("gh").ok_or_else(|| "gh_missing".to_string())?;
     let mut cmd = tokio::process::Command::new(exe);
@@ -699,6 +721,45 @@ async fn gh(cwd: &Path, args: &[&str]) -> Result<String, String> {
     }
 }
 
+const THREADS_QUERY: &str = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved}}}}}";
+
+/// Review threads of a PR that nobody has resolved. A failed lookup is `None`, not zero: the
+/// panel then shows nothing rather than a wrong "all resolved".
+async fn fetch_unresolved(cwd: &Path, number: u64) -> Option<u32> {
+    let out = gh(
+        cwd,
+        &[
+            "api",
+            "graphql",
+            "-f",
+            &format!("query={THREADS_QUERY}"),
+            "-F",
+            "owner={owner}",
+            "-F",
+            "name={repo}",
+            "-F",
+            &format!("number={number}"),
+        ],
+    )
+    .await
+    .ok()?;
+    parse_unresolved(&out)
+}
+
+/// Counts unresolved threads in the GraphQL answer of [`THREADS_QUERY`].
+pub fn parse_unresolved(json: &str) -> Option<u32> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let nodes = v
+        .pointer("/data/repository/pullRequest/reviewThreads/nodes")?
+        .as_array()?;
+    Some(
+        nodes
+            .iter()
+            .filter(|t| t.get("isResolved").and_then(|r| r.as_bool()) == Some(false))
+            .count() as u32,
+    )
+}
+
 /// One uncached lookup. Never fails: problems become quiet statuses.
 async fn fetch(agent: &Agent) -> PrStatus {
     let Some(branch) = agent.branch.as_deref() else {
@@ -713,16 +774,21 @@ async fn fetch(agent: &Agent) -> PrStatus {
         "view",
         branch,
         "--json",
-        "number,url,state,isDraft,title,reviewDecision,mergeable,statusCheckRollup,headRefName",
+        "number,url,state,isDraft,title,reviewDecision,mergeable,mergeStateStatus,baseRefName,statusCheckRollup,headRefName",
     ];
     match gh(cwd, &args).await {
         Ok(out) => match parse_pr_view(&out) {
-            Ok(pr) => PrStatus {
-                state: "ok",
-                reason: None,
-                pr: Some(pr),
-                fetched_at: armada_core::now_ms(),
-            },
+            Ok(mut pr) => {
+                if matches!(pr.state, "open" | "draft") {
+                    pr.unresolved_threads = fetch_unresolved(cwd, pr.number).await;
+                }
+                PrStatus {
+                    state: "ok",
+                    reason: None,
+                    pr: Some(pr),
+                    fetched_at: armada_core::now_ms(),
+                }
+            }
             Err(_) => unknown("error"),
         },
         Err(e) if e == "gh_missing" => unknown("gh_missing"),
@@ -969,6 +1035,30 @@ mod tests {
         let legacy = pr.checks.iter().find(|c| c.name == "ci/legacy").unwrap();
         assert_eq!(legacy.status, "pending");
         assert_eq!(legacy.run_id, None);
+    }
+
+    #[test]
+    fn merge_facts_are_read() {
+        let json = r#"{"number":3,"url":"u","state":"OPEN","mergeStateStatus":"BLOCKED","baseRefName":"main","mergeable":"CONFLICTING"}"#;
+        let pr = parse_pr_view(json).unwrap();
+        assert_eq!(pr.merge_state, Some("blocked"));
+        assert_eq!(pr.base.as_deref(), Some("main"));
+        assert_eq!(pr.mergeable, Some("conflicting"));
+        assert_eq!(pr.unresolved_threads, None);
+        let odd = r#"{"number":3,"url":"u","state":"OPEN","mergeStateStatus":"HAS_HOOKS","baseRefName":""}"#;
+        let pr = parse_pr_view(odd).unwrap();
+        assert_eq!((pr.merge_state, pr.base), (None, None));
+    }
+
+    #[test]
+    fn counts_unresolved_threads() {
+        let json = r#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":true},{"isResolved":false},{"isResolved":false}]}}}}}"#;
+        assert_eq!(parse_unresolved(json), Some(2));
+        let none = r#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}"#;
+        assert_eq!(parse_unresolved(none), Some(0));
+        // A GraphQL error body is "don't know", not "all resolved".
+        assert_eq!(parse_unresolved(r#"{"errors":[{"message":"x"}]}"#), None);
+        assert_eq!(parse_unresolved("not json"), None);
     }
 
     #[test]

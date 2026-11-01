@@ -37,6 +37,7 @@ const load = {
   onboarding: () => import("@/views/Onboarding").then((m) => ({ default: m.Onboarding })),
   palette: () => import("@/components/CommandPalette").then((m) => ({ default: m.CommandPalette })),
   newAgent: () => import("@/components/NewAgentDialog").then((m) => ({ default: m.NewAgentDialog })),
+  issues: () => import("@/components/git/IssuesDialog").then((m) => ({ default: m.IssuesDialog })),
   review: () => import("@/components/ReviewSheet").then((m) => ({ default: m.ReviewSheet })),
   share: () => import("@/components/ShareDialog").then((m) => ({ default: m.ShareDialog })),
   terminal: () => import("@/components/TerminalModal").then((m) => ({ default: m.TerminalModal })),
@@ -48,6 +49,7 @@ const TerminalModal = lazy(load.terminal);
 const Onboarding = lazy(load.onboarding);
 const CommandPalette = lazy(load.palette);
 const NewAgentDialog = lazy(load.newAgent);
+const IssuesDialog = lazy(load.issues);
 const ReviewSheet = lazy(load.review);
 const ShareDialog = lazy(load.share);
 
@@ -175,6 +177,9 @@ export function App() {
                 </WhenOpened>
                 <WhenOpened open={(s) => s.newAgent.open} warm>
                   <NewAgentDialog />
+                </WhenOpened>
+                <WhenOpened open={(s) => s.issues.open}>
+                  <IssuesDialog />
                 </WhenOpened>
                 <AgentDialogs />
                 <ShortcutHelp />
