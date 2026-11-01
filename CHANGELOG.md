@@ -1,9 +1,30 @@
 # Changelog
 
-What's new in each Armada release. The section for a version becomes its GitHub release notes
+What's new in each Kvistcode release. The section for a version becomes its GitHub release notes
 and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
+
+## v0.3.0 — 2026-11-01
+
+Armada is now **Kvistcode**. Your agents, settings and sign-ins carry over, and updates keep working. This release also adds pull-request merging and GitHub issues, search across every conversation, spending limits, alerts to Slack and Discord, and one place to manage your MCP servers, skills and project instructions.
+
+### New
+- **New name: Kvistcode.** Same app, new name and address (kvistcode.com). The command is now `kvistcode`, and new agent branches start with `kvistcode/`. Existing agents and their branches are untouched.
+- **Merge a pull request from the PR panel.** Squash, merge or rebase, with a heads-up if checks are failing or review comments are still open. The panel also shows the base branch and whether GitHub considers it ready to merge, and can take a draft out of draft.
+- **Open a PR your way.** Choose the base branch, open it as a draft, and start from a description that already has the size of the change and “Closes #N”.
+- **Work from GitHub issues.** Browse a project's open issues and start an agent on one, in its own worktree with a branch named after the issue.
+- **Search every conversation.** Press Ctrl/Cmd+Shift+F, or type `?` in the command palette. It finds messages, commands, file paths and summaries, including archived agents, and jumps to the exact spot.
+- **Tools & instructions.** A new Settings page to edit `CLAUDE.md` and `AGENTS.md` (with a warning if the file changed on disk), manage MCP servers per project, and browse your skills and plugins.
+- **Spending limits.** Set a limit per agent, per project or per day, in dollars or tokens. When one is reached the agent finishes its turn, then waits for you in Needs you: raise the limit, continue once, or stop. A meter shows in the agent header whenever a limit applies.
+- **Alerts to Slack, Discord or any webhook**, next to ntfy, with a switch for each kind of event and a Send test button. The addresses are stored in your keychain.
+- **Preview remembers its address** for each project, and gets Back and Forward buttons.
+
+### Changed
+- Reaching a spending limit no longer interrupts an agent mid-task. It stops at the end of its turn instead.
+
+### Fixed
+- A very long command in the sub-agent bar could stretch it wider than the message box.
 
 ## v0.2.0 — 2026-10-31
 

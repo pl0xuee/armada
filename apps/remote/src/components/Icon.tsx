@@ -342,8 +342,7 @@ export function AppMark({ size = 24, className }: { size?: number; className?: s
           <stop offset="1" stopColor="#2385B3" />
         </linearGradient>
       </defs>
-      <path d="M16 3 29 28h-6.4L16 14.6 9.4 28H3z" fill="url(#kvistcode-mark)" />
-      <path d="M11.5 23.5h9" stroke="var(--bg-0)" strokeWidth="2.6" strokeLinecap="round" />
+      <path d="M6 3H11.5V13.2L22 3H29L16.4 15.6L29.4 29H22.6L12.6 18.6L11.5 19.7V29H6Z" fill="url(#kvistcode-mark)" stroke="url(#kvistcode-mark)" strokeWidth="0.9" strokeLinejoin="round" />
     </svg>
   );
 }
