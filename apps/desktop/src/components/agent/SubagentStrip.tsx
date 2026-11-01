@@ -12,7 +12,7 @@ import { useSubagentRuns } from "./useSubagents";
 const LINGER_MS = 3000;
 
 /** Ticks on its own, so the once-a-second render stays inside this one text node. */
-function Elapsed({ since }: { since: number }) {
+export function Elapsed({ since }: { since: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     setNow(Date.now());

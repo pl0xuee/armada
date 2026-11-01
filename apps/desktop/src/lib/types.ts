@@ -213,6 +213,30 @@ export interface SubagentInfo {
   background?: boolean;
   /** A management call (Codex wait/close/send), not a sub-agent of its own: never counted. */
   control?: boolean;
+  /** Set on a Claude "Workflow" run (several agents in parallel); `kind` is then "workflow". */
+  workflow?: { taskId?: string | null; runId?: string | null; transcriptDir: string } | null;
+}
+
+export type WorkflowAgentStatus = "working" | "finished" | "failed" | "unknown";
+
+/** One agent of a Workflow run (see `workflow_progress`). */
+export interface WorkflowAgent {
+  id: string;
+  label: string;
+  phase: string | null;
+  status: WorkflowAgentStatus;
+  toolCalls: number;
+  /** Its latest action as one short line ("Editing src/lib/x.ts"); null once finished. */
+  latest: string | null;
+  /** Seconds since its transcript last changed. */
+  idleSecs: number | null;
+}
+
+export interface WorkflowProgress {
+  runId: string | null;
+  /** `running` includes "just started" and "between phases"; `unknown`: nothing readable or all went quiet. */
+  state: "running" | "finished" | "unknown";
+  agents: WorkflowAgent[];
 }
 
 export type QuestionKind = "single" | "multi" | "text" | "boolean" | "number";

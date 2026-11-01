@@ -21,6 +21,7 @@ import { Fold, useRetained } from "./pinnedFold";
 import { QueueStack } from "./QueueStack";
 import { RateLimitBanner } from "./RateLimitBanner";
 import { SubagentRow, useSubagentPin } from "./SubagentStrip";
+import { useWorkflowPin, WorkflowSection } from "./WorkflowRow";
 
 /** The dock never takes more than this share of its pane; past that it scrolls inside. */
 const MAX_SHARE = 0.4;
@@ -46,7 +47,7 @@ function usePaneShare(ref: React.RefObject<HTMLElement | null>): number | undefi
  * the composer, most important first:
  *  1. needs you: an approval, a plan to approve, or a question (answerable right here);
  *  2. blocked: the usage limit, an error, a reached budget, a helper's merge conflict (each with its action);
- *  3. the plan's progress; 4. running sub-agents; 5. queued messages.
+ *  3. the plan's progress; 4. a running Workflow; 5. running sub-agents; 6. queued messages.
  * Sections fold in and out (~200 ms); the whole dock is capped at 40% of the pane and scrolls inside.
  * It reads only memoized, structure-derived data, so it doesn't re-render per streamed token.
  */
@@ -73,6 +74,7 @@ export const PinnedDock = memo(function PinnedDock({
   const block = blockers(agent, { agentBudgetUsd: cap, budgetAction });
   const planPin = usePlanPin(agent.id, isBusy(agent));
   const sub = useSubagentPin(agent.id);
+  const workflow = useWorkflowPin(agent.id);
   const queued = agent.queue.length > 0;
 
   const keptNeeds = useRetained(needs);
@@ -84,6 +86,7 @@ export const PinnedDock = memo(function PinnedDock({
     budget: block.budget,
     conflict: block.conflict,
     plan: planPin.open,
+    workflow: workflow.open,
     subagents: sub.open,
     queue: queued,
   });
@@ -157,6 +160,9 @@ export const PinnedDock = memo(function PinnedDock({
               </Fold>
               <Fold open={planPin.open}>
                 {planPin.pin && <PlanSection agentId={agent.id} pin={planPin.pin} compact={compact} />}
+              </Fold>
+              <Fold open={workflow.open}>
+                {workflow.call && <WorkflowSection agentId={agent.id} call={workflow.call} compact={compact} />}
               </Fold>
               <Fold open={sub.open}>
                 {sub.strip && <SubagentRow agentId={agent.id} runs={sub.runs} strip={sub.strip} compact={compact} />}

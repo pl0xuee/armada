@@ -55,6 +55,7 @@ import type {
   VoiceInputDevice,
   VoiceStatus,
   VoiceTranscript,
+  WorkflowProgress,
 } from "./types";
 import type {
   InstructionDoc,
@@ -92,6 +93,9 @@ const tauriApi = {
    */
   listItems: (agentId: string, opts?: ListItemsOptions) =>
     invoke<TimelineItem[]>("list_items", { agentId, beforeSeq: opts?.beforeSeq ?? null, limit: opts?.limit ?? null }),
+  /** How a Claude "Workflow" run is going; the backend finds its transcript folder from the tool call. */
+  workflowProgress: (agentId: string, toolCallId: string) =>
+    invoke<WorkflowProgress>("workflow_progress", { agentId, toolCallId }),
   /** Full-text search over every conversation (archived ones too), grouped by agent. */
   searchConversations: (query: string) => invoke<SearchResults>("search_conversations", { query }),
 

@@ -16,6 +16,7 @@ pub mod skill_prefs;
 pub mod skills;
 pub mod toolchain;
 pub mod voice;
+pub mod workflow;
 
 mod acp;
 mod codex;

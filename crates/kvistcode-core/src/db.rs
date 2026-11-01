@@ -550,6 +550,25 @@ impl Db {
         Db::rows_to_items(agent_id, rows)
     }
 
+    /// The newest tool call of an agent with this tool-call id.
+    pub fn tool_call(
+        &self,
+        agent_id: &str,
+        tool_call_id: &str,
+    ) -> anyhow::Result<Option<TimelineItem>> {
+        let data: Option<String> = self
+            .reader
+            .lock()
+            .query_row(
+                "SELECT data FROM items WHERE agent_id = ?1 AND kind = 'tool_call'
+                   AND json_extract(data, '$.toolCallId') = ?2 ORDER BY seq DESC LIMIT 1",
+                params![agent_id, tool_call_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(data.and_then(|d| serde_json::from_str(&d).ok()))
+    }
+
     /// The last `limit` items with `seq < before_seq` (all, when None), oldest first.
     pub fn items_page(
         &self,
@@ -881,6 +900,38 @@ mod tests {
         assert_eq!(db.count_prompts("a").unwrap(), 3);
         assert_eq!(db.count_prompts("b").unwrap(), 1);
         assert_eq!(db.count_prompts("none").unwrap(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tool_call_is_found_by_agent_and_tool_call_id() {
+        let dir = temp("toolcall");
+        let db = Db::open(&dir.join("armada.db")).unwrap();
+        let call = |agent: &str, tool: &str, seq: i64| TimelineItem {
+            id: format!("{agent}-{tool}"),
+            agent_id: agent.into(),
+            seq,
+            ts: seq,
+            body: ItemBody::ToolCall {
+                tool_call_id: tool.into(),
+                title: "Workflow".into(),
+                tool_kind: crate::model::ToolKind::Other,
+                status: crate::model::ToolStatus::Completed,
+                locations: vec![],
+                diffs: vec![],
+                output: String::new(),
+                command: None,
+                images: vec![],
+                subagent: None,
+                parent_tool_call_id: None,
+            },
+        };
+        db.put_item(&call("a", "t1", 1)).unwrap();
+        db.put_item(&call("b", "t1", 2)).unwrap();
+        let hit = db.tool_call("a", "t1").unwrap().unwrap();
+        assert_eq!(hit.id, "a-t1");
+        assert!(db.tool_call("a", "nope").unwrap().is_none());
+        assert!(db.tool_call("c", "t1").unwrap().is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

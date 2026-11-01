@@ -93,6 +93,22 @@ pub async fn list_items(
     .map_err(err)
 }
 
+/// How a Claude "Workflow" run is going (per agent: status, tool calls, latest action),
+/// read from its transcript folder. Takes only the ids: the folder comes from the stored
+/// tool call and is validated in `kvistcode_core::workflow`.
+#[tauri::command]
+pub async fn workflow_progress(
+    core: State<'_, Core>,
+    agent_id: String,
+    tool_call_id: String,
+) -> CmdResult<kvistcode_core::workflow::WorkflowProgress> {
+    let core = core.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || core.workflow_progress(&agent_id, &tool_call_id))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(err)
+}
+
 /// Full-text search over every conversation, archived ones included, grouped by agent.
 #[tauri::command]
 pub async fn search_conversations(
