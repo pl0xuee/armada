@@ -1,6 +1,6 @@
 import { CircleDot, ExternalLink, RefreshCw, Rocket, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toastFailure } from "@/lib/actions";
 import { api } from "@/lib/api";
 import { openExternal } from "@/lib/external";
 import { filterIssues, issueLabels, needsServerSearch } from "@/lib/prFlow";
@@ -12,6 +12,7 @@ import { Button } from "../ui/button";
 import { Dialog, DialogBody, DialogContent } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Spinner } from "../ui/misc";
+import { GhError } from "./GhError";
 
 /** Most label chips offered as filters; the rest are still searchable by name. */
 const MAX_FILTER_CHIPS = 8;
@@ -106,7 +107,7 @@ function IssuesBody({ projectPath, onClose }: { projectPath: string; onClose: ()
       onClose();
       openNewAgent({ projectPath, prompt: s.prompt, title: s.title, worktree: true });
     } catch (e) {
-      toast.error(`Couldn't read issue #${issue.number}`, { description: errorMessage(e) });
+      toastFailure(`Couldn't read issue #${issue.number}`, errorMessage(e));
     } finally {
       setStarting(null);
     }
@@ -148,9 +149,7 @@ function IssuesBody({ projectPath, onClose }: { projectPath: string; onClose: ()
       )}
 
       {error ? (
-        <p role="alert" className="selectable rounded-lg border border-err/30 bg-err/[0.07] px-2.5 py-2 text-[12px] text-err">
-          {error}
-        </p>
+        <GhError text={error} context={`Reading the open issues of ${basename(projectPath)}`} />
       ) : !list ? (
         <div className="flex items-center gap-2 py-8 text-[13px] text-muted">
           <Spinner className="h-4 w-4" /> Loading issues…

@@ -6,6 +6,7 @@ import {
   Bell,
   BellOff,
   GitCompare,
+  GitPullRequest,
   Globe,
   Keyboard,
   Minimize2,
@@ -24,6 +25,7 @@ import {
   Radio,
   Repeat,
   ChartColumn,
+  CircleDot,
   Columns3,
   CornerDownLeft,
   LayoutGrid,
@@ -66,6 +68,9 @@ import { basename, errorMessage, isMac, modKey } from "@/lib/utils";
 import { launchAgent, resolveLaunch } from "@/lib/launchDefaults";
 import { useIdentity } from "@/hooks/useIdentity";
 import { toast } from "sonner";
+import { openExternal } from "@/lib/external";
+import { useGithubRemote } from "@/hooks/useGithubRemote";
+import { usePr } from "@/store/pr";
 import { useDebounced } from "@/hooks/useDebounced";
 import { useApp, usePendingPermissions, usePendingQuestions } from "@/store/app";
 import { useUi, type SettingsSection } from "@/store/ui";
@@ -180,6 +185,9 @@ function Palette({ onClose }: { onClose: () => void }) {
   const questions = usePendingQuestions();
   const current = ui.view === "agents" && ui.selectedAgentId ? agentsMap[ui.selectedAgentId] : undefined;
   const previewOpen = usePreview((s) => (current ? previewOf(s, current.id).open : false));
+  // GitHub actions are offered only where the project has a GitHub remote.
+  const github = useGithubRemote(current?.projectPath) === true;
+  const currentPr = usePr((s) => (current ? s.byAgent[current.id]?.pr : null)) ?? null;
 
   // Conversation search: debounced, and an answer to an older query is dropped.
   const debouncedTerm = searchTerm(debounced);
@@ -424,6 +432,34 @@ function Palette({ onClose }: { onClose: () => void }) {
                     keywords={["review", "diff", "changes", "commit", "merge"]}
                     onSelect={() => run(() => ui.setReviewAgent(current.id))}
                   />
+                )}
+                {github && (
+                  <PaletteAction
+                    icon={<CircleDot />}
+                    label="Issues…"
+                    keywords={["issues", "github", "bugs", "tickets", "start agent on issue"]}
+                    onSelect={() => run(() => ui.openIssues(current.projectPath))}
+                  />
+                )}
+                {github && currentPr && currentPr.state !== "closed" ? (
+                  <PaletteAction
+                    icon={<GitPullRequest />}
+                    label={`Open pull request #${currentPr.number} on GitHub`}
+                    keywords={["pull request", "pr", "github", "merge", "ci", "checks"]}
+                    onSelect={() => run(() => void openExternal(currentPr.url))}
+                  />
+                ) : (
+                  github &&
+                  !currentPr &&
+                  current.worktree &&
+                  current.branch && (
+                    <PaletteAction
+                      icon={<GitPullRequest />}
+                      label="Open pull request…"
+                      keywords={["pull request", "pr", "github", "create", "publish", "review"]}
+                      onSelect={() => run(() => ui.setReviewAgent(current.id, null, "pr"))}
+                    />
+                  )
                 )}
                 {canCompact && (
                   <PaletteAction

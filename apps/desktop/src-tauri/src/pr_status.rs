@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail};
+use anyhow::bail;
 use kvistcode_core::Agent;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -54,6 +54,9 @@ pub struct PrInfo {
     pub merge_state: Option<&'static str>,
     /// The branch the PR merges into.
     pub base: Option<String>,
+    /// The commit the PR's branch points at, which `checks` and `merge_state` describe. A merge
+    /// sends it back to GitHub so a push that landed meanwhile is not merged unseen.
+    pub head_sha: Option<String>,
     /// Review threads nobody has resolved yet. `None` until asked (see [`fetch_unresolved`]).
     pub unresolved_threads: Option<u32>,
     pub checks: Vec<Check>,
@@ -121,6 +124,8 @@ struct RawPr {
     merge_state_status: Option<String>,
     #[serde(default)]
     base_ref_name: Option<String>,
+    #[serde(default)]
+    head_ref_oid: Option<String>,
     #[serde(default)]
     status_check_rollup: Option<Vec<RawCheck>>,
 }
@@ -285,6 +290,7 @@ pub fn parse_pr_view(json: &str) -> anyhow::Result<PrInfo> {
         mergeable,
         merge_state,
         base: raw.base_ref_name.filter(|b| !b.is_empty()),
+        head_sha: raw.head_ref_oid.filter(|h| !h.is_empty()),
         unresolved_threads: None,
         checks,
         summary,
@@ -774,7 +780,7 @@ async fn fetch(agent: &Agent) -> PrStatus {
         "view",
         branch,
         "--json",
-        "number,url,state,isDraft,title,reviewDecision,mergeable,mergeStateStatus,baseRefName,statusCheckRollup,headRefName",
+        "number,url,state,isDraft,title,reviewDecision,mergeable,mergeStateStatus,baseRefName,headRefOid,statusCheckRollup,headRefName",
     ];
     match gh(cwd, &args).await {
         Ok(out) => match parse_pr_view(&out) {
@@ -870,11 +876,7 @@ fn agent_cwd(agent: &Agent) -> anyhow::Result<&Path> {
 }
 
 fn friendly(e: String) -> anyhow::Error {
-    if e == "gh_missing" {
-        anyhow!("The GitHub CLI (gh) is not installed. Get it from https://cli.github.com")
-    } else {
-        anyhow!("{}", e.trim())
-    }
+    crate::gh_errors::explain_gh_error(e)
 }
 
 /// An editable prompt for the preview dialog. `omitted` counts review comments left out
@@ -1048,6 +1050,12 @@ mod tests {
         let odd = r#"{"number":3,"url":"u","state":"OPEN","mergeStateStatus":"HAS_HOOKS","baseRefName":""}"#;
         let pr = parse_pr_view(odd).unwrap();
         assert_eq!((pr.merge_state, pr.base), (None, None));
+        assert_eq!(pr.head_sha, None);
+        let pinned = r#"{"number":3,"url":"u","state":"OPEN","headRefOid":"3f2a9c1d5e7b4a6c8d0e1f2a3b4c5d6e7f8a9b0c"}"#;
+        assert_eq!(
+            parse_pr_view(pinned).unwrap().head_sha.as_deref(),
+            Some("3f2a9c1d5e7b4a6c8d0e1f2a3b4c5d6e7f8a9b0c")
+        );
     }
 
     #[test]

@@ -241,7 +241,7 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
             </Chip>
           )}
           <BudgetChip agent={agent} compact={tier === "compact"} always />
-          {!tile && tier !== "compact" && <PrChip agent={agent} />}
+          {!tile && tier !== "compact" && <PrChip agent={agent} compact={tier !== "full"} />}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {resumable && !busy ? (

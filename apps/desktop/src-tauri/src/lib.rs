@@ -8,6 +8,7 @@ mod commands;
 mod diagnostics;
 mod dictation;
 mod events;
+mod gh_errors;
 mod git_review;
 mod github;
 mod github_work;
