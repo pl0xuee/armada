@@ -10,6 +10,7 @@ mod dictation;
 mod events;
 mod git_review;
 mod github;
+mod github_work;
 mod hotkey;
 mod local;
 mod log_writer;
@@ -126,6 +127,11 @@ macro_rules! handler {
             commands::pr_status,
             commands::pr_fix_ci_prompt,
             commands::pr_review_prompt,
+            commands::pr_base_branches,
+            commands::pr_merge,
+            commands::pr_mark_ready,
+            commands::github_issues,
+            commands::github_issue_start,
             commands::discard_worktree,
             commands::create_account,
             commands::update_account,

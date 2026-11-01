@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Columns3, FolderOpen, GitBranch, Rocket } from "lucide-react";
+import { Check, ChevronDown, CircleDot, Columns3, FolderOpen, GitBranch, Rocket } from "lucide-react";
 import { PermissionModeChip, usePermissionMode } from "./home/PermissionModeChip";
 import { PreflightNotes, usePreflight } from "./home/PreflightNotes";
 import { ProjectPicker } from "./home/ProjectPicker";
@@ -81,6 +81,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
   const openAgent = useUi((s) => s.openAgent);
   const openCompare = useUi((s) => s.openCompare);
   const openAgents = useUi((s) => s.openAgents);
+  const openIssues = useUi((s) => s.openIssues);
   const setView = useUi((s) => s.setView);
 
   const recent = settings?.recentProjects ?? [];
@@ -107,13 +108,13 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
   const [targets, setTargets] = useState<string[]>(() =>
     PROVIDER_ORDER.map((p) => defaultAccount(accounts, p)?.id).filter((x): x is string => !!x),
   );
-  const [worktree, setWorktree] = useState(initial.worktree);
+  const [worktree, setWorktree] = useState(preset?.worktree ?? initial.worktree);
   /** Separate agents to start on this task (not in Compare mode, which starts one per account). */
   const [count, setCount] = useState(1);
-  const [title, setTitle] = useState("");
+  const [title, setTitle] = useState(preset?.title ?? "");
   const [model, setModel] = useState("");
   const [prompt, setPrompt] = useState(preset?.prompt ?? "");
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(!!preset?.title);
   const [submitting, setSubmitting] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
@@ -375,6 +376,19 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
             </div>
             <Button variant="secondary" className="h-9" onClick={() => void browse()}>
               Browse…
+            </Button>
+            <Button
+              variant="secondary"
+              className="h-9"
+              disabled={!project.trim()}
+              title="Start an agent on one of this project's open GitHub issues"
+              onClick={() => {
+                onDone();
+                openIssues(project.trim());
+              }}
+            >
+              <CircleDot />
+              Issues
             </Button>
           </div>
           <ProjectPicker value={project} onChange={setProject} recent={recent} defaultOpen={recent.length === 0} />
