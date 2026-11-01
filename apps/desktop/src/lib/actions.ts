@@ -4,6 +4,7 @@ import { markRemoved, suppressAgent, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { copyText } from "@/components/CopyButton";
 import { api } from "./api";
+import { detailsText, splitDetails } from "./ghError";
 import { tileNeighbour } from "./helpers";
 import { PROVIDERS } from "./providers";
 import type {
@@ -194,6 +195,15 @@ export async function archiveAgent(agent: Agent, archived: boolean) {
   }
 }
 
+/** An error toast. When gh said more than the sentence, "Copy details" keeps the rest for a bug report. */
+export function toastFailure(label: string, text: string) {
+  const { message, details } = splitDetails(text);
+  toast.error(label, {
+    description: message,
+    action: details ? { label: "Copy details", onClick: () => void copyText(detailsText(text, label)) } : undefined,
+  });
+}
+
 /** Run an async op with a toast for failures; returns the result or null. */
 export async function attempt<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
   try {
@@ -202,7 +212,7 @@ export async function attempt<T>(label: string, fn: () => Promise<T>): Promise<T
     const msg = errorMessage(e);
     // Not a failure of the action: the core is quitting (e.g. the app is closing/updating).
     if (isShuttingDown(msg)) toast("Kvistcode is shutting down", { id: "shutting-down" });
-    else toast.error(label, { description: msg });
+    else toastFailure(label, msg);
     return null;
   }
 }

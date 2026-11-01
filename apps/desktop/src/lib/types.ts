@@ -1012,6 +1012,8 @@ export interface PrInfo {
   mergeState?: "clean" | "behind" | "blocked" | "dirty" | "unstable" | "draft" | null;
   /** The branch the PR merges into. */
   base?: string | null;
+  /** The commit the PR points at, which `checks` and `mergeState` describe. A merge is pinned to it. */
+  headSha?: string | null;
   /** Review threads nobody has resolved; null when GitHub couldn't be asked. */
   unresolvedThreads?: number | null;
   checks: PrCheck[];

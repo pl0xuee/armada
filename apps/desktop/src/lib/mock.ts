@@ -16,6 +16,7 @@ import {
   mockSkillsRead,
 } from "./mock-toolkit";
 import { configDefaultsKey, isRememberableOption } from "./configMemory";
+import { BRANCH_CHANGED_MESSAGE } from "./ghError";
 import { isStressMode, STRESS_AGENTS, STRESS_TICK_MS, stressAgents, stressItems, stressWords } from "./mock-stress";
 import {
   commandsFor,
@@ -1087,6 +1088,19 @@ function mockProbe(kind: LocalKind, baseUrl: string): LocalProbe {
 const mockBase: Record<string, BaseBranchStatus> = {};
 /** Pull requests merged / taken out of draft in this session (the browser preview has no GitHub). */
 const mockMerged = new Set<string>();
+/** Agents whose pull request got a new commit since the mock first showed it (see `mockPushToPr`). */
+const mockPushes = new Map<string, number>();
+/** A stable fake commit id for an agent's pull request; each mock push gives it a new one. */
+function mockHeadSha(agentId: string): string {
+  let h = 2166136261;
+  for (const ch of `${agentId}:${mockPushes.get(agentId) ?? 0}`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  return Array.from({ length: 5 }, (_, i) => Math.imul(h + i, 2654435761) >>> 0)
+    .map((n) => n.toString(16).padStart(8, "0"))
+    .join("");
+}
+/** Browser preview only: simulates a push landing on the agent's pull request, so merging shows the "branch changed" answer. */
+(globalThis as { __kvistcodeMockPush?: (agentId: string) => void }).__kvistcodeMockPush = (agentId) =>
+  void mockPushes.set(agentId, (mockPushes.get(agentId) ?? 0) + 1);
 const mockReady = new Set<string>();
 
 const MOCK_ISSUES: IssueSummary[] = [
@@ -1132,8 +1146,11 @@ const MOCK_ISSUES: IssueSummary[] = [
 
 /** Browser preview: GitHub starts signed out so the whole flow can be tried. */
 let mockGithub: GithubStatus = { ghInstalled: true, loggedIn: false, user: null, gitReady: false };
-/** Project folder -> remote URL once "published" in the preview. */
-const mockPublished = new Map<string, string>();
+/** Project folder -> remote URL once "published" in the preview. The projects with demo pull requests start out on GitHub. */
+const mockPublished = new Map<string, string>([
+  ["/home/sam/Projects/atlas-api", "https://github.com/acme/atlas-api.git"],
+  ["/home/sam/Projects/storefront", "git@github.com:acme/storefront.git"],
+]);
 
 /** Port the mock agent "a-token" says its dev server runs on. */
 const MOCK_DEV_PORT = 4723;
@@ -1993,11 +2010,12 @@ export const mockApi: KvistcodeApi = {
     return delay([a.baseBranch ?? "main", "develop", "release/2.x", "staging"], 200);
   },
 
-  async prMerge(agentId, method) {
+  async prMerge(agentId, method, sha) {
     const a = getAgent(agentId);
     await sleep(900);
     const s = await mockApi.prStatus(agentId);
     if (!s.pr || s.pr.state !== "open") throw new Error("This branch has no open pull request to merge.");
+    if (sha !== s.pr.headSha) throw new Error(BRANCH_CHANGED_MESSAGE);
     if (s.pr.mergeable === "conflicting")
       throw new Error("GitHub can't merge this pull request right now: Pull Request is not mergeable.");
     mockMerged.add(agentId);
@@ -2051,6 +2069,7 @@ export const mockApi: KvistcodeApi = {
           mergeable: "mergeable",
           mergeState: failing || review === "changes_requested" ? "blocked" : state === "draft" ? "draft" : "clean",
           base: a.baseBranch ?? "main",
+          headSha: mockHeadSha(agentId),
           unresolvedThreads: review === "changes_requested" ? 2 : 0,
           checks,
           summary: {
