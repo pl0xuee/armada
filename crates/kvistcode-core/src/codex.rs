@@ -947,6 +947,7 @@ impl CodexDriver {
                             effort: effort.clone(),
                             background: false,
                             control,
+                            workflow: None,
                         });
                     }
                 });

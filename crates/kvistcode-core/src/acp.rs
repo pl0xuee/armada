@@ -1347,6 +1347,26 @@ fn apply_tool_fields(b: &mut ItemBody, u: &Value) {
             _ => {}
         }
     }
+    if subagent.is_none() && (meta["toolName"].as_str() == Some("Workflow") || title == "Workflow")
+    {
+        adopt_workflow(output, subagent, tool_kind);
+    }
+}
+
+/// Claude Code's Workflow tool returns at launch with where the run keeps its
+/// transcripts: shown as a background sub-agent group. Output that isn't a launch
+/// leaves the call a plain tool call.
+fn adopt_workflow(output: &str, subagent: &mut Option<SubAgent>, tool_kind: &mut ToolKind) {
+    if let Some((launch, summary)) = crate::workflow::parse_launch(output) {
+        *subagent = Some(SubAgent {
+            kind: Some("workflow".into()),
+            description: summary,
+            background: true,
+            workflow: Some(Box::new(launch)),
+            ..SubAgent::default()
+        });
+        *tool_kind = ToolKind::Think;
+    }
 }
 
 /// A picture in the agent's reply: shown as an image. One that is only a link is
@@ -1597,6 +1617,59 @@ mod subagent_tests {
                 ..
             }
         ));
+    }
+
+    const WF_OUT: &str = "Workflow launched in background. Task ID: w4cpfsvul\nSummary: Five parallel agents\nTranscript dir: /h/projects/p/s/subagents/workflows/wf_d5cc071f-a40\nScript file: /h/x.js";
+
+    #[test]
+    fn workflow_launch_becomes_a_background_group() {
+        let mut b = blank_tool();
+        apply_tool_fields(
+            &mut b,
+            &json!({
+                "sessionUpdate": "tool_call", "toolCallId": "toolu_1", "title": "Workflow",
+                "status": "in_progress", "_meta": {"claudeCode": {"toolName": "Workflow"}}
+            }),
+        );
+        // Until the launch output arrives it is a plain tool call.
+        assert!(sub(&b).is_none());
+        apply_tool_fields(
+            &mut b,
+            &json!({
+                "sessionUpdate": "tool_call_update", "toolCallId": "toolu_1", "status": "completed",
+                "content": [{"type": "content", "content": {"type": "text", "text": WF_OUT}}],
+                "_meta": {"claudeCode": {"toolName": "Workflow"}}
+            }),
+        );
+        let s = sub(&b).unwrap();
+        assert!(s.background);
+        assert_eq!(s.kind.as_deref(), Some("workflow"));
+        assert_eq!(s.description.as_deref(), Some("Five parallel agents"));
+        let w = s.workflow.as_ref().unwrap();
+        assert_eq!(w.task_id.as_deref(), Some("w4cpfsvul"));
+        assert_eq!(w.run_id.as_deref(), Some("wf_d5cc071f-a40"));
+        assert!(w.transcript_dir.ends_with("wf_d5cc071f-a40"));
+        // Old data (no `workflow`) still loads, and the new field round-trips.
+        let old: SubAgent =
+            serde_json::from_str(r#"{"kind":"Explore","description":null,"prompt":null}"#).unwrap();
+        assert!(old.workflow.is_none());
+        let again: SubAgent = serde_json::from_str(&serde_json::to_string(s).unwrap()).unwrap();
+        assert_eq!(again.workflow, s.workflow);
+    }
+
+    #[test]
+    fn workflow_output_that_is_not_a_launch_stays_a_plain_call() {
+        let mut b = blank_tool();
+        apply_tool_fields(
+            &mut b,
+            &json!({
+                "sessionUpdate": "tool_call_update", "toolCallId": "toolu_1", "title": "Workflow",
+                "status": "failed",
+                "content": [{"type": "content", "content": {"type": "text", "text": "Script error: boom"}}],
+                "_meta": {"claudeCode": {"toolName": "Workflow"}}
+            }),
+        );
+        assert!(sub(&b).is_none());
     }
 
     #[test]

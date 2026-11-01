@@ -130,6 +130,14 @@ describe("dockSections order", () => {
     expect(DOCK_ORDER.indexOf("plan")).toBeLessThan(DOCK_ORDER.indexOf("subagents"));
     expect(DOCK_ORDER.indexOf("subagents")).toBeLessThan(DOCK_ORDER.indexOf("queue"));
   });
+  it("shows a running workflow after the plan and before sub-agents", () => {
+    expect(dockSections({ queue: true, subagents: true, workflow: true, plan: true })).toEqual([
+      "plan",
+      "workflow",
+      "subagents",
+      "queue",
+    ]);
+  });
   it("is empty when nothing is relevant", () => {
     expect(dockSections({})).toEqual([]);
     expect(dockSections({ plan: false, queue: false })).toEqual([]);
