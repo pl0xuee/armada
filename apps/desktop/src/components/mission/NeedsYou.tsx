@@ -74,6 +74,10 @@ export function NeedsYouPane() {
         }
         return;
       }
+      if (e.reason === "budget") {
+        toast("Choose how to go on", { description: "Raise the limit, continue once, or stop." });
+        return;
+      }
       await attempt("Couldn't mark it done", () => api.acknowledgeAgent(e.agent.id));
     });
   const archive = (e: TriageEntry) =>

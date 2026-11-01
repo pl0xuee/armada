@@ -5,6 +5,8 @@
 import type { ArmadaApi } from "./api";
 import { emitVoiceBus } from "./voiceBus";
 import { budgetLevel } from "./budget";
+import { searchItems } from "./mock-search";
+import { validateAlertUrl } from "./alertTargets";
 import { mockProjectConfig, mockSaveInstruction, mockSaveRules } from "./mock-project-config";
 import {
   mockInstructionsSave,
@@ -61,7 +63,6 @@ import type {
   ProviderInfo,
   QueuedPrompt,
   Schedule,
-  SearchHit,
   Settings,
   TimelineItem,
   ToolKind,
@@ -111,6 +112,20 @@ const db = {
   schedules: seedSchedules(),
   items: seedItems(),
 };
+
+// ?budget=hold: an agent paused at its spending limit, to see the "Needs you" item.
+if (params?.get("budget") === "hold") {
+  const held = db.agents.find((a) => a.id === "a-e2e");
+  if (held) {
+    held.costUsd = 3.08;
+    held.unread = false;
+    held.budgetHold = { scope: "agent", metric: "cost", spent: 3.08, cap: 3, since: Date.now() - 90_000 };
+    held.queue = [{ id: "q-b1", text: "Now also run the e2e suite against staging.", attachments: 0 }];
+    held.queuedPrompts = 1;
+    held.queuePaused = true;
+  }
+  db.settings.budgetAction = "pause";
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
@@ -1155,34 +1170,8 @@ export const mockApi: ArmadaApi = {
     return delay(clone(list), 220);
   },
 
-  async search(query) {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    const hits: SearchHit[] = [];
-    for (const [agentId, list] of Object.entries(db.items)) {
-      for (const it of list) {
-        const text =
-          it.kind === "user_message" || it.kind === "agent_message" || it.kind === "thought" || it.kind === "notice"
-            ? it.text
-            : it.kind === "tool_call" || it.kind === "permission"
-              ? `${it.title} ${it.kind === "tool_call" ? it.output : (it.command ?? "")}`
-              : it.kind === "plan"
-                ? it.entries.map((e) => e.content).join(" ")
-                : "";
-        const idx = text.toLowerCase().indexOf(q);
-        if (idx >= 0) {
-          const start = Math.max(0, idx - 40);
-          hits.push({
-            agentId,
-            itemId: it.id,
-            kind: it.kind,
-            snippet: `${start > 0 ? "…" : ""}${text.slice(start, idx + q.length + 60).replace(/\s+/g, " ")}`,
-            ts: it.ts,
-          });
-        }
-      }
-    }
-    return delay(hits.sort((a, b) => b.ts - a.ts).slice(0, 30), 160);
+  async searchConversations(query) {
+    return delay(searchItems(db.items, query), 120);
   },
 
   async createAgent(req) {
@@ -2431,9 +2420,58 @@ export const mockApi: ArmadaApi = {
   async budgetStatus() {
     const midnight = new Date().setHours(0, 0, 0, 0);
     const todayUsd = db.agents.filter((a) => a.lastActivityAt >= midnight).reduce((sum, a) => sum + a.costUsd, 0);
+    const todayTokens = db.agents.filter((a) => a.lastActivityAt >= midnight).reduce((sum, a) => sum + a.tokensUsed, 0);
     const cap = db.settings.dailyBudgetUsd;
+    const tokenCap = db.settings.dailyBudgetTokens;
     const day = new Date().toLocaleDateString("en-CA");
-    return { day, todayUsd, dailyBudgetUsd: cap, level: budgetLevel(todayUsd, cap) };
+    const rank = { under: 0, warn: 1, hit: 2 } as const;
+    const a = budgetLevel(todayUsd, cap);
+    const b = budgetLevel(todayTokens, tokenCap);
+    return {
+      day,
+      todayUsd,
+      dailyBudgetUsd: cap,
+      todayTokens,
+      dailyBudgetTokens: tokenCap,
+      level: rank[a] >= rank[b] ? a : b,
+    };
+  },
+
+  async budgetResolve(agentId, choice) {
+    const agent = getAgent(agentId);
+    const hold = agent.budgetHold;
+    if (!hold) return clone(db.settings);
+    if (choice.action === "raise") {
+      if (!(choice.by > 0)) throw new Error("Enter an amount above zero");
+      const cap = hold.cap + choice.by;
+      if (cap <= hold.spent) throw new Error("That is still under what was spent. Raise it by more.");
+      const field = hold.metric === "cost" ? "usd" : "tokens";
+      if (hold.scope === "agent") {
+        patchAgent(agentId, { budget: { usd: null, tokens: null, ...agent.budget, [field]: cap } });
+      } else if (hold.scope === "project") {
+        const cur = db.settings.projectBudgets[agent.projectPath] ?? { usd: null, tokens: null };
+        db.settings.projectBudgets[agent.projectPath] = { ...cur, [field]: cap };
+      } else {
+        const key = hold.metric === "cost" ? "dailyBudgetUsd" : "dailyBudgetTokens";
+        db.settings[key] = cap;
+      }
+    }
+    if (choice.action === "stop") {
+      patchAgent(agentId, { budgetHold: null, queue: [], queuedPrompts: 0, queuePaused: false, acknowledgedAt: Date.now() });
+    } else {
+      patchAgent(agentId, { budgetHold: null, queuePaused: false });
+    }
+    await sleep(150);
+    return clone(db.settings);
+  },
+
+  async testAlertTarget(kind, opts) {
+    const url = opts.url?.trim() || db.settings.alertTargets.find((t) => t.id === opts.targetId)?.url;
+    if (!url) throw new Error("Enter the webhook URL first");
+    const problem = validateAlertUrl(kind, url);
+    if (problem) throw new Error(`Webhook URL: ${problem}`);
+    await sleep(600);
+    if (/fail/.test(url)) throw new Error("https://example.com/…: the server answered 500");
   },
 
   async updateSettings(settings: Settings) {
@@ -3203,6 +3241,13 @@ function validateSettings(s: Settings): string | null {
   if (s.ntfyUrl) {
     const p = ntfyProblem(s.ntfyUrl);
     if (p && !/403/.test(p)) return `Phone push URL: ${p}`;
+  }
+  for (const t of s.alertTargets) {
+    const p = validateAlertUrl(t.kind, t.url);
+    if (p) return `Alerts: ${p}`;
+  }
+  for (const cap of [s.dailyBudgetTokens, s.agentBudgetTokens]) {
+    if (cap != null && (!Number.isFinite(cap) || cap <= 0)) return "Token budgets must be more than 0 (or empty for no cap)";
   }
   return null;
 }

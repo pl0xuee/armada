@@ -16,6 +16,7 @@ use tracing::{debug, info, warn};
 
 use crate::notify::{self, Toast};
 use crate::sound::AudioPlayer;
+use crate::webhooks;
 use crate::window;
 
 const ESCALATION_TICK: Duration = Duration::from_secs(30);
@@ -30,6 +31,8 @@ pub struct Attention {
     window_focused: AtomicBool,
     /// needs_permission bookkeeping for escalation, keyed by agent id.
     pending: Mutex<HashMap<String, PendingApproval>>,
+    /// Slack, Discord and webhook targets.
+    webhooks: webhooks::Hub,
 }
 
 struct PendingApproval {
@@ -47,6 +50,7 @@ impl Attention {
             focused_agent: Mutex::new(None),
             window_focused: AtomicBool::new(true),
             pending: Mutex::new(HashMap::new()),
+            webhooks: webhooks::Hub::default(),
         }
     }
 
@@ -162,6 +166,10 @@ impl Attention {
             return false;
         }
 
+        // Chat and webhook targets choose their own events, so they ignore the desktop's
+        // per-reason switches and window focus; quiet hours (above) still silence them.
+        self.alert_webhooks(&settings, agent_id, reason, title, body);
+
         if !window_focused {
             // Taskbar flash (Windows) / dock bounce (macOS) / urgency hint (Linux).
             if let Some(w) = window::main_window(&self.app) {
@@ -214,6 +222,37 @@ impl Attention {
             }
         }
         true
+    }
+
+    /// Posts the alert to the Slack, Discord and webhook targets that want it.
+    fn alert_webhooks(
+        &self,
+        settings: &Settings,
+        agent_id: &str,
+        reason: AttentionReason,
+        title: &str,
+        body: &str,
+    ) {
+        if settings.alert_targets.iter().all(|t| !t.enabled) {
+            return;
+        }
+        let agent = self.core().agent(agent_id).ok();
+        let held = agent.as_ref().is_some_and(|a| a.budget_hold.is_some());
+        let project = agent
+            .as_ref()
+            .and_then(|a| {
+                std::path::Path::new(&a.project_path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+            })
+            .unwrap_or_default();
+        let event = webhooks::AlertEvent::new(
+            webhooks::Event::from_attention(reason, held),
+            title,
+            &project,
+            body,
+        );
+        self.webhooks.dispatch(&settings.alert_targets, &event);
     }
 
     /// Settings → "Preview" button. Ignores quiet hours / mute on purpose.

@@ -1406,6 +1406,8 @@ impl AgentCtx {
             a.status = AgentStatus::Working;
             a.running = true;
             a.rate_limited = false;
+            // Starting a turn is the answer to a spending-limit hold.
+            a.budget_hold = None;
             a.last_activity_at = now_ms();
         });
         true
@@ -1423,7 +1425,17 @@ impl AgentCtx {
         self.finish_turn(Some(generation), outcome)
     }
 
+    /// At a turn boundary: the spending limit the agent must wait at, if one is hit.
+    /// Read before the turn state is locked (it looks at every agent's spend).
+    fn budget_gate(&self, outcome: &TurnOutcome) -> Option<crate::budget::BudgetHold> {
+        if matches!(outcome, TurnOutcome::Failed(_) | TurnOutcome::Cancelled) {
+            return None;
+        }
+        self.core.upgrade()?.budget_gate(&self.agent_id)
+    }
+
     fn finish_turn(&self, generation: Option<u64>, outcome: TurnOutcome) -> Option<Prompt> {
+        let hold = self.budget_gate(&outcome);
         let stale: Vec<String>;
         let dropped: usize;
         let next: Option<Prompt>;
@@ -1458,7 +1470,8 @@ impl AgentCtx {
             let normal = !matches!(outcome, TurnOutcome::Failed(_) | TurnOutcome::Cancelled);
             let advance =
                 normal || (matches!(outcome, TurnOutcome::Cancelled) && advance_on_cancel);
-            next = if advance && !st.queue_paused {
+            // A spending limit stops the queue from carrying on (the messages stay queued).
+            next = if advance && !st.queue_paused && hold.is_none() {
                 st.queue.pop_front().map(|(_, p)| p)
             } else {
                 None
@@ -1543,6 +1556,9 @@ impl AgentCtx {
             self.notice(NoticeLevel::Info, paused_notice(dropped));
             self.publish_queue();
         }
+        if let (Some(hold), Some(core)) = (hold, self.core.upgrade()) {
+            core.budget_hold_agent(&self.agent_id, hold);
+        }
         // The agent is idle now: helpers merge into it, or it merges into its main.
         if let (Some(core), Ok(rt)) = (self.core.upgrade(), tokio::runtime::Handle::try_current()) {
             let id = self.agent_id.clone();
@@ -1560,7 +1576,10 @@ impl AgentCtx {
                 let body = agent
                     .and_then(|a| a.last_message)
                     .unwrap_or_else(|| "Finished".into());
-                self.attention(AttentionReason::Done, body, None);
+                // A held agent already asked for you; "finished" on top would be noise.
+                if hold.is_none() {
+                    self.attention(AttentionReason::Done, body, None);
+                }
             }
             TurnOutcome::Cancelled => {
                 self.notice(NoticeLevel::Info, "Turn cancelled");
@@ -1839,22 +1858,32 @@ impl AgentCtx {
             }
         });
         if let (Some(c), Some(core)) = (total, self.core.upgrade()) {
-            core.budget_cost(&self.agent_id, agent.cost_usd, c);
+            core.budget_observe(&self.agent_id, c - agent.cost_usd, 0.0);
         }
     }
 
     pub fn add_tokens(&self, tokens: i64) {
         if tokens != 0 {
             self.update_agent(|a| a.tokens_used += tokens);
+            self.budget_tokens(tokens);
         }
     }
 
     pub fn set_tokens(&self, tokens: i64) {
-        if self
+        if let Some(old) = self
             .agent_snapshot()
-            .is_some_and(|a| a.tokens_used != tokens)
+            .map(|a| a.tokens_used)
+            .filter(|old| *old != tokens)
         {
             self.update_agent(|a| a.tokens_used = tokens);
+            self.budget_tokens(tokens - old);
+        }
+    }
+
+    /// Counts a token increase toward the spending limits.
+    fn budget_tokens(&self, delta: i64) {
+        if let (true, Some(core)) = (delta > 0, self.core.upgrade()) {
+            core.budget_observe(&self.agent_id, 0.0, delta as f64);
         }
     }
 

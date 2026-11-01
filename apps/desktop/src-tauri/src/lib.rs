@@ -27,6 +27,7 @@ mod tools;
 mod tray;
 mod updater;
 mod voice_assistant;
+mod webhooks;
 mod window;
 mod workspace;
 
@@ -75,7 +76,7 @@ macro_rules! handler {
             voice_assistant::va_voices,
             clipboard::read_clipboard_images,
             commands::list_items,
-            commands::search,
+            commands::search_conversations,
             commands::create_agent,
             commands::send_prompt,
             commands::spawn_helper,
@@ -160,9 +161,11 @@ macro_rules! handler {
             preview_proxy::preview_proxy_stop,
             commands::update_settings,
             budget::budget_status,
+            budget::budget_resolve,
             commands::set_interface_zoom,
             commands::preview_sound,
             commands::test_notification,
+            commands::test_alert_target,
             commands::open_path,
             commands::check_for_update,
             commands::install_update,
@@ -736,6 +739,7 @@ mod ipc_smoke {
         "voice_start",
         "push_base_branch",
         "test_notification",
+        "test_alert_target",
         "open_path",
         // Writes a file to Downloads and reveals it.
         "save_diagnostics",
