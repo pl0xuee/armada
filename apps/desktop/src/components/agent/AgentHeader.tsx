@@ -21,6 +21,7 @@ import {
   Play,
   SquareTerminal,
   Trash2,
+  Wrench,
 } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { archiveAgent, attempt, exportConversation, renameAgent, resumeAgent, stopAgent } from "@/lib/actions";
@@ -39,6 +40,7 @@ import { selectFromAgents } from "@/lib/memoSelector";
 import { useApp } from "@/store/app";
 import { hasNewServer, previewOf, togglePreview, usePreview } from "@/store/preview";
 import { openProjectSettings } from "@/store/projectSettings";
+import { openToolkit } from "@/store/toolkit";
 import { useUi } from "@/store/ui";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { StatusDot, StatusPill } from "../StatusDot";
@@ -318,6 +320,9 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => openProjectSettings(agent.projectPath)}>
                 <FolderCog /> Project settings…
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => openToolkit("instructions", agent.projectPath)}>
+                <Wrench /> Tools &amp; instructions…
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void exportConversation(agent)}>
                 <Download /> Export conversation…

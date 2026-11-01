@@ -350,6 +350,7 @@ async fn failover_mcp_commands_and_export() {
         env: vec![],
         url: "https://example.com/mcp".into(),
         headers: vec![],
+        project_path: String::new(),
     };
     settings.mcp_servers = vec![
         server("files", true, McpTransport::Stdio),

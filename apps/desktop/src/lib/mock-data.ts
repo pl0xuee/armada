@@ -358,6 +358,18 @@ export function seedSettings(onboarded: boolean): Settings {
         url: "",
         headers: [],
       },
+      {
+        id: "mcp-atlas-redis",
+        name: "Redis (atlas)",
+        enabled: true,
+        transport: "stdio",
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-redis", "redis://localhost:6379"],
+        env: [],
+        url: "",
+        headers: [],
+        projectPath: "/home/sam/Projects/atlas-api",
+      },
     ],
   };
 }
