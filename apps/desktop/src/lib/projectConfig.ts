@@ -22,6 +22,8 @@ export interface InstructionDoc {
   content: string;
   /** Why the file can't be shown or edited (too large, outside the project…). */
   error: string | null;
+  /** Fingerprint of the file on disk (null: it doesn't exist); a checked save compares it to spot outside edits. */
+  stamp?: string | null;
 }
 
 export interface HookEntry {

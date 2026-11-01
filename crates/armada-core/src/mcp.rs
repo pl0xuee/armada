@@ -304,6 +304,34 @@ fn test_http(server: &McpServer) -> anyhow::Result<String> {
     Ok(describe(&init, tools.as_ref()))
 }
 
+/// Folder paths compare equal ignoring a trailing separator and, when both exist on
+/// disk, after resolving links (so `~/code/app/` and `/home/me/code/app` match).
+fn same_folder(a: &str, b: &str) -> bool {
+    let a = crate::providers::expand_home(a.trim());
+    let b = crate::providers::expand_home(b.trim());
+    match (std::fs::canonicalize(&a), std::fs::canonicalize(&b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a.components().eq(b.components()),
+    }
+}
+
+/// The servers an agent in `project` gets: the global ones plus that project's own.
+/// A project server replaces a global one with the same name.
+pub fn servers_for_project(servers: &[McpServer], project: &str) -> Vec<McpServer> {
+    let is_global = |s: &McpServer| s.project_path.trim().is_empty();
+    let mine = |s: &McpServer| !is_global(s) && same_folder(&s.project_path, project);
+    let shadowed = |s: &McpServer| {
+        servers
+            .iter()
+            .any(|m| mine(m) && m.name.trim().eq_ignore_ascii_case(s.name.trim()))
+    };
+    servers
+        .iter()
+        .filter(|s| if is_global(s) { !shadowed(s) } else { mine(s) })
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,6 +419,7 @@ for line in sys.stdin:
             env: vec![],
             url: String::new(),
             headers: vec![],
+            project_path: String::new(),
         };
         assert_eq!(
             test_server(&server, &dir).await.unwrap(),
@@ -401,6 +430,61 @@ for line in sys.stdin:
             ..server
         };
         assert!(test_server(&missing, &dir).await.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn scoped(id: &str, name: &str, project: &str) -> McpServer {
+        McpServer {
+            id: id.into(),
+            name: name.into(),
+            enabled: true,
+            transport: McpTransport::Stdio,
+            command: "echo".into(),
+            args: vec![],
+            env: vec![],
+            url: String::new(),
+            headers: vec![],
+            project_path: project.into(),
+        }
+    }
+
+    fn ids(all: &[McpServer], project: &str) -> Vec<String> {
+        servers_for_project(all, project)
+            .into_iter()
+            .map(|s| s.id)
+            .collect()
+    }
+
+    #[test]
+    fn project_servers_only_reach_their_project() {
+        let all = vec![
+            scoped("g", "github", ""),
+            scoped("a", "db", "/work/app"),
+            scoped("b", "db", "/work/other"),
+        ];
+        assert_eq!(ids(&all, "/work/app"), ["g", "a"]);
+        assert_eq!(ids(&all, "/work/app/"), ["g", "a"]);
+        assert_eq!(ids(&all, "/work/other"), ["g", "b"]);
+        assert_eq!(ids(&all, "/work/third"), ["g"]);
+    }
+
+    #[test]
+    fn project_server_replaces_a_global_one_with_the_same_name() {
+        let all = vec![scoped("g", "DB", ""), scoped("p", "db", "/work/app")];
+        assert_eq!(ids(&all, "/work/app"), ["p"]);
+        assert_eq!(ids(&all, "/elsewhere"), ["g"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_match_resolves_links() {
+        let dir = std::env::temp_dir().join(format!("armada-mcp-scope-{}", std::process::id()));
+        let real = dir.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let all = vec![scoped("p", "db", &real.to_string_lossy())];
+        assert_eq!(ids(&all, &link.to_string_lossy()), ["p"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

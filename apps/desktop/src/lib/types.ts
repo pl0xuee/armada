@@ -708,6 +708,8 @@ export interface McpServer {
   // http
   url: string;
   headers: KeyValue[];
+  /** Empty or missing: every project. Otherwise only agents in that project folder get it. */
+  projectPath?: string;
 }
 
 export interface Schedule {

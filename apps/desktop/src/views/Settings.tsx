@@ -35,7 +35,7 @@ import { RememberedChoicesRow } from "@/components/settings/RememberedChoicesRow
 import { AgentsSection } from "@/components/settings/AgentsSection";
 import { BudgetsSection } from "@/components/settings/BudgetsSection";
 import { CustomSoundLine } from "@/components/settings/CustomSound";
-import { McpSection } from "@/components/settings/McpSection";
+import { ToolsHub } from "@/components/toolkit/ToolsHub";
 import { ProjectSettingsSection } from "@/components/settings/ProjectSettingsSection";
 import { ProviderCard } from "@/components/settings/ProviderCard";
 import { RemoteSection } from "@/components/settings/RemoteSection";
@@ -77,7 +77,7 @@ const SECTIONS: { id: SettingsSection; label: string; icon: ComponentType<{ clas
   { id: "budgets", label: "Budgets", icon: Wallet },
   { id: "templates", label: "Templates", icon: BookText },
   { id: "projects", label: "Projects", icon: FolderCog },
-  { id: "mcp", label: "Tools (MCP)", icon: Plug },
+  { id: "toolkit", label: "Tools & instructions", icon: Plug },
   { id: "providers", label: "Providers", icon: Package },
   { id: "tools", label: "Agent tools", icon: Wrench },
   { id: "agents", label: "Agents", icon: Bot },
@@ -126,7 +126,7 @@ export function SettingsView() {
           {section === "budgets" && <BudgetsSection settings={settings} />}
           {section === "templates" && <TemplatesSection templates={settings.templates} />}
           {section === "projects" && <ProjectSettingsSection />}
-          {section === "mcp" && <McpSection servers={settings.mcpServers} />}
+          {section === "toolkit" && <ToolsHub servers={settings.mcpServers} />}
           {section === "providers" && <Providers />}
           {section === "tools" && <ToolsSection settings={settings} />}
           {section === "agents" && <AgentsSection agents={settings.customAgents} />}
