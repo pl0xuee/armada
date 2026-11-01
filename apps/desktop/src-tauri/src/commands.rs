@@ -18,6 +18,7 @@ use tracing::{info, warn};
 use crate::attention::Attention;
 use crate::git_review::{self, AgentDiff, CommitSummary};
 use crate::github;
+use crate::github_work;
 use crate::pr_status::{self, PrCache, PrStatus};
 use crate::remote::{Remote, RemoteStatus, ShareLink};
 use crate::state::Shell;
@@ -634,11 +635,74 @@ pub async fn create_pr(
     agent_id: String,
     title: String,
     body: String,
+    base: Option<String>,
+    draft: Option<bool>,
 ) -> CmdResult<String> {
     let agent = core.agent(&agent_id).map_err(err)?;
-    git_review::create_pr(&agent, &title, &body)
+    git_review::create_pr(
+        &agent,
+        &title,
+        &body,
+        base.as_deref(),
+        draft.unwrap_or(false),
+    )
+    .await
+    .map_err(err)
+}
+
+/// Branches the agent's pull request could target (its own base first).
+#[tauri::command]
+pub async fn pr_base_branches(core: State<'_, Core>, agent_id: String) -> CmdResult<Vec<String>> {
+    let agent = core.agent(&agent_id).map_err(err)?;
+    github_work::base_branches(&agent).await.map_err(err)
+}
+
+/// Merges the agent's pull request on GitHub (`merge`, `squash` or `rebase`).
+#[tauri::command]
+pub async fn pr_merge(
+    core: State<'_, Core>,
+    cache: State<'_, PrCache>,
+    agent_id: String,
+    method: String,
+) -> CmdResult<String> {
+    let agent = core.agent(&agent_id).map_err(err)?;
+    let _guard = git_review::try_lock_agent(&agent.id).map_err(err)?;
+    let done = github_work::merge_pr(&cache, &agent, &method)
+        .await
+        .map_err(err)?;
+    // Look again now: the next poll must not show the PR as still open.
+    cache.status(&agent, true).await;
+    Ok(done)
+}
+
+/// Takes the agent's draft pull request out of draft.
+#[tauri::command]
+pub async fn pr_mark_ready(
+    core: State<'_, Core>,
+    cache: State<'_, PrCache>,
+    agent_id: String,
+) -> CmdResult<()> {
+    let agent = core.agent(&agent_id).map_err(err)?;
+    github_work::mark_ready(&cache, &agent).await.map_err(err)?;
+    cache.status(&agent, true).await;
+    Ok(())
+}
+
+/// The project's open issues. `search` (GitHub syntax) is for lists that were cut short.
+#[tauri::command]
+pub async fn github_issues(
+    path: String,
+    search: Option<String>,
+) -> CmdResult<github_work::IssueList> {
+    github_work::list_issues(&path, search.as_deref())
         .await
         .map_err(err)
+}
+
+/// The title and prompt for starting an agent on an issue (read fresh from GitHub).
+#[tauri::command]
+pub async fn github_issue_start(path: String, number: u64) -> CmdResult<github_work::IssueStart> {
+    github_work::start_issue(&path, number).await.map_err(err)
 }
 
 // ---- GitHub ----------------------------------------------------------------------

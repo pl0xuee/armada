@@ -740,11 +740,11 @@ export function seedAgents(): Agent[] {
     }),
     makeAgent({
       id: "a-darkmode",
-      title: "Dark mode for analytics dashboard",
+      title: "Issue #31: Dark mode for analytics dashboard",
       provider: "claude",
       accountId: "acc-claude-work",
       project: "console-web",
-      branch: "armada/dashboard-dark",
+      branch: "armada/issue-31-dark-mode-for-analyt-1f2e3d4c",
       status: "interrupted",
       minsAgo: 95,
       cost: 0.88,

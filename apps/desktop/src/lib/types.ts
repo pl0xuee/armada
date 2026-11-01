@@ -930,8 +930,44 @@ export interface PrInfo {
   state: "open" | "draft" | "merged" | "closed";
   review: "approved" | "changes_requested" | "review_required" | null;
   mergeable: "mergeable" | "conflicting" | null;
+  /** GitHub's verdict on merging right now (older backends omit the next three fields). */
+  mergeState?: "clean" | "behind" | "blocked" | "dirty" | "unstable" | "draft" | null;
+  /** The branch the PR merges into. */
+  base?: string | null;
+  /** Review threads nobody has resolved; null when GitHub couldn't be asked. */
+  unresolvedThreads?: number | null;
   checks: PrCheck[];
   summary: { passing: number; failing: number; pending: number; overall: "none" | "passing" | "failing" | "pending" };
+}
+
+export type MergeMethod = "squash" | "merge" | "rebase";
+
+export interface IssueLabel {
+  name: string;
+  /** Hex colour without the "#". */
+  color: string;
+}
+
+export interface IssueSummary {
+  number: number;
+  title: string;
+  url: string;
+  author: string | null;
+  labels: IssueLabel[];
+  updatedAt: string;
+}
+
+export interface IssueList {
+  issues: IssueSummary[];
+  /** GitHub has more open issues than were fetched. */
+  truncated: boolean;
+}
+
+/** What starting an agent on an issue needs: the agent's title and a prompt with the issue fenced as data. */
+export interface IssueStart {
+  number: number;
+  title: string;
+  prompt: string;
 }
 
 export interface PrCheck {

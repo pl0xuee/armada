@@ -47,6 +47,9 @@ export interface NewAgentPreset {
   accountId?: string;
   prompt?: string;
   compare?: boolean;
+  /** Title for the agent, and whether it starts in its own worktree (an issue's agent does). */
+  title?: string;
+  worktree?: boolean;
 }
 
 interface UiStore {
@@ -72,6 +75,8 @@ interface UiStore {
   schedulePrefill: Partial<Schedule> | null;
   paletteOpen: boolean;
   newAgent: { open: boolean; preset: NewAgentPreset | null };
+  /** GitHub issues of a project, from which an agent can be started. */
+  issues: { open: boolean; projectPath: string | null };
   handoffAgent: Agent | null;
   deleteAgent: Agent | null;
   /** Agent being moved to another account. */
@@ -117,6 +122,8 @@ interface UiStore {
   setPaletteOpen: (open: boolean) => void;
   openNewAgent: (preset?: NewAgentPreset) => void;
   closeNewAgent: () => void;
+  openIssues: (projectPath: string) => void;
+  closeIssues: () => void;
   setHandoffAgent: (a: Agent | null) => void;
   setDeleteAgent: (a: Agent | null) => void;
   setMoveAgent: (a: Agent | null) => void;
@@ -291,6 +298,7 @@ export const useUi = create<UiStore>((set) => ({
   schedulePrefill: null,
   paletteOpen: false,
   newAgent: { open: false, preset: null },
+  issues: { open: false, projectPath: null },
   handoffAgent: null,
   deleteAgent: null,
   moveAgent: null,
@@ -376,6 +384,8 @@ export const useUi = create<UiStore>((set) => ({
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   openNewAgent: (preset) => set({ newAgent: { open: true, preset: preset ?? null } }),
   closeNewAgent: () => set((s) => ({ newAgent: { ...s.newAgent, open: false } })),
+  openIssues: (projectPath) => set({ issues: { open: true, projectPath } }),
+  closeIssues: () => set((s) => ({ issues: { ...s.issues, open: false } })),
   setHandoffAgent: (handoffAgent) => set({ handoffAgent }),
   setDeleteAgent: (deleteAgent) => set({ deleteAgent }),
   setMoveAgent: (moveAgent) => set({ moveAgent }),
