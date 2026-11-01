@@ -5,6 +5,29 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.3.1 — 2026-11-01
+
+The phone app catches up with the desktop, merging a pull request is safer, and Claude Code's Workflow runs finally show up.
+
+### New
+- **Workflow runs are visible.** When Claude Code launches a multi-agent Workflow, a card appears in the conversation and a live “Workflow · 5 agents working” row sits above the message box. Expand it to see each agent's latest action, step count and time. It settles to “Workflow finished” when they are done.
+- **Turn limits.** Set a maximum number of turns per agent, per project or per day, which suits subscription accounts where dollar cost isn't known. It pauses at the end of a turn like the other limits, shows a “7 / 20 turns” meter, and the count survives restarts.
+- **Switch skills off.** For Claude agents, turn individual skills on or off, in every project or just one. Your skill files are never changed. Other providers show “Managed by …”.
+- **The phone app does more.** It shows agents held at a spending limit and lets you raise the limit, continue once or stop; shows pull request and CI status on the agent screen; searches conversations; and can change how agents report.
+- **A short tour** on first launch of this version covers the agent grid, the pinned dock, search and spending limits. Skip it any time; Settings → About → Show the tour brings it back.
+- **Issues and Open pull request** are now in the command palette.
+
+### Changed
+- Merging a pull request is pinned to the exact commit you reviewed. If the branch changes after you looked, nothing is merged and you are asked to review again.
+- The merge dialog says “not known” when GitHub hasn't answered, instead of implying a pass, and GitHub errors read as sentences with a Copy details button.
+- The Preview address bar and Back/Forward buttons now follow the page as you click links.
+- Project instructions are edited in one place, Settings → Tools & instructions. The older editor under Projects now links there.
+- The MCP and Skills tabs say when a change applies only to new agents.
+- Small dependency updates.
+
+### Fixed
+- The pull request chip no longer overflows in narrow panels.
+
 ## v0.3.0 — 2026-11-01
 
 Armada is now **Kvistcode**. Your agents, settings and sign-ins carry over, and updates keep working. This release also adds pull-request merging and GitHub issues, search across every conversation, spending limits, alerts to Slack and Discord, and one place to manage your MCP servers, skills and project instructions.

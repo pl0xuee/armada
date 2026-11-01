@@ -1,7 +1,7 @@
 {
   "name": "kvistcode-remote",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Kvistcode mobile companion: a single-file web app served by the desktop app's remote server.",
   "type": "module",
   "scripts": {
@@ -12,11 +12,11 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "preact": "11.0.2"
+    "preact": "11.1.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.3",
-    "@types/node": "26.6.5",
+    "@types/node": "26.6.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "tailwindcss": "4.3.3",
