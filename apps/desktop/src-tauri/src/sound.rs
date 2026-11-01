@@ -9,7 +9,7 @@ use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use armada_core::{AttentionReason, SoundPack, SoundSettings};
+use kvistcode_core::{AttentionReason, SoundPack, SoundSettings};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
 use tracing::{debug, warn};
 
@@ -207,7 +207,7 @@ impl AudioPlayer {
     pub fn new() -> Self {
         let (tx, rx) = channel::<PlayRequest>();
         let spawned = std::thread::Builder::new()
-            .name("armada-audio".into())
+            .name("kvistcode-audio".into())
             .spawn(move || {
                 // Opened lazily and retried on failure: no audio device (headless,
                 // PipeWire not up yet) must never take the app down.
@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn custom_sound_must_be_a_small_regular_file() {
-        let dir = std::env::temp_dir().join(format!("armada-sound-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("kvistcode-sound-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
 
         // A directory is rejected.

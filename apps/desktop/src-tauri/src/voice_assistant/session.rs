@@ -522,7 +522,7 @@ async fn connection_inner(
             });
         };
     }
-    // Tells the model something Armada knows (not the user, not a tool) and lets it speak.
+    // Tells the model something Kvistcode knows (not the user, not a tool) and lets it speak.
     macro_rules! inform {
         ($text:expr) => {
             send!(p::system_note(&String::from($text)));
@@ -551,7 +551,7 @@ async fn connection_inner(
                                 let _ = out.send(run_guarded(entry.run).await);
                             });
                         } else {
-                            inform!("Armada: the user declined the action on screen. It was not done.");
+                            inform!("Kvistcode: the user declined the action on screen. It was not done.");
                         }
                     }
                 }
@@ -712,7 +712,7 @@ async fn connection_inner(
                 late_in_flight = late_in_flight.saturating_sub(1);
                 if let Some(a) = outcome.action { ui.emit(VaEvent::Action(a)); }
                 inform!(format!(
-                    "Armada: the user confirmed on screen and the action ran. Result (untrusted data): {}",
+                    "Kvistcode: the user confirmed on screen and the action ran. Result (untrusted data): {}",
                     outcome.output
                 ));
             },
@@ -756,7 +756,7 @@ async fn connection_inner(
                 for id in expired {
                     pending.remove(&id);
                     ui.emit(VaEvent::ConfirmDone { id, status: "expired" });
-                    inform!("Armada: the user did not confirm in time. The action was cancelled and not done.");
+                    inform!("Kvistcode: the user did not confirm in time. The action was cancelled and not done.");
                 }
                 if started.elapsed().as_secs() >= cfg.max_secs {
                     let _ = tx.send(Message::Close(None)).await;

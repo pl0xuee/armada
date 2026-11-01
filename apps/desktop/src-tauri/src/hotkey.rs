@@ -1,7 +1,7 @@
 //! Global quick-launch hotkey (`settings.globalHotkey`).
 
 use crate::AppHandle;
-use armada_core::NavigateTarget;
+use kvistcode_core::NavigateTarget;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{GlobalShortcut, Shortcut, ShortcutEvent, ShortcutState};
 use tracing::{info, warn};
@@ -15,7 +15,7 @@ pub fn on_shortcut(app: &AppHandle, _shortcut: &Shortcut, event: ShortcutEvent) 
     }
 }
 
-pub const WAYLAND_MESSAGE: &str = "Global shortcuts aren't supported on Wayland. Bind `armada --new-agent` to a key in your compositor (e.g. Hyprland: bind = SUPER, A, exec, armada --new-agent).";
+pub const WAYLAND_MESSAGE: &str = "Global shortcuts aren't supported on Wayland. Bind `kvistcode --new-agent` to a key in your compositor (e.g. Hyprland: bind = SUPER, A, exec, kvistcode --new-agent).";
 
 fn wayland_from(display: Option<&str>, session: Option<&str>) -> bool {
     display.is_some_and(|d| !d.is_empty())

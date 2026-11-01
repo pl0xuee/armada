@@ -31,7 +31,7 @@ export function InstallAllBanner({ providers, className }: { providers: Provider
         </p>
         <p className="mt-0.5 flex items-start gap-1.5 text-[12px] leading-relaxed text-muted">
           <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ok" />
-          Armada installs what's missing. No admin rights needed; if Node.js isn't installed it downloads a private
+          Kvistcode installs what's missing. No admin rights needed; if Node.js isn't installed it downloads a private
           copy.
         </p>
       </div>

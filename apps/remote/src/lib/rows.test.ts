@@ -172,7 +172,7 @@ describe("pictures in replies", () => {
 
 describe("withoutResumeNotice", () => {
   const notice = (text: string) => ({ id: text, agentId: "a", seq: 1, ts: 1, kind: "notice", level: "warn", text }) as unknown as TimelineItem;
-  const items = [notice("Armada closed while this agent was working. Resume to pick up where it left off."), notice("Stopped by you")];
+  const items = [notice("Kvistcode closed while this agent was working. Resume to pick up where it left off."), notice("Stopped by you")];
   it("hides the resume notice while interrupted, so the banner isn't repeated", () => {
     expect(withoutResumeNotice(items, "interrupted").map((i) => i.id)).toEqual(["Stopped by you"]);
   });

@@ -58,7 +58,7 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
         <div data-tauri-drag-region className="flex min-w-0 items-center gap-2">
           <AppMark size={18} />
           <span data-tauri-drag-region className="text-[13px] font-semibold tracking-[-0.01em] text-fg">
-            Armada
+            Kvistcode
           </span>
           {!minimal && (
             <>
@@ -166,7 +166,7 @@ function ConnectionLostBanner({ error }: { error: string }) {
       className="relative z-20 flex shrink-0 items-center gap-2.5 border-b border-err/30 bg-err/[0.08] px-3 py-1.5 text-[12.5px]"
     >
       <Unplug className="h-3.5 w-3.5 shrink-0 text-err" />
-      <span className="font-medium text-err">Lost connection to Armada core</span>
+      <span className="font-medium text-err">Lost connection to Kvistcode core</span>
       <span className="min-w-0 flex-1 truncate text-muted" title={error}>
         Live updates are paused. {error}
       </span>

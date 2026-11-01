@@ -36,7 +36,7 @@ export function UpdatePill() {
                 ? ratio !== null
                   ? `Updating ${Math.round(ratio * 100)}%`
                   : "Updating…"
-                : `Update ${update.version}: Armada ${update.version} is available`
+                : `Update ${update.version}: Kvistcode ${update.version} is available`
             }
             className="relative flex h-[24px] items-center gap-1.5 overflow-hidden rounded-full border border-accent/40 bg-accent/10 pl-2 pr-2.5 text-[11.5px] font-medium text-accent transition-colors hover:bg-accent/15"
           >
@@ -66,7 +66,7 @@ export function UpdatePill() {
               <Sparkles className="h-4 w-4" />
             </span>
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-semibold">Armada {update.version} is available</div>
+              <div className="text-[13px] font-semibold">Kvistcode {update.version} is available</div>
               <div className="text-[12px] text-muted">
                 You have {update.currentVersion}
                 {update.date ? ` · released ${new Date(update.date).toLocaleDateString()}` : ""}
@@ -99,7 +99,7 @@ export function UpdatePill() {
                 />
               </div>
               <p className="mt-1.5 text-[11.5px] text-steel">
-                Armada restarts automatically when the update is installed.
+                Kvistcode restarts automatically when the update is installed.
               </p>
             </div>
           )}

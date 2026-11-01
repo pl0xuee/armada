@@ -17,7 +17,7 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 function cspMeta(): Plugin {
   const hash = (text: string) => `'sha256-${createHash("sha256").update(text, "utf8").digest("base64")}'`;
   return {
-    name: "armada-remote-csp",
+    name: "kvistcode-remote-csp",
     apply: "build",
     enforce: "post",
     generateBundle: {
@@ -53,13 +53,13 @@ function cspMeta(): Plugin {
 /** Dev only: the desktop server provides these in production. */
 function devPwaStubs(): Plugin {
   return {
-    name: "armada-remote-dev-pwa-stubs",
+    name: "kvistcode-remote-dev-pwa-stubs",
     apply: "serve",
     configureServer(server) {
-      if (process.env.ARMADA_REMOTE_URL) return; // proxied to the real server
+      if (process.env.KVISTCODE_REMOTE_URL) return; // proxied to the real server
       server.middlewares.use("/manifest.webmanifest", (_req, res) => {
         res.setHeader("Content-Type", "application/manifest+json");
-        res.end(JSON.stringify({ name: "Armada", short_name: "Armada", display: "standalone", background_color: "#0B0D10", theme_color: "#0B0D10", start_url: "/" }));
+        res.end(JSON.stringify({ name: "Kvistcode", short_name: "Kvistcode", display: "standalone", background_color: "#0B0D10", theme_color: "#0B0D10", start_url: "/" }));
       });
       server.middlewares.use("/icon.png", (_req, res) => {
         res.statusCode = 204;
@@ -70,10 +70,10 @@ function devPwaStubs(): Plugin {
 }
 
 /**
- * `ARMADA_REMOTE_URL=http://127.0.0.1:47821 npm run dev` proxies the API to a
+ * `KVISTCODE_REMOTE_URL=http://127.0.0.1:47821 npm run dev` proxies the API to a
  * running desktop app so the UI can be developed against real agents.
  */
-const remote = process.env.ARMADA_REMOTE_URL;
+const remote = process.env.KVISTCODE_REMOTE_URL;
 const proxied = ["/api", "/manifest.webmanifest", "/icon.png"];
 
 export default defineConfig({

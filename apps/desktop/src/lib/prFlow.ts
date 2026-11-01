@@ -2,7 +2,7 @@
 import type { Agent, ChangedFile, IssueLabel, IssueList, IssueSummary, MergeMethod, PrInfo } from "./types";
 
 /** Agents started from an issue are titled "Issue #42: …", which puts `issue-42-` at the front of their branch. */
-const ISSUE_BRANCH = /^armada\/issue-(\d+)(?:-|$)/;
+const ISSUE_BRANCH = /^kvistcode\/issue-(\d+)(?:-|$)/;
 const ISSUE_TITLE_PREFIX = /^Issue #\d+:\s*/;
 
 /** The issue an agent was started on, from its branch name (no extra state to keep in sync). */
@@ -34,7 +34,7 @@ export function prefillPr(
     parts.push(`${files.length} ${files.length === 1 ? "file" : "files"} changed, +${add} −${del}`);
   }
   if (issue) parts.push(`Closes #${issue}`);
-  if (parts.length > 0) parts.push("_Opened from Armada._");
+  if (parts.length > 0) parts.push("_Opened from Kvistcode._");
   return { title, body: parts.join("\n\n") };
 }
 

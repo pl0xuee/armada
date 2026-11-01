@@ -212,8 +212,8 @@ export function estimateRow(r: Row): number {
 }
 
 /**
- * While an agent is interrupted the composer banner already says "Interrupted when Armada closed. Resume to
- * continue", so the timeline's own notice saying the same ("Armada closed while this agent was working. Resume
+ * While an agent is interrupted the composer banner already says "Interrupted when Kvistcode closed. Resume to
+ * continue", so the timeline's own notice saying the same ("Kvistcode closed while this agent was working. Resume
  * to pick up…") is dropped. Returns `items` itself when nothing is hidden.
  */
 export function withoutResumeNotice(items: TimelineItem[], status: string): TimelineItem[] {

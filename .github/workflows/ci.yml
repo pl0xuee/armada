@@ -132,7 +132,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p apps/desktop/dist
-          echo '<!doctype html><title>Armada</title>' > apps/desktop/dist/index.html
+          echo '<!doctype html><title>Kvistcode</title>' > apps/desktop/dist/index.html
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -259,7 +259,7 @@ jobs:
 
           python3 scripts/release_notes.py "$tag" > release-notes.md
           id=$(gh api "repos/$GITHUB_REPOSITORY/releases" \
-                 -f tag_name="$tag" -f target_commitish="$GITHUB_SHA" -f name="Armada $tag" \
+                 -f tag_name="$tag" -f target_commitish="$GITHUB_SHA" -f name="Kvistcode $tag" \
                  -F draft=true -F body=@release-notes.md --jq .id)
           echo "id=$id" >> "$GITHUB_OUTPUT"
           echo "release=true" >> "$GITHUB_OUTPUT"

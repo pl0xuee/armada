@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Most bytes written to one day's file; further lines are dropped.
 pub const MAX_DAILY_BYTES: u64 = 20 * 1024 * 1024;
 const KEEP_FILES: usize = 7;
-const PREFIX: &str = "armada.log";
+const PREFIX: &str = "kvistcode.log";
 
 pub struct CappedLogWriter {
     dir: PathBuf,
@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn caps_and_restricts_permissions() {
-        let dir = std::env::temp_dir().join(format!("armada-logw-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kvistcode-logw-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let mut w = CappedLogWriter::with_cap(dir.clone(), 10).unwrap();

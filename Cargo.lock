@@ -102,82 +102,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "armada-core"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "base64 0.23.1",
- "chrono",
- "flate2",
- "keyring",
- "libc",
- "parking_lot",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2 0.11.1",
- "tar",
- "tokio",
- "tracing",
- "ureq",
- "uuid",
- "which",
- "windows-sys 0.61.2",
- "zip",
-]
-
-[[package]]
-name = "armada-desktop"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "arboard",
- "armada-core",
- "axum",
- "base64 0.23.1",
- "brotli-decompressor",
- "bytes",
- "chrono",
- "cpal",
- "dirs 7.0.0",
- "flate2",
- "futures-util",
- "http-body-util",
- "hyper",
- "hyper-util",
- "if-addrs",
- "libc",
- "notify-rust",
- "parking_lot",
- "png",
- "portable-pty",
- "qrcode",
- "rodio",
- "serde",
- "serde_json",
- "sha2 0.11.1",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-dialog",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-opener",
- "tauri-plugin-single-instance",
- "tauri-plugin-updater",
- "tokio",
- "tokio-tungstenite",
- "tower",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "ureq",
- "uuid",
- "which",
- "whisper-rs",
- "zbus 6.1.0",
-]
-
-[[package]]
 name = "arrayvec"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2673,6 +2597,82 @@ dependencies = [
  "security-framework 3.7.0",
  "windows-sys 0.60.2",
  "zeroize",
+]
+
+[[package]]
+name = "kvistcode-core"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "chrono",
+ "flate2",
+ "keyring",
+ "libc",
+ "parking_lot",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tar",
+ "tokio",
+ "tracing",
+ "ureq",
+ "uuid",
+ "which",
+ "windows-sys 0.61.2",
+ "zip",
+]
+
+[[package]]
+name = "kvistcode-desktop"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "axum",
+ "base64 0.23.1",
+ "brotli-decompressor",
+ "bytes",
+ "chrono",
+ "cpal",
+ "dirs 7.0.0",
+ "flate2",
+ "futures-util",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "if-addrs",
+ "kvistcode-core",
+ "libc",
+ "notify-rust",
+ "parking_lot",
+ "png",
+ "portable-pty",
+ "qrcode",
+ "rodio",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-dialog",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-opener",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-updater",
+ "tokio",
+ "tokio-tungstenite",
+ "tower",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "ureq",
+ "uuid",
+ "which",
+ "whisper-rs",
+ "zbus 6.1.0",
 ]
 
 [[package]]

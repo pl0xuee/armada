@@ -66,7 +66,7 @@ export function CustomSoundLine({
             </span>
           </Tooltip>
         ) : (
-          <span className="text-muted">Armada sound</span>
+          <span className="text-muted">Kvistcode sound</span>
         )}
       </span>
       <Button
@@ -85,10 +85,10 @@ export function CustomSoundLine({
           variant="ghost"
           disabled={disabled || busy}
           onClick={() => void run(async () => null)}
-          aria-label={`Reset ${eventLabel} to Armada sound`}
+          aria-label={`Reset ${eventLabel} to Kvistcode sound`}
         >
           <RotateCcw className="!h-3 !w-3" />
-          Reset to Armada sound
+          Reset to Kvistcode sound
         </Button>
       )}
     </span>

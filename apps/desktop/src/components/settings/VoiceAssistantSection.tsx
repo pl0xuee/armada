@@ -75,7 +75,7 @@ export function VoiceAssistantSection({ settings }: { settings: Settings }) {
         title="Voice assistant"
         description={
           <>
-            Talk to Armada hands-free: ask what your agents are doing, start one, send a message or open a view. Start
+            Talk to Kvistcode hands-free: ask what your agents are doing, start one, send a message or open a view. Start
             it from the title bar or with{" "}
             <span className="inline-flex gap-0.5 align-middle">
               <Kbd>{modKey}</Kbd>
@@ -91,7 +91,7 @@ export function VoiceAssistantSection({ settings }: { settings: Settings }) {
         <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
         <p>
           <strong className="font-medium">{VA_PRIVACY_NOTICE}</strong> Unlike dictation, this is not processed on your
-          device. Audio is not saved by Armada.
+          device. Audio is not saved by Kvistcode.
         </p>
       </div>
 

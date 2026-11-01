@@ -39,10 +39,10 @@ export function describeStatus(
   serverMessage: string | null,
 ): string {
   if (serverMessage && /shutting down/i.test(serverMessage))
-    return "Armada is shutting down on your computer. Try again once it's running.";
+    return "Kvistcode is shutting down on your computer. Try again once it's running.";
   switch (status) {
     case 0:
-      return "Can't reach Armada. Check that your computer is awake and reachable.";
+      return "Can't reach Kvistcode. Check that your computer is awake and reachable.";
     case 401:
       return "This device was unpaired.";
     case 403:
@@ -50,7 +50,7 @@ export function describeStatus(
     case 404:
       return serverMessage ?? "That agent no longer exists.";
     case 408:
-      return serverMessage ?? "Armada took too long to respond.";
+      return serverMessage ?? "Kvistcode took too long to respond.";
     case 413:
       return (
         serverMessage ??
@@ -58,16 +58,16 @@ export function describeStatus(
       );
     case 421:
       // The server only answers on the addresses it advertises (DNS-rebinding guard).
-      return "Open the link from the QR code or the LAN address shown in Armada.";
+      return "Open the link from the QR code or the LAN address shown in Kvistcode.";
     case 429:
       return serverMessage ?? "Too many attempts. Try again in a few minutes.";
     case 503:
-      return serverMessage ?? "Armada isn't accepting connections right now.";
+      return serverMessage ?? "Kvistcode isn't accepting connections right now.";
     default:
       if (status >= 500)
         return serverMessage
-          ? `Armada hit an error: ${serverMessage}`
-          : "Armada hit an error. Try again.";
+          ? `Kvistcode hit an error: ${serverMessage}`
+          : "Kvistcode hit an error. Try again.";
       return serverMessage ?? `Request failed (${status}).`;
   }
 }
@@ -388,7 +388,7 @@ function parseOk(status: number, text: string): unknown {
     throw new ApiError(
       502,
       null,
-      "Armada sent a response this app couldn't read.",
+      "Kvistcode sent a response this app couldn't read.",
     );
   }
 }
@@ -433,7 +433,7 @@ export async function pairDevice(
     throw new ApiError(
       502,
       null,
-      "Armada sent a response this app couldn't read.",
+      "Kvistcode sent a response this app couldn't read.",
     );
   }
   return { token: out.token, scope: out.scope };

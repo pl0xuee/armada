@@ -1,5 +1,5 @@
 // "Tools & instructions": project instruction files, MCP servers and skills in one place.
-// Types mirror crates/armada-core/src/{project_config,skills}.rs; the helpers are pure.
+// Types mirror crates/kvistcode-core/src/{project_config,skills}.rs; the helpers are pure.
 
 import type { InstructionDoc, InstructionFileName } from "./projectConfig";
 import type { McpServer, Provider } from "./types";

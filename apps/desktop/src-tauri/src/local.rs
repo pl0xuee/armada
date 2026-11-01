@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
-use armada_core::{accounts, local, Core, LocalKind, LocalProbe, LocalServer, PullProgress};
+use kvistcode_core::{accounts, local, Core, LocalKind, LocalProbe, LocalServer, PullProgress};
 use tauri::ipc::Channel;
 use tauri::State;
 

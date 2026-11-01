@@ -1,9 +1,9 @@
 //! Spending limits: the Usage view reads today's spend from here, and a "Needs you"
 //! item for a held agent is answered here. The limits themselves are settings; the
-//! alerts and holding live in `armada_core::budget`.
+//! alerts and holding live in `kvistcode_core::budget`.
 
-use armada_core::budget::{BudgetChoice, BudgetStatus};
-use armada_core::{Core, Settings};
+use kvistcode_core::budget::{BudgetChoice, BudgetStatus};
+use kvistcode_core::{Core, Settings};
 use tauri::State;
 
 /// Today's spend (since local midnight) against the daily limits.

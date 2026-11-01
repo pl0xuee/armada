@@ -1,12 +1,12 @@
 /**
  * Wire types for the remote API. Everything that also exists in the desktop
  * app comes from its `types.ts` (the single source of truth, kept in sync with
- * `crates/armada-core/src/model.rs`); this file only adds the remote-specific
+ * `crates/kvistcode-core/src/model.rs`); this file only adds the remote-specific
  * envelopes and widens a couple of fields the Rust model already has.
  */
 import type {
   Agent as CoreAgent,
-  ArmadaEvent,
+  KvistcodeEvent,
   AgentStatus,
   Attachment,
   AttentionReason,
@@ -149,9 +149,9 @@ export type PermissionItem = Extract<TimelineItem, { kind: "permission" }>;
 export type QuestionItem = Extract<TimelineItem, { kind: "question" }>;
 /** Something that waits for the user: an approval or a question (GET /api/permissions lists both). */
 export type PendingItem = PermissionItem | QuestionItem;
-export type TextDeltaEvent = Extract<ArmadaEvent, { type: "text_delta" }>;
+export type TextDeltaEvent = Extract<KvistcodeEvent, { type: "text_delta" }>;
 
-type Pick_<T extends ArmadaEvent["type"]> = Extract<ArmadaEvent, { type: T }>;
+type Pick_<T extends KvistcodeEvent["type"]> = Extract<KvistcodeEvent, { type: T }>;
 
 /** The subset of desktop events the remote server forwards, plus `resync`. */
 export type RemoteEvent =

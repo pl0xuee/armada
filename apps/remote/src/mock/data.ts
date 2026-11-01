@@ -116,7 +116,7 @@ export function agent(
     provider,
     accountId,
     projectPath: project,
-    cwd: rest.worktree ? `${project}/.armada/worktrees/${id}` : project,
+    cwd: rest.worktree ? `${project}/.kvistcode/worktrees/${id}` : project,
     worktree: false,
     branch: null,
     baseBranch: "main",
@@ -154,7 +154,7 @@ export function buildAgents(now: number): Agent[] {
       agoMin: 1,
       projectPath: "/home/dev/code/acme-api",
       worktree: true,
-      branch: "armada/fix-token-refresh",
+      branch: "kvistcode/fix-token-refresh",
       pendingPermissions: 1,
       costUsd: 0.42,
       tokensUsed: 48_200,
@@ -166,7 +166,7 @@ export function buildAgents(now: number): Agent[] {
     }),
     agent(now, "a2", "Migrate billing to Stripe Payment Element", "codex", "acc-openai", "needs_permission", {
       agoMin: 4,
-      branch: "armada/stripe-v2",
+      branch: "kvistcode/stripe-v2",
       worktree: true,
       pendingPermissions: 1,
       costUsd: 1.18,
@@ -179,7 +179,7 @@ export function buildAgents(now: number): Agent[] {
     }),
     agent(now, "a3", "Refactor API client into hooks", "claude", "acc-personal", "working", {
       agoMin: 0,
-      branch: "armada/api-hooks",
+      branch: "kvistcode/api-hooks",
       worktree: true,
       costUsd: 0.87,
       tokensUsed: 92_400,
@@ -196,7 +196,7 @@ export function buildAgents(now: number): Agent[] {
     }),
     agent(now, "a12", "Audit checkout accessibility", "claude", "acc-work", "idle", {
       agoMin: 6,
-      branch: "armada/a11y-audit",
+      branch: "kvistcode/a11y-audit",
       worktree: true,
       costUsd: 1.36,
       tokensUsed: 118_000,
@@ -233,7 +233,7 @@ export function buildAgents(now: number): Agent[] {
     }),
     agent(now, "a5", "Add e2e tests for checkout", "codex", "acc-openai", "idle", {
       agoMin: 18,
-      branch: "armada/checkout-e2e",
+      branch: "kvistcode/checkout-e2e",
       worktree: true,
       costUsd: 2.04,
       tokensUsed: 210_500,
@@ -777,7 +777,7 @@ export function buildTimelines(now: number): Record<string, TimelineItem[]> {
       ...base("a7", at(95)),
       kind: "notice",
       level: "warn",
-      text: "Armada closed while this agent was working. Resume to pick up where it left off.",
+      text: "Kvistcode closed while this agent was working. Resume to pick up where it left off.",
     },
   ];
 

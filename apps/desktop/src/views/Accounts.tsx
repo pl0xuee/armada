@@ -160,7 +160,7 @@ export function AccountsView() {
           </div>
 
           <p className="mx-auto mt-6 max-w-[560px] text-center text-[12px] leading-relaxed text-steel">
-            Armada drives each vendor's official CLI. Subscriptions sign in through the vendor's own browser flow; API
+            Kvistcode drives each vendor's official CLI. Subscriptions sign in through the vendor's own browser flow; API
             keys live in your OS keychain.
           </p>
         </div>

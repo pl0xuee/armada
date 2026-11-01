@@ -1,10 +1,10 @@
-# Armada — Master Plan
+# Kvistcode — Master Plan
 
 > **Command your fleet.** One sleek, gunmetal command deck for running Claude, ChatGPT (Codex) and Grok agents side by side, across as many accounts as you own, on Windows, macOS and Linux.
 
 > **Status (v0.1.2): this is the original design document.** What shipped differs in places:
-> - **One process, no daemon.** Agents run inside the app's own core (`crates/armada-core`). The tray keeps the app (and the agents) alive when the window closes, and agents resume after restarts and crashes. There is no separate `armadad` or local socket.
-> - **Crates.** `armada-core` (supervisor, ACP and Codex clients, storage, accounts, installer) plus the Tauri shell (`apps/desktop/src-tauri`). Storage is `rusqlite`.
+> - **One process, no daemon.** Agents run inside the app's own core (`crates/kvistcode-core`). The tray keeps the app (and the agents) alive when the window closes, and agents resume after restarts and crashes. There is no separate `kvistcoded` or local socket.
+> - **Crates.** `kvistcode-core` (supervisor, ACP and Codex clients, storage, accounts, installer) plus the Tauri shell (`apps/desktop/src-tauri`). Storage is `rusqlite`.
 > - **UI stack.** React, zustand, Radix, cmdk, motion, xterm, react-markdown and @tanstack/react-virtual; npm, not pnpm. Sounds live in `apps/desktop/src-tauri/sounds`.
 > - **Shipped beyond the plan:**
 >   - the phone companion (`apps/remote`, remote control for every provider);
@@ -21,14 +21,14 @@
 
 ## 1. Vision
 
-Armada is a desktop **agent command center**. You launch agents from any provider into any project folder, watch them work live, approve what they want to do, review their diffs, and switch accounts in one click. When an agent needs you, Armada makes a sound and sends a notification. If the app closes, crashes or the machine reboots, every agent comes back exactly where it was.
+Kvistcode is a desktop **agent command center**. You launch agents from any provider into any project folder, watch them work live, approve what they want to do, review their diffs, and switch accounts in one click. When an agent needs you, Kvistcode makes a sound and sends a notification. If the app closes, crashes or the machine reboots, every agent comes back exactly where it was.
 
 Design pillars:
 
 1. **Zero friction**: install, sign in, type a prompt. No config files required.
 2. **Provider neutral**: Claude, ChatGPT and Grok are first-class citizens, and any other ACP agent works too.
 3. **Never lose work**: agents outlive the window, and every session is resumable.
-4. **Attention, not babysitting**: Armada tells you when you're needed and stays quiet otherwise.
+4. **Attention, not babysitting**: Kvistcode tells you when you're needed and stays quiet otherwise.
 5. **Beautiful by default**: dark, gunmetal, fast, fluid.
 6. **Open source and local-first**: MIT licensed, no telemetry by default, your keys stay in your OS keychain.
 
@@ -36,9 +36,9 @@ Design pillars:
 
 ## 2. The key architectural decision: drive the official agents
 
-Armada does **not** reimplement Claude/GPT/Grok agents or scrape login tokens. It orchestrates each vendor's **official agent runtime** over a structured protocol:
+Kvistcode does **not** reimplement Claude/GPT/Grok agents or scrape login tokens. It orchestrates each vendor's **official agent runtime** over a structured protocol:
 
-| Provider | Runtime | How Armada talks to it | Sign-in options |
+| Provider | Runtime | How Kvistcode talks to it | Sign-in options |
 |---|---|---|---|
 | **Claude** | Claude Code (`claude`) | ACP via `@agentclientprotocol/claude-agent-acp` (fallback: `claude -p --input-format stream-json --output-format stream-json`) | Claude Pro/Max subscription, Console API key, Bedrock/Vertex |
 | **ChatGPT / OpenAI** | Codex CLI (`codex`) | `codex app-server` JSON-RPC (native, ships TS bindings via `generate-ts`); `codex-acp` as fallback | ChatGPT Plus/Pro/Team account, OpenAI API key |
@@ -47,12 +47,12 @@ Armada does **not** reimplement Claude/GPT/Grok agents or scrape login tokens. I
 
 Why this is the right call:
 
-- **It stays within each vendor's terms.** Subscriptions are used through the vendor's own client, the way they intend. Armada never extracts OAuth tokens to call APIs directly.
-- **You get every vendor's newest features for free**: tools, sandboxing, subagents, MCP, skills, model updates. When Anthropic ships something, Armada gets it on the next CLI update.
-- **ACP (Agent Client Protocol)** is the emerging standard for agent ↔ client communication (Zed, JetBrains, Neovim, Windows Terminal, 25+ agents). Building on it makes Armada future-proof. Every new ACP agent works with no extra code.
-- **Resume is native.** Each runtime persists its own sessions (`claude --resume <id>`, `codex resume`, `grok sessions` / ACP `session/load`). Armada stores the session IDs and rehydrates.
+- **It stays within each vendor's terms.** Subscriptions are used through the vendor's own client, the way they intend. Kvistcode never extracts OAuth tokens to call APIs directly.
+- **You get every vendor's newest features for free**: tools, sandboxing, subagents, MCP, skills, model updates. When Anthropic ships something, Kvistcode gets it on the next CLI update.
+- **ACP (Agent Client Protocol)** is the emerging standard for agent ↔ client communication (Zed, JetBrains, Neovim, Windows Terminal, 25+ agents). Building on it makes Kvistcode future-proof. Every new ACP agent works with no extra code.
+- **Resume is native.** Each runtime persists its own sessions (`claude --resume <id>`, `codex resume`, `grok sessions` / ACP `session/load`). Kvistcode stores the session IDs and rehydrates.
 
-Armada manages the CLIs too: it detects installs, offers one-click install/update, and pins known-good versions.
+Kvistcode manages the CLIs too: it detects installs, offers one-click install/update, and pins known-good versions.
 
 ---
 
@@ -64,7 +64,7 @@ Armada manages the CLIs too: it detects installs, offers one-click install/updat
 | Core / daemon | **Rust** (tokio, serde) | Process supervision, ACP/JSON-RPC streams, crash safety |
 | Frontend | **React 19 + TypeScript + Vite** | Biggest ecosystem, best component libraries |
 | Styling | **Tailwind CSS v4** + CSS variables design tokens | Fast theming, gunmetal palette in one place |
-| Components | **shadcn/ui** (Radix primitives) | Accessible, fully ownable, restyled to Armada's look |
+| Components | **shadcn/ui** (Radix primitives) | Accessible, fully ownable, restyled to Kvistcode's look |
 | Motion | **Motion** (Framer Motion) | Fluid micro-interactions, layout animations |
 | Command palette | **cmdk** | Ctrl/⌘+K for everything |
 | Terminal | **xterm.js** (WebGL renderer) | Live view of agent shells |
@@ -84,12 +84,12 @@ Armada manages the CLIs too: it detects installs, offers one-click install/updat
 ## 4. Architecture
 
 ```
-┌──────────────────────── Armada Desktop (Tauri window) ────────────────────────┐
+┌──────────────────────── Kvistcode Desktop (Tauri window) ────────────────────────┐
 │  React UI  ── typed IPC (tauri-specta) ──►  thin Tauri commands               │
 └──────────────────────────────────┬────────────────────────────────────────────┘
                                    │ local socket (Unix socket / Windows named pipe)
 ┌──────────────────────────────────▼────────────────────────────────────────────┐
-│  armadad — background daemon (Rust)                                            │
+│  kvistcoded — background daemon (Rust)                                            │
 │   • Supervisor: spawns / watches / restarts agent processes                    │
 │   • Adapters: ACP client · Codex app-server client · stream-json fallback      │
 │   • Event log: every message, tool call, permission request → SQLite           │
@@ -102,20 +102,20 @@ Armada manages the CLIs too: it detects installs, offers one-click install/updat
    (Claude Code)          (Codex CLI)            (Grok Build)
 ```
 
-**Why a separate daemon?** Closing the window does not kill your agents. Armada lives in the tray, agents keep working, and notifications still fire. Reopening the UI reattaches instantly. If the daemon itself dies, it's restarted and rehydrates from SQLite.
+**Why a separate daemon?** Closing the window does not kill your agents. Kvistcode lives in the tray, agents keep working, and notifications still fire. Reopening the UI reattaches instantly. If the daemon itself dies, it's restarted and rehydrates from SQLite.
 
 ### Repo layout (monorepo: pnpm workspaces + Cargo workspace)
 
 ```
-armada/
+kvistcode/
 ├─ apps/desktop/            # Tauri app (src-tauri + React frontend)
 ├─ crates/
-│  ├─ armada-core/          # domain model, SQLite, event log, settings
-│  ├─ armada-daemon/        # armadad binary, supervisor, IPC server
-│  ├─ armada-acp/           # ACP client
-│  ├─ armada-codex/         # Codex app-server client
-│  ├─ armada-accounts/      # profiles, keychain, config-dir isolation
-│  └─ armada-attention/     # sounds, notifications, rules
+│  ├─ kvistcode-core/          # domain model, SQLite, event log, settings
+│  ├─ kvistcode-daemon/        # kvistcoded binary, supervisor, IPC server
+│  ├─ kvistcode-acp/           # ACP client
+│  ├─ kvistcode-codex/         # Codex app-server client
+│  ├─ kvistcode-accounts/      # profiles, keychain, config-dir isolation
+│  └─ kvistcode-attention/     # sounds, notifications, rules
 ├─ packages/
 │  ├─ ui/                   # design system (tokens, components)
 │  └─ protocol/             # generated TS types
@@ -129,8 +129,8 @@ armada/
 
 Each **Account Profile** = provider + display name + avatar color + auth method + an **isolated config directory**:
 
-- Claude → `CLAUDE_CONFIG_DIR=<armada>/profiles/<id>/claude`
-- Codex → `CODEX_HOME=<armada>/profiles/<id>/codex`
+- Claude → `CLAUDE_CONFIG_DIR=<kvistcode>/profiles/<id>/claude`
+- Codex → `CODEX_HOME=<kvistcode>/profiles/<id>/codex`
 - Grok → isolated grok home per profile (verify the supported env var / home override during Phase 2)
 - API keys → stored in the OS keychain, injected as env vars only into that agent's process
 
@@ -140,7 +140,7 @@ UX:
 - Account switcher in the top bar (avatar stack), and per agent at launch.
 - "Sign in" button runs the vendor's own login flow (browser OAuth) inside that profile's directory.
 - **Usage meters** per account (tokens, cost, rate-limit window where the runtime reports it).
-- **Rate-limit failover** (opt-in): when an agent hits a limit, Armada offers to continue on another account of the same provider, carrying the conversation via fork/resume where supported, or a generated handoff summary where not.
+- **Rate-limit failover** (opt-in): when an agent hits a limit, Kvistcode offers to continue on another account of the same provider, carrying the conversation via fork/resume where supported, or a generated handoff summary where not.
 
 ---
 
@@ -149,7 +149,7 @@ UX:
 - Every agent is a row in SQLite: id, provider, account, cwd, worktree, provider session id, status, model, timestamps.
 - Every event is appended to an event log as it arrives, so the UI can re-render full history without asking the provider.
 - On startup, agents that were running are marked **Interrupted** and shown in a "Pick up where you left off" panel. One click (or auto-resume, if enabled) relaunches with the provider's native resume and the same session id.
-- If a provider session can't be resumed (deleted, expired), Armada offers **Rebuild from transcript**: a fresh session seeded with a compact summary of the logged history.
+- If a provider session can't be resumed (deleted, expired), Kvistcode offers **Rebuild from transcript**: a fresh session seeded with a compact summary of the logged history.
 - Crash safety: SQLite WAL, fsync on status transitions, daemon watchdog.
 
 ---
@@ -167,7 +167,7 @@ Agent states: `Working · Needs approval · Needs input · Done · Error · Rate
 
 - **Smart muting**: no sound if you're already looking at that agent. Quiet hours. Do-not-disturb sync.
 - **Escalation**: if an approval waits more than N minutes, re-ping once (configurable).
-- **Sound packs**: original CC0 sounds designed for Armada (synth + metallic, matching the gunmetal theme). Users can drop in custom `.wav/.ogg` per event. Per-provider sound variants optional.
+- **Sound packs**: original CC0 sounds designed for Kvistcode (synth + metallic, matching the gunmetal theme). Users can drop in custom `.wav/.ogg` per event. Per-provider sound variants optional.
 - Taskbar flash (Windows), dock bounce (macOS), urgency hint (Linux).
 - **Phone push** (optional): ntfy.sh / Pushover / Discord / Slack webhooks, so you can step away from the desk.
 

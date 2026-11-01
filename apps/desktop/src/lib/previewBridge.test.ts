@@ -12,16 +12,16 @@ import {
 } from "./previewBridge";
 
 const T = "tok";
-const msg = (o: Record<string, unknown>) => ({ armada: "preview", v: 1, token: T, ...o });
+const msg = (o: Record<string, unknown>) => ({ kvistcode: "preview", v: 1, token: T, ...o });
 
 describe("parseAgentMessage", () => {
   it("accepts the tokenless handshake only as hello", () => {
-    expect(parseAgentMessage({ armada: "preview", v: 1, type: "hello" }, T)).toEqual({ type: "hello" });
-    expect(parseAgentMessage({ armada: "preview", v: 1, type: "ready", url: "x" }, T)).toBeNull();
+    expect(parseAgentMessage({ kvistcode: "preview", v: 1, type: "hello" }, T)).toEqual({ type: "hello" });
+    expect(parseAgentMessage({ kvistcode: "preview", v: 1, type: "ready", url: "x" }, T)).toBeNull();
   });
   it("rejects wrong token, wrong envelope and junk", () => {
     expect(parseAgentMessage(msg({ type: "ready", token: "nope" }), T)).toBeNull();
-    expect(parseAgentMessage({ ...msg({ type: "ready" }), armada: "other" }, T)).toBeNull();
+    expect(parseAgentMessage({ ...msg({ type: "ready" }), kvistcode: "other" }, T)).toBeNull();
     expect(parseAgentMessage({ ...msg({ type: "ready" }), v: 2 }, T)).toBeNull();
     for (const j of [null, 3, "x", [], undefined]) expect(parseAgentMessage(j, T)).toBeNull();
     expect(parseAgentMessage(msg({ type: "eval", code: "alert(1)" }), T)).toBeNull();

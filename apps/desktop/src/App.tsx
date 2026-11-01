@@ -261,13 +261,13 @@ function LazyTerminal() {
   );
 }
 
-/** Dev perf instrumentation (?stress): React commit durations → window.__armadaPerf. */
+/** Dev perf instrumentation (?stress): React commit durations → window.__kvistcodePerf. */
 const PERF =
   import.meta.env.DEV && typeof location !== "undefined" && new URLSearchParams(location.search).has("stress");
-type PerfWindow = Window & { __armadaPerf?: { commits: number[] } };
+type PerfWindow = Window & { __kvistcodePerf?: { commits: number[] } };
 function onRender(_id: string, _phase: string, actualDuration: number) {
   const w = window as PerfWindow;
-  (w.__armadaPerf ??= { commits: [] }).commits.push(actualDuration);
+  (w.__kvistcodePerf ??= { commits: [] }).commits.push(actualDuration);
 }
 
 function Main() {
@@ -310,7 +310,7 @@ function BootScreen({ error }: { error: string | null }) {
       </div>
       {error ? (
         <div className="max-w-md text-center">
-          <p className="text-[15px] font-semibold">Couldn't reach the Armada core</p>
+          <p className="text-[15px] font-semibold">Couldn't reach the Kvistcode core</p>
           <p className="selectable mt-1.5 font-mono text-xs text-muted">{error}</p>
           <Button className="mt-4" variant="primary" onClick={() => void useApp.getState().boot()}>
             Try again

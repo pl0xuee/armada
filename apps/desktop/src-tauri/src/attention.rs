@@ -1,4 +1,4 @@
-//! The attention engine: turns `ArmadaEvent::Attention` into sounds, OS
+//! The attention engine: turns `KvistcodeEvent::Attention` into sounds, OS
 //! notifications, taskbar flashing and phone pushes, according to settings.
 
 use std::collections::HashMap;
@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::AppHandle;
-use armada_core::{AgentStatus, AttentionReason, Core, ItemBody, QuietHours, Settings};
 use chrono::{NaiveTime, Timelike};
+use kvistcode_core::{AgentStatus, AttentionReason, Core, ItemBody, QuietHours, Settings};
 use parking_lot::Mutex;
 use tauri::{Manager, UserAttentionType};
 use tracing::{debug, info, warn};
@@ -94,7 +94,7 @@ impl Attention {
             .play_scaled(AttentionReason::Done, &settings.sounds, 0.45);
     }
 
-    /// Called (on a blocking thread) for every `ArmadaEvent::Attention`.
+    /// Called (on a blocking thread) for every `KvistcodeEvent::Attention`.
     pub fn on_attention(
         &self,
         agent_id: &str,
@@ -268,7 +268,7 @@ impl Attention {
                 agent_id: None,
                 reason: None,
                 request_id: None,
-                title: "Armada".into(),
+                title: "Kvistcode".into(),
                 body: "Notifications are working. You'll hear from your fleet here.".into(),
             },
         );
@@ -288,7 +288,7 @@ impl Attention {
         send_ntfy(
             url,
             AttentionReason::Done,
-            "Armada",
+            "Kvistcode",
             "Phone pushes are working. You'll hear from your fleet here.",
         )
         .map(|()| true)
@@ -490,7 +490,7 @@ const MAX_PUSH_BODY_CHARS: usize = 200;
 /// What a phone push says. The ntfy server is third-party, so by default ("minimal")
 /// only generic text goes out; "full" sends the agent's text with secrets scrubbed.
 fn push_text(detail: &str, reason: AttentionReason, title: &str, body: &str) -> (String, String) {
-    use armada_core::redact::redact_secrets;
+    use kvistcode_core::redact::redact_secrets;
     if detail == "full" {
         return (
             redact_secrets(title).into_owned(),
@@ -507,7 +507,7 @@ fn push_text(detail: &str, reason: AttentionReason, title: &str, body: &str) -> 
 
 fn push_ntfy(url: String, reason: AttentionReason, title: String, body: String) {
     let spawned = std::thread::Builder::new()
-        .name("armada-ntfy".into())
+        .name("kvistcode-ntfy".into())
         .spawn(move || {
             if let Err(e) = send_ntfy(&url, reason, &title, &body) {
                 warn!("{e}");
@@ -535,7 +535,7 @@ fn send_ntfy(url: &str, reason: AttentionReason, title: &str, body: &str) -> Res
     };
     let agent = ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
-            .tls_config(armada_core::toolchain::platform_tls())
+            .tls_config(kvistcode_core::toolchain::platform_tls())
             .timeout_global(Some(Duration::from_secs(10)))
             // A redirect could send the message (and the topic in the URL) anywhere,
             // including plain http.

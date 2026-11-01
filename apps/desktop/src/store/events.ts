@@ -1,15 +1,15 @@
 import { toast } from "sonner";
-import { onArmadaEvent } from "@/lib/api";
+import { onKvistcodeEvent } from "@/lib/api";
 import { tileNeighbour } from "@/lib/helpers";
 import { publishScheduleEvent } from "@/lib/scheduleEvents";
 import { routeTerminalExit, routeTerminalOutput } from "@/lib/terminal-bus";
 import { switchAccount, switchCandidates } from "@/lib/actions";
-import type { Agent, ArmadaEvent } from "@/lib/types";
+import type { Agent, KvistcodeEvent } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 import { useApp } from "./app";
 import { useUi } from "./ui";
 
-function handleUiEvent(e: ArmadaEvent) {
+function handleUiEvent(e: KvistcodeEvent) {
   switch (e.type) {
     case "terminal_output":
       routeTerminalOutput(e.terminalId, e.data);
@@ -81,7 +81,7 @@ export function connectEvents(): () => void {
   let disposed = false;
   // Store-bound events are coalesced: everything that arrives within one animation frame
   // is applied in a single update (streaming can deliver hundreds of deltas per second).
-  let queue: ArmadaEvent[] = [];
+  let queue: KvistcodeEvent[] = [];
   let raf = 0;
   let fallback: ReturnType<typeof setTimeout> | null = null;
   const flush = () => {
@@ -108,7 +108,7 @@ export function connectEvents(): () => void {
     fallback = setTimeout(flush, 120);
   };
 
-  void onArmadaEvent((e) => {
+  void onKvistcodeEvent((e) => {
     // Terminal output is latency-sensitive and doesn't touch the store.
     if (e.type === "terminal_output" || e.type === "terminal_exit") {
       handleUiEvent(e);

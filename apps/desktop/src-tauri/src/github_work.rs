@@ -1,4 +1,4 @@
-//! The rest of the loop around a pull request, all through the `gh` sign-in Armada already
+//! The rest of the loop around a pull request, all through the `gh` sign-in Kvistcode already
 //! uses: merging it, taking it out of draft, the branches it can target, and the repository's
 //! open issues (to start an agent on one).
 //!
@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use anyhow::{anyhow, bail};
-use armada_core::Agent;
+use kvistcode_core::Agent;
 use serde::{Deserialize, Serialize};
 
 use crate::git_review::{agent_cwd, git, push_remote};
@@ -74,7 +74,7 @@ pub fn explain_merge_error(stderr: &str) -> String {
     if lower.contains("http 409") || lower.contains("head branch was modified") {
         "The branch changed on GitHub while you were looking. Refresh and check it again.".into()
     } else if lower.contains("http 403") || lower.contains("http 404") {
-        "GitHub didn't let Armada merge this pull request. You may not have permission to merge here, or branch protection requires the merge to happen on GitHub.".into()
+        "GitHub didn't let Kvistcode merge this pull request. You may not have permission to merge here, or branch protection requires the merge to happen on GitHub.".into()
     } else if lower.contains("http 405") || lower.contains("http 422") {
         format!("GitHub can't merge this pull request right now: {message}.")
     } else if lower.contains("gh auth login") || lower.contains("http 401") {
@@ -145,7 +145,7 @@ pub async fn mark_ready(cache: &PrCache, agent: &Agent) -> anyhow::Result<()> {
 
 /// Branch names a pull request could target, from `git for-each-ref --format=%(refname)`
 /// over local branches and `remote`'s: without the ref prefix, once each, leaving out
-/// Armada's own agent branches, the agent's branch and the symbolic `HEAD`.
+/// Kvistcode's own agent branches, the agent's branch and the symbolic `HEAD`.
 pub fn base_candidates(refs: &str, remote: &str, own_branch: &str) -> Vec<String> {
     let remote_prefix = format!("refs/remotes/{remote}/");
     let mut names: Vec<String> = refs
@@ -155,7 +155,12 @@ pub fn base_candidates(refs: &str, remote: &str, own_branch: &str) -> Vec<String
             l.strip_prefix("refs/heads/")
                 .or_else(|| l.strip_prefix(remote_prefix.as_str()))
         })
-        .filter(|n| *n != "HEAD" && *n != own_branch && !n.starts_with("armada/"))
+        .filter(|n| {
+            *n != "HEAD"
+                && *n != own_branch
+                && !n.starts_with("kvistcode/")
+                && !n.starts_with("armada/")
+        })
         .map(str::to_string)
         .collect();
     names.sort();
@@ -284,7 +289,7 @@ pub fn parse_issue_list(json: &str, limit: usize) -> anyhow::Result<IssueList> {
 }
 
 fn project_dir(path: &str) -> anyhow::Result<std::path::PathBuf> {
-    let dir = armada_core::providers::expand_home(path);
+    let dir = kvistcode_core::providers::expand_home(path);
     if !Path::new(&dir).is_dir() {
         bail!("{path} is not a folder");
     }
@@ -322,7 +327,7 @@ pub async fn list_issues(path: &str, search: Option<&str>) -> anyhow::Result<Iss
 #[serde(rename_all = "camelCase")]
 pub struct IssueStart {
     pub number: u64,
-    /// The agent's title. Its branch is named after it (`armada/issue-42-…`).
+    /// The agent's title. Its branch is named after it (`kvistcode/issue-42-…`).
     pub title: String,
     pub prompt: String,
 }
@@ -453,7 +458,7 @@ mod tests {
 
     #[test]
     fn base_branches_are_cleaned_up() {
-        let refs = "refs/heads/main\nrefs/heads/armada/fix-ab12cd34\nrefs/heads/feature/x\nrefs/remotes/origin/HEAD\nrefs/remotes/origin/main\nrefs/remotes/origin/release\nrefs/remotes/other/nope\nrefs/heads/mine\n";
+        let refs = "refs/heads/main\nrefs/heads/kvistcode/fix-ab12cd34\nrefs/heads/feature/x\nrefs/remotes/origin/HEAD\nrefs/remotes/origin/main\nrefs/remotes/origin/release\nrefs/remotes/other/nope\nrefs/heads/mine\n";
         assert_eq!(
             base_candidates(refs, "origin", "mine"),
             vec!["feature/x", "main", "release"]

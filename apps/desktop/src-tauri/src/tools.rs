@@ -1,16 +1,16 @@
-//! Armada's own copies of the agent tools (Claude Code, Codex, Grok): installing them for
+//! Kvistcode's own copies of the agent tools (Claude Code, Codex, Grok): installing them for
 //! the providers you use, and keeping them up to date by themselves.
 //!
-//! Armada prefers its own copy over anything on the system (see
-//! `armada_core::providers::find_cli`), so sign-in, status and agents never depend on the
+//! Kvistcode prefers its own copy over anything on the system (see
+//! `kvistcode_core::providers::find_cli`), so sign-in, status and agents never depend on the
 //! system's PATH, launcher scripts or versions. The versions in `providers.rs` are the
 //! tested baseline; newer releases come from the npm registry on their own schedule.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use armada_core::toolchain::{self, Log, UpdateTarget};
-use armada_core::{AgentStatus, ArmadaEvent, Core, Provider};
+use kvistcode_core::toolchain::{self, Log, UpdateTarget};
+use kvistcode_core::{AgentStatus, Core, KvistcodeEvent, Provider};
 use tauri::Manager;
 
 type AppHandle = tauri::AppHandle<crate::Rt>;
@@ -63,10 +63,11 @@ fn busy(core: &Core, provider: Provider) -> bool {
     })
 }
 
-/// A provider Armada should have its own copy of: one that's installed on the system,
+/// A provider Kvistcode should have its own copy of: one that's installed on the system,
 /// or that has agents here. (Others get theirs when the user clicks Install.)
 fn in_use(core: &Core, provider: Provider) -> bool {
-    armada_core::providers::resolve_program(armada_core::providers::cli_name(provider)).is_some()
+    kvistcode_core::providers::resolve_program(kvistcode_core::providers::cli_name(provider))
+        .is_some()
         || core
             .agents()
             .unwrap_or_default()
@@ -77,7 +78,7 @@ fn in_use(core: &Core, provider: Provider) -> bool {
 async fn refresh(app: &AppHandle) {
     let providers = app.state::<Shell>().refresh_providers().await;
     app.state::<Core>()
-        .emit(ArmadaEvent::ProvidersChanged { providers });
+        .emit(KvistcodeEvent::ProvidersChanged { providers });
 }
 
 /// One round: install missing copies, check for updates, apply them when allowed.
@@ -87,7 +88,7 @@ async fn maintain(app: &AppHandle) -> Duration {
     let core = app.state::<Core>().inner().clone();
     let mut wait = CHECK_EVERY;
 
-    // 1. Armada's own copy for every provider in use that lacks one (or has an older one
+    // 1. Kvistcode's own copy for every provider in use that lacks one (or has an older one
     //    than the tested baseline).
     for provider in Provider::ALL {
         if toolchain::needs_install(provider, &data_dir) && in_use(&core, provider) {
@@ -95,7 +96,10 @@ async fn maintain(app: &AppHandle) -> Duration {
                 wait = RETRY_EVERY;
                 continue;
             }
-            info!(provider = provider.as_str(), "installing Armada's own copy");
+            info!(
+                provider = provider.as_str(),
+                "installing Kvistcode's own copy"
+            );
             if let Err(e) = toolchain::install(provider, &data_dir, log()).await {
                 warn!(provider = provider.as_str(), "couldn't install: {e:#}");
                 wait = RETRY_EVERY;

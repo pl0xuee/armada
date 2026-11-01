@@ -227,7 +227,7 @@ function DeleteDialog({ agent, onClose }: { agent: Agent | null; onClose: () => 
       description={
         agent ? (
           <>
-            “{agent.title}” and its history will be removed from Armada. The provider's own session files are left
+            “{agent.title}” and its history will be removed from Kvistcode. The provider's own session files are left
             untouched.
           </>
         ) : null
@@ -246,7 +246,7 @@ function DeleteDialog({ agent, onClose }: { agent: Agent | null; onClose: () => 
             Also remove the worktree
             <span className="mt-0.5 block font-mono text-[11px] text-steel">{agent.branch}</span>
             <span className="mt-1 block text-[11.5px] text-steel">
-              If it has uncommitted or unmerged work, Armada checks with you before discarding it.
+              If it has uncommitted or unmerged work, Kvistcode checks with you before discarding it.
             </span>
           </span>
         </label>

@@ -2,13 +2,13 @@ use std::path::PathBuf;
 
 /// Shown if the mobile companion (apps/remote) hasn't been built yet. Only allowed in
 /// debug builds, or in release builds that explicitly opt in with
-/// `ARMADA_ALLOW_MISSING_REMOTE=1`.
+/// `KVISTCODE_ALLOW_MISSING_REMOTE=1`.
 const PLACEHOLDER: &str = r#"<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Armada</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Kvistcode</title>
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0B0D10;color:#E6EAEF;
 font:16px/1.5 system-ui,sans-serif;padding:24px;text-align:center}code{color:#4FC3F7}</style></head>
-<body><div><h1>Armada</h1><p>The mobile companion wasn't included in this build.<br>
-Run <code>npm run build</code> in <code>apps/remote</code> and rebuild Armada.</p></div></body></html>"#;
+<body><div><h1>Kvistcode</h1><p>The mobile companion wasn't included in this build.<br>
+Run <code>npm run build</code> in <code>apps/remote</code> and rebuild Kvistcode.</p></div></body></html>"#;
 
 fn main() {
     let manifest_dir =
@@ -16,12 +16,12 @@ fn main() {
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR")).join("remote.html");
     let built = manifest_dir.join("../../remote/dist/index.html");
     println!("cargo:rerun-if-changed={}", built.display());
-    println!("cargo:rerun-if-env-changed=ARMADA_ALLOW_MISSING_REMOTE");
+    println!("cargo:rerun-if-env-changed=KVISTCODE_ALLOW_MISSING_REMOTE");
 
     // Commit of this build for the diagnostics report (set it explicitly to override; a
     // source tree without git reports "unknown"). Not tracked for reruns: CI builds are clean.
-    println!("cargo:rerun-if-env-changed=ARMADA_GIT_SHA");
-    if std::env::var_os("ARMADA_GIT_SHA").is_none() {
+    println!("cargo:rerun-if-env-changed=KVISTCODE_GIT_SHA");
+    if std::env::var_os("KVISTCODE_GIT_SHA").is_none() {
         let sha = std::process::Command::new("git")
             .args(["rev-parse", "--short=12", "HEAD"])
             .current_dir(&manifest_dir)
@@ -31,7 +31,7 @@ fn main() {
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit()));
         if let Some(sha) = sha {
-            println!("cargo:rustc-env=ARMADA_GIT_SHA={sha}");
+            println!("cargo:rustc-env=KVISTCODE_GIT_SHA={sha}");
         }
     }
 
@@ -40,12 +40,13 @@ fn main() {
         Err(e) => {
             // PROFILE is "release" for release and every profile inheriting from it.
             let release = std::env::var("PROFILE").as_deref() == Ok("release");
-            let allow_missing = std::env::var("ARMADA_ALLOW_MISSING_REMOTE").as_deref() == Ok("1");
+            let allow_missing =
+                std::env::var("KVISTCODE_ALLOW_MISSING_REMOTE").as_deref() == Ok("1");
             if release && !allow_missing {
                 panic!(
                     "the mobile companion is missing ({}: {e}). Build it with \
                      `npm ci && npm run build` in apps/remote, or set \
-                     ARMADA_ALLOW_MISSING_REMOTE=1 to ship a placeholder page instead.",
+                     KVISTCODE_ALLOW_MISSING_REMOTE=1 to ship a placeholder page instead.",
                     built.display()
                 );
             }

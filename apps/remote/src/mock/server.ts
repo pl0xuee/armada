@@ -470,7 +470,7 @@ export class MockBackend implements Backend {
       cwd: req.projectPath,
       worktree: !!req.worktree,
       groupId: req.groupId ?? null,
-      branch: req.worktree ? `armada/${id}` : null,
+      branch: req.worktree ? `kvistcode/${id}` : null,
       status: "starting",
       running: true,
       archived: false,

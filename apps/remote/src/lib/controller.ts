@@ -165,7 +165,7 @@ function invalidLinkToast() {
   });
 }
 
-/** What this device is called in Armada's list of paired devices. */
+/** What this device is called in Kvistcode's list of paired devices. */
 function deviceName(): string {
   const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
   if (/iPad/.test(ua)) return "iPad";
@@ -183,7 +183,7 @@ export async function pairWithCode(code: string, quiet = false) {
   const gen = ++generation;
   connection?.stop();
   connection = null;
-  // Retries from the "can't reach Armada" screen stay on it (no flash of the boot screen).
+  // Retries from the "can't reach Kvistcode" screen stay on it (no flash of the boot screen).
   if (!quiet)
     setState({ phase: "boot", blockedReason: null, blockedMessage: null });
   try {
@@ -251,7 +251,7 @@ export async function pairWithToken(token: string) {
   await connect({ token, source: "candidate" });
 }
 
-/** Retry from the "can't reach Armada" / rate-limited screens (stays on that screen until it works). */
+/** Retry from the "can't reach Kvistcode" / rate-limited screens (stays on that screen until it works). */
 export async function retryConnect() {
   if (
     pendingPair &&
@@ -259,7 +259,7 @@ export async function retryConnect() {
     !current
   )
     return pairWithCode(pendingPair.code, true);
-  // A code that expired while Armada was unreachable: this device may already be
+  // A code that expired while Kvistcode was unreachable: this device may already be
   // paired, so keep using its own pairing rather than dropping to the pairing screen.
   const expiredCode = pendingPair !== null;
   pendingPair = null;
@@ -288,7 +288,7 @@ async function connect(ref: TokenRef, quiet = false) {
       throw new ApiError(
         502,
         null,
-        "Armada sent a response this app couldn't read.",
+        "Kvistcode sent a response this app couldn't read.",
       );
     }
     // Only now is the token known to be good.
@@ -704,7 +704,7 @@ export async function refreshState() {
       throw new ApiError(
         502,
         null,
-        "Armada sent a response this app couldn't read.",
+        "Kvistcode sent a response this app couldn't read.",
       );
     }
     const agents: Record<string, Agent> = {};
@@ -833,7 +833,7 @@ export async function loadTimeline(agentId: string) {
       throw new ApiError(
         502,
         null,
-        "Armada sent a response this app couldn't read.",
+        "Kvistcode sent a response this app couldn't read.",
       );
     const snapshot = raw.filter(
       (i) => i && typeof i.id === "string" && typeof i.kind === "string",
@@ -915,7 +915,7 @@ export async function loadOlder(agentId: string) {
       throw new ApiError(
         502,
         null,
-        "Armada sent a response this app couldn't read.",
+        "Kvistcode sent a response this app couldn't read.",
       );
     // Older servers ignore paging and send everything: keep only what's older.
     const page = raw
@@ -999,7 +999,7 @@ export async function loadPermissions() {
       throw new ApiError(
         502,
         null,
-        "Armada sent a response this app couldn't read.",
+        "Kvistcode sent a response this app couldn't read.",
       );
     const permissions: Record<string, PendingItem> = {};
     for (const it of raw)
@@ -1884,7 +1884,7 @@ export async function createAgent(
     throw new ApiError(
       502,
       null,
-      "Armada sent a response this app couldn't read.",
+      "Kvistcode sent a response this app couldn't read.",
     );
   setState((s) => ({ agents: { ...s.agents, [agent.id]: agent } }));
   return agent.id;

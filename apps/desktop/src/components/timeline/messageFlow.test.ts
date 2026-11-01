@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ArmadaEvent, TimelineItem } from "@/lib/types";
+import type { KvistcodeEvent, TimelineItem } from "@/lib/types";
 import { reduceItems, type ItemEvent } from "@/store/app";
 import { joinMessageText, runText, stitchMessages } from "./messageFlow";
 
@@ -135,4 +135,4 @@ describe("a streaming reply interrupted by another event", () => {
 });
 
 // Keeps the import used by the type-only event cast above.
-export type _Unused = ArmadaEvent;
+export type _Unused = KvistcodeEvent;

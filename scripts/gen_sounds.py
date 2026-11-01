@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthesize Armada's original attention sounds (CC0).
+"""Synthesize Kvistcode's original attention sounds (CC0).
 
 Pure Python stdlib. Writes 44.1 kHz / 16-bit / mono WAVs into
 apps/desktop/src-tauri/sounds/:

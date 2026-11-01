@@ -212,7 +212,7 @@ export function ProjectPermissions({
       {locked && (
         <div className="rounded-xl border border-err/30 bg-err/8 px-4 py-3">
           <div className="flex items-center gap-2 text-[13px] font-medium text-err">
-            <FileLock2 className="h-4 w-4" /> Armada won't edit this file
+            <FileLock2 className="h-4 w-4" /> Kvistcode won't edit this file
           </div>
           <p className="mt-1 break-words text-[12.5px] text-muted">{file.error}</p>
           <p className="mt-1 text-[11.5px] text-steel">{prettyPath(file.path)}</p>

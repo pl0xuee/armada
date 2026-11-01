@@ -6,8 +6,8 @@
 //! locations or contents, images, thoughts, plans, notices or permission requests
 //! (whose raw input can hold anything the agent was about to run).
 
-use armada_core::redact::redact_secrets;
-use armada_core::{ItemBody, TimelineItem};
+use kvistcode_core::redact::redact_secrets;
+use kvistcode_core::{ItemBody, TimelineItem};
 
 /// Rewrites absolute paths in `text`: paths under one of `roots` become
 /// project-relative, any other absolute path (or `~/…`) is reduced to its file name.
@@ -183,7 +183,7 @@ pub fn mentions_path(visible: &[TimelineItem], path: &str, relative: Option<&str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use armada_core::{FileDiff, ToolKind, ToolStatus};
+    use kvistcode_core::{FileDiff, ToolKind, ToolStatus};
 
     fn item(body: ItemBody) -> TimelineItem {
         TimelineItem {
@@ -301,7 +301,7 @@ mod tests {
             // A reply that is only a picture.
             ItemBody::AgentMessage {
                 text: String::new(),
-                images: vec![armada_core::Attachment {
+                images: vec![kvistcode_core::Attachment {
                     name: "image".into(),
                     mime_type: "image/png".into(),
                     data: "AAAA".into(),
@@ -309,7 +309,7 @@ mod tests {
             },
             ItemBody::Plan { entries: vec![] },
             ItemBody::Notice {
-                level: armada_core::NoticeLevel::Info,
+                level: kvistcode_core::NoticeLevel::Info,
                 text: "/home/me/proj failed".into(),
             },
         ];

@@ -17,7 +17,7 @@ import type {
   AgentDiff,
   AppState,
   Attachment,
-  ArmadaEvent,
+  KvistcodeEvent,
   AttentionReason,
   CreateAccountRequest,
   CommitSummary,
@@ -68,7 +68,7 @@ import type { InstructionSave, SkillDoc, SkillInfo, SkillScope } from "./toolkit
 import { onVoiceBus } from "./voiceBus";
 import type { VaEvent } from "./voiceAssistant";
 
-export const EVENT_CHANNEL = "armada://event";
+export const EVENT_CHANNEL = "kvistcode://event";
 
 export interface ListItemsOptions {
   beforeSeq?: number;
@@ -76,10 +76,10 @@ export interface ListItemsOptions {
 }
 
 /**
- * The browser mock ships only in dev, or in builds with VITE_ARMADA_MOCK=1 (for UI review);
+ * The browser mock ships only in dev, or in builds with VITE_KVISTCODE_MOCK=1 (for UI review);
  * otherwise this is statically false and the mock chunk is dropped from the bundle.
  */
-const MOCK_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ARMADA_MOCK === "1";
+const MOCK_ENABLED = import.meta.env.DEV || import.meta.env.VITE_KVISTCODE_MOCK === "1";
 
 export const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -415,7 +415,7 @@ const tauriApi = {
   vaVoices: () => invoke<string[]>("va_voices"),
 };
 
-export type ArmadaApi = typeof tauriApi;
+export type KvistcodeApi = typeof tauriApi;
 
 type AnyAsyncFn = (...args: unknown[]) => Promise<unknown>;
 
@@ -423,15 +423,15 @@ let mockModule: Promise<typeof import("./mock")> | null = null;
 const loadMock = (): Promise<typeof import("./mock")> =>
   MOCK_ENABLED
     ? (mockModule ??= import("./mock"))
-    : Promise.reject(new Error("Armada's core isn't available here. Open the Armada desktop app."));
+    : Promise.reject(new Error("Kvistcode's core isn't available here. Open the Kvistcode desktop app."));
 
 /** Same surface as `tauriApi`, each call forwarded to the lazily loaded mock backend. */
-function createMockProxy(): ArmadaApi {
+function createMockProxy(): KvistcodeApi {
   const out: Record<string, AnyAsyncFn> = {};
-  for (const key of Object.keys(tauriApi) as (keyof ArmadaApi)[]) {
+  for (const key of Object.keys(tauriApi) as (keyof KvistcodeApi)[]) {
     out[key] = (...args: unknown[]) => loadMock().then((m) => (m.mockApi[key] as unknown as AnyAsyncFn)(...args));
   }
-  return out as unknown as ArmadaApi;
+  return out as unknown as KvistcodeApi;
 }
 
 export interface PreviewProxyInfo {
@@ -447,16 +447,16 @@ export interface PortFamilies {
   v6: boolean;
 }
 
-export const api: ArmadaApi = isTauri() ? tauriApi : createMockProxy();
+export const api: KvistcodeApi = isTauri() ? tauriApi : createMockProxy();
 
-export function onArmadaEvent(cb: (e: ArmadaEvent) => void): Promise<UnlistenFn> {
+export function onKvistcodeEvent(cb: (e: KvistcodeEvent) => void): Promise<UnlistenFn> {
   // The core batches events: a payload is an array per dispatcher cycle (a single object is accepted too).
-  const deliver = (payload: ArmadaEvent | ArmadaEvent[]) => {
+  const deliver = (payload: KvistcodeEvent | KvistcodeEvent[]) => {
     if (Array.isArray(payload)) for (const e of payload) cb(e);
     else cb(payload);
   };
   if (!isTauri()) return loadMock().then((m) => m.subscribeMock(deliver));
-  return listen<ArmadaEvent | ArmadaEvent[]>(EVENT_CHANNEL, (e) => deliver(e.payload));
+  return listen<KvistcodeEvent | KvistcodeEvent[]>(EVENT_CHANNEL, (e) => deliver(e.payload));
 }
 
 /** Voice events: microphone level while recording, model download progress, the length limit. */

@@ -14,7 +14,7 @@ describe("errors", () => {
     expect(describeStatus(429, "Too many open connections for this device or link.")).toMatch(/Too many open connections/);
     expect(describeStatus(503, "Remote access was turned off.")).toBe("Remote access was turned off.");
     expect(describeStatus(421, "Unexpected host.")).toMatch(/QR code or the LAN address/);
-    expect(describeStatus(400, "Armada is shutting down")).toMatch(/shutting down on your computer/);
+    expect(describeStatus(400, "Kvistcode is shutting down")).toMatch(/shutting down on your computer/);
   });
 });
 
@@ -94,7 +94,7 @@ describe("big diffs", () => {
 describe("fleet search", () => {
   it("matches title, project, branch and last message", () => {
     const a = (id: string, extra: Partial<Agent>) => ({ id, title: id, lastMessage: null, branch: null, projectPath: "/x", ...extra }) as Agent;
-    const list = [a("Fix auth", {}), a("b", { projectPath: "/code/billing" }), a("c", { branch: "armada/auth-fix" }), a("d", { lastMessage: "tests pass" })];
+    const list = [a("Fix auth", {}), a("b", { projectPath: "/code/billing" }), a("c", { branch: "kvistcode/auth-fix" }), a("d", { lastMessage: "tests pass" })];
     expect(filterAgents(list, "auth").map((x) => x.id)).toEqual(["Fix auth", "c"]);
     expect(filterAgents(list, "BILLING").map((x) => x.id)).toEqual(["b"]);
     expect(filterAgents(list, "  ").length).toBe(4);

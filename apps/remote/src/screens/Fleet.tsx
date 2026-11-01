@@ -70,7 +70,7 @@ export function Fleet() {
         icon="sparkle"
         tone="accent"
         title="No agents yet"
-        body="Start one from here with New agent, or in Armada on your computer."
+        body="Start one from here with New agent, or in Kvistcode on your computer."
       />
     );
   } else {
@@ -142,7 +142,7 @@ export function Fleet() {
           <div className="flex min-w-0 items-center gap-2.5 pl-2.5">
             <AppMark size={24} />
             <div className="min-w-0">
-              <h1 className="text-[17px] leading-tight font-semibold tracking-[-0.01em] text-fg">Armada</h1>
+              <h1 className="text-[17px] leading-tight font-semibold tracking-[-0.01em] text-fg">Kvistcode</h1>
               {stateStatus === "ready" && (
                 <p className="truncate text-[12px] leading-tight text-muted">
                   {plural(active, "agent")}
@@ -416,7 +416,7 @@ function SettingsSheet({ open, onClose }: { open: boolean; onClose: () => void }
         onClose();
       }}
       title="This device"
-      description="Armada Remote"
+      description="Kvistcode Remote"
     >
       <dl className="divide-y divide-line/70">
         <Row label="Connected to">
@@ -426,7 +426,7 @@ function SettingsSheet({ open, onClose }: { open: boolean; onClose: () => void }
           <ConnectionPill />
         </Row>
         <Row label="Access">{session?.scope === "owner" ? "Full control" : "Read-only"}</Row>
-        {session?.version && <Row label="Armada version">{session.version}</Row>}
+        {session?.version && <Row label="Kvistcode version">{session.version}</Row>}
       </dl>
       {installTipApplies() && (
         <div className="mt-4">

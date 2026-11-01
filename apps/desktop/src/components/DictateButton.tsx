@@ -201,7 +201,7 @@ export function VoiceSetupDialog() {
       >
         <DialogBody className="space-y-3 text-[12.5px] text-muted">
           <p>
-            Armada needs to download a speech model once
+            Kvistcode needs to download a speech model once
             {model ? (
               <>
                 : <span className="text-fg">{model.label}</span> ({formatBytes(model.sizeBytes)}).
@@ -209,7 +209,7 @@ export function VoiceSetupDialog() {
             ) : (
               "."
             )}{" "}
-            It is saved in Armada's data folder and checked against a known checksum. Your audio never leaves this
+            It is saved in Kvistcode's data folder and checked against a known checksum. Your audio never leaves this
             computer and is never saved.
           </p>
           <p>You can pick a different model, a language or a microphone in Settings.</p>

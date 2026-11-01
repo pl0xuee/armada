@@ -92,7 +92,7 @@ export function TemplatesSection({ templates }: { templates: PromptTemplate[] })
             title="No templates yet"
             description={
               <>
-                Save prompts you use often. Add <code className="font-mono text-fg">{"{{fields}}"}</code> and Armada
+                Save prompts you use often. Add <code className="font-mono text-fg">{"{{fields}}"}</code> and Kvistcode
                 asks for them when you insert the template.
               </>
             }

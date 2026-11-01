@@ -471,69 +471,69 @@
   }
 
   /* Agent markdown */
-  .prose-armada {
+  .prose-kvistcode {
     color: var(--text-1);
     font-size: 13.5px;
     line-height: 1.65;
     overflow-wrap: anywhere;
   }
-  .prose-armada > * + * {
+  .prose-kvistcode > * + * {
     margin-top: 0.7em;
   }
   /* Streaming renders one wrapper per block; keep the same rhythm. */
-  .prose-armada .md-block > * + *,
-  .prose-armada .md-block + .md-block > :first-child {
+  .prose-kvistcode .md-block > * + *,
+  .prose-kvistcode .md-block + .md-block > :first-child {
     margin-top: 0.7em;
   }
-  .prose-armada h1,
-  .prose-armada h2,
-  .prose-armada h3,
-  .prose-armada h4 {
+  .prose-kvistcode h1,
+  .prose-kvistcode h2,
+  .prose-kvistcode h3,
+  .prose-kvistcode h4 {
     font-weight: 600;
     letter-spacing: -0.015em;
     line-height: 1.3;
     margin-top: 1.1em;
   }
-  .prose-armada h1 {
+  .prose-kvistcode h1 {
     font-size: 1.25em;
   }
-  .prose-armada h2 {
+  .prose-kvistcode h2 {
     font-size: 1.12em;
   }
-  .prose-armada h3,
-  .prose-armada h4 {
+  .prose-kvistcode h3,
+  .prose-kvistcode h4 {
     font-size: 1em;
   }
-  .prose-armada > :first-child {
+  .prose-kvistcode > :first-child {
     margin-top: 0;
   }
-  .prose-armada a {
+  .prose-kvistcode a {
     color: var(--accent);
     text-decoration: underline;
     text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
     text-underline-offset: 3px;
   }
-  .prose-armada strong {
+  .prose-kvistcode strong {
     font-weight: 600;
     color: var(--text-1);
   }
-  .prose-armada ul,
-  .prose-armada ol {
+  .prose-kvistcode ul,
+  .prose-kvistcode ol {
     padding-left: 1.3em;
   }
-  .prose-armada ul {
+  .prose-kvistcode ul {
     list-style: disc;
   }
-  .prose-armada ol {
+  .prose-kvistcode ol {
     list-style: decimal;
   }
-  .prose-armada li + li {
+  .prose-kvistcode li + li {
     margin-top: 0.25em;
   }
-  .prose-armada li::marker {
+  .prose-kvistcode li::marker {
     color: var(--steel);
   }
-  .prose-armada :not(pre) > code {
+  .prose-kvistcode :not(pre) > code {
     font-family: var(--font-mono);
     font-size: 0.86em;
     padding: 0.12em 0.4em;
@@ -542,35 +542,35 @@
     border: 1px solid var(--border);
     color: color-mix(in srgb, var(--text-1) 88%, var(--accent));
   }
-  .prose-armada blockquote {
+  .prose-kvistcode blockquote {
     border-left: 2px solid var(--gunmetal);
     padding-left: 0.9em;
     color: var(--text-2);
   }
-  .prose-armada hr {
+  .prose-kvistcode hr {
     border-color: var(--border);
   }
-  .prose-armada table {
+  .prose-kvistcode table {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.92em;
     display: block;
     overflow-x: auto;
   }
-  .prose-armada th,
-  .prose-armada td {
+  .prose-kvistcode th,
+  .prose-kvistcode td {
     border: 1px solid var(--border);
     padding: 0.35em 0.7em;
     text-align: left;
   }
-  .prose-armada .md-table {
+  .prose-kvistcode .md-table {
     margin-top: 0.7em;
   }
-  .prose-armada th {
+  .prose-kvistcode th {
     background: var(--bg-3);
     font-weight: 600;
   }
-  .prose-armada input[type="checkbox"] {
+  .prose-kvistcode input[type="checkbox"] {
     margin-right: 0.4em;
     accent-color: var(--accent);
   }

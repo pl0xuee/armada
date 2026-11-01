@@ -1,6 +1,6 @@
-// Shared contract between the React UI and the Rust core (crates/armada-core).
+// Shared contract between the React UI and the Rust core (crates/kvistcode-core).
 // Field names are camelCase on the wire; Rust uses #[serde(rename_all = "camelCase")].
-// Keep this file in sync with crates/armada-core/src/model.rs.
+// Keep this file in sync with crates/kvistcode-core/src/model.rs.
 
 export type Provider = "claude" | "codex" | "grok" | "local" | "custom";
 
@@ -360,7 +360,7 @@ export type TimelineKind = TimelineItem["kind"];
 
 export type AttentionReason = "permission" | "done" | "error";
 
-export type ArmadaEvent =
+export type KvistcodeEvent =
   | { type: "agent_updated"; agent: Agent }
   | { type: "agent_removed"; agentId: string }
   | { type: "item_upserted"; item: TimelineItem }
@@ -413,11 +413,11 @@ export interface ProviderInfo {
   displayName: string; // "Claude", "ChatGPT (Codex)", "Grok"
   cliName: string; // "claude", "codex", "grok"
   installed: boolean;
-  /** Armada's own copy is the one in use (false = a system install, or none). */
+  /** Kvistcode's own copy is the one in use (false = a system install, or none). */
   managed: boolean;
-  /** Version of Armada's own copy of the agent package (Claude: the ACP adapter); null if not installed. */
+  /** Version of Kvistcode's own copy of the agent package (Claude: the ACP adapter); null if not installed. */
   managedVersion: string | null;
-  /** The version Armada was tested with: the way back from a bad update. */
+  /** The version Kvistcode was tested with: the way back from a bad update. */
   testedVersion: string | null;
   /** Newest release found by the last update check. */
   latestVersion: string | null;
@@ -446,7 +446,7 @@ export interface SoundSettings {
   onPermission: boolean;
   onDone: boolean;
   onError: boolean;
-  /** Custom sound file paths (wav/ogg/mp3/flac); null = Armada's sound. */
+  /** Custom sound file paths (wav/ogg/mp3/flac); null = Kvistcode's sound. */
   customPermission: string | null;
   customDone: string | null;
   customError: string | null;
@@ -668,7 +668,7 @@ export interface RemoteSettings {
   enabled: boolean;
   lan: boolean;
   port: number;
-  /** Reach Armada over Tailscale (Tailscale Serve, HTTPS); never together with `lan`. */
+  /** Reach Kvistcode over Tailscale (Tailscale Serve, HTTPS); never together with `lan`. */
   tailscale?: boolean;
   /** The address LAN access listens on; null picks automatically (Wi-Fi/Ethernet first). */
   lanAddress?: string | null;
@@ -688,7 +688,7 @@ export interface ShareLink {
   id: string;
   agentId: string;
   agentTitle: string | null;
-  /** The link; only present right after it is created (Armada keeps just a hash). */
+  /** The link; only present right after it is created (Kvistcode keeps just a hash). */
   url: string | null;
   createdAt: number;
   /** Unix ms; the link stops working then. */
@@ -968,7 +968,7 @@ export interface RepoInfo {
 
 export interface PublishResult {
   url: string;
-  /** Short hash of the first commit, when Armada had to make one. */
+  /** Short hash of the first commit, when Kvistcode had to make one. */
   committed: string | null;
   /** Secret-looking files left out of that first commit. */
   leftOut: string[];

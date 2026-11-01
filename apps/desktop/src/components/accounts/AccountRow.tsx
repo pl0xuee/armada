@@ -282,10 +282,10 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
           description={
             <>
               {local ? (
-                "Armada will forget this server and delete its profile directory. Your models stay where they are."
+                "Kvistcode will forget this server and delete its profile directory. Your models stay where they are."
               ) : (
                 <>
-                  Armada will delete this profile's isolated config directory
+                  Kvistcode will delete this profile's isolated config directory
                   {account.authKind === "api_key"
                     ? " and remove its API key from your OS keychain"
                     : " and its saved login"}

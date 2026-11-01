@@ -34,13 +34,13 @@ const issue = (number: number, title: string, labels: string[] = [], author: str
 });
 
 describe("issue agents", () => {
-  it("finds the issue from the branch armada made", () => {
-    expect(agentIssueNumber({ worktree: true, branch: "armada/issue-42-fix-login-crash-ab12cd34" })).toBe(42);
-    expect(agentIssueNumber({ worktree: true, branch: "armada/issue-7-ab12cd34" })).toBe(7);
-    expect(agentIssueNumber({ worktree: true, branch: "armada/issue-7" })).toBe(7);
-    expect(agentIssueNumber({ worktree: true, branch: "armada/issues-fix-ab12cd34" })).toBeNull();
-    expect(agentIssueNumber({ worktree: true, branch: "armada/fix-issue-42-ab12cd34" })).toBeNull();
-    expect(agentIssueNumber({ worktree: false, branch: "armada/issue-42-x" })).toBeNull();
+  it("finds the issue from the branch kvistcode made", () => {
+    expect(agentIssueNumber({ worktree: true, branch: "kvistcode/issue-42-fix-login-crash-ab12cd34" })).toBe(42);
+    expect(agentIssueNumber({ worktree: true, branch: "kvistcode/issue-7-ab12cd34" })).toBe(7);
+    expect(agentIssueNumber({ worktree: true, branch: "kvistcode/issue-7" })).toBe(7);
+    expect(agentIssueNumber({ worktree: true, branch: "kvistcode/issues-fix-ab12cd34" })).toBeNull();
+    expect(agentIssueNumber({ worktree: true, branch: "kvistcode/fix-issue-42-ab12cd34" })).toBeNull();
+    expect(agentIssueNumber({ worktree: false, branch: "kvistcode/issue-42-x" })).toBeNull();
     expect(agentIssueNumber({ worktree: true, branch: null })).toBeNull();
   });
 });
@@ -52,14 +52,14 @@ describe("prefillPr", () => {
   ];
   it("uses the summary, the size of the change and the issue", () => {
     const out = prefillPr(
-      { title: "Issue #42: Login crashes", lastMessage: "Fixed it.", branch: "armada/issue-42-login-ab12cd34", worktree: true },
+      { title: "Issue #42: Login crashes", lastMessage: "Fixed it.", branch: "kvistcode/issue-42-login-ab12cd34", worktree: true },
       files,
     );
     expect(out.title).toBe("Login crashes");
-    expect(out.body).toBe("## Summary\n\nFixed it.\n\n2 files changed, +15 −2\n\nCloses #42\n\n_Opened from Armada._");
+    expect(out.body).toBe("## Summary\n\nFixed it.\n\n2 files changed, +15 −2\n\nCloses #42\n\n_Opened from Kvistcode._");
   });
   it("is plain without an issue, a summary or a diff", () => {
-    const out = prefillPr({ title: "Tidy", lastMessage: null, branch: "armada/tidy-ab12cd34", worktree: true });
+    const out = prefillPr({ title: "Tidy", lastMessage: null, branch: "kvistcode/tidy-ab12cd34", worktree: true });
     expect(out).toEqual({ title: "Tidy", body: "" });
     expect(prefillPr({ title: "Tidy", lastMessage: "  ", branch: "b", worktree: true }, [files[0]]).body).toContain(
       "1 file changed",

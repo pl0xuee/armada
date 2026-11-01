@@ -8,8 +8,8 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use armada_core::redact::redact_secrets;
-use armada_core::{Agent, Core, Settings};
+use kvistcode_core::redact::redact_secrets;
+use kvistcode_core::{Agent, Core, Settings};
 use tauri::State;
 use tauri_plugin_opener::OpenerExt;
 
@@ -23,7 +23,7 @@ const LOG_LINES: usize = 300;
 const LOG_LINE_MAX: usize = 2000;
 /// Bytes read from the end of one log file.
 const LOG_TAIL_BYTES: u64 = 512 * 1024;
-const LOG_PREFIX: &str = "armada.log";
+const LOG_PREFIX: &str = "kvistcode.log";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 // ---- scrubbing ------------------------------------------------------------------
@@ -221,7 +221,7 @@ pub fn agents_section(agents: &[Agent]) -> String {
 
 async fn probe(program: &Path, args: &[&str]) -> Option<String> {
     let mut cmd = tokio::process::Command::new(program);
-    armada_core::childenv::sanitize_child_env(&mut cmd);
+    kvistcode_core::childenv::sanitize_child_env(&mut cmd);
     cmd.args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -249,7 +249,7 @@ async fn probe(program: &Path, args: &[&str]) -> Option<String> {
 
 async fn tools_section(data_dir: &Path) -> String {
     let mut s = String::new();
-    let node = armada_core::toolchain::usable_node(data_dir).await;
+    let node = kvistcode_core::toolchain::usable_node(data_dir).await;
     let mut entries: Vec<(&str, Option<PathBuf>, Vec<&str>)> = vec![
         ("node", node, vec!["--version"]),
         ("git", which::which("git").ok(), vec!["--version"]),
@@ -362,10 +362,10 @@ fn env_nonempty(k: &str) -> Option<String> {
 
 fn system_section(app_version: &str, data_dir: &Path) -> String {
     let mut s = String::new();
-    let sha = option_env!("ARMADA_GIT_SHA").unwrap_or("unknown");
+    let sha = option_env!("KVISTCODE_GIT_SHA").unwrap_or("unknown");
     let _ = writeln!(
         s,
-        "Armada {app_version} ({}, git {sha})",
+        "Kvistcode {app_version} ({}, git {sha})",
         if cfg!(debug_assertions) {
             "debug"
         } else {
@@ -426,7 +426,7 @@ fn system_section(app_version: &str, data_dir: &Path) -> String {
     s
 }
 
-/// The last `LOG_LINES` lines across Armada's own daily log files, scrubbed.
+/// The last `LOG_LINES` lines across Kvistcode's own daily log files, scrubbed.
 pub fn log_section(log_dir: &Path) -> String {
     let Ok(rd) = std::fs::read_dir(log_dir) else {
         return "(no log files)".into();
@@ -496,7 +496,7 @@ pub struct Inputs<'a> {
 /// Assembles the report and enforces the size cap (the log is what gets trimmed).
 pub fn render(i: &Inputs) -> String {
     let mut head = String::new();
-    let _ = writeln!(head, "# Armada diagnostics\n");
+    let _ = writeln!(head, "# Kvistcode diagnostics\n");
     let _ = writeln!(
         head,
         "Secrets, e-mail addresses and tokens are removed; home folder shown as ~.\n"
@@ -600,7 +600,7 @@ async fn build(app: &AppHandle, core: &Core, shell: &Shell) -> CmdResult<String>
         agents: &agents,
         settings: &settings,
         log,
-        home: armada_core::providers::home_dir(),
+        home: kvistcode_core::providers::home_dir(),
     };
     Ok(render(&inputs))
 }
@@ -628,7 +628,7 @@ pub async fn save_diagnostics(
         .filter(|d| d.is_dir())
         .unwrap_or_else(|| shell.data_dir.clone());
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    let path = dir.join(format!("armada-diagnostics-{stamp}.txt"));
+    let path = dir.join(format!("kvistcode-diagnostics-{stamp}.txt"));
     std::fs::write(&path, report).map_err(|e| format!("Couldn't write {}: {e}", path.display()))?;
     let _ = app.opener().reveal_item_in_dir(&path);
     Ok(path.to_string_lossy().into_owned())
@@ -677,14 +677,14 @@ mod tests {
 
     #[test]
     fn scrub_keeps_ordinary_text() {
-        let t = "INFO armada: agent started in 12 ms (pid 4411) path=/tmp/x/y";
+        let t = "INFO kvistcode: agent started in 12 ms (pid 4411) path=/tmp/x/y";
         assert_eq!(scrub(t), t);
     }
 
     #[test]
     fn settings_hide_webhook_urls_and_project_budgets() {
         let mut s = Settings::default();
-        s.alert_targets.push(armada_core::AlertTarget {
+        s.alert_targets.push(kvistcode_core::AlertTarget {
             id: "t1".into(),
             name: "ops-room".into(),
             url: "https://hooks.slack.com/services/T0/B0/webhooksecret123".into(),
@@ -692,7 +692,7 @@ mod tests {
         });
         s.project_budgets.insert(
             "/home/zed/secret-project".into(),
-            armada_core::budget::BudgetCap {
+            kvistcode_core::budget::BudgetCap {
                 usd: Some(5.0),
                 tokens: None,
             },
@@ -723,7 +723,7 @@ mod tests {
 
     #[test]
     fn report_is_clean_tilded_and_capped() {
-        let dir = std::env::temp_dir().join(format!("armada-diag-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kvistcode-diag-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let mut log = String::new();
@@ -737,7 +737,7 @@ mod tests {
             "WARN mail {} {} {}\n",
             SECRETS[3], SECRETS[4], SECRETS[5]
         ));
-        std::fs::write(dir.join("armada.log.2026-01-01"), &log).unwrap();
+        std::fs::write(dir.join("kvistcode.log.2026-01-01"), &log).unwrap();
         let log_text = log_section(&dir);
         assert!(log_text.lines().count() <= LOG_LINES);
         assert_clean(&log_text);
@@ -746,7 +746,7 @@ mod tests {
         let settings = planted_settings();
         let big = "x ".repeat(400 * 1024);
         let inputs = Inputs {
-            system: "Armada 1.0\nData dir: /home/zed/.local/share/x (1 MB)".into(),
+            system: "Kvistcode 1.0\nData dir: /home/zed/.local/share/x (1 MB)".into(),
             providers: String::new(),
             tools: String::new(),
             accounts: String::new(),

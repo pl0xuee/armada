@@ -174,7 +174,7 @@ export function ProjectInstructions({
                 </pre>
               )}
               <p className="mt-2 text-[11.5px] text-steel">
-                Applies to every project. Edit it in your own editor; Armada doesn't change files outside the project.
+                Applies to every project. Edit it in your own editor; Kvistcode doesn't change files outside the project.
               </p>
             </div>
           )}

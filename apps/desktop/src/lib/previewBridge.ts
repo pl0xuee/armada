@@ -64,7 +64,7 @@ function parseShot(d: Record<string, unknown>): ShotResult {
  * `event.origin` and `event.source` first.
  */
 export function parseAgentMessage(data: unknown, token: string): AgentEvent | null {
-  if (!isObj(data) || data.armada !== "preview" || data.v !== 1 || typeof data.type !== "string") return null;
+  if (!isObj(data) || data.kvistcode !== "preview" || data.v !== 1 || typeof data.type !== "string") return null;
   if (data.type === "hello") return { type: "hello" };
   if (!token || data.token !== token) return null;
   switch (data.type) {

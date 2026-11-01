@@ -7,9 +7,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::AppHandle;
-use armada_core::voice::{self, ModelInfo};
-use armada_core::Core;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use kvistcode_core::voice::{self, ModelInfo};
+use kvistcode_core::Core;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::{Emitter, State};
@@ -499,7 +499,7 @@ pub async fn voice_start(
     let thread = {
         let thread_stop = stop.clone();
         std::thread::Builder::new()
-            .name("armada-dictation-capture".into())
+            .name("kvistcode-dictation-capture".into())
             .spawn(move || run_capture(app, device, thread_stop, tx))
             .map_err(|e| {
                 dict.recording.lock().release(&stop);
@@ -565,7 +565,7 @@ pub async fn voice_cancel(dict: State<'_, Dictation>) -> CmdResult<()> {
 
 fn start_reaper(model: Arc<Mutex<Option<Loaded>>>, busy: Arc<AtomicBool>) {
     let _ = std::thread::Builder::new()
-        .name("armada-dictation-reaper".into())
+        .name("kvistcode-dictation-reaper".into())
         .spawn(move || loop {
             std::thread::sleep(Duration::from_secs(30));
             if busy.load(Ordering::Relaxed) {
@@ -761,13 +761,13 @@ mod tests {
         assert_eq!(clean_transcript("Use [x] here"), "Use [x] here");
     }
 
-    /// Needs a model: ARMADA_TEST_WHISPER_MODEL=/path/ggml-tiny.en.bin and a 16 kHz
-    /// mono 16-bit WAV in ARMADA_TEST_WAV. Run with `-- --ignored`.
+    /// Needs a model: KVISTCODE_TEST_WHISPER_MODEL=/path/ggml-tiny.en.bin and a 16 kHz
+    /// mono 16-bit WAV in KVISTCODE_TEST_WAV. Run with `-- --ignored`.
     #[test]
     #[ignore]
     fn transcribes_a_wav() {
-        let model = std::env::var("ARMADA_TEST_WHISPER_MODEL").expect("model path");
-        let wav = std::fs::read(std::env::var("ARMADA_TEST_WAV").expect("wav path")).unwrap();
+        let model = std::env::var("KVISTCODE_TEST_WHISPER_MODEL").expect("model path");
+        let wav = std::fs::read(std::env::var("KVISTCODE_TEST_WAV").expect("wav path")).unwrap();
         let samples: Vec<f32> = wav[44..]
             .as_chunks::<2>()
             .0
@@ -782,7 +782,7 @@ mod tests {
     }
 
     /// Needs a sound server/device; enumerates only, never records.
-    /// Run with `cargo test -p armada-desktop -- --ignored --nocapture enumerates_input_devices`.
+    /// Run with `cargo test -p kvistcode-desktop -- --ignored --nocapture enumerates_input_devices`.
     #[test]
     #[ignore]
     fn enumerates_input_devices() {

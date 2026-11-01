@@ -171,7 +171,7 @@ function PanelBody() {
               )}
             >
               <span className="mr-1.5 text-[10.5px] font-medium uppercase tracking-wide text-steel">
-                {c.role === "user" ? "You" : "Armada"}
+                {c.role === "user" ? "You" : "Kvistcode"}
               </span>
               {c.text}
             </p>

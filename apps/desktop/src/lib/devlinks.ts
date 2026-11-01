@@ -10,13 +10,13 @@ import type { Settings } from "./types";
 declare global {
   interface Window {
     /** Dev + browser mock only: store handles for automated UI checks. */
-    __armada?: { useApp: typeof useApp; useUi: typeof useUi };
+    __kvistcode?: { useApp: typeof useApp; useUi: typeof useUi };
   }
 }
 
 export function applyDevLinks() {
   if (!import.meta.env.DEV || isTauri()) return;
-  window.__armada = { useApp, useUi };
+  window.__kvistcode = { useApp, useUi };
   const p = new URLSearchParams(location.search);
   const theme = p.get("theme") as Settings["theme"] | null;
   const app = useApp.getState();

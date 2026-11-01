@@ -1,13 +1,13 @@
 //! Project settings: the instruction files, permission rules, hooks, slash commands and
 //! skills Claude Code / Codex already read from a project. The file logic (and its
-//! confinement to the project root) lives in `armada_core::project_config`.
+//! confinement to the project root) lives in `kvistcode_core::project_config`.
 
 use std::path::PathBuf;
 
-use armada_core::project_config::{
+use kvistcode_core::project_config::{
     self, InstructionDoc, PermissionRules, ProjectConfig, SettingsFile, SettingsScope,
 };
-use armada_core::{providers, Core};
+use kvistcode_core::{providers, Core};
 use tauri::State;
 
 pub(crate) type CmdResult<T> = Result<T, String>;
@@ -16,7 +16,7 @@ pub(crate) fn err(e: anyhow::Error) -> String {
     format!("{e:#}")
 }
 
-/// The canonical folder of `project`, which must be one Armada already knows (a recent
+/// The canonical folder of `project`, which must be one Kvistcode already knows (a recent
 /// project or an agent's project), so the UI can't point these commands at any folder.
 pub(crate) fn known_project(core: &Core, project: &str) -> CmdResult<PathBuf> {
     let wanted = providers::expand_home(project.trim());

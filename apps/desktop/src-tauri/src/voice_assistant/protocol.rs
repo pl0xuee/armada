@@ -84,7 +84,7 @@ pub fn function_call_output(call_id: &str, output: &str) -> Value {
     })
 }
 
-/// A note from Armada itself (a trusted system message, not the user and not a tool).
+/// A note from Kvistcode itself (a trusted system message, not the user and not a tool).
 pub fn system_note(text: &str) -> Value {
     json!({
         "type": "conversation.item.create",

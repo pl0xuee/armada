@@ -56,7 +56,7 @@ export function SkillsPanel({ project }: { project: string | null }) {
     <>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <p className="min-w-0 flex-1 basis-[260px] text-[13px] leading-[20px] text-muted">
-          Skills Claude Code can load on demand. To turn one off, move or rename its folder; Armada won't delete or
+          Skills Claude Code can load on demand. To turn one off, move or rename its folder; Kvistcode won't delete or
           change your files.
         </p>
         <div className="flex shrink-0 gap-1.5">

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Least-privilege permissions for the main Armada window. App commands (invoke) are allowed by default; plugins used only from Rust (opener, autostart, global-shortcut, updater, dialog save) need no webview grants.",
+  "description": "Least-privilege permissions for the main Kvistcode window. App commands (invoke) are allowed by default; plugins used only from Rust (opener, autostart, global-shortcut, updater, dialog save) need no webview grants.",
   "windows": [
     "main"
   ],

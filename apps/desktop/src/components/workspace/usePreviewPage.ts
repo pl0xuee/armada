@@ -145,7 +145,7 @@ export function usePreviewPage(opts: {
     const s = sessionRef.current;
     const win = iframeRef.current?.contentWindow;
     if (!s || !win) return false;
-    win.postMessage({ armada: "preview-parent", token: s.token, ...msg }, s.origin);
+    win.postMessage({ kvistcode: "preview-parent", token: s.token, ...msg }, s.origin);
     return true;
   }, []);
 
@@ -173,7 +173,7 @@ export function usePreviewPage(opts: {
       switch (ev.type) {
         case "hello":
           // A new document: hand over the token (only to the proxy origin), forget the old page's problems.
-          (e.source as Window).postMessage({ armada: "preview-parent", token: session.token, cmd: "init" }, session.origin);
+          (e.source as Window).postMessage({ kvistcode: "preview-parent", token: session.token, cmd: "init" }, session.origin);
           setEntries([]);
           setInspecting(false);
           break;

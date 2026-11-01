@@ -140,7 +140,7 @@ export function Review({ agentId }: { agentId: string }) {
           {diff.truncated && (
             <p className="flex items-start gap-2 rounded-xl border border-line bg-panel px-3 py-2.5 text-[13px] text-muted">
               <Icon name="info" size={16} className="mt-px shrink-0" />
-              The patch is too large to show in full here. Review the rest in Armada on your computer.
+              The patch is too large to show in full here. Review the rest in Kvistcode on your computer.
             </p>
           )}
         </section>

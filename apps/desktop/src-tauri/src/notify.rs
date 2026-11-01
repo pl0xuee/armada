@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use crate::AppHandle;
 use anyhow::Context;
-use armada_core::{
+use kvistcode_core::{
     AttentionReason, Core, ItemBody, NavigateTarget, PermissionOption, PermissionOptionKind,
 };
 use tauri::Manager;
@@ -30,7 +30,7 @@ pub struct Toast {
 /// platform call).
 pub fn show(app: AppHandle, icon: Option<PathBuf>, toast: Toast) {
     let spawned = std::thread::Builder::new()
-        .name("armada-notify".into())
+        .name("kvistcode-notify".into())
         .spawn(move || show_blocking(app, icon, toast));
     if let Err(e) = spawned {
         warn!("could not spawn notification thread: {e}");
@@ -48,7 +48,7 @@ pub fn close_for_request(request_id: &str) {
     {
         let request_id = request_id.to_string();
         let spawned = std::thread::Builder::new()
-            .name("armada-notify-close".into())
+            .name("kvistcode-notify-close".into())
             .spawn(move || xdg::close_for_request(&request_id));
         if let Err(e) = spawned {
             warn!("could not spawn notification thread: {e}");
@@ -84,7 +84,7 @@ fn has_hidden_chars(s: &str) -> bool {
 
 /// The notification body for a permission request and whether it may offer Approve/Deny.
 /// A short command is shown whole, so Approve is never pressed on a clipped command; a long
-/// (or already truncated) one gets only "Open in Armada" and a note.
+/// (or already truncated) one gets only "Open in Kvistcode" and a note.
 #[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
 fn request_body(title: &str, command: Option<&str>) -> (String, bool) {
     let command = command.map(str::trim).filter(|c| !c.is_empty());
@@ -103,7 +103,7 @@ fn request_body(title: &str, command: Option<&str>) -> (String, bool) {
         let head: String = title.chars().take(80).collect();
         let head = head.lines().next().unwrap_or("");
         return (
-            format!("{head}\nLong command \u{2014} review it in Armada"),
+            format!("{head}\nLong command \u{2014} review it in Kvistcode"),
             false,
         );
     }
@@ -168,8 +168,8 @@ mod xdg {
     use std::time::{Duration, Instant};
 
     use crate::AppHandle;
-    use armada_core::{AttentionReason, NavigateTarget};
     use futures_util::StreamExt;
+    use kvistcode_core::{AttentionReason, NavigateTarget};
     use parking_lot::Mutex;
     use tracing::{debug, warn};
     use zbus::zvariant::Variant;
@@ -291,7 +291,7 @@ mod xdg {
         let alive = Arc::new(AtomicBool::new(true));
         let listener_alive = alive.clone();
         std::thread::Builder::new()
-            .name("armada-notify-actions".into())
+            .name("kvistcode-notify-actions".into())
             .spawn(move || {
                 zbus::block_on(async {
                     while let Some(msg) = signals.next().await {
@@ -426,7 +426,7 @@ mod xdg {
             Some(DEST),
             "Notify",
             &(
-                "Armada",
+                "Kvistcode",
                 replaces,
                 icon,
                 title,
@@ -499,7 +499,7 @@ mod xdg {
                 actions.extend(["approve", "Approve", "deny", "Deny"]);
             }
             // "default" = clicking the notification body on most servers.
-            actions.extend(["default", "Open Armada", "open", "Open"]);
+            actions.extend(["default", "Open Kvistcode", "open", "Open"]);
         }
         let icon = icon
             .map(|p| p.to_string_lossy().into_owned())
@@ -568,7 +568,9 @@ fn show_blocking(app: AppHandle, _icon: Option<PathBuf>, toast: Toast) {
     use notify_rust::Notification;
 
     let mut n = Notification::new();
-    n.appname("Armada").summary(&toast.title).body(&toast.body);
+    n.appname("Kvistcode")
+        .summary(&toast.title)
+        .body(&toast.body);
     #[cfg(target_os = "windows")]
     if !cfg!(debug_assertions) {
         // Installed builds are registered under the bundle identifier (AUMID);
@@ -664,7 +666,7 @@ mod tests {
     #[test]
     #[ignore = "needs a desktop session"]
     fn notify_call_round_trip() {
-        let id = xdg::notify_for_test("Armada test", "Notification check").unwrap();
+        let id = xdg::notify_for_test("Kvistcode test", "Notification check").unwrap();
         assert!(id > 0);
     }
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Armada",
-  "mainBinaryName": "armada",
+  "productName": "Kvistcode",
+  "mainBinaryName": "kvistcode",
   "identifier": "dev.armada.app",
   "build": {
     "devUrl": "http://localhost:1420",
@@ -15,7 +15,7 @@
       {
         "label": "main",
         "create": false,
-        "title": "Armada",
+        "title": "Kvistcode",
         "width": 1440,
         "height": 900,
         "minWidth": 1000,
@@ -54,11 +54,11 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Command center for Claude, Codex and Grok agents",
-    "longDescription": "Armada runs Claude Code, OpenAI Codex, xAI Grok Build and any ACP agent (Gemini CLI, Goose, OpenCode) side by side across multiple accounts, alerts you with sounds and notifications when an agent needs attention, and resumes every agent after the app closes.",
-    "publisher": "Armada contributors",
-    "copyright": "Copyright (c) Armada contributors. MIT License.",
+    "longDescription": "Kvistcode runs Claude Code, OpenAI Codex, xAI Grok Build and any ACP agent (Gemini CLI, Goose, OpenCode) side by side across multiple accounts, alerts you with sounds and notifications when an agent needs attention, and resumes every agent after the app closes.",
+    "publisher": "Kvistcode contributors",
+    "copyright": "Copyright (c) Kvistcode contributors. MIT License.",
     "license": "MIT",
-    "homepage": "https://github.com/pl0xuee/armada",
+    "homepage": "https://github.com/pl0xuee/kvistcode",
     "linux": {
       "deb": {
         "depends": [
@@ -93,7 +93,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJGQzk1MUQ4N0I0RUUyNDQKUldSRTRrNTcyRkhKdjlaM0VPM2NmWDdVQTErdktGOE4rQkx5RE1rNTNQdjRaRWVyNTRQLzdvTW0K",
       "endpoints": [
-        "https://github.com/pl0xuee/armada/releases/latest/download/latest.json"
+        "https://github.com/pl0xuee/kvistcode/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"
