@@ -125,7 +125,7 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-medium">Remote access is off</p>
                 <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted">
-                  Share links are served by Armada's built-in remote server. Choose who can reach it:
+                  Share links are served by Kvistcode's built-in remote server. Choose who can reach it:
                 </p>
                 <div role="radiogroup" aria-label="Who can open the link" className="mt-3 space-y-2">
                   <ScopeOption

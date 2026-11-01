@@ -16,8 +16,8 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use armada_core::redact::redact_secrets;
-use armada_core::{AlertKind, AlertTarget, AttentionReason};
+use kvistcode_core::redact::redact_secrets;
+use kvistcode_core::{AlertKind, AlertTarget, AttentionReason};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tracing::{debug, warn};
@@ -262,7 +262,7 @@ fn text_of(batch: &[AlertEvent]) -> String {
         }
         return s;
     }
-    let mut s = format!("{} updates from Armada", batch.len());
+    let mut s = format!("{} updates from Kvistcode", batch.len());
     for e in batch.iter().take(BATCH_LINES) {
         s.push_str(&format!("\n• {} · {}", e.event.label(), e.who()));
         if !e.summary.is_empty() {
@@ -303,11 +303,11 @@ fn payload(kind: AlertKind, batch: &[AlertEvent]) -> Value {
         AlertKind::Webhook => match batch {
             [one] => {
                 let mut v = one.as_json();
-                v["app"] = "armada".into();
+                v["app"] = "kvistcode".into();
                 v
             }
             _ => json!({
-                "app": "armada",
+                "app": "kvistcode",
                 "event": "batch",
                 "summary": format!("{} updates", batch.len()),
                 "at": chrono::Utc::now().to_rfc3339(),
@@ -324,7 +324,7 @@ fn payload(kind: AlertKind, batch: &[AlertEvent]) -> Value {
 fn post_json(url: &str, body: &Value, retry_delays: &[Duration]) -> Result<(), String> {
     let agent = ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
-            .tls_config(armada_core::toolchain::platform_tls())
+            .tls_config(kvistcode_core::toolchain::platform_tls())
             .timeout_global(Some(TIMEOUT))
             // A redirect could carry the message (and the secret URL) anywhere.
             .max_redirects(0)
@@ -368,7 +368,7 @@ pub fn send_test(kind: AlertKind, url: &str) -> Result<(), String> {
     validate_url(kind, url).map_err(|e| format!("Webhook URL: {e}"))?;
     let event = AlertEvent::new(
         Event::Test,
-        "Armada",
+        "Kvistcode",
         "",
         "Alerts are working. You'll hear from your fleet here.",
     );
@@ -493,7 +493,7 @@ impl Hub {
                 Offer::FlushAfter(wait) => {
                     let target = target.clone();
                     let spawned = std::thread::Builder::new()
-                        .name("armada-alert-flush".into())
+                        .name("kvistcode-alert-flush".into())
                         .spawn(move || {
                             std::thread::sleep(wait);
                             let batch = coalescer.lock().flush(Instant::now());
@@ -517,7 +517,7 @@ impl Hub {
 
 fn spawn_send(target: AlertTarget, batch: Vec<AlertEvent>) {
     let spawned = std::thread::Builder::new()
-        .name("armada-alert".into())
+        .name("kvistcode-alert".into())
         .spawn(move || send_batch(&target, &batch));
     if let Err(e) = spawned {
         warn!("could not spawn the alert thread: {e}");
@@ -533,12 +533,12 @@ fn send_batch(target: &AlertTarget, batch: &[AlertEvent]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use armada_core::AlertEvents;
+    use kvistcode_core::AlertEvents;
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
     fn ev(event: Event, agent: &str, text: &str) -> AlertEvent {
-        AlertEvent::new(event, agent, "armada", text)
+        AlertEvent::new(event, agent, "kvistcode", text)
     }
 
     #[test]
@@ -646,7 +646,7 @@ mod tests {
         let slack = payload(AlertKind::Slack, &one);
         assert_eq!(
             slack["text"],
-            "Needs you · Fix tests (armada)\nRun npm test"
+            "Needs you · Fix tests (kvistcode)\nRun npm test"
         );
         assert_eq!(slack.as_object().unwrap().len(), 1);
 
@@ -667,7 +667,9 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
-        assert!(text.starts_with("2 updates from Armada") && text.contains("• Finished · Other"));
+        assert!(
+            text.starts_with("2 updates from Kvistcode") && text.contains("• Finished · Other")
+        );
     }
 
     #[test]

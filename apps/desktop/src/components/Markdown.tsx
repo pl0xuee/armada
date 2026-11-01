@@ -432,7 +432,7 @@ export const Markdown = memo(function Markdown({
   return (
     <RunContext.Provider value={runAgentId && !streaming ? runAgentId : null}>
       <StreamingContext.Provider value={!!streaming}>
-        <div className={cn("prose-armada selectable", streaming && "[&>*:last-child>*:last-child]:caret", className)}>
+        <div className={cn("prose-kvistcode selectable", streaming && "[&>*:last-child>*:last-child]:caret", className)}>
           {ranges.map((r, i) => (
             // Index keys are stable: blocks only ever append or grow at the end.
             <div key={i} className="md-block contents">

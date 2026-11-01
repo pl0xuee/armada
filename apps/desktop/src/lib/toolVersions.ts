@@ -1,4 +1,4 @@
-// Version maths and display labels for Armada's own copies of the agent tools.
+// Version maths and display labels for Kvistcode's own copies of the agent tools.
 import type { ProviderInfo } from "./types";
 
 /** Numeric parts of a dotted version ("v0.166.0-beta.1" -> [0, 166, 0]); null when there are none. */
@@ -23,7 +23,7 @@ export function isNewerVersion(a: string | null, b: string | null): boolean {
   return !!a && !!b && compareVersions(a, b) > 0;
 }
 
-/** Armada's copy is newer than the version it was tested with, so there is a way back. */
+/** Kvistcode's copy is newer than the version it was tested with, so there is a way back. */
 export function canRollBack(p: ProviderInfo): boolean {
   return p.managed && isNewerVersion(p.managedVersion, p.testedVersion);
 }
@@ -36,7 +36,7 @@ export function toolSource(p: ProviderInfo): ToolSource {
 }
 
 export const SOURCE_LABEL: Record<ToolSource, string> = {
-  bundled: "Bundled with Armada",
+  bundled: "Bundled with Kvistcode",
   system: "Using system install",
   none: "Not installed",
 };
@@ -62,7 +62,7 @@ export function needsAdapter(p: ProviderInfo): boolean {
   return p.installed && p.adapterRequired && !p.adapterInstalled;
 }
 
-/** Offer "Install": nothing of Armada's own yet and nothing usable, or the adapter is missing. */
+/** Offer "Install": nothing of Kvistcode's own yet and nothing usable, or the adapter is missing. */
 export function canInstall(p: ProviderInfo): boolean {
   return !p.managed && (!p.installed || needsAdapter(p));
 }

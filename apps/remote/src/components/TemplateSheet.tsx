@@ -82,7 +82,7 @@ function TemplateList({ templates, onChoose }: { templates: PromptTemplate[]; on
         </div>
       )}
       {list.length === 0 ? (
-        <p className="py-8 text-center text-[14px] text-steel">{templates.length === 0 ? "No templates yet. Add them in Armada on your computer." : "No templates match."}</p>
+        <p className="py-8 text-center text-[14px] text-steel">{templates.length === 0 ? "No templates yet. Add them in Kvistcode on your computer." : "No templates match."}</p>
       ) : (
         <ul aria-label="Templates" className="overflow-hidden rounded-2xl border border-line bg-card">
           {list.map((t, i) => {

@@ -51,7 +51,7 @@ function looksLikeServer(v: Json | undefined): v is JsonObject {
   return isObject(v) && (typeof v.command === "string" || typeof v.url === "string" || typeof v.serverUrl === "string");
 }
 
-const SSE_WARNING = "Armada supports stdio and Streamable HTTP; SSE-only servers may not work.";
+const SSE_WARNING = "Kvistcode supports stdio and Streamable HTTP; SSE-only servers may not work.";
 const VAR_RE = /\$\{[^}]+\}|\$[A-Z_][A-Z0-9_]*/;
 
 /** Warnings for a converted server: SSE transport and unexpanded ${VAR} references. */

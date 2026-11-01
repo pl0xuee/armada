@@ -151,7 +151,7 @@ export function AgentsSection({ agents }: { agents: CustomAgent[] }) {
     <>
       <SectionHeader
         title="Agents"
-        description="Armada can run any agent that speaks the Agent Client Protocol, side by side with Claude, Codex and Grok."
+        description="Kvistcode can run any agent that speaks the Agent Client Protocol, side by side with Claude, Codex and Grok."
         right={<AddMenu onPick={(p) => setEditing(fromPreset(p))} />}
       />
 
@@ -160,7 +160,7 @@ export function AgentsSection({ agents }: { agents: CustomAgent[] }) {
           <EmptyState
             icon={<Bot />}
             title="No custom agents yet"
-            description="Start from a preset or point Armada at any ACP-compatible command. You can test the connection before saving."
+            description="Start from a preset or point Kvistcode at any ACP-compatible command. You can test the connection before saving."
             className="pb-6"
           />
           <PresetGrid onPick={(p) => setEditing(fromPreset(p))} />
@@ -460,7 +460,7 @@ function AgentDialog({ draft, agents, onClose }: { draft: Draft | null; agents: 
     <Dialog open={draft !== null} onOpenChange={(o) => !o && onClose()}>
       <DialogContent
         title={editingId ? `Edit ${draft?.name}` : draft?.name ? `Add ${draft.name}` : "Add ACP agent"}
-        description="Armada starts the command and talks to it over the Agent Client Protocol."
+        description="Kvistcode starts the command and talks to it over the Agent Client Protocol."
         className="w-[min(620px,calc(100vw-32px))]"
         onOpenAutoFocus={(e) => {
           e.preventDefault();

@@ -1,4 +1,4 @@
-// Armada preview agent. The desktop app's local reverse proxy injects this script into the HTML of the
+// Kvistcode preview agent. The desktop app's local reverse proxy injects this script into the HTML of the
 // dev server shown in the Preview pane. It runs inside the *page* and talks to the app only through
 // window.parent.postMessage; it never evaluates anything it is sent. See src/lib/previewBridge.ts for
 // the parent side and the message shapes.
@@ -10,11 +10,11 @@ import { toJpeg, toPng } from "html-to-image";
   "use strict";
   var W = window;
   // Only the page directly inside the Preview iframe (not nested frames, not a standalone tab).
-  if (W.__armadaPreview || W.parent === W || W.top !== W.parent) return;
-  W.__armadaPreview = true;
+  if (W.__kvistcodePreview || W.parent === W || W.top !== W.parent) return;
+  W.__kvistcodePreview = true;
 
   var VERSION = 1;
-  var OVERLAY_ID = "__armada_preview_overlay__";
+  var OVERLAY_ID = "__kvistcode_preview_overlay__";
   var token = null; // handed over by the app after the hello handshake; never baked into this file
   var parentOrigin = null;
   var queue = []; // events produced before the app answered
@@ -26,7 +26,7 @@ import { toJpeg, toPng } from "html-to-image";
   }
 
   function post(msg) {
-    msg.armada = "preview";
+    msg.kvistcode = "preview";
     msg.v = VERSION;
     if (token === null || parentOrigin === null) {
       if (msg.type !== "hello" && queue.length < MAX_QUEUE) queue.push(msg);
@@ -416,7 +416,7 @@ import { toJpeg, toPng } from "html-to-image";
   // ---- parent link --------------------------------------------------------------------------------
   W.addEventListener("message", function (e) {
     var d = e.data;
-    if (e.source !== W.parent || !d || d.armada !== "preview-parent" || typeof d.token !== "string") return;
+    if (e.source !== W.parent || !d || d.kvistcode !== "preview-parent" || typeof d.token !== "string") return;
     if (token === null) {
       token = d.token;
       parentOrigin = e.origin;

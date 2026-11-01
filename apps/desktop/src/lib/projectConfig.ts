@@ -1,6 +1,6 @@
 // Project settings: the files Claude Code / Codex read from a project (instruction files,
 // permission rules, hooks, slash commands, skills). Types mirror
-// crates/armada-core/src/project_config.rs; the helpers are pure.
+// crates/kvistcode-core/src/project_config.rs; the helpers are pure.
 
 export type RuleKind = "allow" | "ask" | "deny";
 export type SettingsScope = "shared" | "local";

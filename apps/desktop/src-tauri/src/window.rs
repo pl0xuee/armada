@@ -1,7 +1,7 @@
 //! Main-window helpers shared by the tray, notifications, hotkey and commands.
 
 use crate::{AppHandle, Rt};
-use armada_core::{ArmadaEvent, Core, NavigateTarget};
+use kvistcode_core::{Core, KvistcodeEvent, NavigateTarget};
 use tauri::{Manager, WindowEvent};
 type WebviewWindow = tauri::WebviewWindow<Rt>;
 type Window = tauri::Window<Rt>;
@@ -73,7 +73,7 @@ pub fn toggle_main(app: &AppHandle) {
 pub fn navigate(app: &AppHandle, to: NavigateTarget) {
     show_main(app);
     if let Some(core) = app.try_state::<Core>() {
-        core.emit(ArmadaEvent::Navigate { to });
+        core.emit(KvistcodeEvent::Navigate { to });
     }
 }
 

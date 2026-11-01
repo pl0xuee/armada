@@ -41,7 +41,7 @@ export function FileBlock({ file, defaultOpen, id }: { file: ParsedDiff; default
       </button>
       {open && file.tooLarge && (
         <p className="border-t border-line/80 px-3 py-3 text-[12.5px] leading-snug text-muted">
-          This change is too large to show on a phone. Review it in Armada on your computer.
+          This change is too large to show on a phone. Review it in Kvistcode on your computer.
         </p>
       )}
       {open && !file.tooLarge && (

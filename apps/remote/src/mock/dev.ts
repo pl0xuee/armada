@@ -29,7 +29,7 @@ export async function resolveDevBackend(): Promise<DevOverrides | null> {
   const mock = params.get("mock");
   if (mock === "0") return null;
   if (mock !== "1" && (await realServerAvailable())) return null;
-  if (mock !== "1") console.info("[armada] No server at /api/session, using the in-memory mock (add ?mock=0 to disable).");
+  if (mock !== "1") console.info("[kvistcode] No server at /api/session, using the in-memory mock (add ?mock=0 to disable).");
 
   if (params.get("offline") === "1") {
     Object.defineProperty(Navigator.prototype, "onLine", { configurable: true, get: () => false });

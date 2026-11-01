@@ -1,5 +1,5 @@
 //! PTY terminals for provider login flows and installs. Output is streamed to the
-//! UI as `ArmadaEvent::TerminalOutput`, exit as `ArmadaEvent::TerminalExit`.
+//! UI as `KvistcodeEvent::TerminalOutput`, exit as `KvistcodeEvent::TerminalExit`.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context};
-use armada_core::{ArmadaEvent, Core};
+use kvistcode_core::{Core, KvistcodeEvent};
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use tracing::{debug, warn};
@@ -235,7 +235,7 @@ impl PtyReader {
             let mut inner = master.try_clone_reader()?;
             let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(64);
             std::thread::Builder::new()
-                .name("armada-pty-pipe".into())
+                .name("kvistcode-pty-pipe".into())
                 .spawn(move || {
                     let mut buf = [0u8; 8192];
                     loop {
@@ -303,7 +303,7 @@ impl PtyReader {
 fn flush_output(core: &Core, id: &str, pending: &mut Vec<u8>) {
     let data = decode_utf8_chunk(pending);
     for chunk in split_at_char_boundaries(&data, MAX_EVENT_BYTES) {
-        core.emit(ArmadaEvent::TerminalOutput {
+        core.emit(KvistcodeEvent::TerminalOutput {
             terminal_id: id.to_string(),
             data: chunk.to_string(),
         });
@@ -355,7 +355,7 @@ impl Terminals {
         // Drop the AppImage's libraries/paths so system tools in the shell still work.
         apply_env_changes(
             &mut cmd,
-            armada_core::childenv::appimage_env_changes(std::env::vars_os()),
+            kvistcode_core::childenv::appimage_env_changes(std::env::vars_os()),
         );
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
@@ -365,7 +365,10 @@ impl Terminals {
         for (k, v) in &spec.env {
             cmd.env(k, v);
         }
-        let cwd = spec.cwd.clone().or_else(armada_core::providers::home_dir);
+        let cwd = spec
+            .cwd
+            .clone()
+            .or_else(kvistcode_core::providers::home_dir);
         if let Some(cwd) = cwd.filter(|p| p.is_dir()) {
             cmd.cwd(cwd);
         }
@@ -400,7 +403,7 @@ impl Terminals {
         let waiter_stop = stop.clone();
         let waiter_slot = slot.clone();
         let spawned = std::thread::Builder::new()
-            .name("armada-pty-wait".into())
+            .name("kvistcode-pty-wait".into())
             .spawn(move || {
                 let Some(mut child) = waiter_slot.lock().take() else {
                     return;
@@ -425,7 +428,7 @@ impl Terminals {
                     code,
                 );
                 debug!(terminal = %waiter_id, ?code, "terminal exited");
-                core.emit(ArmadaEvent::TerminalExit {
+                core.emit(KvistcodeEvent::TerminalExit {
                     terminal_id: waiter_id,
                     code,
                 });
@@ -482,7 +485,7 @@ impl Terminals {
         // the PTY stops accepting input.
         let (input_tx, input_rx) = mpsc::sync_channel::<Vec<u8>>(INPUT_QUEUE);
         std::thread::Builder::new()
-            .name("armada-pty-write".into())
+            .name("kvistcode-pty-write".into())
             .spawn(move || {
                 for data in input_rx {
                     if let Err(e) = writer.write_all(&data).and_then(|()| writer.flush()) {
@@ -503,7 +506,7 @@ impl Terminals {
             let id = id.to_string();
             let stop = stop.clone();
             std::thread::Builder::new()
-                .name("armada-pty-read".into())
+                .name("kvistcode-pty-read".into())
                 .spawn(move || {
                     // Give the UI a moment to learn the terminal id (returned by the
                     // command) before the first bytes arrive; the PTY buffers meanwhile.
@@ -539,7 +542,7 @@ impl Terminals {
                     flush_output(&core, &id, &mut pending);
                     if !pending.is_empty() {
                         // An incomplete UTF-8 sequence at the very end.
-                        core.emit(ArmadaEvent::TerminalOutput {
+                        core.emit(KvistcodeEvent::TerminalOutput {
                             terminal_id: id.clone(),
                             data: String::from_utf8_lossy(&pending).into_owned(),
                         });
@@ -566,18 +569,18 @@ impl Terminals {
     pub fn spawn_task<F>(
         &self,
         core: Core,
-        job: impl FnOnce(armada_core::toolchain::Log) -> F,
+        job: impl FnOnce(kvistcode_core::toolchain::Log) -> F,
         on_exit: impl FnOnce(Option<i32>) + Send + 'static,
     ) -> String
     where
         F: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
     {
         let id = uuid::Uuid::new_v4().to_string();
-        let log: armada_core::toolchain::Log = {
+        let log: kvistcode_core::toolchain::Log = {
             let core = core.clone();
             let id = id.clone();
             Arc::new(move |line: &str| {
-                core.emit(ArmadaEvent::TerminalOutput {
+                core.emit(KvistcodeEvent::TerminalOutput {
                     terminal_id: id.clone(),
                     data: colorize(line),
                 })
@@ -602,7 +605,7 @@ impl Terminals {
                 }
             };
             tasks.lock().remove(&task_id);
-            core.emit(ArmadaEvent::TerminalExit {
+            core.emit(KvistcodeEvent::TerminalExit {
                 terminal_id: task_id,
                 code: Some(code),
             });
@@ -623,7 +626,7 @@ impl Terminals {
             return false;
         };
         task.abort.abort();
-        core.emit(ArmadaEvent::TerminalExit {
+        core.emit(KvistcodeEvent::TerminalExit {
             terminal_id: id.to_string(),
             code: None,
         });
@@ -685,7 +688,7 @@ impl Terminals {
             .map(|t| t.proc.clone())
             .ok_or_else(|| anyhow!("terminal not found"))?;
         std::thread::Builder::new()
-            .name("armada-pty-kill".into())
+            .name("kvistcode-pty-kill".into())
             .spawn(move || proc.terminate(KILL_GRACE))
             .context("starting the terminal kill thread")?;
         Ok(())
@@ -773,7 +776,7 @@ fn finish_io(
         let term = terminals.inner.lock().remove(id);
         if let Some(term) = term {
             let _ = std::thread::Builder::new()
-                .name("armada-pty-close".into())
+                .name("kvistcode-pty-close".into())
                 .spawn(move || drop(term));
         }
         let _ = done_rx.recv_timeout(Duration::from_millis(200));
@@ -950,33 +953,36 @@ mod tests {
         let vars = vec![
             (
                 OsString::from("APPIMAGE"),
-                OsString::from("/x/Armada.AppImage"),
+                OsString::from("/x/Kvistcode.AppImage"),
             ),
             (
                 OsString::from("APPDIR"),
-                OsString::from("/tmp/.mount_Armada1"),
+                OsString::from("/tmp/.mount_Kvistcode1"),
             ),
             (
                 OsString::from("LD_LIBRARY_PATH"),
-                OsString::from("/tmp/.mount_Armada1/usr/lib"),
+                OsString::from("/tmp/.mount_Kvistcode1/usr/lib"),
             ),
             (
                 OsString::from("PATH"),
-                OsString::from("/tmp/.mount_Armada1/usr/bin:/usr/bin"),
+                OsString::from("/tmp/.mount_Kvistcode1/usr/bin:/usr/bin"),
             ),
         ];
         let mut cmd = CommandBuilder::new("env");
-        cmd.env("LD_LIBRARY_PATH", "/tmp/.mount_Armada1/usr/lib");
-        cmd.env("PATH", "/tmp/.mount_Armada1/usr/bin:/usr/bin");
-        cmd.env("APPDIR", "/tmp/.mount_Armada1");
-        apply_env_changes(&mut cmd, armada_core::childenv::appimage_env_changes(vars));
+        cmd.env("LD_LIBRARY_PATH", "/tmp/.mount_Kvistcode1/usr/lib");
+        cmd.env("PATH", "/tmp/.mount_Kvistcode1/usr/bin:/usr/bin");
+        cmd.env("APPDIR", "/tmp/.mount_Kvistcode1");
+        apply_env_changes(
+            &mut cmd,
+            kvistcode_core::childenv::appimage_env_changes(vars),
+        );
         assert!(cmd.get_env("LD_LIBRARY_PATH").is_none());
         assert!(cmd.get_env("APPDIR").is_none());
         assert_eq!(cmd.get_env("PATH").unwrap(), "/usr/bin");
     }
 
     use super::*;
-    use armada_core::EventSink;
+    use kvistcode_core::EventSink;
 
     #[test]
     fn finds_the_script_behind_npm_shims() {
@@ -1021,15 +1027,15 @@ mod tests {
         }
     }
 
-    struct Events(Mutex<Vec<ArmadaEvent>>);
+    struct Events(Mutex<Vec<KvistcodeEvent>>);
     impl EventSink for Events {
-        fn emit(&self, event: ArmadaEvent) {
+        fn emit(&self, event: KvistcodeEvent) {
             self.0.lock().push(event);
         }
     }
 
     fn test_core() -> (Core, Arc<Events>, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("armada-term-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("kvistcode-term-{}", uuid::Uuid::new_v4()));
         let events = Arc::new(Events(Mutex::new(Vec::new())));
         let core = Core::open(dir.join("data"), events.clone()).unwrap();
         (core, events, dir)
@@ -1037,7 +1043,7 @@ mod tests {
 
     fn exited(events: &Events, id: &str) -> bool {
         events.0.lock().iter().any(
-            |e| matches!(e, ArmadaEvent::TerminalExit { terminal_id, .. } if terminal_id == id),
+            |e| matches!(e, KvistcodeEvent::TerminalExit { terminal_id, .. } if terminal_id == id),
         )
     }
 
@@ -1148,7 +1154,7 @@ mod tests {
         let marker = dir.join("pid");
         // The child writes its pid only once it ignores SIGHUP, and the login waits for
         // that: exiting first could hang up the terminal before the trap is set (the
-        // kernel's hangup, not Armada, would then kill it — a flaky failure on macOS).
+        // kernel's hangup, not Kvistcode, would then kill it — a flaky failure on macOS).
         let script = format!(
             "sh -c 'trap \"\" HUP; echo $$ > \"$0\"; exec sleep 30' '{m}' & \
              while [ ! -s '{m}' ]; do sleep 0.01; done; exit 0",
@@ -1203,7 +1209,7 @@ mod tests {
             "leftover survived"
         );
         let code = events.0.lock().iter().find_map(|e| match e {
-            ArmadaEvent::TerminalExit { terminal_id, code } if *terminal_id == id => Some(*code),
+            KvistcodeEvent::TerminalExit { terminal_id, code } if *terminal_id == id => Some(*code),
             _ => None,
         });
         assert_eq!(code, Some(Some(3)));
@@ -1228,7 +1234,7 @@ mod tests {
             .lock()
             .iter()
             .filter_map(|e| match e {
-                ArmadaEvent::TerminalOutput { terminal_id, data } if *terminal_id == id => {
+                KvistcodeEvent::TerminalOutput { terminal_id, data } if *terminal_id == id => {
                     Some(data.clone())
                 }
                 _ => None,

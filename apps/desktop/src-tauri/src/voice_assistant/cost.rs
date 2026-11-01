@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn checkpoints_add_only_the_delta_and_count_the_session_once() {
-        let dir = std::env::temp_dir().join(format!("armada-va-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("kvistcode-va-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut l = SessionLedger::new(&dir);
         l.checkpoint(30, 0.10).unwrap();
@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn ledger_accumulates_and_rolls_over() {
-        let dir = std::env::temp_dir().join(format!("armada-va-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("kvistcode-va-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         record_session(&dir, "2026-10", 60, 0.5).unwrap();
         let u = record_session(&dir, "2026-10", 30, 0.25).unwrap();

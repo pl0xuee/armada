@@ -113,7 +113,7 @@ export function dockBlock(agent: Pick<Agent, "status" | "rateLimited" | "helperS
   // The desktop's `blockers`: a usage limit unless the agent is shut down; an error that isn't a limit.
   if (agent.rateLimited === true && !resumable) return { kind: "usage_limit", title: "This account hit its usage limit" };
   if (agent.status === "error") return { kind: "error", title: "The last turn failed" };
-  if (agent.status === "interrupted") return { kind: "interrupted", title: "Interrupted when Armada closed" };
+  if (agent.status === "interrupted") return { kind: "interrupted", title: "Interrupted when Kvistcode closed" };
   if (agent.status === "stopped") return { kind: "stopped", title: "This agent was stopped" };
   if (agent.parentId && agent.helperSync?.state === "conflict") return { kind: "conflict", title: "Merge conflict with the main agent" };
   return null;

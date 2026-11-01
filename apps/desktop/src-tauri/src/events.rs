@@ -1,31 +1,31 @@
-//! Bridges core events to the webview (`armada://event`) and to the attention
+//! Bridges core events to the webview (`kvistcode://event`) and to the attention
 //! engine / tray. `emit` only pushes onto a channel, so it never blocks the core.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::AppHandle;
-use armada_core::{ArmadaEvent, DeltaField, EventSink};
+use kvistcode_core::{DeltaField, EventSink, KvistcodeEvent};
 use tauri::{Emitter, Manager};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tracing::warn;
 
 use crate::attention::Attention;
 
-pub const EVENT_CHANNEL: &str = "armada://event";
+pub const EVENT_CHANNEL: &str = "kvistcode://event";
 
 pub struct TauriSink {
-    tx: UnboundedSender<ArmadaEvent>,
+    tx: UnboundedSender<KvistcodeEvent>,
 }
 
 impl EventSink for TauriSink {
-    fn emit(&self, event: ArmadaEvent) {
+    fn emit(&self, event: KvistcodeEvent) {
         // Only fails once the dispatcher is gone (app shutting down).
         let _ = self.tx.send(event);
     }
 }
 
-pub fn channel() -> (Arc<dyn EventSink>, UnboundedReceiver<ArmadaEvent>) {
+pub fn channel() -> (Arc<dyn EventSink>, UnboundedReceiver<KvistcodeEvent>) {
     let (tx, rx) = unbounded_channel();
     (Arc::new(TauriSink { tx }), rx)
 }
@@ -41,17 +41,17 @@ const STREAM_PACING: Duration = Duration::from_millis(16);
 ///   events in between (until that item is replaced by a full upsert);
 /// - terminal output for the same terminal merges (until it exits);
 /// - only the latest `AgentUpdated` per agent is kept (each carries the whole agent).
-fn coalesce(batch: Vec<ArmadaEvent>) -> Vec<ArmadaEvent> {
+fn coalesce(batch: Vec<KvistcodeEvent>) -> Vec<KvistcodeEvent> {
     use std::collections::HashMap;
 
-    let mut out: Vec<Option<ArmadaEvent>> = Vec::with_capacity(batch.len());
+    let mut out: Vec<Option<KvistcodeEvent>> = Vec::with_capacity(batch.len());
     // (agent, item, field) → slot of the last delta for it.
     let mut deltas: HashMap<(String, String, DeltaField), usize> = HashMap::new();
     let mut terminals: HashMap<String, usize> = HashMap::new();
     let mut agents: HashMap<String, usize> = HashMap::new();
     for event in batch {
         match event {
-            ArmadaEvent::TextDelta {
+            KvistcodeEvent::TextDelta {
                 agent_id,
                 item_id,
                 field,
@@ -60,7 +60,7 @@ fn coalesce(batch: Vec<ArmadaEvent>) -> Vec<ArmadaEvent> {
             } => {
                 let key = (agent_id, item_id, field);
                 if let Some(&slot) = deltas.get(&key) {
-                    if let Some(ArmadaEvent::TextDelta {
+                    if let Some(KvistcodeEvent::TextDelta {
                         delta: d1,
                         offset: o1,
                         ..
@@ -73,7 +73,7 @@ fn coalesce(batch: Vec<ArmadaEvent>) -> Vec<ArmadaEvent> {
                     }
                 }
                 deltas.insert(key.clone(), out.len());
-                out.push(Some(ArmadaEvent::TextDelta {
+                out.push(Some(KvistcodeEvent::TextDelta {
                     agent_id: key.0,
                     item_id: key.1,
                     field: key.2,
@@ -81,33 +81,33 @@ fn coalesce(batch: Vec<ArmadaEvent>) -> Vec<ArmadaEvent> {
                     offset,
                 }));
             }
-            ArmadaEvent::TerminalOutput { terminal_id, data } => {
+            KvistcodeEvent::TerminalOutput { terminal_id, data } => {
                 if let Some(&slot) = terminals.get(&terminal_id) {
-                    if let Some(ArmadaEvent::TerminalOutput { data: d1, .. }) = &mut out[slot] {
+                    if let Some(KvistcodeEvent::TerminalOutput { data: d1, .. }) = &mut out[slot] {
                         d1.push_str(&data);
                         continue;
                     }
                 }
                 terminals.insert(terminal_id.clone(), out.len());
-                out.push(Some(ArmadaEvent::TerminalOutput { terminal_id, data }));
+                out.push(Some(KvistcodeEvent::TerminalOutput { terminal_id, data }));
             }
-            ArmadaEvent::AgentUpdated { agent } => {
+            KvistcodeEvent::AgentUpdated { agent } => {
                 if let Some(slot) = agents.insert(agent.id.clone(), out.len()) {
                     out[slot] = None;
                 }
-                out.push(Some(ArmadaEvent::AgentUpdated { agent }));
+                out.push(Some(KvistcodeEvent::AgentUpdated { agent }));
             }
             other => {
                 // Later deltas must not merge across a full replacement or removal.
                 match &other {
-                    ArmadaEvent::ItemUpserted { item } => {
+                    KvistcodeEvent::ItemUpserted { item } => {
                         deltas.retain(|(_, i, _), _| i != &item.id);
                     }
-                    ArmadaEvent::AgentRemoved { agent_id } => {
+                    KvistcodeEvent::AgentRemoved { agent_id } => {
                         deltas.retain(|(a, _, _), _| a != agent_id);
                         agents.remove(agent_id);
                     }
-                    ArmadaEvent::TerminalExit { terminal_id, .. } => {
+                    KvistcodeEvent::TerminalExit { terminal_id, .. } => {
                         terminals.remove(terminal_id);
                     }
                     _ => {}
@@ -119,7 +119,7 @@ fn coalesce(batch: Vec<ArmadaEvent>) -> Vec<ArmadaEvent> {
     out.into_iter().flatten().collect()
 }
 
-pub fn spawn_dispatcher(app: AppHandle, mut rx: UnboundedReceiver<ArmadaEvent>) {
+pub fn spawn_dispatcher(app: AppHandle, mut rx: UnboundedReceiver<KvistcodeEvent>) {
     tauri::async_runtime::spawn(async move {
         while let Some(first) = rx.recv().await {
             let mut batch = vec![first];
@@ -132,7 +132,7 @@ pub fn spawn_dispatcher(app: AppHandle, mut rx: UnboundedReceiver<ArmadaEvent>) 
             let streaming = batch.iter().any(|e| {
                 matches!(
                     e,
-                    ArmadaEvent::TextDelta { .. } | ArmadaEvent::TerminalOutput { .. }
+                    KvistcodeEvent::TextDelta { .. } | KvistcodeEvent::TerminalOutput { .. }
                 )
             });
             let batch = coalesce(batch);
@@ -150,7 +150,7 @@ pub fn spawn_dispatcher(app: AppHandle, mut rx: UnboundedReceiver<ArmadaEvent>) 
     });
 }
 
-fn dispatch(app: &AppHandle, event: ArmadaEvent) {
+fn dispatch(app: &AppHandle, event: KvistcodeEvent) {
     {
         {
             if let Some(remote) = app.try_state::<Arc<crate::remote::Remote>>() {
@@ -158,13 +158,13 @@ fn dispatch(app: &AppHandle, event: ArmadaEvent) {
             }
             match event {
                 // Answered (here, on the phone or elsewhere): drop its notification.
-                ArmadaEvent::ItemUpserted { item } => {
-                    if let armada_core::ItemBody::Permission {
+                KvistcodeEvent::ItemUpserted { item } => {
+                    if let kvistcode_core::ItemBody::Permission {
                         request_id,
                         resolution: Some(_),
                         ..
                     }
-                    | armada_core::ItemBody::Question {
+                    | kvistcode_core::ItemBody::Question {
                         request_id,
                         resolution: Some(_),
                         ..
@@ -175,7 +175,7 @@ fn dispatch(app: &AppHandle, event: ArmadaEvent) {
                         }
                     }
                 }
-                ArmadaEvent::Attention {
+                KvistcodeEvent::Attention {
                     agent_id,
                     reason,
                     title,
@@ -205,10 +205,10 @@ fn dispatch(app: &AppHandle, event: ArmadaEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use armada_core::DeltaField;
+    use kvistcode_core::DeltaField;
 
-    fn delta(item: &str, text: &str, offset: usize) -> ArmadaEvent {
-        ArmadaEvent::TextDelta {
+    fn delta(item: &str, text: &str, offset: usize) -> KvistcodeEvent {
+        KvistcodeEvent::TextDelta {
             agent_id: "a".into(),
             item_id: item.into(),
             field: DeltaField::Text,
@@ -217,10 +217,10 @@ mod tests {
         }
     }
 
-    fn texts(out: &[ArmadaEvent]) -> Vec<(String, String, usize)> {
+    fn texts(out: &[KvistcodeEvent]) -> Vec<(String, String, usize)> {
         out.iter()
             .filter_map(|e| match e {
-                ArmadaEvent::TextDelta {
+                KvistcodeEvent::TextDelta {
                     item_id,
                     delta,
                     offset,
@@ -254,14 +254,14 @@ mod tests {
 
     #[test]
     fn full_upsert_stops_merging() {
-        let item: armada_core::TimelineItem = serde_json::from_value(serde_json::json!({
+        let item: kvistcode_core::TimelineItem = serde_json::from_value(serde_json::json!({
             "id": "m", "agentId": "a", "seq": 1, "ts": 0,
             "kind": "agent_message", "text": "hé"
         }))
         .unwrap();
         let out = coalesce(vec![
             delta("m", "hé", 0),
-            ArmadaEvent::ItemUpserted { item },
+            KvistcodeEvent::ItemUpserted { item },
             delta("m", "!", 2),
         ]);
         assert_eq!(

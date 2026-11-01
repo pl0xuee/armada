@@ -5,7 +5,7 @@ import { isMac } from "@/lib/utils";
 import { CopyButton } from "../CopyButton";
 
 export const LFS_BLOCK_REASON =
-  "Git LFS isn't installed, so Armada can't tell which asset files really changed. Install it, then refresh.";
+  "Git LFS isn't installed, so Kvistcode can't tell which asset files really changed. Install it, then refresh.";
 
 /** Install command for the current platform (plus the one-time `git lfs install`). */
 export function lfsInstallHint(): { label: string; command: string; note?: string; alt?: string } {

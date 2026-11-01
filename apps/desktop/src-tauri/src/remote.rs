@@ -38,10 +38,6 @@ use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 
-use armada_core::{
-    now_ms, Agent, ArmadaEvent, Attachment, BusySend, Core, CreateAgentRequest, Provider,
-    RemoteSettings,
-};
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -49,6 +45,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use futures_util::stream::Stream;
+use kvistcode_core::{
+    now_ms, Agent, Attachment, BusySend, Core, CreateAgentRequest, KvistcodeEvent, Provider,
+    RemoteSettings,
+};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -653,7 +653,7 @@ fn lan_ip(settings: &RemoteSettings) -> Option<IpAddr> {
 }
 
 /// Linux: a firewall that drops the phone's connections, and the command that lets them
-/// in. (Windows and macOS ask the user themselves the first time Armada listens.)
+/// in. (Windows and macOS ask the user themselves the first time Kvistcode listens.)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FirewallHint {
@@ -837,11 +837,11 @@ impl Remote {
     }
 
     /// Forwards agent events to connected remote clients.
-    pub fn publish(&self, event: &ArmadaEvent) {
+    pub fn publish(&self, event: &KvistcodeEvent) {
         // Share links die with their agent: when it is deleted or archived.
         match event {
-            ArmadaEvent::AgentRemoved { agent_id } => self.drop_shares_for(agent_id),
-            ArmadaEvent::AgentUpdated { agent } if agent.archived => {
+            KvistcodeEvent::AgentRemoved { agent_id } => self.drop_shares_for(agent_id),
+            KvistcodeEvent::AgentUpdated { agent } if agent.archived => {
                 self.drop_shares_for(&agent.id)
             }
             _ => {}
@@ -851,28 +851,28 @@ impl Remote {
         }
         let relevant = matches!(
             event,
-            ArmadaEvent::AgentUpdated { .. }
-                | ArmadaEvent::AgentRemoved { .. }
-                | ArmadaEvent::ItemUpserted { .. }
-                | ArmadaEvent::TextDelta { .. }
-                | ArmadaEvent::Attention { .. }
+            KvistcodeEvent::AgentUpdated { .. }
+                | KvistcodeEvent::AgentRemoved { .. }
+                | KvistcodeEvent::ItemUpserted { .. }
+                | KvistcodeEvent::TextDelta { .. }
+                | KvistcodeEvent::Attention { .. }
                 // Owner-only (viewers only get events about their agent).
-                | ArmadaEvent::AccountUpdated { .. }
-                | ArmadaEvent::AccountRemoved { .. }
+                | KvistcodeEvent::AccountUpdated { .. }
+                | KvistcodeEvent::AccountRemoved { .. }
         );
         if relevant {
             if let Ok(json) = serde_json::to_string(event) {
                 let agent_id = match event {
-                    ArmadaEvent::AgentUpdated { agent } => Some(agent.id.clone()),
-                    ArmadaEvent::AgentRemoved { agent_id }
-                    | ArmadaEvent::TextDelta { agent_id, .. }
-                    | ArmadaEvent::Attention { agent_id, .. } => Some(agent_id.clone()),
-                    ArmadaEvent::ItemUpserted { item } => Some(item.agent_id.clone()),
+                    KvistcodeEvent::AgentUpdated { agent } => Some(agent.id.clone()),
+                    KvistcodeEvent::AgentRemoved { agent_id }
+                    | KvistcodeEvent::TextDelta { agent_id, .. }
+                    | KvistcodeEvent::Attention { agent_id, .. } => Some(agent_id.clone()),
+                    KvistcodeEvent::ItemUpserted { item } => Some(item.agent_id.clone()),
                     _ => None,
                 };
                 let kind = match event {
-                    ArmadaEvent::AgentUpdated { .. } => PublishedKind::AgentUpdated,
-                    ArmadaEvent::AgentRemoved { .. } => PublishedKind::AgentRemoved,
+                    KvistcodeEvent::AgentUpdated { .. } => PublishedKind::AgentUpdated,
+                    KvistcodeEvent::AgentRemoved { .. } => PublishedKind::AgentRemoved,
                     _ => PublishedKind::Other,
                 };
                 let _ = self.events.send(Arc::new(Published {
@@ -954,7 +954,7 @@ impl Remote {
             if tokens.devices.len() >= MAX_DEVICES {
                 return Err(ApiError(
                     StatusCode::CONFLICT,
-                    "Too many paired devices. Remove one in Armada's Settings → Remote first."
+                    "Too many paired devices. Remove one in Kvistcode's Settings → Remote first."
                         .into(),
                 ));
             }
@@ -1570,7 +1570,7 @@ impl Remote {
         }
         Err(self.record_failure(
             ip,
-            "This device isn't paired with Armada (or was unpaired).",
+            "This device isn't paired with Kvistcode (or was unpaired).",
         ))
     }
 
@@ -1931,7 +1931,7 @@ fn visible(scope: &Scope, agent_id: &str) -> Result<(), ApiError> {
     }
 }
 
-/// The phone app's ETag: it changes only with a new Armada build.
+/// The phone app's ETag: it changes only with a new Kvistcode build.
 fn index_etag() -> &'static str {
     static ETAG: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     ETAG.get_or_init(|| {
@@ -1988,8 +1988,8 @@ async fn manifest() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "application/manifest+json")],
         Json(json!({
-            "name": "Armada",
-            "short_name": "Armada",
+            "name": "Kvistcode",
+            "short_name": "Kvistcode",
             "start_url": "/",
             "display": "standalone",
             "background_color": "#0B0D10",
@@ -2043,7 +2043,7 @@ async fn pair(
     if !remote.redeem_pairing(&body.code) {
         return Err(remote.record_failure(
             ip,
-            "That pairing code didn't work or has expired. Show a fresh QR code in Armada.",
+            "That pairing code didn't work or has expired. Show a fresh QR code in Kvistcode.",
         ));
     }
     let token = remote.add_device(&body.device_name)?;
@@ -2201,13 +2201,13 @@ fn viewer_items(
     before_seq: Option<i64>,
     limit: Option<usize>,
     roots: &[String],
-) -> anyhow::Result<Vec<armada_core::TimelineItem>> {
+) -> anyhow::Result<Vec<kvistcode_core::TimelineItem>> {
     let Some(limit) = limit else {
         return Ok(view::project_items(&core.items(id)?, roots));
     };
     let limit = limit.clamp(1, 1000);
     let mut before = before_seq;
-    let mut out: Vec<armada_core::TimelineItem> = Vec::new();
+    let mut out: Vec<kvistcode_core::TimelineItem> = Vec::new();
     for _ in 0..20 {
         let raw = core.items_page(id, before, limit)?;
         let Some(oldest) = raw.iter().map(|i| i.seq).min() else {
@@ -2420,7 +2420,7 @@ async fn permissions(
     State(c): State<Ctx>,
     ConnectInfo(peer): Peer,
     headers: HeaderMap,
-) -> Result<Json<Vec<armada_core::TimelineItem>>, ApiError> {
+) -> Result<Json<Vec<kvistcode_core::TimelineItem>>, ApiError> {
     let scope = c.auth(&peer, &headers)?;
     // Viewers never see approval requests or questions (they hold raw commands and paths).
     if scope != Scope::Owner {
@@ -2437,10 +2437,10 @@ async fn permissions(
             out.extend(core.items(&agent.id)?.into_iter().filter(|i| {
                 matches!(
                     i.body,
-                    armada_core::ItemBody::Permission {
+                    kvistcode_core::ItemBody::Permission {
                         resolution: None,
                         ..
-                    } | armada_core::ItemBody::Question {
+                    } | kvistcode_core::ItemBody::Question {
                         resolution: None,
                         ..
                     }
@@ -2519,7 +2519,7 @@ async fn resume(
 ) -> Result<StatusCode, ApiError> {
     owner(&c.auth(&peer, &headers)?)?;
     let core = c.remote.core();
-    let interrupted = core.agent(&id)?.status == armada_core::AgentStatus::Interrupted;
+    let interrupted = core.agent(&id)?.status == kvistcode_core::AgentStatus::Interrupted;
     // Starting an agent can take a while; answer now; progress and failures reach the
     // phone as agent updates and notices.
     tauri::async_runtime::spawn(async move {
@@ -2668,7 +2668,7 @@ struct MessageBody {
 /// out (`exclude`) or the request says to include them: the desktop asks first, so the
 /// phone mustn't be a way around that.
 async fn guard_secret_files(
-    core: &armada_core::Core,
+    core: &kvistcode_core::Core,
     agent_id: &str,
     body: &MessageBody,
 ) -> Result<(), ApiError> {
@@ -2758,7 +2758,7 @@ fn check_viewer_image(core: &Core, id: &str, path: &str) -> anyhow::Result<()> {
     if input.is_empty() || input.starts_with("file:") {
         return Err(denied());
     }
-    if armada_core::is_network_path(input) {
+    if kvistcode_core::is_network_path(input) {
         return Err(denied());
     }
     let requested = std::path::PathBuf::from(input);
@@ -3306,7 +3306,7 @@ mod tests {
         assert_eq!(ok(&"a".repeat(65)), None);
         assert!(ok(&"a".repeat(64)).is_some());
     }
-    use armada_core::{CreateAgentRequest, EventSink, ItemBody, Provider};
+    use kvistcode_core::{CreateAgentRequest, EventSink, ItemBody, Provider};
     use std::io::BufRead;
 
     #[test]
@@ -3335,7 +3335,7 @@ mod tests {
     /// Forwards core events to the remote server, like the app's dispatcher does.
     struct Forward(Mutex<Option<Arc<Remote>>>);
     impl EventSink for Forward {
-        fn emit(&self, event: ArmadaEvent) {
+        fn emit(&self, event: KvistcodeEvent) {
             if let Some(r) = self.0.lock().as_ref() {
                 r.publish(&event);
             }
@@ -3442,10 +3442,11 @@ mod tests {
     async fn remote_api_end_to_end() {
         let mock = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../../crates/armada-core/tests/mock_acp.py"
+            "/../../../crates/kvistcode-core/tests/mock_acp.py"
         );
-        std::env::set_var("ARMADA_GROK_COMMAND", format!("python3 {mock}"));
-        let dir = std::env::temp_dir().join(format!("armada-remote-test-{}", std::process::id()));
+        std::env::set_var("KVISTCODE_GROK_COMMAND", format!("python3 {mock}"));
+        let dir =
+            std::env::temp_dir().join(format!("kvistcode-remote-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let project = dir.join("project");
         std::fs::create_dir_all(&project).unwrap();
@@ -3594,7 +3595,7 @@ mod tests {
                     None,
                 )
                 .await;
-                let items: Vec<armada_core::TimelineItem> = serde_json::from_str(&body).unwrap();
+                let items: Vec<kvistcode_core::TimelineItem> = serde_json::from_str(&body).unwrap();
                 if let Some(id) = items.iter().find_map(|i| match &i.body {
                     ItemBody::Permission {
                         request_id,
@@ -3752,7 +3753,7 @@ mod tests {
         )
         .await;
         assert_eq!(code, 200);
-        let page: Vec<armada_core::TimelineItem> = serde_json::from_str(&body).unwrap();
+        let page: Vec<kvistcode_core::TimelineItem> = serde_json::from_str(&body).unwrap();
         assert_eq!(page.len(), 1, "limit is honored");
 
         // Unauthenticated requests are refused before any body is read.
@@ -3912,7 +3913,7 @@ mod tests {
 
         // Through Tailscale Serve: requests name the tailnet host (over https) and come
         // from this computer, with the phone's tailnet address in X-Forwarded-For.
-        let tailnet = format!("armada-pc.tail1234.ts.net:{port}");
+        let tailnet = format!("kvistcode-pc.tail1234.ts.net:{port}");
         let via = |origin: &str| {
             format!("GET /api/session HTTP/1.1\r\nHost: {tailnet}\r\nOrigin: {origin}\r\nX-Forwarded-For: 100.101.1.2\r\nAuthorization: Bearer {owner}\r\nConnection: close\r\n\r\n")
         };
@@ -4179,7 +4180,7 @@ mod tests {
     }
 
     fn temp_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("armada-tokens-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("kvistcode-tokens-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -4284,7 +4285,7 @@ mod tests {
 
     struct NullSink;
     impl EventSink for NullSink {
-        fn emit(&self, _event: ArmadaEvent) {}
+        fn emit(&self, _event: KvistcodeEvent) {}
     }
 
     fn test_remote(dir: &std::path::Path) -> (Arc<Remote>, Core) {
@@ -4379,7 +4380,7 @@ mod tests {
         assert!(remote.share_expiry(&format!("{token}0")).is_some());
         // Status forgets expired shares; archived or removed agents drop theirs.
         assert_eq!(remote.status().shares.len(), 1);
-        remote.publish(&ArmadaEvent::AgentRemoved {
+        remote.publish(&KvistcodeEvent::AgentRemoved {
             agent_id: "a1".into(),
         });
         assert!(remote.status().shares.is_empty());

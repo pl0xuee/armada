@@ -24,7 +24,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   override componentDidCatch(error: unknown, info: ErrorInfo) {
-    console.error("[armada] render error", error, info.componentStack);
+    console.error("[kvistcode] render error", error, info.componentStack);
   }
 
   override componentDidUpdate(prev: Props) {

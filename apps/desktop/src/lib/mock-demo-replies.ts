@@ -134,7 +134,7 @@ const user = await withRetry(() => api.get(\`/users/\${id}\`), { attempts: 3 });
 To run it from the terminal against staging:
 
 \`\`\`bash
-ARMADA_ENV=staging npm run smoke -- --only retry
+KVISTCODE_ENV=staging npm run smoke -- --only retry
 \`\`\`
 
 ### Behaviour at a glance

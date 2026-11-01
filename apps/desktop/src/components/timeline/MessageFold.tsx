@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { collapseLimitPx, hiddenLines, shouldCollapse, type MessageRole } from "./collapse";
 
 /** Bubbles up to the conversation: stop following the stream. */
-export const UNFOLLOW_EVENT = "armada:timeline-unfollow";
+export const UNFOLLOW_EVENT = "kvistcode:timeline-unfollow";
 
 /** Messages the reader opened (survives the row being virtualized out and back in). */
 const opened = new Set<string>();

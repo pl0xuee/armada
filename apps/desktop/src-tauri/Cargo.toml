@@ -1,25 +1,25 @@
 [package]
-name = "armada-desktop"
-description = "Armada — agent command center (Tauri shell)"
+name = "kvistcode-desktop"
+description = "Kvistcode — agent command center (Tauri shell)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-default-run = "armada"
+default-run = "kvistcode"
 
 [[bin]]
-name = "armada"
+name = "kvistcode"
 path = "src/main.rs"
 
 [lib]
-name = "armada_desktop_lib"
+name = "kvistcode_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-armada-core.workspace = true
+kvistcode-core.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

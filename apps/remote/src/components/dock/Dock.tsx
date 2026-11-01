@@ -295,7 +295,7 @@ function BlockedCard({ agent, block, onSwitchAccount }: { agent: Agent; block: D
       : kind === "error"
         ? notice || "Retry to carry on where it left off."
         : kind === "conflict"
-          ? "Resolve it in Armada on your computer."
+          ? "Resolve it in Kvistcode on your computer."
           : "Resume to continue the session.";
   return (
     <section

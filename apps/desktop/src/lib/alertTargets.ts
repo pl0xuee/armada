@@ -16,8 +16,8 @@ export const ALERT_KINDS: { value: AlertKind; label: string; placeholder: string
   {
     value: "webhook",
     label: "Webhook",
-    placeholder: "https://example.com/armada-hook",
-    hint: "Armada POSTs a small JSON message. https only (http works for localhost).",
+    placeholder: "https://example.com/kvistcode-hook",
+    hint: "Kvistcode POSTs a small JSON message. https only (http works for localhost).",
   },
 ];
 

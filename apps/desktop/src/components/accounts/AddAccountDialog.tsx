@@ -227,7 +227,7 @@ export function AddAccountDialog({
                 ) : (
                   <p className="rounded-lg border border-line bg-base/50 px-3 py-2.5 text-[12px] leading-relaxed text-muted">
                     After you click <span className="text-fg">Add & sign in</span>, {PROVIDERS[provider].tagline}'s own
-                    login runs in a terminal and opens your browser. Armada never sees your password or tokens.
+                    login runs in a terminal and opens your browser. Kvistcode never sees your password or tokens.
                   </p>
                 )}
               </>

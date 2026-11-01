@@ -1,15 +1,15 @@
-// Real-app smoke test. Launches the built Armada binary through tauri-driver (WebDriver),
+// Real-app smoke test. Launches the built Kvistcode binary through tauri-driver (WebDriver),
 // then walks the UI the way a user would and fails on any uncaught JS error, error toast
 // or "state not managed"-style backend failure. Unit tests can't catch those: the 0.1.3
 // release shipped dictation broken at runtime because a command asked for managed state
 // that was never registered.
 //
 // Env:
-//   ARMADA_BIN           path to the app binary (default ../../../target/debug/armada)
+//   KVISTCODE_BIN           path to the app binary (default ../../../target/debug/kvistcode)
 //   TAURI_DRIVER_PORT    where tauri-driver listens (default 4444)
-//   ARMADA_E2E_URL       if set, skip tauri-driver and drive an already-running WebDriver
+//   KVISTCODE_E2E_URL       if set, skip tauri-driver and drive an already-running WebDriver
 //                        endpoint with a plain browser at this URL (local dev only)
-//   ARMADA_E2E_HOST/PORT the WebDriver endpoint for ARMADA_E2E_URL mode
+//   KVISTCODE_E2E_HOST/PORT the WebDriver endpoint for KVISTCODE_E2E_URL mode
 //
 // Run it under an isolated HOME / XDG_* dirs (run.sh does) so the app starts
 // from empty state and never touches real data.
@@ -20,9 +20,9 @@ import { fileURLToPath } from "node:url";
 import { remote } from "webdriverio";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const bin = path.resolve(process.env.ARMADA_BIN ?? path.join(here, "../../../target/debug/armada"));
+const bin = path.resolve(process.env.KVISTCODE_BIN ?? path.join(here, "../../../target/debug/kvistcode"));
 const port = Number(process.env.TAURI_DRIVER_PORT ?? 4444);
-const pageUrl = process.env.ARMADA_E2E_URL;
+const pageUrl = process.env.KVISTCODE_E2E_URL;
 
 const failures = [];
 const log = (m) => console.log(`[e2e] ${m}`);
@@ -50,7 +50,7 @@ async function waitForPort(p, ms) {
 
 let driver = null;
 if (!pageUrl) {
-  if (!existsSync(bin)) throw new Error(`app binary not found: ${bin} (set ARMADA_BIN)`);
+  if (!existsSync(bin)) throw new Error(`app binary not found: ${bin} (set KVISTCODE_BIN)`);
   driver = spawn("tauri-driver", ["--port", String(port)], { stdio: ["ignore", "inherit", "inherit"] });
   driver.on("error", (e) => {
     console.error(`[e2e] could not start tauri-driver: ${e.message}`);
@@ -88,8 +88,8 @@ const caps = pageUrl
 
 try {
   browser = await remote({
-    hostname: process.env.ARMADA_E2E_HOST ?? "127.0.0.1",
-    port: pageUrl ? Number(process.env.ARMADA_E2E_PORT ?? 9515) : port,
+    hostname: process.env.KVISTCODE_E2E_HOST ?? "127.0.0.1",
+    port: pageUrl ? Number(process.env.KVISTCODE_E2E_PORT ?? 9515) : port,
     logLevel: "warn",
     connectionRetryCount: 1,
     capabilities: caps,

@@ -29,12 +29,12 @@ beforeEach(async () => {
 describe("pairing retries", () => {
   it("shows the server's message when the device list is full", async () => {
     pairDevice.mockRejectedValue(
-      new ApiError(409, "Too many paired devices. Remove one in Armada first."),
+      new ApiError(409, "Too many paired devices. Remove one in Kvistcode first."),
     );
     await pairWithCode("code-409");
     expect(getState().phase).toBe("blocked");
     expect(getState().blockedMessage).toBe(
-      "Too many paired devices. Remove one in Armada first.",
+      "Too many paired devices. Remove one in Kvistcode first.",
     );
   });
 

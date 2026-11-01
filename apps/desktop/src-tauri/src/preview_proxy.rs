@@ -36,8 +36,8 @@ type Body = BoxBody<Bytes, io::Error>;
 
 /// The agent script, built by `npm run build:preview-agent`.
 const AGENT_JS: &str = include_str!("../assets/preview-agent.js");
-const AGENT_PATH: &str = "/__armada/preview-agent.js";
-const SCRIPT_TAG: &str = "<script src=\"/__armada/preview-agent.js\"></script>";
+const AGENT_PATH: &str = "/__kvistcode/preview-agent.js";
+const SCRIPT_TAG: &str = "<script src=\"/__kvistcode/preview-agent.js\"></script>";
 /// How much HTML is looked at for an insertion point before giving up on `<head>`.
 const SNIFF_LIMIT: usize = 64 * 1024;
 /// Compressed HTML is decoded in memory, up to this size (before and after decoding).
@@ -296,7 +296,7 @@ async fn route(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Body> {
     if !host_ok {
         return text(
             StatusCode::FORBIDDEN,
-            "Armada preview proxy: unexpected Host",
+            "Kvistcode preview proxy: unexpected Host",
         );
     }
     if req.uri().path() == AGENT_PATH {
@@ -1053,7 +1053,7 @@ mod tests {
         );
     }
 
-    /// Manual: `ARMADA_PROXY_TARGET=http://localhost:5173 cargo test -p armada-desktop proxy_for_manual_checks -- --ignored --nocapture`
+    /// Manual: `KVISTCODE_PROXY_TARGET=http://localhost:5173 cargo test -p kvistcode-desktop proxy_for_manual_checks -- --ignored --nocapture`
     /// The committed bundle must be rebuilt (`npm run build:preview-agent`) when the agent's commands change.
     #[test]
     fn bundled_agent_handles_page_commands() {
@@ -1069,7 +1069,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn proxy_for_manual_checks() {
-        let target = std::env::var("ARMADA_PROXY_TARGET").expect("set ARMADA_PROXY_TARGET");
+        let target = std::env::var("KVISTCODE_PROXY_TARGET").expect("set KVISTCODE_PROXY_TARGET");
         let proxies = PreviewProxies::default();
         let info = proxies.start("manual", &target).await.unwrap();
         println!("PROXY {}", info.url);

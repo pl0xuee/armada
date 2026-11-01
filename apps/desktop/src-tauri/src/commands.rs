@@ -4,10 +4,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::AppHandle;
-use armada_core::{
-    accounts, toolchain, Account, Agent, AgentStatus, AlertKind, ArmadaEvent, Attachment,
-    AttentionReason, Core, CreateAccountRequest, CreateAgentRequest, CustomAgent, McpServer,
-    Provider, ProviderInfo, Schedule, SearchResults, Settings, TimelineItem, UpdateInfo,
+use kvistcode_core::{
+    accounts, toolchain, Account, Agent, AgentStatus, AlertKind, Attachment, AttentionReason, Core,
+    CreateAccountRequest, CreateAgentRequest, CustomAgent, KvistcodeEvent, McpServer, Provider,
+    ProviderInfo, Schedule, SearchResults, Settings, TimelineItem, UpdateInfo,
 };
 use serde::Serialize;
 use tauri::{Manager, State};
@@ -182,7 +182,7 @@ pub async fn remove_queued(
     core: State<'_, Core>,
     agent_id: String,
     queued_id: String,
-) -> CmdResult<Option<armada_core::RemovedPrompt>> {
+) -> CmdResult<Option<kvistcode_core::RemovedPrompt>> {
     core.remove_queued(&agent_id, &queued_id).map_err(err)
 }
 
@@ -383,7 +383,7 @@ pub async fn get_diff(core: State<'_, Core>, agent_id: String) -> CmdResult<Agen
 pub async fn list_checkpoints(
     core: State<'_, Core>,
     agent_id: String,
-) -> CmdResult<armada_core::checkpoints::CheckpointList> {
+) -> CmdResult<kvistcode_core::checkpoints::CheckpointList> {
     core.list_checkpoints(&agent_id).await.map_err(err)
 }
 
@@ -392,7 +392,7 @@ pub async fn preview_checkpoint(
     core: State<'_, Core>,
     agent_id: String,
     checkpoint_id: String,
-) -> CmdResult<armada_core::checkpoints::RestorePreview> {
+) -> CmdResult<kvistcode_core::checkpoints::RestorePreview> {
     core.preview_checkpoint(&agent_id, &checkpoint_id)
         .await
         .map_err(err)
@@ -405,7 +405,7 @@ pub async fn restore_checkpoint(
     core: State<'_, Core>,
     agent_id: String,
     checkpoint_id: String,
-) -> CmdResult<armada_core::checkpoints::RestoreResult> {
+) -> CmdResult<kvistcode_core::checkpoints::RestoreResult> {
     let (_guard, _agent) = lock_idle_agent(&core, &agent_id, "restoring its files").map_err(err)?;
     core.restore_checkpoint(&agent_id, &checkpoint_id)
         .await
@@ -724,7 +724,7 @@ pub async fn github_login(
     core: State<'_, Core>,
     terminals: State<'_, Terminals>,
 ) -> CmdResult<LoginTerminal> {
-    let exe = armada_core::providers::resolve_program("gh").ok_or_else(|| {
+    let exe = kvistcode_core::providers::resolve_program("gh").ok_or_else(|| {
         "The GitHub CLI (gh) is not installed. Get it from https://cli.github.com".to_string()
     })?;
     let args = github::login_args();
@@ -767,7 +767,7 @@ pub async fn github_setup_git() -> CmdResult<github::GithubStatus> {
 /// What publishing `path` would start from: repository or not, commits, remotes, a name.
 #[tauri::command]
 pub async fn github_repo_info(path: String) -> CmdResult<github::RepoInfo> {
-    let path = armada_core::providers::expand_home(&path);
+    let path = kvistcode_core::providers::expand_home(&path);
     github::repo_info(std::path::Path::new(&path))
         .await
         .map_err(err)
@@ -785,12 +785,12 @@ pub async fn github_publish(
 ) -> CmdResult<github::PublishResult> {
     let (_guard, agent) = lock_idle_agent(&core, &agent_id, "publishing").map_err(err)?;
     // The project folder, not an agent's worktree: the remote belongs to the repository.
-    let project = armada_core::providers::expand_home(&agent.project_path);
+    let project = kvistcode_core::providers::expand_home(&agent.project_path);
     // Publishing may commit everything in that folder, so no other agent may be writing into it.
     let busy_neighbour = core.agents().map_err(err)?.into_iter().any(|other| {
         other.id != agent.id
             && !other.worktree
-            && armada_core::providers::expand_home(&other.cwd) == project
+            && kvistcode_core::providers::expand_home(&other.cwd) == project
             && matches!(
                 other.status,
                 AgentStatus::Working | AgentStatus::Starting | AgentStatus::NeedsPermission
@@ -908,7 +908,7 @@ pub async fn login_account(
             "Custom agents handle sign-in themselves; see the agent's own documentation."
                 .to_string()
         })?;
-    let exe = armada_core::providers::resolve_program(&program).ok_or_else(|| {
+    let exe = kvistcode_core::providers::resolve_program(&program).ok_or_else(|| {
         format!(
             "{} is not installed (could not find `{program}` on PATH). Install it from Settings → Providers.",
             account.provider.display_name()
@@ -981,8 +981,8 @@ pub struct LoginTerminal {
 /// Whether `path` is a folder inside a git work tree (for launch preflight).
 #[tauri::command]
 pub async fn is_git_repo(path: String) -> CmdResult<bool> {
-    let path = armada_core::providers::expand_home(&path);
-    Ok(armada_core::git_work_tree(std::path::Path::new(&path)).await)
+    let path = kvistcode_core::providers::expand_home(&path);
+    Ok(kvistcode_core::git_work_tree(std::path::Path::new(&path)).await)
 }
 
 // ---- providers ---------------------------------------------------------------
@@ -993,7 +993,7 @@ pub async fn detect_providers(
     shell: State<'_, Shell>,
 ) -> CmdResult<Vec<ProviderInfo>> {
     let providers = shell.refresh_providers().await;
-    core.emit(ArmadaEvent::ProvidersChanged {
+    core.emit(KvistcodeEvent::ProvidersChanged {
         providers: providers.clone(),
     });
     Ok(providers)
@@ -1034,7 +1034,7 @@ pub async fn install_missing(
     ))
 }
 
-/// Looks for newer releases of Armada's agent tools now (the background check runs every
+/// Looks for newer releases of Kvistcode's agent tools now (the background check runs every
 /// few hours) and returns the providers with what was found.
 #[tauri::command]
 pub async fn check_tool_updates(
@@ -1044,14 +1044,14 @@ pub async fn check_tool_updates(
     let log: toolchain::Log = std::sync::Arc::new(|_| {});
     toolchain::check_updates(&log).await.map_err(err)?;
     let providers = shell.refresh_providers().await;
-    core.emit(ArmadaEvent::ProvidersChanged {
+    core.emit(KvistcodeEvent::ProvidersChanged {
         providers: providers.clone(),
     });
     Ok(providers)
 }
 
 /// Installs the newest release of a provider's agent tool (or, with `rollback`, the
-/// version this Armada was tested with), showing progress in a terminal like installs do.
+/// version this Kvistcode was tested with), showing progress in a terminal like installs do.
 /// If the new version doesn't start, the previous one is put back.
 #[tauri::command]
 pub async fn update_tool(
@@ -1081,7 +1081,7 @@ fn after_install(app: AppHandle, code: Option<i32>) {
     tauri::async_runtime::spawn(async move {
         let providers = app.state::<Shell>().refresh_providers().await;
         app.state::<Core>()
-            .emit(ArmadaEvent::ProvidersChanged { providers });
+            .emit(KvistcodeEvent::ProvidersChanged { providers });
     });
 }
 
@@ -1117,7 +1117,7 @@ pub async fn terminal_kill(
 
 // ---- settings & attention ------------------------------------------------------
 
-/// Checks the fields Armada acts on blindly. Only changed values are checked, so a
+/// Checks the fields Kvistcode acts on blindly. Only changed values are checked, so a
 /// value saved before validation existed doesn't block unrelated changes.
 fn validate_settings(previous: Option<&Settings>, settings: &Settings) -> CmdResult<()> {
     let quiet = &settings.quiet_hours;
@@ -1145,10 +1145,10 @@ fn validate_settings(previous: Option<&Settings>, settings: &Settings) -> CmdRes
 /// every target that is new or whose URL or kind changed.
 fn validate_alert_targets(previous: Option<&Settings>, settings: &Settings) -> CmdResult<()> {
     let targets = &settings.alert_targets;
-    if targets.len() > armada_core::model::MAX_ALERT_TARGETS {
+    if targets.len() > kvistcode_core::model::MAX_ALERT_TARGETS {
         return Err(format!(
             "Alerts: at most {} targets",
-            armada_core::model::MAX_ALERT_TARGETS
+            kvistcode_core::model::MAX_ALERT_TARGETS
         ));
     }
     let mut seen = std::collections::HashSet::new();
@@ -1221,8 +1221,8 @@ pub async fn update_settings(
 #[tauri::command]
 pub fn set_interface_zoom(app: AppHandle, percent: u32) -> CmdResult<()> {
     let percent = percent.clamp(
-        armada_core::model::MIN_INTERFACE_SCALE,
-        armada_core::model::MAX_INTERFACE_SCALE,
+        kvistcode_core::model::MIN_INTERFACE_SCALE,
+        kvistcode_core::model::MAX_INTERFACE_SCALE,
     );
     if let Some(w) = crate::window::main_window(&app) {
         w.set_zoom(f64::from(percent) / 100.0)
@@ -1628,7 +1628,7 @@ mod tests {
             "authKind": "api_key", "configDir": "/home/me/My Profiles/work", "createdAt": 0
         }))
         .unwrap();
-        account.auth_kind = armada_core::AuthKind::ApiKey;
+        account.auth_kind = kvistcode_core::AuthKind::ApiKey;
         let line = login_command_line(
             &account,
             std::path::Path::new("/opt/Claude Code/claude"),

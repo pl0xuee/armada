@@ -11,13 +11,13 @@ use std::time::Duration;
 
 use crate::AppHandle;
 use anyhow::{anyhow, Context};
-use armada_core::{ArmadaEvent, Core, UpdateInfo};
+use kvistcode_core::{Core, KvistcodeEvent, UpdateInfo};
 use parking_lot::Mutex;
 use tauri::Manager;
 use tauri_plugin_updater::UpdaterExt;
 use tracing::{error, info, warn};
 
-const REPO: &str = "pl0xuee/armada";
+const REPO: &str = "pl0xuee/kvistcode";
 const FIRST_CHECK_DELAY: Duration = Duration::from_secs(15);
 const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
@@ -93,7 +93,7 @@ struct GithubRelease {
 fn github_latest() -> anyhow::Result<GithubRelease> {
     let agent = ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
-            .tls_config(armada_core::toolchain::platform_tls())
+            .tls_config(kvistcode_core::toolchain::platform_tls())
             .timeout_global(Some(Duration::from_secs(20)))
             .build(),
     );
@@ -101,7 +101,10 @@ fn github_latest() -> anyhow::Result<GithubRelease> {
     let mut resp = agent
         .get(&url)
         .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", concat!("Armada/", env!("CARGO_PKG_VERSION")))
+        .header(
+            "User-Agent",
+            concat!("Kvistcode/", env!("CARGO_PKG_VERSION")),
+        )
         .call()
         .context("asking GitHub for the latest release")?;
     let body: serde_json::Value = serde_json::from_str(&resp.body_mut().read_to_string()?)?;
@@ -168,7 +171,7 @@ pub async fn check(app: &AppHandle) -> anyhow::Result<Option<UpdateInfo>> {
     }))
 }
 
-/// Downloads and verifies the update, shuts Armada down cleanly, installs, restarts.
+/// Downloads and verifies the update, shuts Kvistcode down cleanly, installs, restarts.
 ///
 /// The download happens while everything is still running (a failed download leaves
 /// the app untouched). Shutdown must come *before* `install`: on Windows the updater
@@ -181,7 +184,7 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 pub async fn install(app: &AppHandle) -> anyhow::Result<()> {
     if !can_self_update() {
         anyhow::bail!(
-            "This copy of Armada was installed by your package manager. Download the new version from {}",
+            "This copy of Kvistcode was installed by your package manager. Download the new version from {}",
             releases_page()
         );
     }
@@ -198,7 +201,7 @@ pub async fn install(app: &AppHandle) -> anyhow::Result<()> {
     let update = tokio::time::timeout(CHECK_TIMEOUT, app.updater()?.check())
         .await
         .map_err(|_| anyhow!("Checking for the update timed out. Try again."))??
-        .ok_or_else(|| anyhow!("Armada is already up to date"))?;
+        .ok_or_else(|| anyhow!("Kvistcode is already up to date"))?;
     info!(version = %update.version, "downloading update");
     let progress_core = app.state::<Core>().inner().clone();
     let mut downloaded: u64 = 0;
@@ -208,7 +211,7 @@ pub async fn install(app: &AppHandle) -> anyhow::Result<()> {
         update.download(
             move |chunk, total| {
                 downloaded += chunk as u64;
-                progress_core.emit(ArmadaEvent::UpdateProgress { downloaded, total });
+                progress_core.emit(KvistcodeEvent::UpdateProgress { downloaded, total });
             },
             || info!("update downloaded"),
         ),
@@ -218,7 +221,7 @@ pub async fn install(app: &AppHandle) -> anyhow::Result<()> {
     .context("downloading the update")?;
 
     if !crate::begin_update() {
-        anyhow::bail!("Armada is quitting; the update will be offered again next time");
+        anyhow::bail!("Kvistcode is quitting; the update will be offered again next time");
     }
     // Record busy agents as interrupted (so they resume after the restart), end PTYs
     // and stop the remote server before the binary is replaced.
@@ -245,7 +248,7 @@ pub async fn install(app: &AppHandle) -> anyhow::Result<()> {
             use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
             app.dialog()
                 .message(format!(
-                    "Armada {version} couldn't be installed:\n\n{e:#}\n\nArmada will restart on the current version. You can download the update from {}",
+                    "Kvistcode {version} couldn't be installed:\n\n{e:#}\n\nKvistcode will restart on the current version. You can download the update from {}",
                     releases_page()
                 ))
                 .title("Update failed")
@@ -276,7 +279,7 @@ pub fn spawn_background_checks(app: AppHandle) {
                             info!(version = %update.version, "update available");
                             *notified = Some(update.version.clone());
                             app.state::<Core>()
-                                .emit(ArmadaEvent::UpdateAvailable { update });
+                                .emit(KvistcodeEvent::UpdateAvailable { update });
                         }
                     }
                     Ok(None) => {}

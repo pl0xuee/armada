@@ -1,4 +1,4 @@
-// Which composer options Armada remembers (mirrors crates/armada-core/src/config_memory.rs).
+// Which composer options Kvistcode remembers (mirrors crates/kvistcode-core/src/config_memory.rs).
 import type { ConfigOption, CustomAgent, Provider } from "./types";
 import { identityFor } from "./identity";
 

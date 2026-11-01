@@ -1,4 +1,4 @@
-//! Voice assistant: talk to Armada through OpenAI's Realtime API (`gpt-realtime`).
+//! Voice assistant: talk to Kvistcode through OpenAI's Realtime API (`gpt-realtime`).
 //!
 //! Audio goes to OpenAI and the assistant reads agent information through tools, so
 //! the feature is off until the user enables it in Settings and picks the OpenAI API
@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::AppHandle;
-use armada_core::{accounts, AuthKind, Core, Provider};
+use kvistcode_core::{accounts, AuthKind, Core, Provider};
 use parking_lot::Mutex;
 use tauri::{Emitter, State};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -194,7 +194,7 @@ pub async fn va_start(
         sink: sink.clone(),
         finished: false,
     };
-    let host = Arc::new(host::ArmadaTools::new(app.clone(), core, sink.clone()));
+    let host = Arc::new(host::KvistcodeTools::new(app.clone(), core, sink.clone()));
     tauri::async_runtime::spawn(async move {
         let devices = Box::new(audio::SystemAudio { input_device });
         let end = session::run(cfg, sink.clone(), host, devices, ctl_rx).await;

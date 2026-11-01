@@ -81,7 +81,7 @@ describe("groupByProject", () => {
   });
 
   it("filters agents by title, folder or branch", () => {
-    const list = [agent({ title: "Fix login" }), agent({ projectPath: "/work/api", branch: "armada/billing-1" })];
+    const list = [agent({ title: "Fix login" }), agent({ projectPath: "/work/api", branch: "kvistcode/billing-1" })];
     expect(groupByProject(list, "login").projects).toHaveLength(1);
     expect(groupByProject(list, "billing").projects[0].name).toBe("api");
     expect(groupByProject(list, "nothing").projects).toHaveLength(0);

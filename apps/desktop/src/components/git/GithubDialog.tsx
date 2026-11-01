@@ -164,7 +164,7 @@ function GithubBody({
           {!status.ghInstalled ? (
             <>
               <p className="text-[12.5px] text-muted">
-                Armada uses the GitHub CLI (<code className="font-mono">gh</code>) to talk to GitHub, and it isn't
+                Kvistcode uses the GitHub CLI (<code className="font-mono">gh</code>) to talk to GitHub, and it isn't
                 installed.
               </p>
               <Button size="sm" variant="secondary" onClick={() => void openExternal("https://cli.github.com")}>
@@ -174,7 +174,7 @@ function GithubBody({
           ) : !status.loggedIn ? (
             <>
               <p className="text-[12.5px] text-muted">
-                Opens your browser to sign in to GitHub. Armada never sees your password.
+                Opens your browser to sign in to GitHub. Kvistcode never sees your password.
               </p>
               <Button size="sm" variant="primary" onClick={() => void startGithubLogin()}>
                 <GithubGlyph className="h-3.5 w-3.5" /> Sign in to GitHub
@@ -226,7 +226,7 @@ function GithubBody({
           <Step n={2} done={false} title={`Push ${branch}`}>
             <p className="text-[12.5px] text-muted">
               To <span className="selectable break-all font-mono text-[11.5px] text-fg">{origin.url}</span>. Commit
-              first: only commits are pushed, and Armada never force-pushes.
+              first: only commits are pushed, and Kvistcode never force-pushes.
             </p>
             <Button
               size="sm"
@@ -344,7 +344,7 @@ function PublishForm({
       }}
     >
       <p className="text-[12.5px] text-muted">
-        {repo.isRepo ? "This repository has no GitHub remote." : "This folder isn't a git repository yet."} Armada will
+        {repo.isRepo ? "This repository has no GitHub remote." : "This folder isn't a git repository yet."} Kvistcode will
         {repo.isRepo ? "" : " set it up,"}
         {repo.hasCommits ? "" : " make a first commit (leaving out files that look like secrets),"} create the
         repository and push <span className="font-mono">{repo.branch ?? "main"}</span> from{" "}

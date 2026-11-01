@@ -23,7 +23,7 @@ INSTALL = """### Install
 - **Windows**: `-setup.exe`
 - **Linux**: `.AppImage`, `.deb` or `.rpm`
 
-Already installed? Armada updates itself (Settings → About → Check for updates)."""
+Already installed? Kvistcode updates itself (Settings → About → Check for updates)."""
 
 
 def fail(msg: str) -> None:

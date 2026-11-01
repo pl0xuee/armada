@@ -456,7 +456,7 @@ function StatusBanner({
   let text = "";
   if (agent.status === "interrupted") {
     tone = "violet";
-    text = "Interrupted when Armada closed. Resume to continue the session.";
+    text = "Interrupted when Kvistcode closed. Resume to continue the session.";
   } else if (agent.status === "stopped") {
     tone = "steel";
     text = "This agent was stopped. Resume to continue the session.";

@@ -1,8 +1,8 @@
 {
-  "name": "armada-remote",
+  "name": "kvistcode-remote",
   "private": true,
   "version": "0.2.0",
-  "description": "Armada mobile companion: a single-file web app served by the desktop app's remote server.",
+  "description": "Kvistcode mobile companion: a single-file web app served by the desktop app's remote server.",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -90,7 +90,7 @@ export async function startGithubLogin() {
       kind: "login",
       github: true,
       title: "Sign in to GitHub",
-      subtitle: "Uses the GitHub CLI. Armada never sees your password; git is set up to use the sign-in afterwards.",
+      subtitle: "Uses the GitHub CLI. Kvistcode never sees your password; git is set up to use the sign-in afterwards.",
     });
   } catch (e) {
     toast.error("Couldn't start the GitHub sign-in", { description: errorMessage(e) });
@@ -112,7 +112,7 @@ export async function startInstall(provider: Provider) {
   }
 }
 
-/** Update an agent tool to the newest release, or (rollback) back to the version Armada was tested with. */
+/** Update an agent tool to the newest release, or (rollback) back to the version Kvistcode was tested with. */
 export async function startToolUpdate(provider: Provider, rollback = false) {
   const name = PROVIDERS[provider].short;
   try {
@@ -201,7 +201,7 @@ export async function attempt<T>(label: string, fn: () => Promise<T>): Promise<T
   } catch (e) {
     const msg = errorMessage(e);
     // Not a failure of the action: the core is quitting (e.g. the app is closing/updating).
-    if (isShuttingDown(msg)) toast("Armada is shutting down", { id: "shutting-down" });
+    if (isShuttingDown(msg)) toast("Kvistcode is shutting down", { id: "shutting-down" });
     else toast.error(label, { description: msg });
     return null;
   }
@@ -221,7 +221,7 @@ export async function retryLastPrompt(
 }
 
 export function isShuttingDown(message: string): boolean {
-  return message.includes("Armada is shutting down");
+  return message.includes("Kvistcode is shutting down");
 }
 
 export async function installMissing() {
@@ -231,7 +231,7 @@ export async function installMissing() {
       terminalId,
       kind: "install",
       title: "Install missing agents",
-      subtitle: "No admin rights needed. If Node.js isn't installed, Armada downloads a private copy.",
+      subtitle: "No admin rights needed. If Node.js isn't installed, Kvistcode downloads a private copy.",
     });
   } catch (e) {
     toast.error("Couldn't start the installer", { description: errorMessage(e) });
@@ -245,9 +245,9 @@ export async function checkForUpdates(): Promise<void> {
     const u = await api.checkForUpdate();
     if (u) {
       useApp.getState().setUpdate(u);
-      toast.success(`Armada ${u.version} is available`, { id, description: "See the banner to install it." });
+      toast.success(`Kvistcode ${u.version} is available`, { id, description: "See the banner to install it." });
     } else {
-      toast.success("You're up to date", { id, description: `Armada ${useApp.getState().version}` });
+      toast.success("You're up to date", { id, description: `Kvistcode ${useApp.getState().version}` });
     }
   } catch (e) {
     toast.error("Couldn't check for updates", { id, description: errorMessage(e) });

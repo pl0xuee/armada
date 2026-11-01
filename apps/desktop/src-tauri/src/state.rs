@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use armada_core::{providers, ProviderInfo};
+use kvistcode_core::{providers, ProviderInfo};
 use parking_lot::Mutex;
 
 pub struct Shell {

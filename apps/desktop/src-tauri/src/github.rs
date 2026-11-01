@@ -1,7 +1,7 @@
 //! GitHub for agents' work: whether `gh` is signed in and git can use that sign-in, pushing
 //! a branch, and turning a folder into a new GitHub repository.
 //!
-//! Armada runs git and `gh` with prompts switched off (a GUI app has nowhere to answer
+//! Kvistcode runs git and `gh` with prompts switched off (a GUI app has nowhere to answer
 //! them), so an HTTPS push only works when git has a credential helper that already knows
 //! the token. `gh auth setup-git` installs one; [`setup_git`] is that step, run on request.
 
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
-use armada_core::Agent;
+use kvistcode_core::Agent;
 use serde::Serialize;
 
 use crate::git_review::{
@@ -37,7 +37,7 @@ fn is_timeout(e: &anyhow::Error) -> bool {
 
 /// Where `gh` and global git config are asked from when no repository is involved.
 fn neutral_dir() -> PathBuf {
-    armada_core::providers::home_dir().unwrap_or_else(std::env::temp_dir)
+    kvistcode_core::providers::home_dir().unwrap_or_else(std::env::temp_dir)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -64,7 +64,7 @@ pub async fn status() -> anyhow::Result<GithubStatus> {
         user: None,
         git_ready: false,
     };
-    if armada_core::providers::resolve_program("gh").is_none() {
+    if kvistcode_core::providers::resolve_program("gh").is_none() {
         return Ok(none);
     }
     let logged_in = match output("gh", &cwd, &["auth", "status", "--hostname", HOST], quick()).await {
@@ -171,7 +171,7 @@ pub async fn repo_info(path: &Path) -> anyhow::Result<RepoInfo> {
         bail!("{} is not a folder", path.display());
     }
     let suggested_name = suggest_name(path);
-    if !armada_core::git_work_tree(path).await {
+    if !kvistcode_core::git_work_tree(path).await {
         return Ok(RepoInfo {
             is_repo: false,
             has_commits: false,
@@ -271,7 +271,7 @@ fn validate_repo_name(name: &str) -> anyhow::Result<()> {
 pub struct PublishResult {
     /// The new repository's address.
     pub url: String,
-    /// Short hash of the first commit, when Armada had to make one.
+    /// Short hash of the first commit, when Kvistcode had to make one.
     pub committed: Option<String>,
     /// Files with secret-looking names that were left out of that first commit.
     pub left_out: Vec<String>,
@@ -431,7 +431,7 @@ pub async fn push_agent(agent: &Agent) -> anyhow::Result<String> {
             || text.contains("fetch first")
             || text.contains("[rejected]")
         {
-            bail!("{remote}/{branch} has commits this branch doesn't; pull or merge them first (Armada never force-pushes).");
+            bail!("{remote}/{branch} has commits this branch doesn't; pull or merge them first (Kvistcode never force-pushes).");
         }
         return Err(explain_push_failure(e));
     }
@@ -458,7 +458,7 @@ pub fn is_auth_failure(text: &str) -> bool {
 pub fn explain_push_failure(e: anyhow::Error) -> anyhow::Error {
     let text = format!("{e:#}");
     if is_auth_failure(&text) {
-        e.context("GitHub didn't accept Armada's credentials. Sign in to GitHub and connect git to it with the GitHub button in the Review panel, or check that you can write to this repository")
+        e.context("GitHub didn't accept Kvistcode's credentials. Sign in to GitHub and connect git to it with the GitHub button in the Review panel, or check that you can write to this repository")
     } else {
         e
     }
@@ -527,7 +527,7 @@ mod tests {
         ] {
             std::env::set_var(k, v);
         }
-        let dir = std::env::temp_dir().join(format!("armada-gh-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("kvistcode-gh-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         // Not inside any repository: a stray one in the temp dir's parents would hide the init.
         let dir = dir.canonicalize().unwrap();
@@ -553,7 +553,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_empty_folder_is_refused() {
-        let dir = std::env::temp_dir().join(format!("armada-gh-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("kvistcode-gh-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let dir = dir.canonicalize().unwrap();
         let info = repo_info(&dir).await.unwrap();

@@ -1,13 +1,13 @@
 //! "Tools & instructions": safe saving of `CLAUDE.md` / `AGENTS.md` (noticing edits made
 //! elsewhere) and the skills Claude Code loads. The file logic, and its confinement to
-//! the project root and the known skill folders, lives in `armada_core::project_config`
-//! and `armada_core::skills`; MCP servers use the settings and test commands.
+//! the project root and the known skill folders, lives in `kvistcode_core::project_config`
+//! and `kvistcode_core::skills`; MCP servers use the settings and test commands.
 
 use std::path::PathBuf;
 
-use armada_core::project_config::{self, InstructionDoc, InstructionSave};
-use armada_core::skills::{self, SkillDoc, SkillInfo};
-use armada_core::{providers, Core};
+use kvistcode_core::project_config::{self, InstructionDoc, InstructionSave};
+use kvistcode_core::skills::{self, SkillDoc, SkillInfo};
+use kvistcode_core::{providers, Core};
 use tauri::State;
 
 use crate::project_settings::{blocking, err, known_project, CmdResult};

@@ -90,7 +90,7 @@ export function ShortcutHelp() {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
         title="Keyboard shortcuts"
-        description="Armada is fully usable from the keyboard."
+        description="Kvistcode is fully usable from the keyboard."
         className="w-[min(760px,calc(100vw-16px))]"
         sheet
       >

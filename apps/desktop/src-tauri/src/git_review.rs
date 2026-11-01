@@ -10,7 +10,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, bail, Context};
-use armada_core::Agent;
+use kvistcode_core::Agent;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -54,7 +54,7 @@ pub struct AgentDiff {
     pub lfs: Option<LfsSummary>,
 }
 
-/// Git LFS facts about a diff. Armada never runs LFS (or any repository-configured
+/// Git LFS facts about a diff. Kvistcode never runs LFS (or any repository-configured
 /// filter) to view a diff: LFS files are compared against their committed pointers.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -131,7 +131,7 @@ pub fn try_lock_agent(agent_id: &str) -> anyhow::Result<tokio::sync::OwnedMutexG
         locks.entry(agent_id.to_string()).or_default().clone()
     };
     lock.try_lock_owned().map_err(|_| {
-        anyhow!("Armada is already committing, merging or reverting this agent's work; wait for it to finish")
+        anyhow!("Kvistcode is already committing, merging or reverting this agent's work; wait for it to finish")
     })
 }
 
@@ -207,20 +207,20 @@ async fn output_capped(
 ) -> anyhow::Result<Captured> {
     use tokio::io::AsyncReadExt;
 
-    let exe = armada_core::providers::resolve_program(program).ok_or_else(|| match program {
+    let exe = kvistcode_core::providers::resolve_program(program).ok_or_else(|| match program {
         "gh" => anyhow!("The GitHub CLI (gh) is not installed. Get it from https://cli.github.com"),
         _ => anyhow!("{program} is not installed or not on PATH"),
     })?;
     let mut cmd = tokio::process::Command::new(exe);
     // Running as an AppImage: don't hand git/gh our bundled libraries.
-    armada_core::childenv::sanitize_child_env(&mut cmd);
+    kvistcode_core::childenv::sanitize_child_env(&mut cmd);
     if program == "git" {
         // Windows: paths past MAX_PATH (deep node_modules) instead of "Filename too long".
         // Unknown elsewhere, where git ignores it.
         cmd.args(["-c", "core.longpaths=true"]);
         // The repository's own config (the agent can write it) must not run programs or
         // redirect pushes; the user's global config keeps working.
-        let hardening = armada_core::hardening(cwd).await?;
+        let hardening = kvistcode_core::hardening(cwd).await?;
         match subcommand_of(args) {
             "push" => {
                 if let Some(why) = &hardening.push_blocker {
@@ -242,7 +242,7 @@ async fn output_capped(
         cmd.args(&hardening.args);
     } else if program == "gh" {
         // gh spawns git itself: hand it the same hardening through the environment.
-        let hardening = armada_core::hardening(cwd).await?;
+        let hardening = kvistcode_core::hardening(cwd).await?;
         if let Some(why) = hardening
             .push_blocker
             .as_ref()
@@ -658,7 +658,7 @@ impl TempIndex {
             .await?;
         // Absolute already; the join only matters for very old git versions.
         let real = plain_path(&git.cwd.join(real.trim_end_matches(['\r', '\n'])));
-        let name = format!("armada-index-{}", uuid::Uuid::new_v4());
+        let name = format!("kvistcode-index-{}", uuid::Uuid::new_v4());
         // Next to the real index (same permissions as the repository) when possible.
         let mut candidates = Vec::new();
         if let Some(dir) = real.parent() {
@@ -704,8 +704,8 @@ impl TempIndex {
     }
 }
 
-/// Removes `armada-index-*` files (and their `.lock`s) in `dir` older than
-/// [`STALE_TEMP_INDEX`]: left behind when Armada was killed mid-diff.
+/// Removes `kvistcode-index-*` files (and their `.lock`s) in `dir` older than
+/// [`STALE_TEMP_INDEX`]: left behind when Kvistcode was killed mid-diff.
 fn sweep_stale_temp_indexes(dir: &Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -715,7 +715,7 @@ fn sweep_stale_temp_indexes(dir: &Path) {
         if !entry
             .file_name()
             .to_string_lossy()
-            .starts_with("armada-index-")
+            .starts_with("kvistcode-index-")
         {
             continue;
         }
@@ -1555,7 +1555,7 @@ pub async fn commit_excluding(
 /// Whether a file name looks like it holds credentials or keys (the list shared with
 /// checkpoint snapshots).
 pub fn looks_like_secret(path: &str) -> bool {
-    armada_core::checkpoints::is_secret_path(path)
+    kvistcode_core::checkpoints::is_secret_path(path)
 }
 
 /// Untracked, not-ignored files that a commit of the agent's work would add and whose
@@ -1691,7 +1691,7 @@ async fn commit_paths(
     touched: &[String],
 ) -> anyhow::Result<CommitSummary> {
     const NOTHING: &str =
-        "Nothing to commit: Armada hasn't seen this agent change any files in this \
+        "Nothing to commit: Kvistcode hasn't seen this agent change any files in this \
                            repository. (Agents without their own worktree only commit the files \
                            they edited; commit anything else yourself.)";
     let nothing = || anyhow::Error::new(NothingToCommit(NOTHING.into()));
@@ -2127,7 +2127,7 @@ pub async fn merge(agent: &Agent) -> anyhow::Result<String> {
         Some(1) => {}
         _ => check("git", &["merge-base"], &merged)?,
     }
-    let message = format!("Merge Armada agent: {}", agent.title);
+    let message = format!("Merge Kvistcode agent: {}", agent.title);
     if let Err(e) = git(project, &["merge", "--no-ff", branch, "-m", &message]).await {
         let _ = git(project, &["merge", "--abort"]).await;
         return Err(e.context(format!("merging {branch} into {base} (merge aborted)")));
@@ -2243,7 +2243,7 @@ pub async fn push_base_branch(agent: &Agent) -> anyhow::Result<BaseBranchStatus>
         || remote.starts_with('-')
         || remote.contains(char::is_whitespace)
     {
-        bail!("{base} tracks `{upstream}`, which isn't on a remote Armada can push to; push it from a terminal.");
+        bail!("{base} tracks `{upstream}`, which isn't on a remote Kvistcode can push to; push it from a terminal.");
     }
     if !merge_ref.starts_with("refs/heads/") {
         bail!("{base}'s upstream `{upstream}` isn't a branch; push it from a terminal.");
@@ -2333,7 +2333,7 @@ pub async fn create_pr(
         bail!("{branch} has no commits that aren't already in {base}, so there's nothing to open a pull request for.");
     }
     // Fail fast with a friendly message before pushing anything.
-    armada_core::providers::resolve_program("gh").ok_or_else(|| {
+    kvistcode_core::providers::resolve_program("gh").ok_or_else(|| {
         anyhow!("The GitHub CLI (gh) is not installed. Get it from https://cli.github.com")
     })?;
     let remote = push_remote(cwd, branch).await?;
@@ -2460,7 +2460,7 @@ mod tests {
 
     impl Repo {
         fn new() -> Self {
-            let dir = std::env::temp_dir().join(format!("armada-git-{}", uuid::Uuid::new_v4()));
+            let dir = std::env::temp_dir().join(format!("kvistcode-git-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(dir.join("hooks-none")).unwrap();
             let repo = Repo {
                 // Without Windows' \\?\ prefix, which git can't handle.
@@ -2469,8 +2469,8 @@ mod tests {
             repo.git(&["init", "-q"]);
             // Byte-exact checkouts whatever the machine's git config says.
             repo.git(&["config", "core.autocrlf", "false"]);
-            repo.git(&["config", "user.name", "Armada Test"]);
-            repo.git(&["config", "user.email", "test@armada.invalid"]);
+            repo.git(&["config", "user.name", "Kvistcode Test"]);
+            repo.git(&["config", "user.email", "test@kvistcode.invalid"]);
             repo.git(&["config", "commit.gpgsign", "false"]);
             repo.git(&["config", "core.hooksPath", "hooks-none"]);
             repo.write(".gitignore", "hooks-none/\n*.log\n");
@@ -2512,7 +2512,7 @@ mod tests {
                 .unwrap()
                 .filter_map(|e| e.ok())
                 .map(|e| e.file_name().to_string_lossy().into_owned())
-                .filter(|n| n.starts_with("armada-index-"))
+                .filter(|n| n.starts_with("kvistcode-index-"))
                 .collect()
         }
     }
@@ -2618,14 +2618,15 @@ mod tests {
             );
         };
         in_inner(&["init", "-q"]);
-        in_inner(&["config", "user.name", "Armada Test"]);
-        in_inner(&["config", "user.email", "test@armada.invalid"]);
+        in_inner(&["config", "user.name", "Kvistcode Test"]);
+        in_inner(&["config", "user.email", "test@kvistcode.invalid"]);
         in_inner(&["config", "core.hooksPath", "/dev/null"]);
         std::fs::write(inner.join("f.txt"), "hi\n").unwrap();
         std::fs::write(inner.join(".gitattributes"), "f.txt filter=evil\n").unwrap();
         in_inner(&["add", "-A"]);
         in_inner(&["commit", "-q", "-m", "inner"]);
-        let marker = std::env::temp_dir().join(format!("armada-nested-{}", uuid::Uuid::new_v4()));
+        let marker =
+            std::env::temp_dir().join(format!("kvistcode-nested-{}", uuid::Uuid::new_v4()));
         in_inner(&[
             "config",
             "filter.evil.clean",
@@ -2692,8 +2693,8 @@ mod tests {
         repo.git(&["add", "-A"]);
         repo.git(&["commit", "-q", "-m", "init"]);
         let git_dir = repo.dir.join(".git");
-        let stale = git_dir.join("armada-index-stale");
-        let fresh = git_dir.join("armada-index-fresh");
+        let stale = git_dir.join("kvistcode-index-stale");
+        let fresh = git_dir.join("kvistcode-index-fresh");
         std::fs::write(&stale, "x").unwrap();
         std::fs::write(&fresh, "x").unwrap();
         let old = SystemTime::now() - STALE_TEMP_INDEX - Duration::from_secs(60);
@@ -2717,7 +2718,8 @@ mod tests {
         repo.git(&["add", "-A"]);
         repo.git(&["commit", "-q", "-m", "init"]);
 
-        let markers = std::env::temp_dir().join(format!("armada-pwned-{}", uuid::Uuid::new_v4()));
+        let markers =
+            std::env::temp_dir().join(format!("kvistcode-pwned-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&markers).unwrap();
         let touch = |name: &str| format!("touch '{}'; cat", markers.join(name).display());
         repo.git(&["config", "core.fsmonitor", &touch("fsmonitor")]);
@@ -2952,7 +2954,7 @@ mod tests {
         repo.write("user.txt", "u\n");
         repo.git(&["add", "-A"]);
         repo.git(&["commit", "-q", "-m", "init"]);
-        // The repo's own `core.hooksPath` is ignored by Armada; `.git/hooks` is honored.
+        // The repo's own `core.hooksPath` is ignored by Kvistcode; `.git/hooks` is honored.
         std::fs::create_dir_all(repo.dir.join(".git/hooks")).unwrap();
         std::fs::write(
             repo.dir.join(".git/hooks/pre-commit"),
@@ -3253,7 +3255,7 @@ mod tests {
             );
         };
         in_other(&["config", "user.name", "O"]);
-        in_other(&["config", "user.email", "o@armada.invalid"]);
+        in_other(&["config", "user.email", "o@kvistcode.invalid"]);
         in_other(&["config", "commit.gpgsign", "false"]);
         std::fs::write(other.join("o.txt"), "o\n").unwrap();
         in_other(&["add", "-A"]);
@@ -3587,7 +3589,7 @@ mod tests {
 
     /// A PATH directory with no `git-lfs` in it.
     fn empty_path() -> (PathBuf, std::ffi::OsString) {
-        let dir = std::env::temp_dir().join(format!("armada-path-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("kvistcode-path-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = std::env::join_paths([&dir]).unwrap();
         (dir, path)
@@ -3922,17 +3924,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// Timing probe: `ARMADA_DIFF_PROBE=<repo> cargo test --lib probe_diff -- --ignored
+    /// Timing probe: `KVISTCODE_DIFF_PROBE=<repo> cargo test --lib probe_diff -- --ignored
     /// --nocapture`. Read-only on the probed repository (objects are redirected to a
     /// scratch directory so even the intent-to-add of untracked files writes nowhere).
     #[tokio::test]
     #[ignore]
     async fn probe_diff() {
-        let Ok(target) = std::env::var("ARMADA_DIFF_PROBE") else {
+        let Ok(target) = std::env::var("KVISTCODE_DIFF_PROBE") else {
             return;
         };
         let target = PathBuf::from(target);
-        let scratch = std::env::temp_dir().join(format!("armada-probe-{}", uuid::Uuid::new_v4()));
+        let scratch =
+            std::env::temp_dir().join(format!("kvistcode-probe-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&scratch).unwrap();
         let common = git(
             &target,
@@ -3944,7 +3947,7 @@ mod tests {
         std::env::set_var("GIT_OBJECT_DIRECTORY", &scratch);
         std::env::set_var("GIT_ALTERNATE_OBJECT_DIRECTORIES", &objects);
         // Like `get_diff`, with the agent starting an hour ago unless told otherwise.
-        let started = std::env::var("ARMADA_PROBE_STARTED_MS")
+        let started = std::env::var("KVISTCODE_PROBE_STARTED_MS")
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
             .map(|ms| SystemTime::UNIX_EPOCH + Duration::from_millis(ms));

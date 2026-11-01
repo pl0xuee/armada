@@ -349,7 +349,7 @@ function Sounds({ settings }: { settings: Settings }) {
 
   return (
     <>
-      <SectionHeader title="Sounds" description="Audio cues play even when Armada is in the tray." />
+      <SectionHeader title="Sounds" description="Audio cues play even when Kvistcode is in the tray." />
       <div className="space-y-6">
         <SettingGroup>
           <SettingRow
@@ -638,7 +638,7 @@ function Notifications({ settings }: { settings: Settings }) {
                 <Input
                   id="ntfy-url"
                   value={ntfy}
-                  placeholder="https://ntfy.sh/armada-7f3k2"
+                  placeholder="https://ntfy.sh/kvistcode-7f3k2"
                   onChange={(e) => setNtfy(e.target.value)}
                   onBlur={commitNtfy}
                   onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
@@ -734,12 +734,12 @@ const FAILOVER: { value: Settings["failover"]; label: string; description: strin
   {
     value: "ask",
     label: "Ask me",
-    description: "Armada shows a banner on the agent offering your other signed-in accounts of the same provider.",
+    description: "Kvistcode shows a banner on the agent offering your other signed-in accounts of the same provider.",
   },
   {
     value: "auto",
     label: "Switch automatically",
-    description: "Armada moves the agent to another signed-in account of the same provider and keeps going.",
+    description: "Kvistcode moves the agent to another signed-in account of the same provider and keeps going.",
   },
 ];
 
@@ -786,26 +786,26 @@ function Behavior({ settings }: { settings: Settings }) {
 
   return (
     <>
-      <SectionHeader title="Behavior" description="How Armada runs in the background and launches agents." />
+      <SectionHeader title="Behavior" description="How Kvistcode runs in the background and launches agents." />
       <div className="space-y-6">
         <SettingGroup title="App">
           <SettingRow
             title="Close to tray"
-            description="Closing the window keeps agents running and Armada in the tray."
+            description="Closing the window keeps agents running and Kvistcode in the tray."
             htmlFor="b-tray"
           >
             <Switch id="b-tray" checked={settings.closeToTray} onCheckedChange={toggle("closeToTray")} />
           </SettingRow>
           <SettingRow
             title="Launch at login"
-            description="Start Armada quietly in the tray when you sign in."
+            description="Start Kvistcode quietly in the tray when you sign in."
             htmlFor="b-login"
           >
             <Switch id="b-login" checked={settings.launchAtLogin} onCheckedChange={toggle("launchAtLogin")} />
           </SettingRow>
           <SettingRow
             title="Global hotkey"
-            description="Bring Armada forward from anywhere. Record a shortcut, or type Tauri accelerator syntax; leave empty to disable."
+            description="Bring Kvistcode forward from anywhere. Record a shortcut, or type Tauri accelerator syntax; leave empty to disable."
             htmlFor="b-hotkey"
           >
             <div className="w-[240px] max-w-full">
@@ -896,7 +896,7 @@ function Behavior({ settings }: { settings: Settings }) {
           <RememberedChoicesRow />
           <SettingRow
             title="Auto-resume interrupted agents"
-            description="When Armada starts, agents cut off by a crash or reboot pick up where they left off."
+            description="When Kvistcode starts, agents cut off by a crash or reboot pick up where they left off."
             htmlFor="b-resume"
           >
             <Switch id="b-resume" checked={settings.autoResume} onCheckedChange={toggle("autoResume")} />
@@ -971,7 +971,7 @@ function Providers() {
         description={
           detectedAt
             ? `Agent CLIs found on this machine · detected ${relativeTimeLong(detectedAt)}`
-            : "Armada drives each vendor's official agent CLI."
+            : "Kvistcode drives each vendor's official agent CLI."
         }
         right={
           <Button size="sm" variant="secondary" onClick={detect} disabled={detecting}>
@@ -1032,7 +1032,7 @@ function About() {
             <AppMark size={52} className="relative" />
           </div>
           <div className="min-w-0">
-            <h2 className="text-[22px] font-semibold tracking-[-0.025em]">Armada</h2>
+            <h2 className="text-[22px] font-semibold tracking-[-0.025em]">Kvistcode</h2>
             <p className="text-[13px] text-muted">Command your fleet.</p>
             <p className="mt-1 text-[12px] text-steel tabular">
               Version {version || "dev"} ·{" "}
@@ -1042,17 +1042,17 @@ function About() {
         </div>
         <div className="relative mt-5 flex flex-wrap gap-2">
           <Button asChild size="sm" variant="secondary">
-            <a href="https://github.com/pl0xuee/armada" rel="noreferrer noopener">
+            <a href="https://github.com/pl0xuee/kvistcode" rel="noreferrer noopener">
               <GithubGlyph /> GitHub
             </a>
           </Button>
           <Button asChild size="sm" variant="ghost">
-            <a href="https://github.com/pl0xuee/armada/issues/new" rel="noreferrer noopener">
+            <a href="https://github.com/pl0xuee/kvistcode/issues/new" rel="noreferrer noopener">
               Report an issue <ExternalLink />
             </a>
           </Button>
           <Button asChild size="sm" variant="ghost">
-            <a href="https://github.com/pl0xuee/armada/releases" rel="noreferrer noopener">
+            <a href="https://github.com/pl0xuee/kvistcode/releases" rel="noreferrer noopener">
               Release notes <ExternalLink />
             </a>
           </Button>
@@ -1066,7 +1066,7 @@ function About() {
               <Sparkles className="h-4 w-4" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-medium text-fg">Armada {update.version} is available</p>
+              <p className="text-[13px] font-medium text-fg">Kvistcode {update.version} is available</p>
               {progress ? (
                 <div className="mt-1.5 flex items-center gap-2">
                   <div className="h-1 w-40 overflow-hidden rounded-full bg-raised">

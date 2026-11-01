@@ -75,7 +75,7 @@ describe("runPolicy", () => {
       "bun test",
       "yarn install --frozen-lockfile",
       "pnpm run build",
-      "cargo test -p armada-core --locked",
+      "cargo test -p kvistcode-core --locked",
       "cargo build --workspace --all-targets",
       "cargo fmt --all --check",
       "cargo clippy --workspace -- -D warnings",

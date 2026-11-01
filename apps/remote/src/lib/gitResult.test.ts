@@ -59,8 +59,8 @@ describe("shipResult", () => {
 
 describe("desktop wording", () => {
   it("builds the conflict prompt", () => {
-    expect(conflictPrompt({ branch: "armada/x", baseBranch: "main" }, "conflicts in a.ts")).toBe(
-      "Merging armada/x into main failed:\n\nconflicts in a.ts\n\nPlease merge main into your branch, resolve the conflicts, make sure everything still builds and tests pass, and commit the result.",
+    expect(conflictPrompt({ branch: "kvistcode/x", baseBranch: "main" }, "conflicts in a.ts")).toBe(
+      "Merging kvistcode/x into main failed:\n\nconflicts in a.ts\n\nPlease merge main into your branch, resolve the conflicts, make sure everything still builds and tests pass, and commit the result.",
     );
     expect(conflictPrompt({ branch: null, baseBranch: null }, "e")).toContain("Merging your branch into the base branch failed");
   });

@@ -11,7 +11,7 @@ export type Route =
   | { name: "inbox" }
   | { name: "new" };
 
-const ROUTE_EVENT = "armada:route";
+const ROUTE_EVENT = "kvistcode:route";
 
 export function parseRoute(hash: string): Route {
   const path = hash.replace(/^#/, "");
@@ -83,13 +83,13 @@ export function getRoute(): Route {
 }
 
 interface HistoryMark {
-  armada: true;
+  kvistcode: true;
   depth: number;
 }
 
 function depth(): number {
   const s = history.state as Partial<HistoryMark> | null;
-  return s?.armada ? (s.depth ?? 0) : 0;
+  return s?.kvistcode ? (s.depth ?? 0) : 0;
 }
 
 export function navigate(route: Route, opts: { replace?: boolean } = {}) {
@@ -101,11 +101,11 @@ export function navigate(route: Route, opts: { replace?: boolean } = {}) {
   // and seem to do nothing.
   const overSheet = (history.state as { overlay?: number } | null)?.overlay !== undefined;
   if (opts.replace) {
-    history.replaceState({ armada: true, depth: depth() } satisfies HistoryMark, "", url);
+    history.replaceState({ kvistcode: true, depth: depth() } satisfies HistoryMark, "", url);
   } else if (overSheet) {
-    history.replaceState({ armada: true, depth: depth() + 1 } satisfies HistoryMark, "", url);
+    history.replaceState({ kvistcode: true, depth: depth() + 1 } satisfies HistoryMark, "", url);
   } else {
-    history.pushState({ armada: true, depth: depth() + 1 } satisfies HistoryMark, "", url);
+    history.pushState({ kvistcode: true, depth: depth() + 1 } satisfies HistoryMark, "", url);
   }
   window.dispatchEvent(new Event(ROUTE_EVENT));
 }

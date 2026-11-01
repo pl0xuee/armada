@@ -202,7 +202,7 @@ function ResultBody({ agent, result, onClose }: { agent: Agent; result: GitResul
         {result.leftUncommitted > 0 && (
           <p className="px-1 text-[13px] leading-snug text-muted">
             The {plural(result.leftUncommitted, "other changed file")} stayed uncommitted: changes this agent didn't make, files you
-            left out, or files in a nested repository. Review {result.leftUncommitted === 1 ? "it" : "them"} in Armada on your computer.
+            left out, or files in a nested repository. Review {result.leftUncommitted === 1 ? "it" : "them"} in Kvistcode on your computer.
           </p>
         )}
         {result.skipped.length > 0 && (

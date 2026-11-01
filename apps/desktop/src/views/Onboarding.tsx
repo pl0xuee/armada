@@ -273,7 +273,7 @@ function ProvidersStep() {
     <>
       <StepHeader
         title="Your agent runtimes"
-        description="Armada drives each vendor's official CLI, so you get their newest features the day they ship. One click installs anything that's missing."
+        description="Kvistcode drives each vendor's official CLI, so you get their newest features the day they ship. One click installs anything that's missing."
       />
       <div className="mb-3 flex items-center justify-between">
         <span className="text-[12.5px] text-muted">
@@ -308,7 +308,7 @@ function AccountsStep() {
     <>
       <StepHeader
         title="Sign in once, switch in one click"
-        description="Armada found the logins your CLIs already use. Add more accounts (a second Claude Max, a work ChatGPT…) and run agents on all of them at once."
+        description="Kvistcode found the logins your CLIs already use. Add more accounts (a second Claude Max, a work ChatGPT…) and run agents on all of them at once."
       />
       <div className="overflow-hidden rounded-xl border border-line bg-card edge">
         <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
@@ -344,13 +344,13 @@ function PrefsStep() {
     <>
       <StepHeader
         title="Attention, not babysitting"
-        description="Armada pings you when an agent needs approval, finishes, or hits an error, and stays quiet otherwise."
+        description="Kvistcode pings you when an agent needs approval, finishes, or hits an error, and stays quiet otherwise."
       />
       <div className="space-y-2.5">
         <PrefCard
           icon={<Volume2 />}
           title="Sounds"
-          description="Short metallic cues, designed for Armada."
+          description="Short metallic cues, designed for Kvistcode."
           control={
             <Switch
               aria-label="Sounds"
@@ -496,7 +496,7 @@ function DoneStep({ onFinish, finishing }: { onFinish: () => void; finishing: bo
         disabled={finishing}
         autoFocus
       >
-        <Rocket /> Launch Armada
+        <Rocket /> Launch Kvistcode
       </Button>
     </div>
   );

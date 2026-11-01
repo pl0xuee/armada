@@ -39,7 +39,7 @@ describe("compareVersions", () => {
 });
 
 describe("canRollBack", () => {
-  it("only when Armada's copy is newer than the tested version", () => {
+  it("only when Kvistcode's copy is newer than the tested version", () => {
     expect(canRollBack(with_(codex, { managedVersion: "0.166.0" }))).toBe(true);
     expect(canRollBack(codex)).toBe(false);
     expect(canRollBack(with_(codex, { managedVersion: "0.160.0" }))).toBe(false);
@@ -73,7 +73,7 @@ describe("canInstall", () => {
     expect(canInstall(with_(grok, { installed: false }))).toBe(true);
     expect(canInstall(with_(claude, { managed: false, adapterInstalled: false }))).toBe(true);
   });
-  it("not for a working system install (Armada sets up its own) or a bundled copy", () => {
+  it("not for a working system install (Kvistcode sets up its own) or a bundled copy", () => {
     expect(canInstall(grok)).toBe(false);
     expect(canInstall(codex)).toBe(false);
   });

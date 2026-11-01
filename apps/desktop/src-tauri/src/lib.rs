@@ -1,4 +1,4 @@
-//! Armada desktop shell: wires `armada_core::Core` to a Tauri 2 window, the tray,
+//! Kvistcode desktop shell: wires `kvistcode_core::Core` to a Tauri 2 window, the tray,
 //! OS notifications, sounds, PTY terminals and git review commands.
 
 mod attention;
@@ -36,7 +36,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use armada_core::{ArmadaEvent, Core};
+use kvistcode_core::{Core, KvistcodeEvent};
 use tauri::{Manager, RunEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tracing::{error, info, warn};
@@ -206,20 +206,20 @@ pub fn run() {
     // PATH is process-global and `set_var` is unsound once other threads may read the
     // environment, so every PATH change happens here, before Tauri, tokio or anything
     // else starts a thread. GUI launches (Finder, Start menu, .desktop files) get a
-    // minimal PATH; then Armada-managed Node and agent CLIs are added.
-    armada_core::providers::augment_path();
+    // minimal PATH; then Kvistcode-managed Node and agent CLIs are added.
+    kvistcode_core::providers::augment_path();
     let startup_data_dir = app_data_dir(&context.config().identifier);
     if let Some(dir) = &startup_data_dir {
-        armada_core::toolchain::add_managed_paths(dir);
+        kvistcode_core::toolchain::add_managed_paths(dir);
     }
 
     tauri::Builder::<Rt>::new()
         // Must be first so a second launch is caught before anything else starts.
-        // `armada --new-agent` from a compositor/WM keybinding works as a quick-launch
+        // `kvistcode --new-agent` from a compositor/WM keybinding works as a quick-launch
         // where global hotkeys can't be grabbed (Wayland).
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if argv.iter().any(|a| a == "--new-agent") {
-                window::navigate(app, armada_core::NavigateTarget::NewAgent);
+                window::navigate(app, kvistcode_core::NavigateTarget::NewAgent);
             } else {
                 window::show_main(app);
             }
@@ -246,7 +246,7 @@ pub fn run() {
         .on_window_event(window::on_window_event)
         .invoke_handler(handler!())
         .build(context)
-        .expect("error while building Armada")
+        .expect("error while building Kvistcode")
         .run(on_run_event);
 }
 
@@ -291,12 +291,12 @@ fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()>
     info!(
         version = %app.package_info().version,
         data_dir = %data_dir.display(),
-        "starting Armada"
+        "starting Kvistcode"
     );
     if startup_data_dir != Some(data_dir.as_path()) {
         warn!(
             startup = ?startup_data_dir,
-            "data dir differs from the one used for PATH setup; Armada-managed tools may not be found"
+            "data dir differs from the one used for PATH setup; Kvistcode-managed tools may not be found"
         );
     }
 
@@ -358,7 +358,7 @@ fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()>
             }
         });
     }
-    // Armada's own copies of the agent tools: install what's missing, keep them current.
+    // Kvistcode's own copies of the agent tools: install what's missing, keep them current.
     tools::spawn_maintenance(app.clone());
     if autostart_launch() {
         // Launched at login: the window was built hidden (quietly in the tray). Without
@@ -368,11 +368,11 @@ fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()>
         }
     }
     if std::env::args().any(|a| a == "--new-agent") {
-        // Cold start via `armada --new-agent`: open New agent once the UI is listening.
+        // Cold start via `kvistcode --new-agent`: open New agent once the UI is listening.
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(Duration::from_millis(2000)).await;
-            window::navigate(&app, armada_core::NavigateTarget::NewAgent);
+            window::navigate(&app, kvistcode_core::NavigateTarget::NewAgent);
         });
     }
 
@@ -406,7 +406,7 @@ fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()>
         tauri::async_runtime::spawn(async move {
             let providers = app.state::<Shell>().providers().await;
             app.state::<Core>()
-                .emit(ArmadaEvent::ProvidersChanged { providers });
+                .emit(KvistcodeEvent::ProvidersChanged { providers });
         });
     }
     Ok(())
@@ -435,12 +435,12 @@ fn init_logging(log_dir: &Path) -> tracing_appender::non_blocking::WorkerGuard {
             tracing_appender::non_blocking(std::io::sink())
         }
     };
-    let filter = EnvFilter::try_from_env("ARMADA_LOG")
+    let filter = EnvFilter::try_from_env("KVISTCODE_LOG")
         .unwrap_or_else(|_| {
         // Raw agent stderr / non-JSON stdout can carry secrets: off by default,
-        // opt in with ARMADA_LOG (e.g. `debug,armada::agent_stderr=debug`).
+        // opt in with KVISTCODE_LOG (e.g. `debug,kvistcode::agent_stderr=debug`).
         EnvFilter::new(
-            "info,armada_core=debug,armada_desktop_lib=debug,armada::agent_stderr=warn,armada::rpc=warn",
+            "info,kvistcode_core=debug,kvistcode_desktop_lib=debug,kvistcode::agent_stderr=warn,kvistcode::rpc=warn",
         )
     });
     let _ = tracing_subscriber::registry()
@@ -487,7 +487,7 @@ const DONE: u8 = 2;
 const UPDATING: u8 = 3;
 static EXIT_STATE: AtomicU8 = AtomicU8::new(RUNNING);
 
-/// Armada is quitting.
+/// Kvistcode is quitting.
 pub(crate) fn exiting() -> bool {
     EXIT_STATE.load(Ordering::SeqCst) != RUNNING
 }
@@ -529,8 +529,8 @@ pub(crate) async fn shutdown_services(app: &AppHandle) {
     };
     tokio::join!(agents, terminals);
     // Anything still alive (a stuck handshake, a timed-out stop): end its whole
-    // process tree rather than leave it running after Armada is gone.
-    let _ = tauri::async_runtime::spawn_blocking(armada_core::kill_all_children).await;
+    // process tree rather than leave it running after Kvistcode is gone.
+    let _ = tauri::async_runtime::spawn_blocking(kvistcode_core::kill_all_children).await;
 }
 
 /// Total time allowed for a clean shutdown before the app exits anyway.
@@ -591,7 +591,7 @@ fn on_run_event(app: &AppHandle, event: RunEvent) {
                         {
                             warn!("shutdown took too long; exiting anyway");
                             let _ = tauri::async_runtime::spawn_blocking(
-                                armada_core::kill_all_children,
+                                kvistcode_core::kill_all_children,
                             )
                             .await;
                         }
@@ -617,7 +617,7 @@ fn on_run_event(app: &AppHandle, event: RunEvent) {
                 ));
                 EXIT_STATE.store(DONE, Ordering::SeqCst);
             }
-            armada_core::kill_all_children()
+            kvistcode_core::kill_all_children()
         }
         #[cfg(target_os = "macos")]
         RunEvent::Reopen { .. } => window::show_main(app),
@@ -634,6 +634,8 @@ mod tests {
         let conf: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         assert!(conf["app"].get("appDirectoriesOverride").is_none());
+        // The pre-rename app id is kept on purpose: the data directory, stored sign-ins, window
+        // storage and the single-instance lock are all keyed on it, so existing installs keep working.
         assert_eq!(conf["identifier"], "dev.armada.app");
     }
 
@@ -644,7 +646,7 @@ mod tests {
     fn commands_only_request_managed_state() {
         const MANAGED: &[&str] = &[
             "Core",
-            "armada_core::Core",
+            "kvistcode_core::Core",
             "Shell",
             "Terminals",
             "Dictation",
@@ -856,7 +858,7 @@ mod ipc_smoke {
 
     #[test]
     fn every_command_resolves_its_state() {
-        let tmp = std::env::temp_dir().join(format!("armada-ipc-smoke-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("kvistcode-ipc-smoke-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
 

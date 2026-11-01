@@ -225,6 +225,6 @@ export async function cancelDictation(): Promise<void> {
 }
 
 /** Dictation needs the desktop app (or the browser mock): not the mobile companion. */
-export const dictationAvailable = () => isTauri() || import.meta.env.DEV || import.meta.env.VITE_ARMADA_MOCK === "1";
+export const dictationAvailable = () => isTauri() || import.meta.env.DEV || import.meta.env.VITE_KVISTCODE_MOCK === "1";
 
 export const DICTATION_KEYS = [isMac ? "⌘" : "Ctrl", "⇧", "D"];

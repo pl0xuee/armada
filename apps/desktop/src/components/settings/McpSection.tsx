@@ -483,7 +483,7 @@ function McpDialog({
               />
               <p className="mt-1.5 text-[12px] text-steel">
                 {stdio
-                  ? "Armada starts the server as a subprocess next to each agent."
+                  ? "Kvistcode starts the server as a subprocess next to each agent."
                   : "Agents connect to a server that's already running, locally or in the cloud."}
               </p>
             </div>

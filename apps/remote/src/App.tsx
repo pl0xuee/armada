@@ -116,6 +116,6 @@ function Screen({ route, viewerAgent }: { route: ReturnType<typeof useRoute>; vi
 function useDocumentTitle() {
   const count = useNeedsYouCount();
   useEffect(() => {
-    document.title = count > 0 ? `(${count}) Armada` : "Armada";
+    document.title = count > 0 ? `(${count}) Kvistcode` : "Kvistcode";
   }, [count]);
 }

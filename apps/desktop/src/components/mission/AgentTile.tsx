@@ -167,7 +167,7 @@ export const AgentTile = memo(function AgentTile({
             {agent.branch && (
               <span className="flex min-w-0 items-center gap-1">
                 <GitBranch className="h-3 w-3 shrink-0" />
-                <span className="truncate font-mono text-[10.5px]">{agent.branch.replace(/^armada\//, "")}</span>
+                <span className="truncate font-mono text-[10.5px]">{agent.branch.replace(/^kvistcode\//, "")}</span>
               </span>
             )}
           </div>

@@ -263,7 +263,7 @@ export function LocalSetup({
             </div>
             {kind !== "custom" && (
               <p className="text-steel">
-                You can add it now and start it later. Armada checks again whenever you launch an agent.
+                You can add it now and start it later. Kvistcode checks again whenever you launch an agent.
               </p>
             )}
           </div>

@@ -111,7 +111,7 @@ export function Pairing() {
   const submit = async () => {
     const parsed = parsePasted(value);
     if (parsed.kind === "invalid") {
-      setError("That doesn't look like an Armada pairing link.");
+      setError("That doesn't look like an Kvistcode pairing link.");
       return;
     }
     setError(null);
@@ -135,7 +135,7 @@ export function Pairing() {
     <Frame>
       <Mark />
       <h1 className="mt-6 text-center text-[26px] leading-tight font-semibold tracking-[-0.02em] text-fg">
-        Pair with Armada
+        Pair with Kvistcode
       </h1>
       <p className="mx-auto mt-2 max-w-[330px] text-center text-[15px] leading-relaxed text-muted">
         Watch your agents, approve requests and send prompts from your phone.
@@ -143,7 +143,7 @@ export function Pairing() {
 
       {reason === "revoked" && (
         <Callout tone="warn" icon="unlink" title="This device was unpaired">
-          Its access was revoked or expired. Scan a new QR code from Armada's
+          Its access was revoked or expired. Scan a new QR code from Kvistcode's
           Settings to reconnect.
         </Callout>
       )}
@@ -163,7 +163,7 @@ export function Pairing() {
           title="That pairing link didn't work"
         >
           Pairing codes work once and expire after 5 minutes. Show a fresh QR
-          code in Armada and scan it again.
+          code in Kvistcode and scan it again.
         </Callout>
       )}
 
@@ -172,7 +172,7 @@ export function Pairing() {
         aria-label="How to pair"
       >
         <Step n={1} icon="laptop">
-          Open <span className="font-semibold">Armada</span> on your computer
+          Open <span className="font-semibold">Kvistcode</span> on your computer
         </Step>
         <Step n={2} icon="cog">
           Go to <span className="font-semibold">Settings</span>
@@ -192,8 +192,8 @@ export function Pairing() {
       {standalone && (
         <Callout tone="warn" icon="info" title="Pair this Home Screen app">
           {isIOS()
-            ? "On iPhone the Home Screen app keeps its own storage, separate from Safari. Copy the pairing link in Armada (Settings → Remote) and paste it below once."
-            : "Copy the pairing link in Armada (Settings → Remote) and paste it below."}
+            ? "On iPhone the Home Screen app keeps its own storage, separate from Safari. Copy the pairing link in Kvistcode (Settings → Remote) and paste it below once."
+            : "Copy the pairing link in Kvistcode (Settings → Remote) and paste it below."}
         </Callout>
       )}
 
@@ -320,27 +320,27 @@ export function Blocked() {
         {rate
           ? "Too many attempts"
           : unreachable
-            ? "Can't reach Armada"
+            ? "Can't reach Kvistcode"
             : unavailable
               ? "Remote access is off"
               : reason === "misdirected"
-                ? "Use Armada's link"
+                ? "Use Kvistcode's link"
                 : "Something went wrong"}
       </h1>
       <p className="mx-auto mt-2 max-w-[330px] text-center text-[15px] leading-relaxed text-muted">
         {rate
           ? (message ?? "Try again in a few minutes.")
           : unreachable
-            ? "Your phone couldn't connect to Armada on your computer."
+            ? "Your phone couldn't connect to Kvistcode on your computer."
             : unavailable
-              ? `${message ?? "Armada isn't accepting connections."} Turn it on in Settings → Remote; this page reconnects by itself.`
+              ? `${message ?? "Kvistcode isn't accepting connections."} Turn it on in Settings → Remote; this page reconnects by itself.`
               : message}
       </p>
 
       {unreachable && (
         <ul className="mt-7 space-y-3 rounded-2xl border border-line bg-panel p-4 text-[14px] text-fg edge">
           {[
-            "Armada is open and your computer is awake",
+            "Kvistcode is open and your computer is awake",
             "Remote access is on in Settings → Remote",
             "Your phone is on the same Wi-Fi as your computer, or connected to Tailscale",
           ].map((t) => (
@@ -356,7 +356,7 @@ export function Blocked() {
           <li className="flex items-start gap-2.5 border-t border-line/70 pt-3 text-muted">
             <Icon name="qr" size={17} className="mt-0.5 shrink-0 text-steel" />
             If your computer's network address changed (new Wi-Fi, router
-            restart), scan the QR code in Armada again.
+            restart), scan the QR code in Kvistcode again.
           </li>
         </ul>
       )}
@@ -423,7 +423,7 @@ export function Boot() {
         )}
         role="status"
       >
-        Connecting to Armada…
+        Connecting to Kvistcode…
       </p>
     </main>
   );

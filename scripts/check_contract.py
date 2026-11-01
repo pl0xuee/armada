@@ -9,7 +9,7 @@ Parses every `invoke("name", {keys})` in apps/desktop/src/lib/api.ts and every
   * argument key mismatches (camelCase of the Rust parameter, honoring
     `rename_all`; Option<_> parameters may be omitted; State/AppHandle/Window
     parameters are not arguments, a Channel is),
-  * an `ArmadaApi` method in api.ts that mock.ts does not implement.
+  * an `KvistcodeApi` method in api.ts that mock.ts does not implement.
 
 Usage: python3 scripts/check_contract.py
 """

@@ -68,7 +68,7 @@ export function PullModelDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         title="Get a model"
-        description="Models download into Ollama and run on this computer. These all support tool calling, which Armada's agents need."
+        description="Models download into Ollama and run on this computer. These all support tool calling, which Kvistcode's agents need."
         className="w-[min(540px,calc(100vw-32px))]"
       >
         <DialogBody className="space-y-2">

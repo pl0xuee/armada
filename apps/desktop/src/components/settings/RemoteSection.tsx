@@ -199,7 +199,7 @@ export function RemoteSection({ settings }: { settings: Settings }) {
         <SettingGroup>
           <SettingRow
             title="Remote access"
-            description="Runs a small web server inside Armada for the mobile companion and share links."
+            description="Runs a small web server inside Kvistcode for the mobile companion and share links."
             htmlFor="remote-enabled"
           >
             {applying && (
@@ -326,7 +326,7 @@ export function RemoteSection({ settings }: { settings: Settings }) {
           <>
             Anyone on this network who scans the pairing code while it's shown can control your agents, and traffic on
             the local network isn't encrypted. Use it on networks you trust, not on public Wi-Fi; Tailscale is the safer
-            choice. Armada refuses to listen on a public address.
+            choice. Kvistcode refuses to listen on a public address.
           </>
         }
         confirmLabel="Allow network access"
@@ -358,7 +358,7 @@ function networkDescription(status: RemoteStatus, saved: string | null | undefin
     return "Phones on your Wi-Fi can't reach this address. Pick Wi-Fi / Ethernet, or connect the phone to the same VPN.";
   }
   if (saved && !status.lanAddresses.some((a) => a.ip === saved)) {
-    return "The address you picked isn't connected, so Armada is using the best one available.";
+    return "The address you picked isn't connected, so Kvistcode is using the best one available.";
   }
   return "Which of this computer's addresses phones on your network connect to.";
 }
@@ -371,7 +371,7 @@ function FirewallCard({ firewall }: { firewall: NonNullable<RemoteStatus["firewa
       <div className="min-w-0 flex-1">
         <div className="text-[13px] font-medium">This computer's firewall may block your phone</div>
         <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted">
-          {firewall.name} is on and doesn't allow Armada's port, so a phone that scans the code waits on a blank page.
+          {firewall.name} is on and doesn't allow Kvistcode's port, so a phone that scans the code waits on a blank page.
           Allow devices on your network by running this in a terminal:
         </p>
         <div className="mt-2 flex items-center gap-2">
@@ -433,7 +433,7 @@ function StatusCard({ status, starting }: { status: RemoteStatus; starting: bool
   );
 }
 
-/** Setup steps until Tailscale Serve is sharing Armada, then what the phone needs. */
+/** Setup steps until Tailscale Serve is sharing Kvistcode, then what the phone needs. */
 function TailscaleCard({ tailscale, onRecheck }: { tailscale: TailscaleStatus; onRecheck: () => void }) {
   if (tailscale.state === "on") {
     return (
@@ -460,10 +460,10 @@ function TailscaleCard({ tailscale, onRecheck }: { tailscale: TailscaleStatus; o
       : tailscale.state === "notConnected"
         ? "Connect Tailscale on this computer"
         : tailscale.state === "needsOperator"
-          ? "Let Armada use Tailscale Serve"
+          ? "Let Kvistcode use Tailscale Serve"
           : tailscale.state === "needsHttps"
             ? "Turn on HTTPS for your tailnet"
-            : "Tailscale couldn't share Armada";
+            : "Tailscale couldn't share Kvistcode";
   return (
     <div role="note" className="flex gap-3 rounded-xl border border-warn/30 bg-warn/[0.06] px-4 py-3">
       <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />

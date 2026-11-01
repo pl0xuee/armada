@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::AppHandle;
-use armada_core::{
+use kvistcode_core::{
     Agent, AgentStatus, Core, CreateAgentRequest, ItemBody, Provider, TimelineItem, ToolStatus,
 };
 use parking_lot::Mutex;
@@ -22,7 +22,7 @@ use super::tools::{self, basename, clean, AgentRef, OpenView, Resolved, ToolCall
 const DUPLICATE_WINDOW: Duration = Duration::from_secs(120);
 
 #[derive(Clone)]
-pub struct ArmadaTools {
+pub struct KvistcodeTools {
     app: AppHandle,
     core: Core,
     sink: Arc<dyn VaSink>,
@@ -30,9 +30,9 @@ pub struct ArmadaTools {
     recent: Arc<Mutex<Vec<(String, Instant, String)>>>,
 }
 
-impl ArmadaTools {
+impl KvistcodeTools {
     pub fn new(app: AppHandle, core: Core, sink: Arc<dyn VaSink>) -> Self {
-        ArmadaTools {
+        KvistcodeTools {
             app,
             core,
             sink,
@@ -41,7 +41,7 @@ impl ArmadaTools {
     }
 }
 
-impl ToolHost for ArmadaTools {
+impl ToolHost for KvistcodeTools {
     fn call(&self, name: String, arguments: String) -> ToolFuture {
         let host = self.clone();
         Box::pin(async move {
@@ -171,7 +171,7 @@ fn ago(now: i64, then: i64) -> String {
     }
 }
 
-impl ArmadaTools {
+impl KvistcodeTools {
     async fn run(&self, name: &str, call: ToolCall) -> ToolOutcome {
         match call {
             ToolCall::ListAgents => self.list_agents(),
@@ -233,7 +233,7 @@ impl ArmadaTools {
         };
         agents.retain(|a| !a.archived);
         agents.sort_by_key(|a| std::cmp::Reverse(a.last_activity_at));
-        let now = armada_core::now_ms();
+        let now = kvistcode_core::now_ms();
         let rows: Vec<Value> = agents
             .iter()
             .take(25)
@@ -340,7 +340,7 @@ impl ArmadaTools {
             "recentCommands": commands,
             "pendingApprovals": pending,
             "pullRequest": pr,
-            "lastActivity": ago(armada_core::now_ms(), agent.last_activity_at),
+            "lastActivity": ago(kvistcode_core::now_ms(), agent.last_activity_at),
         }))
     }
 
@@ -384,7 +384,7 @@ impl ArmadaTools {
                 }
             }
             Resolved::None => return fail(
-                "That isn't a project Armada knows. Open it once in the New Agent dialog first.",
+                "That isn't a project Kvistcode knows. Open it once in the New Agent dialog first.",
             ),
         };
         let accounts = match self.core.accounts() {
@@ -625,7 +625,7 @@ impl WithKind for ToolOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use armada_core::SubAgent;
+    use kvistcode_core::SubAgent;
 
     fn call(status: ToolStatus, sub: Option<SubAgent>) -> TimelineItem {
         TimelineItem {
@@ -636,7 +636,7 @@ mod tests {
             body: ItemBody::ToolCall {
                 tool_call_id: "t".into(),
                 title: "Task".into(),
-                tool_kind: armada_core::ToolKind::Other,
+                tool_kind: kvistcode_core::ToolKind::Other,
                 status,
                 locations: vec![],
                 diffs: vec![],

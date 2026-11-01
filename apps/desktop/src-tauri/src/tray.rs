@@ -7,7 +7,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::AppHandle;
-use armada_core::NavigateTarget;
+use kvistcode_core::NavigateTarget;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
@@ -15,7 +15,7 @@ use tauri::Manager;
 
 use crate::window;
 
-const TRAY_ID: &str = "armada-tray";
+const TRAY_ID: &str = "kvistcode-tray";
 
 pub struct TrayState {
     tray: TrayIcon<crate::Rt>,
@@ -34,7 +34,7 @@ pub fn available() -> bool {
 }
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "Show Armada", true, None::<&str>)?;
+    let show = MenuItem::with_id(app, "show", "Show Kvistcode", true, None::<&str>)?;
     let new_agent = MenuItem::with_id(app, "new_agent", "New Agent", true, None::<&str>)?;
     let needs = MenuItem::with_id(app, "needs_you", "Needs you", true, None::<&str>)?;
     let mission = MenuItem::with_id(
@@ -45,7 +45,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         None::<&str>,
     )?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Armada", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Kvistcode", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &new_agent, &needs, &mission, &sep, &quit])?;
 
     // macOS menu bar icons are template images (black + alpha, tinted by the OS);
@@ -64,7 +64,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let tray = TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
         .icon_as_template(template)
-        .tooltip("Armada")
+        .tooltip("Kvistcode")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(on_menu_event)
@@ -109,10 +109,10 @@ pub fn set_needs_you(app: &AppHandle, count: usize) {
         return;
     }
     let tooltip = if count == 0 {
-        "Armada".to_string()
+        "Kvistcode".to_string()
     } else {
         format!(
-            "Armada — {count} need{} you",
+            "Kvistcode — {count} need{} you",
             if count == 1 { "s" } else { "" }
         )
     };

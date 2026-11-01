@@ -140,7 +140,7 @@ export function AccountSheet({ agent, open, onClose }: { agent: Agent; open: boo
       description={agent.rateLimited ? "This account hit its usage limit. The session continues on the account you pick." : "The session continues on the account you pick."}
     >
       {list.length <= 1 ? (
-        <p className="py-2 text-[14px] text-muted">There's no other account for this provider. Add one in Armada on your computer.</p>
+        <p className="py-2 text-[14px] text-muted">There's no other account for this provider. Add one in Kvistcode on your computer.</p>
       ) : (
         <div className="space-y-1.5" role="radiogroup" aria-label="Accounts">
           {list.map((a) => {

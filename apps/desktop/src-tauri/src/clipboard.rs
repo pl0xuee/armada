@@ -3,7 +3,7 @@
 //! composer asks us to read the system clipboard directly. No-op on macOS/Windows, where the
 //! webview handles image paste itself.
 
-use armada_core::Attachment;
+use kvistcode_core::Attachment;
 use serde::Serialize;
 
 // Only the Linux reader uses these (macOS/Windows are a no-op).
@@ -21,7 +21,7 @@ pub struct ClipboardImages {
 
 #[tauri::command]
 pub async fn read_clipboard_images(
-    core: tauri::State<'_, armada_core::Core>,
+    core: tauri::State<'_, kvistcode_core::Core>,
     agent_id: Option<String>,
 ) -> Result<ClipboardImages, String> {
     // Paths found in clipboard *text* are only trusted inside the agent's project.
@@ -115,7 +115,7 @@ fn push_image(out: &mut ClipboardImages, mime: &str, bytes: Vec<u8>) {
 fn wayland(out: &mut ClipboardImages, paths: &mut Vec<ClipPath>) {
     fn wl_paste() -> std::process::Command {
         let mut cmd = std::process::Command::new("wl-paste");
-        armada_core::childenv::sanitize_std_command(&mut cmd);
+        kvistcode_core::childenv::sanitize_std_command(&mut cmd);
         cmd
     }
     let Ok(list) = wl_paste().arg("--list-types").output() else {
@@ -292,7 +292,7 @@ mod tests {
     }
 
     fn scratch(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("armada-clip-{tag}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("kvistcode-clip-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

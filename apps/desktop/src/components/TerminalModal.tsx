@@ -361,7 +361,7 @@ async function afterExit(session: TerminalSession, code: number | null) {
         else if (/^(Update|Roll back)/.test(session.title))
           // An update that fails leaves the previous version in place (rolled back by the backend).
           toast.error(`${session.title} didn't finish`, {
-            description: "Armada kept the version that was working. See the terminal for details.",
+            description: "Kvistcode kept the version that was working. See the terminal for details.",
           });
         else toast.error("Install didn't finish", { description: `Exit code ${code ?? "unknown"}` });
       } else {

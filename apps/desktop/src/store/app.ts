@@ -6,7 +6,7 @@ import type {
   Account,
   Agent,
   AppState,
-  ArmadaEvent,
+  KvistcodeEvent,
   ProviderInfo,
   Settings,
   TimelineItem,
@@ -45,8 +45,8 @@ export interface AppStore {
   connectionLost: string | null;
 
   boot: () => Promise<void>;
-  applyEvent: (e: ArmadaEvent) => void;
-  applyEvents: (events: ArmadaEvent[]) => void;
+  applyEvent: (e: KvistcodeEvent) => void;
+  applyEvents: (events: KvistcodeEvent[]) => void;
   ensureItems: (agentId: string, force?: boolean) => Promise<void>;
   /** Page in the previous PAGE_SIZE items before the loaded ones. */
   loadOlder: (agentId: string) => Promise<void>;
@@ -74,8 +74,8 @@ export function insertBySeq(list: TimelineItem[], item: TimelineItem): TimelineI
   return next;
 }
 
-export type TextDelta = Extract<ArmadaEvent, { type: "text_delta" }>;
-export type ItemEvent = Extract<ArmadaEvent, { type: "item_upserted" | "text_delta" }>;
+export type TextDelta = Extract<KvistcodeEvent, { type: "text_delta" }>;
+export type ItemEvent = Extract<KvistcodeEvent, { type: "item_upserted" | "text_delta" }>;
 
 function fieldOf(item: TimelineItem, field: "text" | "output"): string | null {
   if (field === "output") return item.kind === "tool_call" ? item.output : null;

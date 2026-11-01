@@ -1,8 +1,8 @@
 // In-memory mock of the Rust backend, used when the UI runs in a plain browser.
-// It mirrors the command surface of ./api.ts and emits the same ArmadaEvents,
+// It mirrors the command surface of ./api.ts and emits the same KvistcodeEvents,
 // including simulated streaming, permissions, login terminals and installs.
 
-import type { ArmadaApi } from "./api";
+import type { KvistcodeApi } from "./api";
 import { emitVoiceBus } from "./voiceBus";
 import { budgetLevel } from "./budget";
 import { searchItems } from "./mock-search";
@@ -47,7 +47,7 @@ import type {
   Agent,
   AgentDiff,
   AppState,
-  ArmadaEvent,
+  KvistcodeEvent,
   Attachment,
   LanAddress,
   TailscaleStatus,
@@ -69,7 +69,7 @@ import type {
   UpdateInfo,
 } from "./types";
 
-type Listener = (e: ArmadaEvent | ArmadaEvent[]) => void;
+type Listener = (e: KvistcodeEvent | KvistcodeEvent[]) => void;
 
 const listeners = new Set<Listener>();
 
@@ -79,8 +79,8 @@ export function subscribeMock(cb: Listener): () => void {
 }
 
 // Like the real core: events emitted in one tick are delivered as one array.
-let outbox: ArmadaEvent[] = [];
-function emit(e: ArmadaEvent) {
+let outbox: KvistcodeEvent[] = [];
+function emit(e: KvistcodeEvent) {
   if (outbox.length === 0) queueMicrotask(flushOutbox);
   outbox.push(e);
 }
@@ -573,7 +573,7 @@ function startLiveActivity() {
     bumpUsage("a-token", 14000);
     const msg = addItem("a-token", { kind: "agent_message", text: "" });
     const summary =
-      "All **6 auth tests pass**, including the new concurrency regression test.\n\n### What changed\n\n- `refreshToken()` is now **single-flight**: one in-flight promise shared by concurrent callers, cleared in `finally` so a failed refresh can be retried.\n- The interceptor queues requests that 401 while a refresh is running and replays them with the new token.\n- New test: two parallel `refreshToken()` calls hit `/oauth/token` exactly **once**.\n\n```diff\n- export async function refreshToken(): Promise<string> {\n+ export function refreshToken(): Promise<string> {\n+   inflight ??= doRefresh().finally(() => { inflight = null; });\n+   return inflight;\n```\n\nThe branch `armada/fix-token-refresh` is ready for review.";
+      "All **6 auth tests pass**, including the new concurrency regression test.\n\n### What changed\n\n- `refreshToken()` is now **single-flight**: one in-flight promise shared by concurrent callers, cleared in `finally` so a failed refresh can be retried.\n- The interceptor queues requests that 401 while a refresh is running and replays them with the new token.\n- New test: two parallel `refreshToken()` calls hit `/oauth/token` exactly **once**.\n\n```diff\n- export async function refreshToken(): Promise<string> {\n+ export function refreshToken(): Promise<string> {\n+   inflight ??= doRefresh().finally(() => { inflight = null; });\n+   return inflight;\n```\n\nThe branch `kvistcode/fix-token-refresh` is ready for review.";
     await streamField("a-token", msg.id, "text", summary, turn, 0.45);
     if (plan && plan.kind === "plan") {
       updateItem("a-token", plan.id, { entries: plan.entries.map((e) => ({ ...e, status: "completed" })) });
@@ -786,7 +786,7 @@ async function runLogin(t: MockTerminal) {
   await sleep(500);
   termOut(
     t.id,
-    `If the browser didn't open, visit:\r\n${C.cyan}https://auth.example.com/oauth/authorize?client_id=armada-demo&code_challenge=Xq9…${C.reset}\r\n\r\n`,
+    `If the browser didn't open, visit:\r\n${C.cyan}https://auth.example.com/oauth/authorize?client_id=kvistcode-demo&code_challenge=Xq9…${C.reset}\r\n\r\n`,
   );
   await sleep(400);
   termOut(
@@ -834,12 +834,12 @@ async function runInstallMissing(t: MockTerminal) {
     if (t.done) return;
     await out(`${C.cyan}▸${C.reset} Installing ${p.displayName} (${p.cliName})…`, 400);
     await out(
-      `${C.dim}  npm install --prefix ~/.local/share/armada/tools ${p.installCommand.split(" ").slice(3).join(" ")}${C.reset}`,
+      `${C.dim}  npm install --prefix ~/.local/share/kvistcode/tools ${p.installCommand.split(" ").slice(3).join(" ")}${C.reset}`,
     );
     await out(`${C.dim}  added 18 packages in 3s${C.reset}`, 700);
     p.installed = true;
     p.version = p.version ?? "1.0.3";
-    p.path = `~/.local/share/armada/tools/bin/${p.cliName}`;
+    p.path = `~/.local/share/kvistcode/tools/bin/${p.cliName}`;
     markManaged(p);
     if (p.adapterRequired) p.adapterInstalled = true;
     await out(`${C.green}✓${C.reset} ${p.displayName} ${p.version} ready`);
@@ -850,7 +850,7 @@ async function runInstallMissing(t: MockTerminal) {
   await termExit(t, 0);
 }
 
-/** Armada's own copy is now the one in use. */
+/** Kvistcode's own copy is now the one in use. */
 function markManaged(p: ProviderInfo) {
   p.managed = true;
   p.managedVersion = p.managedVersion ?? p.testedVersion ?? p.version;
@@ -868,7 +868,7 @@ async function runToolUpdate(t: MockTerminal, rollback: boolean) {
         ? "@openai/codex"
         : "@xai-org/grok-build";
   await sleep(300);
-  termOut(t.id, `${C.dim}$ npm install --prefix ~/.local/share/armada/tools ${pkg}@${target}${C.reset}\r\n\r\n`);
+  termOut(t.id, `${C.dim}$ npm install --prefix ~/.local/share/kvistcode/tools ${pkg}@${target}${C.reset}\r\n\r\n`);
   for (const s of [
     "npm http fetch GET 200 https://registry.npmjs.org/" + pkg.replace("/", "%2f") + " 96ms",
     "npm http fetch GET 200 https://registry.npmjs.org/" + pkg.replace("/", "%2f") + "/-/" + target + ".tgz 214ms",
@@ -887,7 +887,7 @@ async function runToolUpdate(t: MockTerminal, rollback: boolean) {
   p.updateAvailable = !!p.latestVersion && p.latestVersion !== target;
   if (p.provider === "claude") p.version = "2.1.310";
   else p.version = target;
-  p.path = `~/.local/share/armada/tools/node_modules/.bin/${p.cliName}`;
+  p.path = `~/.local/share/kvistcode/tools/node_modules/.bin/${p.cliName}`;
   termOut(t.id, `${C.green}✔ ${p.displayName} ${rollback ? "rolled back to" : "updated to"} ${target}.${C.reset}\r\n`);
   emit({ type: "providers_changed", providers: clone(db.providers) });
   await termExit(t, 0);
@@ -912,7 +912,7 @@ async function runInstall(t: MockTerminal) {
   }
   p.installed = true;
   p.version = p.version ?? "1.0.3";
-  p.path = `~/.local/share/armada/tools/node_modules/.bin/${p.cliName}`;
+  p.path = `~/.local/share/kvistcode/tools/node_modules/.bin/${p.cliName}`;
   markManaged(p);
   if (p.adapterRequired) p.adapterInstalled = true;
   termOut(t.id, `${C.green}✔ ${p.displayName} installed (${p.version}).${C.reset}\r\n`);
@@ -1138,7 +1138,7 @@ const mockPublished = new Map<string, string>();
 /** Port the mock agent "a-token" says its dev server runs on. */
 const MOCK_DEV_PORT = 4723;
 
-export const mockApi: ArmadaApi = {
+export const mockApi: KvistcodeApi = {
   async getState(): Promise<AppState> {
     setTimeout(startLiveActivity, 600);
     if (isStressMode()) setupStress();
@@ -1195,9 +1195,9 @@ export const mockApi: ArmadaApi = {
       provider: req.provider,
       accountId: req.accountId,
       projectPath: req.projectPath,
-      cwd: req.worktree ? `/home/sam/.armada/worktrees/${req.projectPath.split("/").pop()}/${id}` : req.projectPath,
+      cwd: req.worktree ? `/home/sam/.kvistcode/worktrees/${req.projectPath.split("/").pop()}/${id}` : req.projectPath,
       worktree: req.worktree,
-      branch: req.worktree ? `armada/${slug}` : null,
+      branch: req.worktree ? `kvistcode/${slug}` : null,
       baseBranch: req.worktree ? "main" : null,
       baseCommit: req.worktree ? "4f1c2e9a7b" : null,
       sessionId: null,
@@ -1678,7 +1678,7 @@ export const mockApi: ArmadaApi = {
 
   async saveDiagnostics() {
     await sleep(300);
-    return "~/Downloads/armada-diagnostics-20260101-120000.txt";
+    return "~/Downloads/kvistcode-diagnostics-20260101-120000.txt";
   },
 
   async exportAgent(agentId) {
@@ -1972,7 +1972,7 @@ export const mockApi: ArmadaApi = {
     assertIdle(a, "pushing");
     if (!mockGithub.loggedIn) {
       throw new Error(
-        "GitHub didn't accept Armada's credentials. Sign in to GitHub with the GitHub button in the Review panel.",
+        "GitHub didn't accept Kvistcode's credentials. Sign in to GitHub with the GitHub button in the Review panel.",
       );
     }
     await gitLock(agentId, 800);
@@ -2125,7 +2125,7 @@ export const mockApi: ArmadaApi = {
       color: req.color,
       authKind: req.authKind,
       isSystem: false,
-      configDir: `~/.local/share/armada/profiles/${req.name.toLowerCase().replace(/\W+/g, "-")}`,
+      configDir: `~/.local/share/kvistcode/profiles/${req.name.toLowerCase().replace(/\W+/g, "-")}`,
       createdAt: Date.now(),
       status:
         req.authKind === "api_key"
@@ -2510,7 +2510,7 @@ export const mockApi: ArmadaApi = {
       type: "attention",
       agentId: db.agents[0]?.id ?? "",
       reason: "done",
-      title: "Armada test notification",
+      title: "Kvistcode test notification",
       body: "Notifications are working. You'll hear from us when an agent needs you.",
       requestId: null,
     });
@@ -2884,10 +2884,10 @@ const MOCK_UPDATE: UpdateInfo = {
   currentVersion: "0.1.0-mock",
   version: "0.2.0",
   date: new Date(Date.now() - 86_400_000).toISOString(),
-  url: "https://github.com/pl0xuee/armada/releases/tag/v0.2.0",
+  url: "https://github.com/pl0xuee/kvistcode/releases/tag/v0.2.0",
   canInstall: true,
   notes:
-    "## Highlights\n\n- **One-click installer**: Armada installs missing agents for you, no admin rights needed.\n- **Inbox** keyboard flow is faster: `A` / `D` now advance automatically.\n- Mission Control tiles stream the latest action live.\n\n## Fixes\n\n- Resuming an interrupted Codex agent no longer replays the last tool call.\n- The context meter is accurate for 1M-token sessions.",
+    "## Highlights\n\n- **One-click installer**: Kvistcode installs missing agents for you, no admin rights needed.\n- **Inbox** keyboard flow is faster: `A` / `D` now advance automatically.\n- Mission Control tiles stream the latest action live.\n\n## Fixes\n\n- Resuming an interrupted Codex agent no longer replays the last tool call.\n- The context meter is accurate for 1M-token sessions.",
 };
 
 // Announce the update shortly after boot, like the backend's auto-check.
@@ -2962,7 +2962,7 @@ function mockTailscale(): TailscaleStatus | null {
   const none = { url: null, message: null, command: null, link: null };
   switch (state) {
     case "on":
-      return { ...none, state, url: `https://armada-pc.tail1234.ts.net:${r.port}` };
+      return { ...none, state, url: `https://kvistcode-pc.tail1234.ts.net:${r.port}` };
     case "notInstalled":
       return {
         ...none,
@@ -2975,7 +2975,7 @@ function mockTailscale(): TailscaleStatus | null {
         ...none,
         state,
         message:
-          "Tailscale is installed but not connected on this computer. Start it and sign in (the --operator part lets Armada manage Serve without sudo):",
+          "Tailscale is installed but not connected on this computer. Start it and sign in (the --operator part lets Kvistcode manage Serve without sudo):",
         command: "sudo systemctl enable --now tailscaled && sudo tailscale up --operator=$USER",
       };
     case "needsOperator":
@@ -3135,7 +3135,7 @@ function assertIdle(a: Agent, what: string) {
 
 async function gitLock(agentId: string, ms: number) {
   if (gitBusy.has(agentId)) {
-    throw new Error("Armada is already committing, merging or reverting this agent's work; wait for it to finish.");
+    throw new Error("Kvistcode is already committing, merging or reverting this agent's work; wait for it to finish.");
   }
   gitBusy.add(agentId);
   try {
@@ -3146,7 +3146,7 @@ async function gitLock(agentId: string, ms: number) {
 }
 
 const UNSAVED_WORK: Record<string, string> = {
-  "a-e2e": "1 uncommitted change in the worktree and 2 commits on armada/e2e-checkout that no other branch contains.",
+  "a-e2e": "1 uncommitted change in the worktree and 2 commits on kvistcode/e2e-checkout that no other branch contains.",
   "a-billing": "3 uncommitted changes in the worktree.",
 };
 
@@ -3252,12 +3252,12 @@ function validateSettings(s: Settings): string | null {
   return null;
 }
 
-const MOCK_DIAGNOSTICS = `# Armada diagnostics
+const MOCK_DIAGNOSTICS = `# Kvistcode diagnostics
 
 (browser mock: this is a sample report)
 
 ## System
-Armada 0.0.0-mock (debug, git unknown)
+Kvistcode 0.0.0-mock (debug, git unknown)
 OS: linux x86_64
 WebKitGTK: 2.44.0
 CPU threads: 8, RAM: 16.0 GB
@@ -3271,6 +3271,6 @@ by provider: claude 2, codex 1
 
 ## Log (most recent lines)
 \`\`\`
-INFO armada: started
+INFO kvistcode: started
 \`\`\`
 `;

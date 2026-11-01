@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthesizes Armada's built-in notification sounds (the `soft` and `glass` packs).
+"""Synthesizes Kvistcode's built-in notification sounds (the `soft` and `glass` packs).
 
 README
 ------

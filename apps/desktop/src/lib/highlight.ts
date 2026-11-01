@@ -217,7 +217,7 @@ function getCore(): Promise<Core> {
       import("shiki/core"),
       import("shiki/engine/javascript"),
     ]);
-    const theme = createCssVariablesTheme({ name: "armada", variablePrefix: "--syntax-", fontStyle: true });
+    const theme = createCssVariablesTheme({ name: "kvistcode", variablePrefix: "--syntax-", fontStyle: true });
     return (await createHighlighterCore({
       themes: [theme],
       langs: [],
@@ -259,7 +259,7 @@ export async function highlight(
   try {
     const core = await getCore();
     await ensureLang(core, lang);
-    const raw = core.codeToTokensBase(code, { lang, theme: "armada", tokenizeMaxLineLength: 3000 });
+    const raw = core.codeToTokensBase(code, { lang, theme: "kvistcode", tokenizeMaxLineLength: 3000 });
     const lines: HlLine[] = raw.map((line) =>
       line.map((tk) => {
         const out: HlToken = { t: tk.content };

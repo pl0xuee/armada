@@ -88,7 +88,7 @@ function ConnectionBanner() {
             ? "You're offline. Showing the last known state."
             : limited
               ? `${note ?? "Live updates are unavailable."} Updating every 10 seconds.`
-              : (note ?? "Connection lost. Reconnecting to Armada…")}
+              : (note ?? "Connection lost. Reconnecting to Kvistcode…")}
         </span>
         {!offline && (
           <button type="button" onClick={reconnectNow} className="press hit relative -my-2 h-9 shrink-0 rounded-lg px-2 font-semibold text-warn">

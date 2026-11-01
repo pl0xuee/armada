@@ -90,7 +90,7 @@ export function buildExtras(now: number, flags: ReadonlySet<string>): Extras {
       agent(now, id, title, "claude", "acc-work", status, {
         projectPath: WEB,
         worktree: true,
-        branch: `armada/${id}`,
+        branch: `kvistcode/${id}`,
         groupId: "grp-login",
         steerable: true,
         ...extra,

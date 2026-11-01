@@ -1,38 +1,38 @@
 <div align="center">
 
-<img src="apps/desktop/src-tauri/icons/icon.svg" width="96" alt="Armada icon" />
+<img src="apps/desktop/src-tauri/icons/icon.svg" width="96" alt="Kvistcode icon" />
 
-# Armada
+# Kvistcode
 
 **Command your fleet of AI coding agents.**
 
 One desktop app to run Claude Code, OpenAI Codex, xAI Grok, local models and any ACP agent side by side,<br />
 across all your accounts, with every project isolated in its own git worktree.
 
-[![CI](https://github.com/pl0xuee/armada/actions/workflows/ci.yml/badge.svg)](https://github.com/pl0xuee/armada/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/pl0xuee/armada?include_prereleases&sort=semver)](https://github.com/pl0xuee/armada/releases/latest)
+[![CI](https://github.com/pl0xuee/kvistcode/actions/workflows/ci.yml/badge.svg)](https://github.com/pl0xuee/kvistcode/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/pl0xuee/kvistcode?include_prereleases&sort=semver)](https://github.com/pl0xuee/kvistcode/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-<img width="100%" src="docs/screenshots/mission-control.png" alt="Armada's Mission Control: a grid of agents from several providers, some working, some waiting for approval, with Allow and Deny buttons on the cards" />
+<img width="100%" src="docs/screenshots/mission-control.png" alt="Kvistcode's Mission Control: a grid of agents from several providers, some working, some waiting for approval, with Allow and Deny buttons on the cards" />
 
 </div>
 
-> The screenshots in this README come from Armada's built-in demo data (fictional projects and accounts), not from a real workspace.
+> The screenshots in this README come from Kvistcode's built-in demo data (fictional projects and accounts), not from a real workspace.
 
-## Why Armada
+## Why Kvistcode
 
-Coding agents are most useful when you can run several at once, but each vendor ships its own terminal UI, its own login and its own idea of a session. Armada puts them in one place. It drives each vendor's **official agent runtime** (it never reimplements an agent or scrapes a login), so your subscriptions are used exactly as the vendor intends. Each agent gets its own branch and working copy, so parallel work doesn't collide, and you get one live view of who is working, who is stuck and who needs you.
+Coding agents are most useful when you can run several at once, but each vendor ships its own terminal UI, its own login and its own idea of a session. Kvistcode puts them in one place. It drives each vendor's **official agent runtime** (it never reimplements an agent or scrapes a login), so your subscriptions are used exactly as the vendor intends. Each agent gets its own branch and working copy, so parallel work doesn't collide, and you get one live view of who is working, who is stuck and who needs you.
 
 ## Features
 
 ### Agents from every provider
 
 - **Claude Code, OpenAI Codex, xAI Grok Build**, plus any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com) (Gemini CLI, Goose, OpenCode or your own), added as a first-class provider with a connection test.
-- **Local models.** Run agents on Ollama, LM Studio or any OpenAI-compatible server (llama.cpp, vLLM, a GPU box on your network). Armada detects Ollama and LM Studio, lists their models, and lets you pick one per agent. Local agents are free and need no sign-in; nothing leaves your computer unless you point at another machine, which Armada warns about. See the [quickstart](#run-models-locally).
+- **Local models.** Run agents on Ollama, LM Studio or any OpenAI-compatible server (llama.cpp, vLLM, a GPU box on your network). Kvistcode detects Ollama and LM Studio, lists their models, and lets you pick one per agent. Local agents are free and need no sign-in; nothing leaves your computer unless you point at another machine, which Kvistcode warns about. See the [quickstart](#run-models-locally).
 - **Multiple accounts per provider.** Every account has its own isolated login, so you can run two Claude Max accounts and three ChatGPT accounts at once. API keys are kept in your OS keychain.
 - **Compare mode.** Send one prompt to several providers, read the answers side by side and keep the one you like. **Handoff** lets one agent review another's work ("have Codex review Claude's work").
-- Agents survive closing the window (Armada lives in the tray), crashes and reboots, and can be resumed.
+- Agents survive closing the window (Kvistcode lives in the tray), crashes and reboots, and can be resumed.
 - Messages typed while an agent is busy queue up and run in order; edit, drop or send one right now. Paste screenshots or attach images, and `@`-mention files with fuzzy search. Slash-command autocomplete shows each agent's own commands.
 
 <img width="100%" src="docs/screenshots/agent-conversation.png" alt="An agent conversation with syntax-highlighted code, a Done summary card with Review diff, Commit and Open PR buttons, and header chips for plan, branch and pull request status" />
@@ -90,7 +90,7 @@ Pair your phone with a QR code and run the fleet from it, from anywhere over Tai
 
 <img width="100%" src="docs/screenshots/phone-companion.png" alt="Three phone screens of the companion app: the agent list with pending approvals, an agent working with a sub-agent and queued messages, and a finished agent with a Done summary" />
 
-> **Remote-control safety.** Choose **Tailscale** in Settings → Remote & mobile: Armada stays on this computer only and Tailscale Serve shares it with your own devices over HTTPS, with nothing opened on your network. Local network access is plain HTTP, for networks you trust. Don't expose the port to the internet.
+> **Remote-control safety.** Choose **Tailscale** in Settings → Remote & mobile: Kvistcode stays on this computer only and Tailscale Serve shares it with your own devices over HTTPS, with nothing opened on your network. Local network access is plain HTTP, for networks you trust. Don't expose the port to the internet.
 
 ### Automation
 
@@ -107,16 +107,16 @@ Pair your phone with a QR code and run the fleet from it, from anywhere over Tai
 
 ### Privacy and security
 
-- Armada doesn't reimplement agents or scrape logins. Each account runs in its own config directory (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`), and API keys live in your OS keychain.
+- Kvistcode doesn't reimplement agents or scrape logins. Each account runs in its own config directory (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`), and API keys live in your OS keychain.
 - Local-model agents talk only to the server you configure, and voice dictation runs on-device.
 - The phone companion is served by the desktop app on your network. Keep it on a trusted or private network; never expose it to the internet.
 - Updates are signed and verified before installing.
-- Checkpoints are kept as local git refs under `refs/armada/*`. They are never pushed on their own, but `git push --mirror` would send them, so don't mirror a working copy. Untracked credential files (`.env`, `*.pem`, `*.key`, `id_rsa*`, `.npmrc`, ...) are left out of checkpoints.
+- Checkpoints are kept as local git refs under `refs/kvistcode/*`. They are never pushed on their own, but `git push --mirror` would send them, so don't mirror a working copy. Untracked credential files (`.env`, `*.pem`, `*.key`, `id_rsa*`, `.npmrc`, ...) are left out of checkpoints.
 - Phone pushes (ntfy) say only which agent needs you by default; full message text is opt-in, with secrets scrubbed. Keep the topic name private.
 
 ## Install
 
-Download the installer for your OS from the [latest release](https://github.com/pl0xuee/armada/releases/latest):
+Download the installer for your OS from the [latest release](https://github.com/pl0xuee/kvistcode/releases/latest):
 
 | OS | Download |
 |---|---|
@@ -124,9 +124,9 @@ Download the installer for your OS from the [latest release](https://github.com/
 | macOS | `.dmg` (universal: Apple Silicon and Intel) |
 | Linux | `.AppImage`, `.deb` or `.rpm` |
 
-Armada checks GitHub Releases for updates (shortly after launch, then every 6 hours, and from Settings, About). Windows, macOS and AppImage installs update in place with signed updates; `.deb` and `.rpm` installs are told when a new version exists and link to the release page.
+Kvistcode checks GitHub Releases for updates (shortly after launch, then every 6 hours, and from Settings, About). Windows, macOS and AppImage installs update in place with signed updates; `.deb` and `.rpm` installs are told when a new version exists and link to the release page.
 
-On first run Armada's setup installs the agent CLIs for you. If you have no Node.js it downloads a private, checksum-verified copy; no admin rights needed. Then sign in to each account from the Accounts page.
+On first run Kvistcode's setup installs the agent CLIs for you. If you have no Node.js it downloads a private, checksum-verified copy; no admin rights needed. Then sign in to each account from the Accounts page.
 
 ### Run models locally
 
@@ -134,7 +134,7 @@ On first run Armada's setup installs the agent CLIs for you. If you have no Node
    ```bash
    OLLAMA_CONTEXT_LENGTH=32768 ollama serve
    ```
-2. In Armada, open **Accounts**, then **Add local model server**. Armada detects Ollama (and LM Studio) automatically and lists the models it has; with Ollama you can download a recommended coding model from inside the app ("Get a model").
+2. In Kvistcode, open **Accounts**, then **Add local model server**. Kvistcode detects Ollama (and LM Studio) automatically and lists the models it has; with Ollama you can download a recommended coding model from inside the app ("Get a model").
 3. Start a new agent, choose **Local**, and pick a model. You can switch models later.
 
 Notes: a GPU with enough memory for the model makes a big difference, and small models can struggle with tool use and long tasks. Local agents need the Codex CLI installed and a server that supports the OpenAI Responses API.
@@ -153,13 +153,13 @@ Notes: a GPU with enough memory for the model makes a big difference, and small 
 
 See [`docs/PLAN.md`](docs/PLAN.md) for the architecture and roadmap.
 
-Armada also ships a light theme (Titanium):
+Kvistcode also ships a light theme (Titanium):
 
 <img width="100%" src="docs/screenshots/light-theme.png" alt="Mission Control in the light Titanium theme" />
 
 ## Keyboard shortcuts
 
-Armada is fully usable from the keyboard. Press `Ctrl/Cmd+/` (or `?`) in the app for the full cheat sheet. Use `Cmd` on macOS and `Ctrl` elsewhere.
+Kvistcode is fully usable from the keyboard. Press `Ctrl/Cmd+/` (or `?`) in the app for the full cheat sheet. Use `Cmd` on macOS and `Ctrl` elsewhere.
 
 | Shortcut | Action |
 |---|---|
@@ -217,19 +217,19 @@ Handy tools for working on the core:
 
 ```bash
 # One-click installer from the command line
-cargo run -p armada-core --example install -- /tmp/armada-data all
+cargo run -p kvistcode-core --example install -- /tmp/kvistcode-data all
 
 # Drive a real agent end to end (prints every event, auto-approves)
-cargo run -p armada-core --example smoke -- /tmp/armada-data ~/some/repo grok "Say hi"
+cargo run -p kvistcode-core --example smoke -- /tmp/kvistcode-data ~/some/repo grok "Say hi"
 
 # Point a provider at a development build of an agent
-ARMADA_GROK_COMMAND="python3 my_agent.py" npm run tauri dev
+KVISTCODE_GROK_COMMAND="python3 my_agent.py" npm run tauri dev
 ```
 
 ## Project layout
 
 ```
-crates/armada-core/        agent supervisor, ACP + Codex clients, storage, accounts, installer
+crates/kvistcode-core/        agent supervisor, ACP + Codex clients, storage, accounts, installer
 apps/desktop/src-tauri/    Tauri shell: commands, tray, sounds, notifications, terminals, git review
 apps/desktop/src/          React UI
 apps/remote/               phone companion (single-file web app served by the desktop app)

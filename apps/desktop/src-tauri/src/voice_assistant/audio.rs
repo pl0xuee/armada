@@ -52,7 +52,7 @@ pub fn base64_to_pcm16(b64: &str) -> Result<Vec<i16>, base64::DecodeError> {
 /// Peak level 0..=1 of a block, shaped like the dictation meter.
 pub fn level_i16(samples: &[i16]) -> f32 {
     let f: Vec<f32> = samples.iter().map(|s| *s as f32 / 32768.0).collect();
-    armada_core::voice::meter_level(&f)
+    kvistcode_core::voice::meter_level(&f)
 }
 
 /// Streaming mono resampler to [`SAMPLE_RATE`]: averages the span each output sample
@@ -133,7 +133,7 @@ impl MicEncoder {
     }
 
     pub fn push(&mut self, interleaved: &[f32]) {
-        let mono = armada_core::voice::downmix(interleaved, self.channels);
+        let mono = kvistcode_core::voice::downmix(interleaved, self.channels);
         let resampled = self.resampler.process(&mono);
         self.pending.extend(f32_to_i16(&resampled));
         while self.pending.len() >= CHUNK_SAMPLES {
@@ -303,7 +303,7 @@ fn start_mic(
 ) -> Result<(), String> {
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
     std::thread::Builder::new()
-        .name("armada-va-mic".into())
+        .name("kvistcode-va-mic".into())
         .spawn(move || {
             // The stream is created and dropped on this thread (it isn't Send everywhere).
             let setup = (|| {
@@ -423,7 +423,7 @@ impl Source for RingSource {
 fn start_speaker(buf: Arc<SpeakerBuffer>, stop: Arc<AtomicBool>) -> Result<(), String> {
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
     std::thread::Builder::new()
-        .name("armada-va-speaker".into())
+        .name("kvistcode-va-speaker".into())
         .spawn(move || {
             // The output stream lives on this thread for the whole session.
             let output = match crate::sound::Output::open() {

@@ -61,7 +61,7 @@ function VoiceAssistantComposerButton() {
   );
   const icon = <AudioLines className={cn("h-3.5 w-3.5", live && "animate-pulse motion-reduce:animate-none")} aria-hidden />;
   const shortcut = [modKey, "⇧", "A"];
-  const label = live ? "End voice assistant" : "Talk to Armada · GPT voice";
+  const label = live ? "End voice assistant" : "Talk to Kvistcode · GPT voice";
 
   if (!ready && !live) {
     return (
@@ -71,7 +71,7 @@ function VoiceAssistantComposerButton() {
             <button
               type="button"
               className={cls}
-              aria-label={`Talk to Armada, GPT voice (${modKey}+Shift+A). Needs setup`}
+              aria-label={`Talk to Kvistcode, GPT voice (${modKey}+Shift+A). Needs setup`}
               aria-haspopup="dialog"
               aria-expanded={help}
               aria-keyshortcuts={isMac ? "Meta+Shift+A" : "Control+Shift+A"}
@@ -83,7 +83,7 @@ function VoiceAssistantComposerButton() {
         <PopoverContent side="top" align="end" className="w-64">
           <div className="text-[13px] font-medium text-fg">Voice assistant needs setup</div>
           <p className="mt-1 text-[12px] leading-relaxed text-muted">
-            Talking to Armada uses OpenAI's realtime voice. Turn it on and pick an OpenAI API-key account to pay for
+            Talking to Kvistcode uses OpenAI's realtime voice. Turn it on and pick an OpenAI API-key account to pay for
             sessions.
           </p>
           <Button
@@ -108,7 +108,7 @@ function VoiceAssistantComposerButton() {
         type="button"
         onClick={toggleVoiceAssistant}
         className={cls}
-        aria-label={live ? "End voice assistant" : `Talk to Armada, GPT voice (${modKey}+Shift+A)`}
+        aria-label={live ? "End voice assistant" : `Talk to Kvistcode, GPT voice (${modKey}+Shift+A)`}
         aria-pressed={live}
         aria-keyshortcuts={isMac ? "Meta+Shift+A" : "Control+Shift+A"}
       >

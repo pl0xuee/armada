@@ -1,9 +1,9 @@
-# Releasing Armada
+# Releasing Kvistcode
 
-Installed copies of Armada check GitHub Releases for updates (15 seconds after launch, then every 6 hours, plus Settings → About → "Check for updates").
+Installed copies of Kvistcode check GitHub Releases for updates (15 seconds after launch, then every 6 hours, plus Settings → About → "Check for updates").
 
 - **Windows, macOS, Linux AppImage** install updates in place. The updater reads `latest.json` from the latest published release and verifies each download against the public key in `apps/desktop/src-tauri/tauri.conf.json` before installing.
-- **deb / rpm** installs are owned by the system package manager. Armada asks the GitHub Releases API whether a newer version exists and links to the release page.
+- **deb / rpm** installs are owned by the system package manager. Kvistcode asks the GitHub Releases API whether a newer version exists and links to the release page.
 
 ## Release notes
 
@@ -73,4 +73,17 @@ The phone companion is embedded into the desktop binary, and release builds refu
 cd apps/desktop && npm ci && npm run tauri build
 ```
 
-(`beforeBuildCommand` rebuilds it too; set `ARMADA_ALLOW_MISSING_REMOTE=1` only for throwaway builds.)
+(`beforeBuildCommand` rebuilds it too; set `KVISTCODE_ALLOW_MISSING_REMOTE=1` only for throwaway builds.)
+
+## Names that still say "armada"
+
+The app was renamed from Armada to Kvistcode. A few identifiers keep the old spelling on purpose, because installed copies key their data on them. Do not rename these without a migration:
+
+| Where | What | Why |
+|---|---|---|
+| `tauri.conf.json` `identifier`, `KEYRING_SERVICE` | `dev.armada.app` | The data directory, stored sign-ins, window storage and the single-instance lock are all keyed on it |
+| `armada.db` | database file name | Lives in the data directory |
+| `localStorage` keys `armada.*` (app and phone) | UI preferences, drafts, the phone's pairing token | Renaming would reset them |
+| `.armada-merge-*` | leftover-folder marker | Lets cleanup find folders from older versions |
+| `~/.tauri/armada-updater.*` | updater signing key files | Same key keeps signing updates |
+| `armada/…` branches | agent branches made before the rename | New ones are `kvistcode/…`; the PR base picker hides both |

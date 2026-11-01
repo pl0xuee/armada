@@ -215,7 +215,7 @@ export function SchedulesView() {
           )}
           {schedules !== null && !loadError && (
             <p className="mt-6 text-center text-[11.5px] text-steel">
-              Times are local. Schedules run while Armada is running, including when it's minimized to the tray.
+              Times are local. Schedules run while Kvistcode is running, including when it's minimized to the tray.
             </p>
           )}
         </div>

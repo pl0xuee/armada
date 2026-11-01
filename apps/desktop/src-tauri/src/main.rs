@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    armada_desktop_lib::run();
+    kvistcode_desktop_lib::run();
 }

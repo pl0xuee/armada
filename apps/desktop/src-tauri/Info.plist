@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Armada uses the microphone for voice dictation. Audio is transcribed on this device.</string>
+	<string>Kvistcode uses the microphone for voice dictation. Audio is transcribed on this device.</string>
 </dict>
 </plist>

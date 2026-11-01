@@ -73,7 +73,7 @@ export function AlertTargets({ targets }: { targets: AlertTarget[] }) {
           }}
         />
       ) : (
-        <p className="px-4 py-3 text-[12px] text-steel">That's the most targets Armada keeps ({MAX_ALERT_TARGETS}).</p>
+        <p className="px-4 py-3 text-[12px] text-steel">That's the most targets Kvistcode keeps ({MAX_ALERT_TARGETS}).</p>
       )}
       <div className="px-4 py-3 text-[12px] leading-relaxed text-muted">
         <FieldError field="alerts" />

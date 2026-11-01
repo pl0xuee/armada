@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail};
-use armada_core::Agent;
+use kvistcode_core::Agent;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
@@ -87,7 +87,7 @@ fn unknown(reason: &'static str) -> PrStatus {
         state: "unknown",
         reason: Some(reason),
         pr: None,
-        fetched_at: armada_core::now_ms(),
+        fetched_at: kvistcode_core::now_ms(),
     }
 }
 
@@ -96,7 +96,7 @@ fn none() -> PrStatus {
         state: "none",
         reason: None,
         pr: None,
-        fetched_at: armada_core::now_ms(),
+        fetched_at: kvistcode_core::now_ms(),
     }
 }
 
@@ -685,12 +685,12 @@ pub fn review_prompt(number: u64, feedback: &str) -> String {
 
 pub(crate) async fn gh(cwd: &Path, args: &[&str]) -> Result<String, String> {
     let exe =
-        armada_core::providers::resolve_program("gh").ok_or_else(|| "gh_missing".to_string())?;
+        kvistcode_core::providers::resolve_program("gh").ok_or_else(|| "gh_missing".to_string())?;
     let mut cmd = tokio::process::Command::new(exe);
-    armada_core::childenv::sanitize_child_env(&mut cmd);
-    // gh spawns git: give it Armada's repo-config hardening, and refuse where the repo
+    kvistcode_core::childenv::sanitize_child_env(&mut cmd);
+    // gh spawns git: give it Kvistcode's repo-config hardening, and refuse where the repo
     // redirects URLs.
-    let hardening = armada_core::hardening(cwd)
+    let hardening = kvistcode_core::hardening(cwd)
         .await
         .map_err(|e| e.to_string())?;
     if let Some(why) = hardening
@@ -786,7 +786,7 @@ async fn fetch(agent: &Agent) -> PrStatus {
                     state: "ok",
                     reason: None,
                     pr: Some(pr),
-                    fetched_at: armada_core::now_ms(),
+                    fetched_at: kvistcode_core::now_ms(),
                 }
             }
             Err(_) => unknown("error"),
@@ -1012,8 +1012,8 @@ pub fn flatten_pages(json: &str) -> anyhow::Result<String> {
 mod tests {
     use super::*;
 
-    // Captured from `gh pr view 2` on pl0xuee/armada (Dependabot PR, all checks failed).
-    const FAILING: &str = r#"{"headRefName":"dependabot/cargo/sha2-0.11.1","isDraft":false,"mergeable":"MERGEABLE","number":2,"reviewDecision":"","state":"OPEN","statusCheckRollup":[{"__typename":"CheckRun","completedAt":"2026-10-28T01:01:28Z","conclusion":"FAILURE","detailsUrl":"https://github.com/pl0xuee/armada/actions/runs/40612200694/job/122566194688","name":"ubuntu-22.04","startedAt":"2026-10-28T00:58:55Z","status":"COMPLETED","workflowName":"CI"},{"__typename":"CheckRun","completedAt":"2026-10-28T01:01:25Z","conclusion":"SUCCESS","detailsUrl":"https://github.com/pl0xuee/armada/actions/runs/40612200694/job/122566194946","name":"macos-latest","startedAt":"2026-10-28T00:58:56Z","status":"COMPLETED","workflowName":"CI"},{"__typename":"CheckRun","completedAt":"","conclusion":"","detailsUrl":"https://github.com/pl0xuee/armada/actions/runs/40612200694/job/122566194995","name":"windows-latest","startedAt":"2026-10-28T00:58:55Z","status":"IN_PROGRESS","workflowName":"CI"},{"__typename":"StatusContext","context":"ci/legacy","state":"PENDING","targetUrl":"https://example.com/build/1","startedAt":"2026-10-28T00:58:55Z"}],"title":"Bump sha2 from 0.10.9 to 0.11.1","url":"https://github.com/pl0xuee/armada/pull/2"}"#;
+    // Captured from `gh pr view 2` on pl0xuee/kvistcode (Dependabot PR, all checks failed).
+    const FAILING: &str = r#"{"headRefName":"dependabot/cargo/sha2-0.11.1","isDraft":false,"mergeable":"MERGEABLE","number":2,"reviewDecision":"","state":"OPEN","statusCheckRollup":[{"__typename":"CheckRun","completedAt":"2026-10-28T01:01:28Z","conclusion":"FAILURE","detailsUrl":"https://github.com/pl0xuee/kvistcode/actions/runs/40612200694/job/122566194688","name":"ubuntu-22.04","startedAt":"2026-10-28T00:58:55Z","status":"COMPLETED","workflowName":"CI"},{"__typename":"CheckRun","completedAt":"2026-10-28T01:01:25Z","conclusion":"SUCCESS","detailsUrl":"https://github.com/pl0xuee/kvistcode/actions/runs/40612200694/job/122566194946","name":"macos-latest","startedAt":"2026-10-28T00:58:56Z","status":"COMPLETED","workflowName":"CI"},{"__typename":"CheckRun","completedAt":"","conclusion":"","detailsUrl":"https://github.com/pl0xuee/kvistcode/actions/runs/40612200694/job/122566194995","name":"windows-latest","startedAt":"2026-10-28T00:58:55Z","status":"IN_PROGRESS","workflowName":"CI"},{"__typename":"StatusContext","context":"ci/legacy","state":"PENDING","targetUrl":"https://example.com/build/1","startedAt":"2026-10-28T00:58:55Z"}],"title":"Bump sha2 from 0.10.9 to 0.11.1","url":"https://github.com/pl0xuee/kvistcode/pull/2"}"#;
 
     #[test]
     fn parses_pr_with_mixed_checks() {

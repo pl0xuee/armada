@@ -1,8 +1,8 @@
 {
-  "name": "armada-e2e",
+  "name": "kvistcode-e2e",
   "private": true,
   "type": "module",
-  "description": "Real-app smoke test: drives the built Armada binary through tauri-driver (WebDriver).",
+  "description": "Real-app smoke test: drives the built Kvistcode binary through tauri-driver (WebDriver).",
   "scripts": {
     "test": "node smoke.mjs"
   },

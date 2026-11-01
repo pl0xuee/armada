@@ -4,8 +4,8 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use armada_core::scripts::{self, ProjectScript};
-use armada_core::Core;
+use kvistcode_core::scripts::{self, ProjectScript};
+use kvistcode_core::Core;
 use tauri::State;
 
 use crate::terminal::{SpawnSpec, Terminals};
@@ -69,7 +69,7 @@ pub async fn workspace_terminal_open(
     // Same environment hygiene as the agents: no AppImage runtime leaking into the shell.
     let mut env_remove = Vec::new();
     let mut env = Vec::new();
-    for (name, value) in armada_core::childenv::appimage_env_changes(std::env::vars_os()) {
+    for (name, value) in kvistcode_core::childenv::appimage_env_changes(std::env::vars_os()) {
         let name = name.to_string_lossy().into_owned();
         match value {
             Some(v) => env.push((name, v.to_string_lossy().into_owned())),

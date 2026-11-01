@@ -116,5 +116,5 @@ export { mockReadInstruction };
 
 // Demo only: lets the browser demo (and screenshots) edit an instruction file "in another editor".
 if (typeof window !== "undefined") {
-  (window as unknown as { __armadaExternalEdit?: typeof mockExternalEdit }).__armadaExternalEdit = mockExternalEdit;
+  (window as unknown as { __kvistcodeExternalEdit?: typeof mockExternalEdit }).__kvistcodeExternalEdit = mockExternalEdit;
 }

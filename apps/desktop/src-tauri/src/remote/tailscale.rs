@@ -1,8 +1,8 @@
 //! Tailscale Serve: publishes the loopback-only remote server to the user's tailnet as
 //! `https://<machine>.<tailnet>.ts.net:<port>`, so a phone running Tailscale reaches
-//! Armada from anywhere without opening a port on the LAN or the firewall. Tailscale
+//! Kvistcode from anywhere without opening a port on the LAN or the firewall. Tailscale
 //! terminates TLS with a real certificate and only lets the tailnet's own devices in;
-//! Armada still requires pairing. Driven through the `tailscale` CLI.
+//! Kvistcode still requires pairing. Driven through the `tailscale` CLI.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -112,7 +112,7 @@ async fn run(cli: &PathBuf, args: &[&str], timeout: Duration) -> Result<Output, 
 fn not_connected() -> TailscaleStatus {
     let (message, command) = if cfg!(target_os = "linux") {
         (
-            "Tailscale is installed but not connected on this computer. Start it and sign in (the --operator part lets Armada manage Serve without sudo):",
+            "Tailscale is installed but not connected on this computer. Start it and sign in (the --operator part lets Kvistcode manage Serve without sudo):",
             Some("sudo systemctl enable --now tailscaled && sudo tailscale up --operator=$USER"),
         )
     } else {
@@ -163,7 +163,7 @@ fn parse_node(json: &Value) -> Result<String, TailscaleStatus> {
     Ok(name.to_string())
 }
 
-/// Whether the Serve config (`tailscale serve status --json`) proxies `port` to Armada.
+/// Whether the Serve config (`tailscale serve status --json`) proxies `port` to Kvistcode.
 fn serves(json: &Value, port: u16) -> bool {
     let target = format!("http://127.0.0.1:{port}");
     let suffix = format!(":{port}");
@@ -242,13 +242,13 @@ fn serve_failed(stderr: &str) -> TailscaleStatus {
         .unwrap_or("unknown error");
     TailscaleStatus::problem(
         TailscaleState::Error,
-        &format!("Tailscale couldn't share Armada: {detail}"),
+        &format!("Tailscale couldn't share Kvistcode: {detail}"),
         None,
         None,
     )
 }
 
-/// Stops publishing `port` (best effort: Armada is going away or changing modes).
+/// Stops publishing `port` (best effort: Kvistcode is going away or changing modes).
 pub async fn unserve(port: u16) {
     let Some(cli) = cli() else { return };
     let https = format!("--https={port}");
@@ -272,10 +272,10 @@ mod tests {
     fn node_states() {
         let up = json!({
             "BackendState": "Running",
-            "Self": { "DNSName": "armada-pc.tail1234.ts.net." },
-            "CertDomains": ["armada-pc.tail1234.ts.net"],
+            "Self": { "DNSName": "kvistcode-pc.tail1234.ts.net." },
+            "CertDomains": ["kvistcode-pc.tail1234.ts.net"],
         });
-        assert_eq!(parse_node(&up).unwrap(), "armada-pc.tail1234.ts.net");
+        assert_eq!(parse_node(&up).unwrap(), "kvistcode-pc.tail1234.ts.net");
 
         let login =
             json!({ "BackendState": "NeedsLogin", "AuthURL": "https://login.tailscale.com/a/abc" });
@@ -303,7 +303,7 @@ mod tests {
     fn serve_config_and_urls() {
         let cfg = json!({
             "TCP": { "47821": { "HTTPS": true } },
-            "Web": { "armada-pc.tail1234.ts.net:47821": { "Handlers": { "/": { "Proxy": "http://127.0.0.1:47821" } } } },
+            "Web": { "kvistcode-pc.tail1234.ts.net:47821": { "Handlers": { "/": { "Proxy": "http://127.0.0.1:47821" } } } },
         });
         assert!(serves(&cfg, 47821));
         assert!(!serves(&cfg, 47822));
