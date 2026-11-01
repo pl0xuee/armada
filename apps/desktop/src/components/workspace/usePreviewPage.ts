@@ -12,6 +12,7 @@ import {
   type PickedElement,
   type ShotResult,
 } from "@/lib/previewBridge";
+import { devUrlFromPage } from "@/lib/previewNav";
 
 /** How long after the page loads the agent may take to say hello before the tools count as unavailable. */
 const AGENT_WAIT_MS = 5000;
@@ -43,6 +44,8 @@ interface Session {
 export interface PageHandlers {
   picked: (info: PickedElement) => void;
   pickShot: (selector: string, result: ShotResult) => void;
+  /** The page moved (link, pushState, hash...): its address as the dev server's own loopback URL. */
+  navigated: (devUrl: string) => void;
 }
 
 const SAMPLE: Omit<ConsoleEntry, "at">[] = [
@@ -66,6 +69,7 @@ export function usePreviewPage(opts: {
   const [agent, setAgent] = useState<"waiting" | "ready" | "unavailable">("waiting");
   const [entries, setEntries] = useState<ConsoleEntry[]>([]);
   const [inspecting, setInspecting] = useState(false);
+  const [history, setHistory] = useState({ canBack: false, canForward: false });
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const handlers = useRef(opts.handlers);
   handlers.current = opts.handlers;
@@ -153,6 +157,7 @@ export function usePreviewPage(opts: {
   useEffect(() => {
     setAgent("waiting");
     setInspecting(false);
+    setHistory({ canBack: false, canForward: false });
     clearTimeout(loadTimer.current);
     return () => clearTimeout(loadTimer.current);
   }, [frameKey, session?.token]);
@@ -181,6 +186,13 @@ export function usePreviewPage(opts: {
           clearTimeout(loadTimer.current);
           setAgent("ready");
           break;
+        case "nav": {
+          // Only the path, query and hash are taken from the page; the origin is always the dev server's.
+          const devUrl = devUrlFromPage(ev.url, session.origin, session.key);
+          if (devUrl) handlers.current.navigated(devUrl);
+          setHistory((h) => (h.canBack === ev.canBack && h.canForward === ev.canForward ? h : { canBack: ev.canBack, canForward: ev.canForward }));
+          break;
+        }
         case "console":
           setEntries((cur) => addEntry(cur, ev.entry));
           break;
@@ -246,5 +258,5 @@ export function usePreviewPage(opts: {
   /** Back / forward inside the page (its own session history). */
   const navigate = useCallback((dir: "back" | "forward") => send({ cmd: "history", dir }), [send]);
 
-  return { iframeRef, frameSrc, frameReady, tools, simulated: !!session?.simulated, entries, clear, inspecting, inspect, screenshot, navigate, onFrameLoad };
+  return { iframeRef, frameSrc, frameReady, tools, simulated: !!session?.simulated, entries, clear, inspecting, inspect, screenshot, navigate, onFrameLoad, canBack: history.canBack, canForward: history.canForward };
 }

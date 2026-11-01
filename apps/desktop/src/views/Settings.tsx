@@ -68,6 +68,7 @@ import type { AttentionReason, Settings, SoundPack } from "@/lib/types";
 import { cn, errorMessage, isMac, modKey } from "@/lib/utils";
 import { MAX_SCALE, MIN_SCALE, DEFAULT_SCALE, SCALE_PRESETS, SCALE_STEP } from "@/lib/zoom";
 import { useApp } from "@/store/app";
+import { openTour } from "@/store/tour";
 import { useUi, type SettingsSection } from "@/store/ui";
 
 const SECTIONS: { id: SettingsSection; label: string; icon: ComponentType<{ className?: string }> }[] = [
@@ -1141,6 +1142,14 @@ function About() {
               Save to file…
             </Button>
           </div>
+        </SettingRow>
+      </SettingGroup>
+
+      <SettingGroup title="Welcome" className="mb-8">
+        <SettingRow title="Show the tour again" description="A short look at agent grids, the pinned dock, search and spending limits.">
+          <Button size="sm" variant="secondary" onClick={openTour}>
+            <Sparkles /> Show the tour
+          </Button>
         </SettingRow>
       </SettingGroup>
 
