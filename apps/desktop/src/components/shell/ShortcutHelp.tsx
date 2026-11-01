@@ -25,6 +25,7 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
     title: "Anywhere",
     rows: [
       { keys: [modKey, "K"], label: "Command palette (type > to start an agent)" },
+      { keys: [modKey, "⇧", "F"], label: "Search every conversation (type ? in the palette)" },
       { keys: [modKey, "N"], label: "New agent" },
       { keys: [modKey, "J"], label: "Needs you (press again for the next one)" },
       { keys: [modKey, "I"], label: "Needs you (same as J)" },

@@ -7,7 +7,7 @@ use crate::AppHandle;
 use armada_core::{
     accounts, toolchain, Account, Agent, AgentStatus, ArmadaEvent, Attachment, AttentionReason,
     Core, CreateAccountRequest, CreateAgentRequest, CustomAgent, McpServer, Provider, ProviderInfo,
-    Schedule, SearchHit, Settings, TimelineItem, UpdateInfo,
+    Schedule, SearchResults, Settings, TimelineItem, UpdateInfo,
 };
 use serde::Serialize;
 use tauri::{Manager, State};
@@ -92,10 +92,14 @@ pub async fn list_items(
     .map_err(err)
 }
 
+/// Full-text search over every conversation, archived ones included, grouped by agent.
 #[tauri::command]
-pub async fn search(core: State<'_, Core>, query: String) -> CmdResult<Vec<SearchHit>> {
+pub async fn search_conversations(
+    core: State<'_, Core>,
+    query: String,
+) -> CmdResult<SearchResults> {
     let core = core.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || core.search(&query))
+    tauri::async_runtime::spawn_blocking(move || core.search_conversations(&query))
         .await
         .map_err(|e| e.to_string())?
         .map_err(err)

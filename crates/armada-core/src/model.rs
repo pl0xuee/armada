@@ -1469,8 +1469,34 @@ pub struct SearchHit {
     pub agent_id: String,
     pub item_id: String,
     pub kind: String,
+    /// A short excerpt; each matched word is wrapped in `\u{1}` and `\u{2}`.
     pub snippet: String,
     pub ts: i64,
+    /// The item's place in its agent's timeline, so the UI can load back to it.
+    pub seq: i64,
+}
+
+/// The best matches in one agent's conversation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchGroup {
+    pub agent_id: String,
+    /// Best match first, at most a handful.
+    pub hits: Vec<SearchHit>,
+    /// How many items in this conversation matched (of those searched).
+    pub total: usize,
+}
+
+/// Conversation search results, best conversation first.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResults {
+    pub groups: Vec<SearchGroup>,
+    /// Older conversations are still being indexed in the background, so the
+    /// results may be incomplete.
+    pub indexing: bool,
+    /// More items matched than were looked at.
+    pub truncated: bool,
 }
 
 pub fn now_ms() -> i64 {

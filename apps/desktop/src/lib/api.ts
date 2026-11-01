@@ -34,7 +34,7 @@ import type {
   ProviderInfo,
   RemoteStatus,
   Schedule,
-  SearchHit,
+  SearchResults,
   Settings,
   BudgetStatus,
   ShareLink,
@@ -86,7 +86,8 @@ const tauriApi = {
    */
   listItems: (agentId: string, opts?: ListItemsOptions) =>
     invoke<TimelineItem[]>("list_items", { agentId, beforeSeq: opts?.beforeSeq ?? null, limit: opts?.limit ?? null }),
-  search: (query: string) => invoke<SearchHit[]>("search", { query }),
+  /** Full-text search over every conversation (archived ones too), grouped by agent. */
+  searchConversations: (query: string) => invoke<SearchResults>("search_conversations", { query }),
 
   // agents
   createAgent: (req: CreateAgentRequest) => invoke<Agent>("create_agent", { req }),
