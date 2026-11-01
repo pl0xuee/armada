@@ -73,12 +73,12 @@ export function Fold({ open, children, className }: { open: boolean; children: R
   return (
     <div
       className={cn(
-        "grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none",
+        "grid grid-cols-[minmax(0,1fr)] transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none",
         expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
         className,
       )}
     >
-      <div className={cn("min-h-0", !settled && "overflow-hidden")}>{children}</div>
+      <div className={cn("min-h-0 min-w-0", !settled && "overflow-hidden")}>{children}</div>
     </div>
   );
 }
