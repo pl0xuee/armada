@@ -103,6 +103,7 @@ macro_rules! handler {
             commands::handoff_agent,
             commands::set_focus,
             commands::chime_watched,
+            commands::background_finished,
             commands::set_window_title,
             commands::set_needs_you_count,
             commands::get_diff,

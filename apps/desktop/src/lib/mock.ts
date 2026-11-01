@@ -7,6 +7,8 @@ import { emitVoiceBus } from "./voiceBus";
 import { budgetLevel } from "./budget";
 import { searchItems } from "./mock-search";
 import { mockWorkflowProgress, mockWorkflowStart } from "./mock-workflow";
+import { pluralize } from "./format";
+import { TURN_ONLY_PREFIX } from "./background";
 import { validateAlertUrl } from "./alertTargets";
 import { mockProjectConfig, mockSaveRules } from "./mock-project-config";
 import {
@@ -211,11 +213,14 @@ function bumpUsage(agentId: string, tokens: number) {
 
 function attention(agentId: string, reason: AttentionReason, body: string) {
   const a = getAgent(agentId);
+  const turnOnly = reason === "done" && body.startsWith(TURN_ONLY_PREFIX);
   const title =
     reason === "permission"
       ? `${a.title} needs approval`
       : reason === "done"
-        ? `${a.title} is done`
+        ? turnOnly
+          ? a.title
+          : `${a.title} is done`
         : `${a.title} hit an error`;
   emit({ type: "attention", agentId, reason, title, body, requestId: null });
 }
@@ -549,7 +554,17 @@ function finishTurn(agentId: string, text: string) {
     turns,
     ...(hold ? { budgetHold: hold } : {}),
   });
-  if (!hold) attention(agentId, "done", preview);
+  if (hold) return;
+  // Like the backend: a turn that ends with a launched workflow still running says so, not "done".
+  const launched = itemsOf(agentId).findLast((i) => i.kind === "tool_call" && i.subagent?.workflow);
+  const run = launched && launched.kind === "tool_call" ? mockWorkflowProgress(launched.toolCallId) : null;
+  if (run?.state === "running")
+    attention(
+      agentId,
+      "done",
+      `${TURN_ONLY_PREFIX} A workflow is still running (${pluralize(run.agents.length, "agent")}).`,
+    );
+  else attention(agentId, "done", preview);
 }
 
 /** The turn limit an agent has just reached (with the Pause action), if any: the agent's own, else the default. */
@@ -1835,6 +1850,10 @@ export const mockApi: KvistcodeApi = {
   },
 
   async chimeWatched() {
+    return undefined;
+  },
+
+  async backgroundFinished() {
     return undefined;
   },
 

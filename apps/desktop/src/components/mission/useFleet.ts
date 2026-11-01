@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { triageQueue } from "@/lib/agents";
 import type { Agent, AgentStatus } from "@/lib/types";
 import { useApp } from "@/store/app";
+import { useBackgroundIds } from "@/store/background";
 
 /** Agents that are working or about to (a pending approval counts: the agent is paused, not done). */
 export const LIVE: AgentStatus[] = ["working", "starting", "needs_permission"];
@@ -9,9 +10,11 @@ const IDLE: AgentStatus[] = ["idle", "stopped"];
 
 export type Filter = "all" | "live" | "idle";
 
-export function matchesFilter(a: Agent, f: Filter): boolean {
-  if (f === "live") return LIVE.includes(a.status);
-  if (f === "idle") return IDLE.includes(a.status);
+/** `background`: agents whose turn ended but whose workflow / background agents still run: live, not idle. */
+export function matchesFilter(a: Agent, f: Filter, background?: ReadonlySet<string>): boolean {
+  const bg = a.status === "idle" && !!background?.has(a.id);
+  if (f === "live") return LIVE.includes(a.status) || bg;
+  if (f === "idle") return IDLE.includes(a.status) && !bg;
   return true;
 }
 
@@ -32,6 +35,7 @@ const STATUS_ORDER: Record<AgentStatus, number> = {
  */
 export function useFleet(): { agents: Agent[]; live: number; idle: number } {
   const agentsMap = useApp((s) => s.agents);
+  const background = useBackgroundIds();
   return useMemo(() => {
     const active = Object.values(agentsMap).filter((a) => !a.archived);
     const urgent = triageQueue(active).map((e) => e.agent);
@@ -41,8 +45,8 @@ export function useFleet(): { agents: Agent[]; live: number; idle: number } {
       .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.createdAt - a.createdAt);
     return {
       agents: [...urgent, ...rest],
-      live: active.filter((a) => matchesFilter(a, "live")).length,
-      idle: active.filter((a) => matchesFilter(a, "idle")).length,
+      live: active.filter((a) => matchesFilter(a, "live", background)).length,
+      idle: active.filter((a) => matchesFilter(a, "idle", background)).length,
     };
-  }, [agentsMap]);
+  }, [agentsMap, background]);
 }

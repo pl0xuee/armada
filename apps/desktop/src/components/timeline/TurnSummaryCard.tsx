@@ -19,6 +19,8 @@ import { formatCost, formatTokens, pluralize } from "@/lib/format";
 import type { Agent, BaseBranchStatus, TimelineItem } from "@/lib/types";
 import { basename, cn, errorMessage } from "@/lib/utils";
 import { useApp } from "@/store/app";
+import { useBackground } from "@/store/background";
+import { backgroundActive, backgroundDetail } from "@/lib/background";
 import { useUi } from "@/store/ui";
 import { PushBaseNotice } from "../git/PushBaseNotice";
 import { ConfirmDialog } from "../ui/alert-dialog";
@@ -79,6 +81,9 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
     }
     return false;
   });
+  // Still true after the turn ended: say so next to "Done", which is only about the turn itself.
+  const bg = useBackground(agent.id);
+  const bgRunning = backgroundActive(bg) && !stale && agent.status === "idle";
   const gitDisabled = busy !== null || agentBusy || stale || shipped;
   const gitReason = shipped
     ? "Already shipped"
@@ -154,6 +159,14 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
           <span className="rounded-md border border-line-strong px-1.5 text-[11px] font-medium text-muted">
             Earlier turn
           </span>
+        )}
+        {bgRunning && (
+          <Tooltip content={backgroundDetail(bg)}>
+            <span className="inline-flex h-5 items-center gap-1.5 rounded-md border border-accent/30 bg-accent/10 px-1.5 text-[11px] font-medium text-accent">
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent animate-breathe" />
+              {bg.workflows > 0 ? "Workflow still running" : "Background agents may still run"}
+            </span>
+          </Tooltip>
         )}
       </header>
 

@@ -10,8 +10,7 @@ import { findOption, respondPermission } from "@/lib/actions";
 import { BudgetChip } from "@/components/agent/BudgetChip";
 import { agentCostText } from "@/lib/format";
 import type { QuestionItem } from "@/lib/question";
-import { DONE_META, STATUS } from "@/lib/providers";
-import { useIsDone } from "@/store/completion";
+import { useStatusView } from "@/store/background";
 import type { Account, Agent, PermissionOption, TimelineItem } from "@/lib/types";
 import { basename, cn } from "@/lib/utils";
 import type { TileSummary } from "./useTileSummaries";
@@ -35,10 +34,10 @@ export const AgentRowCompact = memo(function AgentRowCompact({
   onOpen: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const done = useIsDone(agent);
-  const meta = done ? DONE_META : STATUS[agent.status];
+  const view = useStatusView(agent);
+  const { done, meta } = view;
   const identity = useIdentity(agent.provider, agent.customAgentId);
-  const working = agent.status === "working" || agent.status === "starting";
+  const working = agent.status === "working" || agent.status === "starting" || view.background;
   const allowOpt = pending ? (findOption(pending, ["allow_once"]) ?? findOption(pending, ["allow_always"])) : undefined;
   const denyOpt = pending ? findOption(pending, ["reject_once", "reject_always"]) : undefined;
 
@@ -47,9 +46,11 @@ export const AgentRowCompact = memo(function AgentRowCompact({
     ? pending.title
     : question
       ? question.message
-      : working
-        ? (summary.tail ?? summary.action ?? "Working…")
-        : (agent.lastMessage ?? summary.action ?? "");
+      : view.background
+        ? meta.label
+        : working
+          ? (summary.tail ?? summary.action ?? "Working…")
+          : (agent.lastMessage ?? summary.action ?? "");
 
   const respond = async (option: PermissionOption | undefined) => {
     if (!pending || !option || busy) return;
@@ -85,7 +86,7 @@ export const AgentRowCompact = memo(function AgentRowCompact({
       )}
       <div className="flex items-center gap-2">
         <span className="flex w-3 shrink-0 justify-center">
-          <StatusDot status={agent.status} size={7} done={done} />
+          <StatusDot status={view.dot} size={7} done={done} />
         </span>
         <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="sm" />
       </div>
