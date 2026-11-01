@@ -11,7 +11,6 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tracing::warn;
 
 use crate::attention::Attention;
-use crate::tray;
 
 pub const EVENT_CHANNEL: &str = "armada://event";
 
@@ -158,9 +157,6 @@ fn dispatch(app: &AppHandle, event: ArmadaEvent) {
                 remote.publish(&event);
             }
             match event {
-                ArmadaEvent::AgentUpdated { .. } | ArmadaEvent::AgentRemoved { .. } => {
-                    tray::mark_dirty(app);
-                }
                 // Answered (here, on the phone or elsewhere): drop its notification.
                 ArmadaEvent::ItemUpserted { item } => {
                     if let armada_core::ItemBody::Permission {

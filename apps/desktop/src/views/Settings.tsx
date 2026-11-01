@@ -30,6 +30,7 @@ import { AppMark } from "@/components/AppMark";
 import { GithubGlyph } from "@/components/settings/GithubGlyph";
 import { InstallAllBanner } from "@/components/settings/InstallAllBanner";
 import { HelperSettings } from "@/components/settings/HelperSettings";
+import { ResponseStyleSettings } from "@/components/settings/ResponseStyleSettings";
 import { RememberedChoicesRow } from "@/components/settings/RememberedChoicesRow";
 import { AgentsSection } from "@/components/settings/AgentsSection";
 import { BudgetsSection } from "@/components/settings/BudgetsSection";
@@ -55,14 +56,15 @@ import { Switch } from "@/components/ui/switch";
 import { checkForUpdates, copyDiagnostics, saveDiagnosticsFile } from "@/lib/actions";
 import { useGuardedInstall } from "@/components/settings/useGuardedInstall";
 import { HotkeyRecorder } from "@/components/settings/HotkeyRecorder";
+import { acceleratorCaps } from "@/components/settings/acceleratorLabels";
 import { useCommitOnUnmount } from "@/components/settings/useCommitOnUnmount";
 import { FieldError } from "@/components/settings/FieldError";
 import { fieldErrorId, saveSettingsPatch, useFieldError } from "@/components/settings/settingsErrors";
 import { api } from "@/lib/api";
 import { relativeTimeLong } from "@/lib/format";
 import { updateCount } from "@/lib/toolVersions";
-import type { AttentionReason, Settings } from "@/lib/types";
-import { cn, errorMessage, modKey } from "@/lib/utils";
+import type { AttentionReason, Settings, SoundPack } from "@/lib/types";
+import { cn, errorMessage, isMac, modKey } from "@/lib/utils";
 import { MAX_SCALE, MIN_SCALE, DEFAULT_SCALE, SCALE_PRESETS, SCALE_STEP } from "@/lib/zoom";
 import { useApp } from "@/store/app";
 import { useUi, type SettingsSection } from "@/store/ui";
@@ -289,22 +291,28 @@ const SOUND_EVENTS: {
     custom: "customPermission",
     reason: "permission",
     title: "Needs approval",
-    description: "Two-tone rising ping",
+    description: "When an agent is waiting for your decision",
   },
   {
     key: "onDone",
     custom: "customDone",
     reason: "done",
     title: "Agent finished",
-    description: "Soft completion chord",
+    description: "When an agent has finished its work",
   },
   {
     key: "onError",
     custom: "customError",
     reason: "error",
     title: "Error or rate limit",
-    description: "Low metallic thud",
+    description: "When something fails or a usage limit is hit",
   },
+];
+
+const SOUND_PACKS: { value: SoundPack; label: string; description: string }[] = [
+  { value: "soft", label: "Soft", description: "Warm mallet tones, calm and short." },
+  { value: "glass", label: "Glass", description: "Brighter bell and crystal tones with a longer shimmer." },
+  { value: "classic", label: "Classic", description: "The original plain tones." },
 ];
 
 function PreviewButton({ reason, disabled }: { reason: AttentionReason; disabled?: boolean }) {
@@ -328,11 +336,36 @@ function Sounds({ settings }: { settings: Settings }) {
   const [volume, setVolume] = useState(s.volume);
   useEffect(() => setVolume(s.volume), [s.volume]);
 
+  const choosePack = async (pack: SoundPack) => {
+    if (pack === s.pack) return;
+    const saved = await save({ sounds: { ...s, pack } });
+    // Play "finished" in the new pack so the difference is audible right away (unless the
+    // user has their own file for it, which would play instead).
+    if (saved && s.enabled && !s.customDone?.trim()) {
+      api.previewSound("done").catch((e) => toast.error("Couldn't play sound", { description: errorMessage(e) }));
+    }
+  };
+
   return (
     <>
       <SectionHeader title="Sounds" description="Audio cues play even when Armada is in the tray." />
       <div className="space-y-6">
         <SettingGroup>
+          <SettingRow
+            title="Sound pack"
+            description={SOUND_PACKS.find((p) => p.value === s.pack)?.description}
+            htmlFor="snd-pack"
+          >
+            <Select
+              id="snd-pack"
+              aria-label="Sound pack"
+              className="h-8 w-[160px]"
+              value={s.pack}
+              disabled={!s.enabled}
+              onValueChange={(v) => void choosePack(v as SoundPack)}
+              options={SOUND_PACKS}
+            />
+          </SettingRow>
           <SettingRow title="Play sounds" description="Master switch for all audio cues." htmlFor="snd-enabled">
             <Switch
               id="snd-enabled"
@@ -357,7 +390,7 @@ function Sounds({ settings }: { settings: Settings }) {
 
         <SettingGroup
           title="Events"
-          description="Use Armada's sounds or your own .wav, .ogg, .mp3 or .flac files. Preview plays whichever is saved."
+          description="Use the pack's sounds or your own .wav, .ogg, .mp3 or .flac files. Preview plays whichever is saved."
         >
           {SOUND_EVENTS.map((ev) => (
             <SettingRow
@@ -711,6 +744,7 @@ function Behavior({ settings }: { settings: Settings }) {
   const [hotkey, setHotkey] = useState(settings.globalHotkey);
   const [hotkeyError, setHotkeyError] = useState<string | null>(null);
   const [hotkeySaving, setHotkeySaving] = useState(false);
+  const hotkeyCaps = acceleratorCaps(hotkey, isMac);
   // After a failed save the store rolls back; keep the user's text (and the error) instead.
   const holdHotkey = useRef(false);
   useEffect(() => {
@@ -786,11 +820,23 @@ function Behavior({ settings }: { settings: Settings }) {
                   aria-invalid={hotkeyError !== null}
                   aria-describedby={hotkeyError ? "b-hotkey-error" : undefined}
                   className={cn(
-                    "h-8 pr-8 font-mono text-[12px]",
+                    "peer h-8 pr-8 font-mono text-[12px]",
+                    // The caps below stand in for the raw text until you edit it.
+                    hotkeyCaps.length > 0 && !hotkeyError && "text-transparent focus:text-fg",
                     hotkeyError && "border-err/60 focus:border-err/60 focus:ring-err/15",
                   )}
                   spellCheck={false}
                 />
+                {hotkeyCaps.length > 0 && !hotkeyError && (
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute inset-y-0 left-2.5 right-8 flex items-center gap-1 overflow-hidden peer-focus:hidden"
+                  >
+                    {hotkeyCaps.map((c, i) => (
+                      <Kbd key={`${c}${i}`}>{c}</Kbd>
+                    ))}
+                  </span>
+                )}
                 {hotkeySaving ? (
                   <Spinner className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
                 ) : (
@@ -870,6 +916,8 @@ function Behavior({ settings }: { settings: Settings }) {
           </SettingRow>
         </SettingGroup>
 
+        <ResponseStyleSettings settings={settings} />
+
         <HelperSettings settings={settings} />
 
         <SettingGroup title="Usage limits">
@@ -944,8 +992,8 @@ const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: [modKey, "K"], label: "Command palette" },
   { keys: [modKey, "N"], label: "New agent" },
   { keys: [modKey, "1–9"], label: "Jump to agent" },
-  { keys: [modKey, "I"], label: "Inbox" },
-  { keys: [modKey, "⇧", "M"], label: "Mission Control" },
+  { keys: [modKey, "J"], label: "Needs you" },
+  { keys: [modKey, "⇧", "M"], label: "Mission Control: All agents" },
   { keys: [modKey, ","], label: "Settings" },
   { keys: ["Esc"], label: "Close / cancel turn" },
 ];

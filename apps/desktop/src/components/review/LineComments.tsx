@@ -106,7 +106,7 @@ export function LineCommentCard({
           {outdated && (
             <span
               title="The code at this line changed since you commented; it's sent with the line as you saw it."
-              className="rounded border border-line-strong px-1 font-sans text-[10px] font-medium text-muted"
+              className="rounded border border-line-strong px-1 font-sans text-[11px] font-medium text-muted"
             >
               Outdated
             </span>

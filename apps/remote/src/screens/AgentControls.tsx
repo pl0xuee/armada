@@ -15,7 +15,6 @@ import { cancelTurn, resumeAgent, setArchived, setConfigOption, stopAgent, switc
 import { isBusy, isResumable, safeColor } from "@/lib/meta";
 import { accountProblem } from "@/lib/newAgent";
 import { useStore } from "@/lib/store";
-import { useRunningSubagentCount } from "@/lib/subagents";
 import type { Agent, ConfigOption, RemoteAccount } from "@/lib/types";
 
 /** Same-provider accounts the agent could switch to. */
@@ -24,7 +23,7 @@ export function switchableAccounts(agent: Agent, accounts: Record<string, Remote
 }
 
 /** Which sides of a horizontal scroller have more to scroll to (for an edge fade). */
-function useScrollEdges(active: boolean) {
+export function useScrollEdges(active: boolean) {
   const ref = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ left: false, right: false });
   useEffect(() => {
@@ -52,9 +51,7 @@ function useScrollEdges(active: boolean) {
 export const SettingsChips = memo(function SettingsChips({ agent, onPick }: { agent: Agent; onPick: (optionId: string) => void }) {
   const options = visibleOptions(agent.configOptions);
   const busy = useStore((s) => s.busy);
-  // A number, so streamed text (which changes the items every frame) doesn't re-render the chips.
-  const subagents = useRunningSubagentCount(agent.id);
-  const shown = options.length > 0 || subagents > 0;
+  const shown = options.length > 0;
   const { ref, edges } = useScrollEdges(shown);
   if (!shown) return null;
   return (
@@ -68,12 +65,6 @@ export const SettingsChips = memo(function SettingsChips({ agent, onPick }: { ag
       )}
     >
       <div className="mx-auto flex w-max min-w-full max-w-none items-center gap-1.5 px-safe py-1.5 md:w-full md:max-w-[860px]">
-        {subagents > 0 && (
-          <span className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-accent/35 bg-accent/10 px-2.5 text-[12.5px] font-medium text-accent">
-            <Spinner size={12} />
-            {subagents === 1 ? "1 sub-agent running" : `${subagents} sub-agents running`}
-          </span>
-        )}
         {options.map((o) => {
           const saving = !!busy[`config:${agent.id}:${o.id}`];
           return (
@@ -200,11 +191,13 @@ export function AgentActions({
   onClose,
   onPickOption,
   onSwitchAccount,
+  onAddAgents,
 }: {
   agent: Agent;
   onClose: () => void;
   onPickOption: (optionId: string) => void;
   onSwitchAccount: () => void;
+  onAddAgents?: () => void;
 }) {
   const accounts = useStore((s) => s.accounts);
   const busy = useStore((s) => s.busy);
@@ -258,6 +251,11 @@ export function AgentActions({
       >
         Review changes
       </Button>
+      {onAddAgents && (
+        <Button variant="secondary" icon="plus" className="w-full" onClick={onAddAgents}>
+          Add agents
+        </Button>
+      )}
       <div className="grid grid-cols-2 gap-2">
         {resumable && (
           <Button variant="primary" icon="play" loading={!!busy[`resume:${agent.id}`]} onClick={run(() => resumeAgent(agent.id))}>

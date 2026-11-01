@@ -11,19 +11,12 @@ export interface ProjectGroup {
   name: string;
   /** Not archived: agents that need you first, then working ones, then the most recently active. */
   agents: Agent[];
-  /** Agents waiting for the user (permission, error, interrupted). */
+  /** Agents that need the user, by `needsAttention`: the same count as the rail badge. */
   needs: number;
   working: number;
   lastActivityAt: number;
 }
 
-const NEEDS_RANK: Partial<Record<Agent["status"], number>> = {
-  needs_permission: 0,
-  error: 1,
-  interrupted: 2,
-};
-
-const needsYou = (a: Agent) => a.status in NEEDS_RANK || a.pendingPermissions > 0;
 const isWorking = (a: Agent) => a.status === "working" || a.status === "starting";
 
 export const projectKey = (path: string) => path.trim().replace(/[\\/]+$/, "") || path;
@@ -56,7 +49,11 @@ export function groupByProject(agents: Agent[], query = ""): { projects: Project
     else byPath.set(key, [a]);
   }
   const byActivity = (x: Agent, y: Agent) => y.lastActivityAt - x.lastActivityAt;
-  const rank = (a: Agent) => (needsYou(a) ? (NEEDS_RANK[a.status] ?? 0) : isWorking(a) ? 3 : 4);
+  // Agents that need you first (most urgent reason first), then working ones, then the rest.
+  const rank = (a: Agent) => {
+    const reason = needsAttention(a);
+    return reason ? NEED_RANK[reason] : isWorking(a) ? NEED_RANK_END : NEED_RANK_END + 1;
+  };
   const projects: ProjectGroup[] = [];
   for (const [path, list] of byPath) {
     list.sort((x, y) => rank(x) - rank(y) || byActivity(x, y));
@@ -64,7 +61,7 @@ export function groupByProject(agents: Agent[], query = ""): { projects: Project
       path,
       name: basename(path),
       agents: list,
-      needs: list.filter(needsYou).length,
+      needs: list.filter((a) => needsAttention(a) !== null).length,
       working: list.filter(isWorking).length,
       lastActivityAt: Math.max(...list.map((a) => a.lastActivityAt)),
     });
@@ -275,6 +272,46 @@ export function runningCount(runs: readonly SubagentRun[]): number {
   return n;
 }
 
+/** What the pinned sub-agent strip shows for an agent's runs (see `subagentStrip`). */
+export interface SubagentStrip {
+  running: number;
+  finished: number;
+  failed: number;
+  /** The one run's description, or a count while several. */
+  headline: string;
+  /** Latest known step of the most recently launched running sub-agent that has one. */
+  step: string | null;
+  /** When the earliest still-running sub-agent launched. */
+  since: number | null;
+  /** The run a click on the strip jumps to: the newest running one, else the newest finished. */
+  focus: SubagentRun | null;
+}
+
+export function subagentStrip(runs: readonly SubagentRun[]): SubagentStrip {
+  const running = runs.filter((r) => r.state === "running");
+  const finished = runs.filter((r) => r.state !== "running");
+  const failed = finished.filter((r) => r.state === "failed").length;
+  const shown = running.length > 0 ? running : finished;
+  const noun = `${shown.length} sub-agents`;
+  const headline =
+    shown.length === 1
+      ? shown[0].description
+      : running.length > 0
+        ? `${noun} working`
+        : failed > 0
+          ? `${noun} finished, ${failed} failed`
+          : `${noun} finished`;
+  return {
+    running: running.length,
+    finished: finished.length,
+    failed,
+    headline,
+    step: [...running].reverse().find((r) => r.step)?.step ?? null,
+    since: running.length > 0 ? Math.min(...running.map((r) => r.startedAt)) : null,
+    focus: shown[shown.length - 1] ?? null,
+  };
+}
+
 /** Child calls per sub-agent toolCallId. */
 export function childrenByParent(items: TimelineItem[]): Map<string, ToolItem[]> {
   const m = new Map<string, ToolItem[]>();
@@ -313,6 +350,7 @@ export function needsAttention(a: Agent): NeedsReason | null {
 }
 
 const NEED_RANK: Record<NeedsReason, number> = { permission: 0, rate_limited: 1, error: 2, done: 3 };
+const NEED_RANK_END = 4;
 
 /** Agents that need the user, most urgent first, then oldest activity first (FIFO within a reason). */
 export function triageQueue(agents: Agent[]): { agent: Agent; reason: NeedsReason }[] {

@@ -93,14 +93,15 @@ export function useGlobalShortcuts(enabled: boolean) {
       }
       if (key === "j" && !e.shiftKey) {
         e.preventDefault();
-        // Opens "Needs you"; pressed again while it's open, moves to the next waiting agent.
-        if (ui.view === "triage") selectNextTriage(triageQueueNow());
-        else ui.setView("triage");
+        // Opens Mission Control's "Needs you" tab; pressed again there, moves to the next waiting agent.
+        if (ui.view === "mission" && ui.missionTab === "needs") selectNextTriage(triageQueueNow());
+        else ui.openMission("needs");
         return;
       }
       if (key === "i" && !e.shiftKey) {
+        // The old Inbox's key: pending approvals are the first thing in "Needs you".
         e.preventDefault();
-        ui.setView("inbox");
+        ui.openMission("needs");
         return;
       }
       if (key === "a" && e.shiftKey) {
@@ -110,7 +111,7 @@ export function useGlobalShortcuts(enabled: boolean) {
       }
       if (key === "m" && e.shiftKey) {
         e.preventDefault();
-        ui.setView("mission");
+        ui.openMission("all");
         return;
       }
       if (e.key === "," && !e.shiftKey) {

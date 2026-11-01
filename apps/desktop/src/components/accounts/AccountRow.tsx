@@ -147,7 +147,7 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
               </>
             )}
             {!compact && st && (
-              <span className="hidden shrink-0 text-steel/80 @2xl/acct:inline">
+              <span className="hidden shrink-0 text-steel @2xl/acct:inline">
                 · checked {relativeTimeLong(st.checkedAt, now)}
               </span>
             )}
@@ -194,7 +194,7 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
             <div className={cn("flex flex-wrap items-end gap-x-4 gap-y-1.5", compact ? "mt-1.5" : "mt-2.5")}>
               <UsageMeters usage={usage} className="w-full max-w-[460px]" />
               {!compact && (
-                <span className="hidden pb-px text-[11px] text-steel/80 @xl/acct:inline">
+                <span className="hidden pb-px text-[11px] text-steel @xl/acct:inline">
                   updated {relativeTimeLong(usage.updatedAt, now)}
                 </span>
               )}
@@ -221,6 +221,14 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
               </Button>
             </Tooltip>
           )}
+          {/* Takes the place a sign-in button would have, so check, edit and remove line up across rows. */}
+          {!compact && apiKey && (
+            <Tooltip content="Replace API key">
+              <Button size="icon-sm" variant="ghost" aria-label="Replace API key" onClick={() => setReplacingKey(true)}>
+                <KeyRound />
+              </Button>
+            </Tooltip>
+          )}
           <Tooltip content="Check sign-in status">
             <Button size="icon-sm" variant="ghost" onClick={onCheck} disabled={checking} aria-label="Check account">
               <RefreshCw className={cn(checking && "animate-spin")} />
@@ -228,18 +236,6 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
           </Tooltip>
           {!compact && (
             <>
-              {apiKey && (
-                <Tooltip content="Replace API key">
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label="Replace API key"
-                    onClick={() => setReplacingKey(true)}
-                  >
-                    <KeyRound />
-                  </Button>
-                </Tooltip>
-              )}
               <EditAccountPopover account={account}>
                 <Button size="icon-sm" variant="ghost" aria-label="Rename or recolor">
                   <Pencil />

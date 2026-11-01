@@ -11,19 +11,22 @@ export function AgentCount({
   value,
   onChange,
   disabled,
+  max = MAX_PARALLEL_AGENTS,
   compact = false,
   className,
 }: {
   value: number;
   onChange: (n: number) => void;
   disabled?: boolean;
+  /** Fewer than {@link MAX_PARALLEL_AGENTS} when there is only room for some. */
+  max?: number;
   compact?: boolean;
   className?: string;
 }) {
   const step =
     "flex h-5 w-5 items-center justify-center rounded-md text-muted enabled:hover:bg-gunmetal enabled:hover:text-fg disabled:opacity-35 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25";
   return (
-    <Tooltip content={`Start up to ${MAX_PARALLEL_AGENTS} separate agents on this task, each in its own worktree`}>
+    <Tooltip content={`Start up to ${max} separate agents on this task, each in its own worktree`}>
       <div
         role="group"
         aria-label="Number of agents"
@@ -51,7 +54,7 @@ export function AgentCount({
           type="button"
           className={step}
           aria-label="More agents"
-          disabled={disabled || value >= MAX_PARALLEL_AGENTS}
+          disabled={disabled || value >= max}
           onClick={() => onChange(value + 1)}
         >
           <Plus className="h-3 w-3" />

@@ -1,18 +1,37 @@
-import { Cpu, FilePen, FileSearch, FolderOpen, GitBranch, Hash, ListChecks, Shrink, Workflow } from "lucide-react";
+import {
+  CalendarClock,
+  Cpu,
+  FilePen,
+  FileSearch,
+  FolderOpen,
+  GitBranch,
+  Hash,
+  ListChecks,
+  Shrink,
+  UserRound,
+  Workflow,
+} from "lucide-react";
 import { m } from "motion/react";
-import { useState, type ReactNode } from "react";
-import { agentDerived } from "./derived";
+import { memo, useRef, useState, type ReactNode } from "react";
+import type { AgentDerived } from "./derived";
 import { useRunningSubagentCount } from "./useSubagents";
 import { canCompact, COMPACT_SUGGEST_RATIO, compactContext, contextRatio } from "./compact";
+import { useScrollFade } from "@/hooks/useScrollFade";
 import { attempt } from "@/lib/actions";
 import { api } from "@/lib/api";
 import { agentCostText, formatTokens } from "@/lib/format";
-import type { Agent, TimelineItem } from "@/lib/types";
+import { agentHasBranch } from "@/lib/pr";
+import type { Account, Agent } from "@/lib/types";
 import { cn, prettyPath } from "@/lib/utils";
+import { useApp } from "@/store/app";
+import { usePr } from "@/store/pr";
+import { AccountAvatar } from "../AccountAvatar";
 import { ContextRing } from "../ContextRing";
 import { RelTime } from "../RelTime";
+import { UsageMeters } from "../UsageMeter";
 import { CopyButton } from "../CopyButton";
 import { PlanChecklist } from "../timeline/items";
+import { PrChip } from "./PrChip";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/misc";
 import { Tooltip } from "../ui/tooltip";
@@ -40,29 +59,37 @@ function Section({
   );
 }
 
-export function Inspector({
+/**
+ * `derived` is cached on tool-call structure (agentDerived keeps its references across streamed text),
+ * so with `memo` the panel only re-renders when the agent record or a tool call actually changes.
+ */
+export const Inspector = memo(function Inspector({
   agent,
-  items,
+  derived,
   className,
 }: {
   agent: Agent;
-  items: TimelineItem[] | undefined;
+  derived: AgentDerived;
   className?: string;
 }) {
-  // Cached on tool-call structure: streaming text doesn't recompute (or re-sort) these.
-  const { files, plan } = agentDerived(agent.id, items);
+  const { files, plan } = derived;
   const subagents = useRunningSubagentCount(agent.id);
+  const account = useApp((s) => s.accounts.find((a) => a.id === agent.accountId));
+  const hasPr = usePr((s) => agentHasBranch(agent) && s.byAgent[agent.id]?.state === "ok" && !!s.byAgent[agent.id].pr);
+  const scrollRef = useRef<HTMLElement>(null);
+  useScrollFade(scrollRef);
   const done = plan?.entries.filter((e) => e.status === "completed").length ?? 0;
 
   return (
     <m.aside
+      ref={scrollRef}
       initial={{ opacity: 0, x: 12 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 12 }}
       transition={{ duration: 0.16 }}
       aria-label="Inspector"
       className={cn(
-        "flex h-full w-[272px] shrink-0 flex-col overflow-y-auto border-l border-line bg-panel/70",
+        "scroll-fade flex h-full w-[272px] shrink-0 flex-col overflow-y-auto border-l border-line bg-panel/70",
         className,
       )}
     >
@@ -71,7 +98,7 @@ export function Inspector({
           {agent.contextSize ? (
             <ContextRing used={agent.contextUsed ?? 0} size={agent.contextSize} diameter={68} label="context" />
           ) : (
-            <div className="flex h-[68px] w-[68px] items-center justify-center rounded-full border border-dashed border-line-strong text-[10px] text-steel">
+            <div className="flex h-[68px] w-[68px] items-center justify-center rounded-full border border-dashed border-line-strong text-[11px] text-steel">
               n/a
             </div>
           )}
@@ -88,6 +115,8 @@ export function Inspector({
         </div>
         {canCompact(agent) && agent.running && agent.contextSize ? <CompactRow agent={agent} /> : null}
       </Section>
+
+      {account && agent.provider !== "custom" && <AccountSection account={account} />}
 
       {(subagents > 0 || agent.queue.length > 0) && (
         <Section title="Activity" icon={<Workflow />}>
@@ -135,42 +164,9 @@ export function Inspector({
           <p className="text-[12px] text-steel">No files yet.</p>
         ) : (
           <ul className="-mx-1.5 space-y-px">
-            {files.slice(0, 40).map((f) => {
-              const name = f.path.split("/").pop() ?? f.path;
-              const dir = f.path.slice(0, f.path.length - name.length);
-              return (
-                <li key={f.path}>
-                  <Tooltip
-                    side="left"
-                    content={
-                      <span className="flex flex-col">
-                        <span className="font-mono text-[11px]">{f.path}</span>
-                        <span className="text-steel">Click to show in folder</span>
-                      </span>
-                    }
-                  >
-                    <button
-                      type="button"
-                      aria-label={`Show ${f.path} in folder`}
-                      onClick={() =>
-                        void attempt("Couldn't show the file", () => api.openPath(joinPath(agent.cwd, f.path)))
-                      }
-                      className="flex h-7 w-full items-center gap-2 rounded-md px-1.5 text-left transition-colors hover:bg-raised"
-                    >
-                      {f.edited ? (
-                        <FilePen className="h-3.5 w-3.5 shrink-0 text-accent" />
-                      ) : (
-                        <FileSearch className="h-3.5 w-3.5 shrink-0 text-steel" />
-                      )}
-                      <span className="min-w-0 truncate font-mono text-[11.5px]">
-                        <span className={cn(f.edited ? "text-fg" : "text-muted")}>{name}</span>
-                        <span className="ml-1.5 text-steel/80">{dir}</span>
-                      </span>
-                    </button>
-                  </Tooltip>
-                </li>
-              );
-            })}
+            {files.slice(0, 40).map((f) => (
+              <FileRow key={f.path} file={f} cwd={agent.cwd} />
+            ))}
           </ul>
         )}
       </Section>
@@ -205,6 +201,18 @@ export function Inspector({
           <Row label="Started">
             <RelTime ts={agent.createdAt} long side="left" className="text-muted" />
           </Row>
+          {agent.scheduleId && (
+            <Row label="Schedule">
+              <span className="flex items-center gap-1 text-muted">
+                <CalendarClock className="h-3 w-3" /> Scheduled run
+              </span>
+            </Row>
+          )}
+          {hasPr && (
+            <Row label="Pull request">
+              <PrChip agent={agent} />
+            </Row>
+          )}
           <div>
             <dt className="mb-1 text-steel">Working directory</dt>
             <dd className="selectable break-all rounded-lg border border-line bg-base/50 px-2 py-1.5 font-mono text-[11px] text-muted">
@@ -223,6 +231,68 @@ export function Inspector({
         </dl>
       </Section>
     </m.aside>
+  );
+});
+
+/** A touched file. The tooltip (a dozen components) is only mounted once the row has been hovered or focused. */
+const FileRow = memo(function FileRow({ file: f, cwd }: { file: AgentDerived["files"][number]; cwd: string }) {
+  const [armed, setArmed] = useState(false);
+  const name = f.path.split("/").pop() ?? f.path;
+  const dir = f.path.slice(0, f.path.length - name.length);
+  const button = (
+    <button
+      type="button"
+      aria-label={`Show ${f.path} in folder`}
+      onClick={() => void attempt("Couldn't show the file", () => api.openPath(joinPath(cwd, f.path)))}
+      onPointerEnter={armed ? undefined : () => setArmed(true)}
+      onFocus={armed ? undefined : () => setArmed(true)}
+      className="flex h-7 w-full items-center gap-2 rounded-md px-1.5 text-left transition-colors hover:bg-raised"
+    >
+      {f.edited ? (
+        <FilePen className="h-3.5 w-3.5 shrink-0 text-accent" />
+      ) : (
+        <FileSearch className="h-3.5 w-3.5 shrink-0 text-steel" />
+      )}
+      <span className="min-w-0 truncate font-mono text-[11.5px]">
+        <span className={cn(f.edited ? "text-fg" : "text-muted")}>{name}</span>
+        <span className="ml-1.5 text-steel">{dir}</span>
+      </span>
+    </button>
+  );
+  return (
+    <li>
+      {armed ? (
+        <Tooltip
+          side="left"
+          content={
+            <span className="flex flex-col">
+              <span className="font-mono text-[11px]">{f.path}</span>
+              <span className="text-steel">Click to show in folder</span>
+            </span>
+          }
+        >
+          {button}
+        </Tooltip>
+      ) : (
+        button
+      )}
+    </li>
+  );
+});
+
+/** Which account runs this agent, its plan and how much of each usage window is spent. */
+function AccountSection({ account }: { account: Account }) {
+  const usage = account.usage;
+  const plan = account.status?.label ?? (usage?.plan ? usage.plan.charAt(0).toUpperCase() + usage.plan.slice(1) : null);
+  return (
+    <Section title="Account" icon={<UserRound />}>
+      <div className="flex items-center gap-2 text-[12px]">
+        <AccountAvatar account={account} size={18} showProvider={false} />
+        <span className="min-w-0 truncate text-fg">{account.name}</span>
+        {plan && <span className="ml-auto shrink-0 text-steel">{plan}</span>}
+      </div>
+      <UsageMeters usage={usage} compact className="mt-2.5" />
+    </Section>
   );
 }
 

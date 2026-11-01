@@ -1,5 +1,5 @@
 // Dev-only deep links for reviewing screens in the browser mock, e.g.
-//   ?view=inbox   ?agent=a-token   ?dialog=new-agent|compare|palette|review|handoff|delete
+//   ?view=mission&tab=needs   ?agent=a-token   ?dialog=new-agent|compare|palette|review|handoff|delete
 //   ?onboarding&step=2   ?section=providers   ?theme=titanium
 // Never active inside Tauri or in production builds.
 import { useApp } from "@/store/app";

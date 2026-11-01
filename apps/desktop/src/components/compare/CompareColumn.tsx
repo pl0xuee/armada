@@ -1,4 +1,4 @@
-import { ArrowUpRight, Crown, FileCode2, MessageSquare } from "lucide-react";
+import { ArrowUpRight, Crown, FileCode2 } from "lucide-react";
 import { useMemo } from "react";
 import { AccountAvatar } from "@/components/AccountAvatar";
 import { DiffStat } from "@/components/DiffView";
@@ -23,10 +23,8 @@ export function CompareColumn({
   cheapest,
   badge,
   onOpen,
-  onSelect,
-  selected = false,
   onKeep,
-  keeping = false,
+  keeping,
 }: {
   agent: Agent;
   account: Account | undefined;
@@ -36,12 +34,8 @@ export function CompareColumn({
   /** "#2" when several agents of the same kind are shown together. */
   badge?: string;
   onOpen: () => void;
-  /** Makes the card selectable: a button to message this agent from the page's box. */
-  onSelect?: () => void;
-  selected?: boolean;
-  /** Without it there is no "Keep this one" (a project's agents aren't competing). */
-  onKeep?: () => void;
-  keeping?: boolean;
+  onKeep: () => void;
+  keeping: boolean;
 }) {
   const done = useIsDone(agent);
   const meta = STATUS[agent.status];
@@ -82,7 +76,7 @@ export function CompareColumn({
         meta.live ? "border-transparent" : "border-line",
       )}
       style={
-        meta.live && !selected
+        meta.live
           ? {
               boxShadow: `inset 0 1px 0 var(--edge-strong), 0 0 0 1px color-mix(in srgb, ${meta.colorVar} 38%, var(--border)), 0 10px 36px -16px color-mix(in srgb, ${meta.colorVar} 50%, transparent)`,
             }
@@ -97,7 +91,9 @@ export function CompareColumn({
             background: `linear-gradient(180deg, color-mix(in srgb, ${identity.color} 9%, transparent), transparent)`,
           }}
         />
-        {working && <div aria-hidden className="shimmer-bar absolute inset-x-0 top-0 h-[2px] bg-accent/15" />}
+        {working && (
+          <div aria-hidden className="shimmer-bar shimmer-calm absolute inset-x-0 top-0 h-[2px] bg-accent/15" />
+        )}
         <div className="relative flex items-center gap-2.5">
           <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="lg" />
           <div className="min-w-0 flex-1">
@@ -119,7 +115,7 @@ export function CompareColumn({
         <div className="relative mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-muted tabular">
           <span className={cn("flex items-center gap-1", cheapest && "text-ok")}>
             {agentCostText(agent)}
-            {cheapest && <span className="text-[10px] uppercase tracking-wider">cheapest</span>}
+            {cheapest && <span className="text-[11px] uppercase tracking-wider">cheapest</span>}
           </span>
           <span>{formatTokens(agent.tokensUsed)} tokens</span>
           {files > 0 && (
@@ -160,16 +156,9 @@ export function CompareColumn({
         <Button size="sm" variant="ghost" onClick={onOpen}>
           Open <ArrowUpRight />
         </Button>
-        {onSelect && (
-          <Button size="sm" variant={selected ? "secondary" : "ghost"} onClick={onSelect} aria-pressed={selected}>
-            <MessageSquare /> {selected ? "Selected" : "Tell it something"}
-          </Button>
-        )}
-        {onKeep && (
-          <Button size="sm" variant="primary" className="ml-auto" onClick={onKeep} disabled={keeping}>
-            <Crown /> Keep this one
-          </Button>
-        )}
+        <Button size="sm" variant="secondary" className="ml-auto" onClick={onKeep} disabled={keeping}>
+          <Crown /> Keep this one
+        </Button>
       </footer>
     </section>
   );

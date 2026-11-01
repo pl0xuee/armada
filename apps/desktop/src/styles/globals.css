@@ -106,7 +106,7 @@
   --bg-3: #e3e7ec;
   --gunmetal: #d6dce3;
   --border: #d2d8df;
-  --border-strong: #87919e;
+  --border-strong: #6f7a88;
   --text-1: #12161b;
   --text-2: #4a5462;
   --steel: #56616e;
@@ -140,6 +140,12 @@
   --syntax-token-function: #0268a4;
   --syntax-token-punctuation: #56616e;
   --syntax-token-link: #0268a4;
+}
+
+/* The warn text colour is a dark brown for contrast on light surfaces; as a button fill it reads muddy. */
+[data-theme="titanium"] button.bg-warn.text-warn-fg {
+  background-color: #e9a42f;
+  color: #2a1800;
 }
 
 @theme inline {
@@ -212,6 +218,12 @@
   }
 }
 
+@keyframes demote-settle {
+  from {
+    opacity: 0.55;
+  }
+}
+
 @keyframes think-in {
   from {
     opacity: 0;
@@ -248,12 +260,9 @@
   }
 }
 
-@keyframes think-sweep {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: -100% 0;
+@keyframes think-pulse {
+  50% {
+    opacity: 0.55;
   }
 }
 
@@ -396,14 +405,12 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Opacity only: a moving text gradient repaints on the main thread every frame. */
   .think-text {
-    color: transparent;
-    background: linear-gradient(90deg, var(--steel) 40%, var(--text-1) 50%, var(--steel) 60%) 100% 0 / 250% 100%;
-    -webkit-background-clip: text;
-    background-clip: text;
+    color: var(--text-2);
     animation:
       var(--animate-think-in),
-      think-sweep 2.4s linear infinite;
+      think-pulse 2.4s ease-in-out infinite;
   }
 
   .shimmer-bar {
@@ -428,8 +435,27 @@
     content: "";
     position: absolute;
     inset: 0;
-    background: linear-gradient(90deg, transparent, var(--edge-strong), transparent);
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text-1) 9%, transparent), transparent);
     animation: var(--animate-shimmer);
+  }
+
+  /* Soft edges for a scroller. useScrollFade sets --fade-top/--fade-bottom to how far it is scrolled
+     (up to its own limit), so nothing fades at the very start or end. */
+  .scroll-fade {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent,
+      #000 var(--fade-top, 0px),
+      #000 calc(100% - var(--fade-bottom, 0px)),
+      transparent
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent,
+      #000 var(--fade-top, 0px),
+      #000 calc(100% - var(--fade-bottom, 0px)),
+      transparent
+    );
   }
 
   .caret::after {
@@ -549,15 +575,17 @@
     accent-color: var(--accent);
   }
 
-  /* Conversation typography: a readable measure for prose, full column width for code/tables. */
+  /* Conversation typography: a readable measure for prose, full column width for code/tables.
+     15px on a 24px line (whole pixels keep row heights exact for the virtualizer); headings stay close to body size (this is a chat, not a document). The line
+     heights are mirrored in components/timeline/collapse.ts (fold heights). */
   .prose-chat {
     font-size: 15px;
-    line-height: 1.68;
+    line-height: 24px;
   }
   .prose-chat > * + *,
   .prose-chat .md-block > * + *,
   .prose-chat .md-block + .md-block > :first-child {
-    margin-top: 0.8em;
+    margin-top: 0.85em;
   }
   .prose-chat > .md-block:first-child > :first-child {
     margin-top: 0;
@@ -565,112 +593,244 @@
   .prose-chat :is(p, ul, ol, blockquote, h1, h2, h3, h4) {
     max-width: 72ch;
   }
-  .prose-chat h1,
-  .prose-chat h2,
-  .prose-chat h3,
-  .prose-chat h4 {
+  .prose-chat :is(h1, h2, h3, h4) {
     letter-spacing: -0.012em;
-    line-height: 1.3;
+    line-height: 1.32;
+    text-wrap: balance;
   }
   .prose-chat h1 {
-    font-size: 1.4em;
-    font-weight: 700;
+    font-size: 1.27em;
+    font-weight: 650;
   }
   .prose-chat h2 {
-    font-size: 1.2em;
+    font-size: 1.13em;
     font-weight: 650;
   }
   .prose-chat h3 {
-    font-size: 1.05em;
+    font-size: 1em;
     font-weight: 650;
   }
   .prose-chat h4 {
-    font-size: 0.95em;
+    font-size: 0.93em;
     font-weight: 600;
+    letter-spacing: 0.01em;
     color: var(--text-2);
   }
   .prose-chat .md-block + .md-block > h1 {
     margin-top: 1.7em;
   }
   .prose-chat .md-block + .md-block > h2 {
-    margin-top: 1.5em;
+    margin-top: 1.55em;
   }
   .prose-chat .md-block + .md-block > :is(h3, h4) {
-    margin-top: 1.25em;
+    margin-top: 1.3em;
   }
   .prose-chat .md-block + .md-block > :is(h1, h2, h3, h4) + *,
   .prose-chat :is(h1, h2, h3, h4) + * {
     margin-top: 0.5em;
   }
+  .prose-chat strong {
+    font-weight: 620;
+  }
   .prose-chat ul,
   .prose-chat ol {
-    padding-left: 1.5em;
+    padding-left: 1.45em;
+  }
+  .prose-chat ol {
+    font-variant-numeric: tabular-nums;
   }
   .prose-chat li + li {
-    margin-top: 0.3em;
+    margin-top: 0.28em;
   }
   .prose-chat li > :is(ul, ol) {
-    margin-top: 0.3em;
+    margin-top: 0.28em;
+  }
+  .prose-chat li > ul {
+    list-style-type: circle;
+  }
+  .prose-chat li > ul > li > ul {
+    list-style-type: square;
+  }
+  .prose-chat li > p {
+    margin-top: 0;
   }
   .prose-chat li > p + p {
-    margin-top: 0.4em;
+    margin-top: 0.45em;
   }
+  /* Task lists (- [ ] / - [x]): a drawn checkbox instead of the native one. */
+  .prose-chat ul.contains-task-list {
+    list-style: none;
+    padding-left: 0;
+  }
+  .prose-chat li.task-list-item {
+    position: relative;
+    padding-left: 1.65em;
+  }
+  .prose-chat li.task-list-item > input[type="checkbox"] {
+    appearance: none;
+    position: absolute;
+    left: 0;
+    top: 0.36em;
+    width: 1.05em;
+    height: 1.05em;
+    margin: 0;
+    border-radius: 0.3em;
+    border: 1.5px solid var(--border-strong);
+    background: transparent;
+  }
+  .prose-chat li.task-list-item > input[type="checkbox"]:checked {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+  .prose-chat li.task-list-item > input[type="checkbox"]:checked::after {
+    content: "";
+    position: absolute;
+    left: 0.3em;
+    top: 0.08em;
+    width: 0.24em;
+    height: 0.52em;
+    border: solid var(--accent-fg);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+  /* Inline code: a quiet pill that never changes the line's height. */
   .prose-chat :not(pre) > code {
-    font-size: 0.87em;
-    padding: 0.1em 0.38em;
-    border-color: transparent;
-    background: color-mix(in srgb, var(--bg-3) 85%, transparent);
+    font-size: 0.86em;
+    line-height: 1;
+    padding: 0.16em 0.4em;
+    border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+    background: color-mix(in srgb, var(--bg-3) 70%, transparent);
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+  .prose-chat a {
+    text-decoration-thickness: 1px;
+    text-decoration-color: color-mix(in srgb, var(--accent) 38%, transparent);
+    text-underline-offset: 0.22em;
+    transition:
+      color 0.12s,
+      text-decoration-color 0.12s;
+  }
+  .prose-chat a:hover {
+    color: color-mix(in srgb, var(--accent) 80%, var(--text-1));
+    text-decoration-color: currentColor;
   }
   .prose-chat blockquote {
-    border-left: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
-    background: color-mix(in srgb, var(--accent) 5%, transparent);
-    padding: 0.5em 1em;
-    border-radius: 0 10px 10px 0;
+    border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+    padding: 0.1em 0 0.1em 1em;
+    color: var(--text-2);
   }
   .prose-chat blockquote > * + * {
     margin-top: 0.5em;
   }
   .prose-chat hr {
-    margin: 1.6em 0;
+    border: 0;
+    height: 1px;
+    background: var(--border);
+    margin: 1.7em 0;
   }
+  /* Tables: hairlines, a quiet header row, light zebra; scrolls sideways with its first column pinned. */
   .prose-chat .md-table {
+    --tbl-bg: color-mix(in srgb, var(--bg-1) 60%, var(--bg-0));
+    --tbl-head: color-mix(in srgb, var(--bg-3) 75%, var(--tbl-bg));
+    --tbl-zebra: color-mix(in srgb, var(--bg-2) 70%, var(--tbl-bg));
     overflow-x: auto;
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 12px;
+    background: var(--tbl-bg);
   }
   .prose-chat .md-table table {
     display: table;
-    width: 100%;
+    width: max-content;
+    min-width: 100%;
+    max-width: none;
     overflow: visible;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 0.9em;
     line-height: 1.5;
+    font-variant-numeric: tabular-nums;
   }
   .prose-chat th,
   .prose-chat td {
     border: 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-    padding: 0.5em 0.85em;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+    padding: 0.5em 0.95em;
     vertical-align: top;
+    max-width: 44ch;
   }
   .prose-chat th {
-    background: color-mix(in srgb, var(--bg-3) 70%, transparent);
+    background: var(--tbl-head);
     color: var(--text-2);
-    font-size: 0.92em;
+    font-size: 0.86em;
+    font-weight: 600;
+    letter-spacing: 0.02em;
     white-space: nowrap;
+    border-bottom-color: var(--border);
   }
-  .prose-chat tbody tr:nth-child(even) td {
-    background: color-mix(in srgb, var(--bg-2) 55%, transparent);
+  .prose-chat tbody tr {
+    background: var(--tbl-bg);
+  }
+  .prose-chat tbody tr:nth-child(even) {
+    background: var(--tbl-zebra);
   }
   .prose-chat tbody tr:last-child td {
     border-bottom: 0;
   }
-  /* Narration between tool calls: same size (no reflow when it stops being the tail), softer color. */
-  .prose-interim,
-  .prose-interim strong {
+  .prose-chat :is(th, td):first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: inherit;
+  }
+  .prose-chat :is(th, td)[data-num] {
+    text-align: right;
+  }
+  .prose-chat th:first-child {
+    background: var(--tbl-head);
+  }
+  .prose-chat td :not(pre) > code,
+  .prose-chat td > code {
+    font-size: 0.9em;
+  }
+  /* Working notes between tool calls: smaller, quieter, no big headings. The answer that closes the
+     turn is the full-size text above. */
+  .prose-narration {
+    font-size: 13.5px;
+    line-height: 21px;
     color: var(--text-2);
   }
-  .prose-interim :not(pre) > code {
+  /* Added only to a message that is demoted while on screen (it was the answer in the making, then a tool
+     call followed): it fades into its quieter style instead of snapping. Opacity only (compositor): a
+     font-size transition re-laid the text out every frame, which showed up with many tiles streaming. */
+  .prose-demote {
+    animation: demote-settle 0.22s ease-out;
+  }
+  .prose-narration > * + *,
+  .prose-narration .md-block > * + *,
+  .prose-narration .md-block + .md-block > :first-child {
+    margin-top: 0.7em;
+  }
+  .prose-narration strong {
+    color: color-mix(in srgb, var(--text-2) 55%, var(--text-1));
+  }
+  .prose-narration :is(h1, h2, h3, h4) {
+    font-size: 1em;
+    color: var(--text-1);
+  }
+  .prose-narration :not(pre) > code {
     color: var(--text-2);
+  }
+
+  /* Soft fade where a long message or code block is folded. */
+  .fold-fade {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 3.5rem), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 3.5rem), transparent);
+  }
+  .fold-fade-code {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 3rem), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 3rem), transparent);
   }
 
   .xterm-host .xterm {
@@ -690,6 +850,45 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* A hidden or unfocused window (see useWindowActivity) stops animating. */
+html[data-window="blurred"] *,
+html[data-window="blurred"] ::before,
+html[data-window="blurred"] ::after {
+  animation-play-state: paused !important;
+}
+
+/* Tiled conversations: the ambient motion (pulses, shimmers, blinking caret) belongs to the tile you are
+   working in, or the one under the pointer. The others keep their spinner and rest on a still frame of each,
+   so eight streaming tiles don't mean dozens of compositor layers animating at once. */
+[data-tile="idle"]:not(:hover) .animate-breathe {
+  animation: none;
+  opacity: 0.8;
+}
+[data-tile="idle"]:not(:hover) .animate-pulse-ring {
+  animation: none;
+  opacity: 0;
+}
+[data-tile="idle"]:not(:hover) .shimmer-bar::after {
+  animation: none;
+  transform: none;
+  opacity: 0.4;
+}
+[data-tile="idle"]:not(:hover) .think-text,
+[data-tile="idle"]:not(:hover) .caret::after {
+  animation: none;
+}
+
+/* Card-top shimmer lines in grids of cards (Mission Control, Compare): still until the card is hovered. */
+.shimmer-calm::after {
+  animation: none;
+  transform: none;
+  opacity: 0.4;
+}
+:hover > .shimmer-calm::after {
+  animation: var(--animate-shimmer);
+  opacity: 1;
 }
 
 /* Radix enter/exit animations (transform/opacity only). */

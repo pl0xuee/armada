@@ -1,6 +1,10 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AccountDot, ProviderBadge, StatusDot } from "@/components/Identity";
 import { Composer, type ComposerHandle } from "@/components/Composer";
+import { AddAgentsSheet } from "@/components/AddAgents";
+import { Dock } from "@/components/dock/Dock";
+import { SiblingStrip, useSiblings } from "@/components/SiblingStrip";
+import { canAddAgents } from "@/lib/together";
 import { ImageSource } from "@/components/LocalImage";
 import { Icon, Spinner } from "@/components/Icon";
 import { Sheet } from "@/components/Sheet";
@@ -286,9 +290,21 @@ function AgentView({
   }, [agent.id, agent.unread, readOnly]);
 
   const openDetails = useCallback(() => setDetails(true), []);
-  const chips = useMemo(() => <SettingsChips agent={agent} onPick={setOptionSheet} />, [agent]);
+  const [addOpen, setAddOpen] = useState(false);
+  const siblings = useSiblings(agent.id);
+  const canAdd = !readOnly && canAddAgents(agent);
+  const openAdd = useCallback(() => setAddOpen(true), []);
+  const chips = useMemo(
+    () => (
+      <>
+        <SiblingStrip agentId={agent.id} onAdd={canAdd ? openAdd : undefined} />
+        <SettingsChips agent={agent} onPick={setOptionSheet} />
+      </>
+    ),
+    [agent, canAdd, openAdd],
+  );
   const banner = useMemo(
-    () => (readOnly ? null : <StatusBanner agent={agent} readOnly={false} onSwitchAccount={() => setAccountSheet(true)} />),
+    () => (readOnly ? null : <Dock agent={agent} onSwitchAccount={() => setAccountSheet(true)} />),
     [agent, readOnly],
   );
 
@@ -357,7 +373,16 @@ function AgentView({
           setDetails(false);
           setAccountSheet(true);
         }}
+        onAddAgents={
+          canAdd
+            ? () => {
+                setDetails(false);
+                setAddOpen(true);
+              }
+            : undefined
+        }
       />
+      {canAdd && <AddAgentsSheet agent={agent} together={siblings.length || 1} open={addOpen} onClose={() => setAddOpen(false)} />}
       {!readOnly && <OptionSheet agent={agent} optionId={optionSheet} onClose={() => setOptionSheet(null)} />}
       {!readOnly && <AccountSheet agent={agent} open={accountSheet} onClose={() => setAccountSheet(false)} />}
     </div>
@@ -538,6 +563,7 @@ function AgentDetailsSheet({
   readOnly,
   onPickOption,
   onSwitchAccount,
+  onAddAgents,
 }: {
   agent: Agent;
   open: boolean;
@@ -545,6 +571,7 @@ function AgentDetailsSheet({
   readOnly: boolean;
   onPickOption: (optionId: string) => void;
   onSwitchAccount: () => void;
+  onAddAgents?: () => void;
 }) {
   const accounts = useStore((s) => s.accounts);
   const customAgents = useStore((s) => s.customAgents);
@@ -557,7 +584,7 @@ function AgentDetailsSheet({
 
   return (
     <Sheet open={open} onClose={onClose} title={agent.title} description={`${id.name}${model ? ` · ${model}` : ""}`}>
-      {!readOnly && <AgentActions agent={agent} onClose={onClose} onPickOption={onPickOption} onSwitchAccount={onSwitchAccount} />}
+      {!readOnly && <AgentActions agent={agent} onClose={onClose} onPickOption={onPickOption} onSwitchAccount={onSwitchAccount} onAddAgents={onAddAgents} />}
       {!readOnly && <h3 className="mt-5 mb-1 px-0.5 text-[12px] font-semibold tracking-[0.08em] text-steel uppercase">Details</h3>}
       <dl className="divide-y divide-line/70">
         <DetailRow label="Status">

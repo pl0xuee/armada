@@ -19,6 +19,14 @@ def update(session_id, upd):
           "params": {"sessionId": session_id, "update": upd}})
 
 
+def log(kind, text):
+    """With MOCK_LOG set, records what the agent was given (system prompts and prompts)."""
+    path = os.environ.get("MOCK_LOG")
+    if path:
+        with open(path, "a") as f:
+            f.write(json.dumps({"kind": kind, "text": text}) + "\n")
+
+
 def read():
     line = sys.stdin.readline()
     if not line:
@@ -42,6 +50,8 @@ while True:
             "authMethods": []}})
     elif method in ("session/new", "session/resume", "session/load"):
         mcp_count = len(msg["params"].get("mcpServers", []))
+        for part in (msg["params"].get("systemPrompt") or {}).get("content", []):
+            log("system", part.get("text", ""))
         sid = msg["params"].get("sessionId", "mock-session-1")
         send({"jsonrpc": "2.0", "id": mid, "result": {
             "sessionId": sid,
@@ -52,6 +62,7 @@ while True:
     elif method == "session/prompt":
         sid = msg["params"]["sessionId"]
         text = msg["params"]["prompt"][0]["text"]
+        log("prompt", text)
         update(sid, {"sessionUpdate": "available_commands_update", "availableCommands": [
             {"name": "compact", "description": "Compact the conversation", "input": None},
             {"name": "review", "description": "Review code", "input": {"hint": "path"}}]})

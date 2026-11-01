@@ -12,11 +12,20 @@ import { saveSettingsPatch } from "./settingsErrors";
 const SAME = "same";
 
 const BUSY_SEND: { value: BusySend; label: string; description: string }[] = [
-  { value: "ask", label: "Ask", description: "A small chooser appears each time: queue it, or start a helper." },
-  { value: "queue", label: "Queue it", description: "The message runs right after the current turn." },
+  {
+    value: "deliver",
+    label: "Deliver to the running turn",
+    description:
+      "Like Claude Code: your message goes into the turn that's running and the agent reads it at its next step, nothing is stopped. Agents that can't take messages mid-turn queue it instead.",
+  },
+  {
+    value: "queue",
+    label: "Queue until the turn ends",
+    description: "The message waits in the queue and runs right after the current turn.",
+  },
   {
     value: "helper",
-    label: "Start a helper",
+    label: "Run in a parallel helper",
     description: "A helper agent starts now, works on a copy of the agent's files in parallel, and merges back.",
   },
 ];
@@ -67,11 +76,11 @@ export function HelperSettings({ settings }: { settings: Settings }) {
       <SettingRow
         stack
         title="When an agent is busy and you send a message"
-        description={BUSY_SEND.find((o) => o.value === (settings.busySend ?? "ask"))?.description}
+        description={BUSY_SEND.find((o) => o.value === (settings.busySend ?? "deliver"))?.description}
       >
         <Segmented
           aria-label="When an agent is busy and you send a message"
-          value={settings.busySend ?? "ask"}
+          value={settings.busySend ?? "deliver"}
           onChange={(v) => void save({ busySend: v })}
           className="w-full"
           options={BUSY_SEND.map((o) => ({ value: o.value, label: o.label }))}
@@ -90,7 +99,11 @@ export function HelperSettings({ settings }: { settings: Settings }) {
         />
       </SettingRow>
       {value !== SAME && !d.customAgentId && (
-        <SettingRow title="Helper model" description="Leave empty for the account's default model." htmlFor="helper-model">
+        <SettingRow
+          title="Helper model"
+          description="Leave empty for the account's default model."
+          htmlFor="helper-model"
+        >
           <Input
             id="helper-model"
             value={model}

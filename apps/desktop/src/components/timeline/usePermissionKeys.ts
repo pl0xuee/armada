@@ -36,8 +36,8 @@ export const cardSelector = (requestId: string) => `[data-permission-request="${
 /**
  * Keyboard approvals for the visible agent's latest pending request (lib/approvalKeys.ts):
  * A/Y allow once · Shift+A twice always allow · D/N deny · Shift+D/Shift+N deny with a reason ·
- * Enter allows once only while focus is on the card itself. Keys act only while the card is on
- * screen, and never from inputs, buttons, menus or open dialogs.
+ * Enter allows once only while focus is on the card itself. Keys act only while the card (or the
+ * ApprovalDock) is on screen, and never from inputs, buttons, menus or open dialogs.
  */
 export function usePermissionKeys(
   agent: Agent,
@@ -64,7 +64,9 @@ export function usePermissionKeys(
       const enterOnCard = e.key === "Enter" && !e.shiftKey && card !== null && e.target === card;
       if (!enterOnCard && shouldIgnoreApprovalKey(e)) return;
       if (enterOnCard && (e.repeat || e.isComposing)) return;
-      if (!usePermissionUi.getState().visible[p.requestId]) return;
+      // On screen: the card is in view, or its actions are docked above the composer (always in view).
+      const ui = usePermissionUi.getState();
+      if (!ui.visible[p.requestId] && !ui.docked[p.requestId]) return;
       const action = enterOnCard ? "allow_once" : approvalActionFor(e);
       if (!action) return;
       const opts = permissionKeyOptions(p);

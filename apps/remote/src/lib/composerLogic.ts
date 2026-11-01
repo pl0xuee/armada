@@ -84,14 +84,18 @@ export function coalesceDeltas(events: RemoteEvent[]): RemoteEvent[] {
  * Pick with `pickPlaceholder`.
  */
 export function composerPlaceholders(
-  agent: Pick<Agent, "status" | "unread" | "availableCommands">,
+  agent: Pick<Agent, "status" | "unread" | "availableCommands"> & { steerable?: boolean },
   name: string,
   /** The agent is waiting on a question: typing queues a message, it doesn't answer it. */
   asking = false,
 ): string[] {
-  if (asking) return ["Answer above, or queue a message to run after this turn…", "Answer above, or queue a message…", "Answer above, or queue…"];
+  if (asking) return ["Answer above, or queue a message to run after this turn…", "Answer above, or queue a message…", "Answer above, or queue…", "Answer above…"];
   if (agent.status === "needs_permission") {
     return ["Waiting for you above. Queue a message to run after this turn…", "Waiting for you above. Queue a message…", "Queue a message…"];
+  }
+  if ((agent.status === "working" || agent.status === "starting") && agent.steerable) {
+    // The server hands it to the running turn: it reads it at its next step.
+    return [`${name} is working. Type a follow-up: it reads it at its next step…`, `${name} is working. Type a follow-up…`, "Type a follow-up…"];
   }
   if (agent.status === "working" || agent.status === "starting") {
     return [`${name} is working. Queue a follow-up message…`, `${name} is working. Queue a message…`, "Queue a message…"];

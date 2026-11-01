@@ -1,10 +1,9 @@
-import { ChevronLeft, ChevronRight, ListTodo, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { HeaderAction, PageHeader } from "@/components/PageHeader";
+import { NeedsYouDetail } from "@/components/mission/NeedsYouDetail";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { RelTime } from "@/components/RelTime";
-import { TriageDetail } from "@/components/triage/TriageDetail";
 import {
   REASON_TONE,
   reasonLabel,
@@ -15,6 +14,7 @@ import {
 } from "@/components/triage/useTriage";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
+import { Tooltip } from "@/components/ui/tooltip";
 import { archiveAgent, findOption, respondPermission, attempt } from "@/lib/actions";
 import { api } from "@/lib/api";
 import { approvalActionFor, createArm, shouldIgnoreApprovalKey } from "@/lib/approvalKeys";
@@ -24,7 +24,8 @@ import { cn, isEditableTarget, modKey } from "@/lib/utils";
 import { collectPending, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 
-export function TriageView() {
+/** Mission Control's "Needs you" tab: the agents waiting on you, most urgent first, with the answer inline. */
+export function NeedsYouPane() {
   const queue = useTriageQueue();
   const selectedId = useTriageStore((s) => s.selectedId);
   const select = useTriageStore((s) => s.select);
@@ -170,45 +171,6 @@ export function TriageView() {
 
   return (
     <div className="@container flex h-full flex-col">
-      <PageHeader
-        icon={<ListTodo />}
-        title="Needs you"
-        subtitle={
-          queue.length === 0 ? (
-            "Nothing is waiting on you"
-          ) : (
-            <>
-              <span className="tabular">{queue.length}</span> agent{queue.length === 1 ? "" : "s"} waiting · most urgent
-              first
-            </>
-          )
-        }
-        right={
-          queue.length > 0 ? (
-            <span className="hidden items-center gap-1 text-[11.5px] text-steel @3xl/ph:flex">
-              <Kbd>J</Kbd>
-              <Kbd>K</Kbd> move <span className="mx-1 text-line-strong">·</span>
-              <Kbd>E</Kbd> done <span className="mx-1 text-line-strong">·</span>
-              {current && questionAgents.has(current.agent.id) ? (
-                <>
-                  <Kbd>↵</Kbd> open to answer
-                </>
-              ) : (
-                <>
-                  <Kbd>A</Kbd>
-                  <Kbd>D</Kbd> answer
-                </>
-              )}{" "}
-              <span className="mx-1 text-line-strong">·</span>
-              <Kbd>{modKey}</Kbd>
-              <Kbd>J</Kbd> next
-            </span>
-          ) : (
-            <HeaderAction icon={<Plus />} label="New agent" onClick={() => useUi.getState().openNewAgent()} />
-          )
-        }
-      />
-
       {!current ? (
         <AllClear />
       ) : (
@@ -218,13 +180,14 @@ export function TriageView() {
             className="hidden w-[300px] shrink-0 flex-col overflow-y-auto border-r border-line bg-panel/60 p-2 @3xl:flex"
           >
             <ul ref={listRef} className="space-y-px" aria-label="Queue" onKeyDown={onListKeyDown}>
-              {queue.map((e) => (
+              {queue.map((e, i) => (
                 <QueueRow
                   key={e.agent.id}
                   agent={e.agent}
                   reason={e.reason}
                   asking={questionAgents.has(e.agent.id)}
                   active={e.agent.id === current.agent.id}
+                  heading={sectionHeading(e.reason, queue[i - 1]?.reason)}
                   onSelect={select}
                 />
               ))}
@@ -243,7 +206,7 @@ export function TriageView() {
                 <ChevronRight className="!h-3.5 !w-3.5" />
               </Button>
             </div>
-            <TriageDetail
+            <NeedsYouDetail
               key={current.agent.id}
               entry={current}
               onDone={() => void markDone(current)}
@@ -253,8 +216,16 @@ export function TriageView() {
           </section>
         </div>
       )}
+      {current && <KeyHints reason={current.reason} asking={questionAgents.has(current.agent.id)} />}
     </div>
   );
+}
+
+/** Agents stuck on you come first; finished work waiting to be looked at gets its own, quieter section. */
+function sectionHeading(reason: NeedsReason, previous: NeedsReason | undefined): string | null {
+  const review = reason === "done";
+  if (previous === undefined) return review ? "To review" : "Blocked";
+  return review && previous !== "done" ? "To review" : null;
 }
 
 /** Memoised: props are the (stable) agent object, so one agent updating doesn't re-render every row. */
@@ -263,12 +234,15 @@ const QueueRow = memo(function QueueRow({
   reason,
   asking,
   active,
+  heading,
   onSelect,
 }: {
   agent: Agent;
   reason: NeedsReason;
   asking: boolean;
   active: boolean;
+  /** Section title to show above this row (the first row of each section). */
+  heading: string | null;
   onSelect: (id: string) => void;
 }) {
   const ref = useRef<HTMLLIElement>(null);
@@ -277,6 +251,11 @@ const QueueRow = memo(function QueueRow({
   }, [active]);
   return (
     <li ref={ref}>
+      {heading && (
+        <p className="px-2.5 pb-1 pt-2.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-steel">
+          {heading}
+        </p>
+      )}
       <button
         type="button"
         data-agent={agent.id}
@@ -307,7 +286,6 @@ const QueueRow = memo(function QueueRow({
 });
 
 function AllClear() {
-  const setView = useUi((s) => s.setView);
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 py-12 text-center">
       <div className="relative mb-6 h-28 w-28" aria-hidden>
@@ -325,13 +303,77 @@ function AllClear() {
         No approvals, errors or unread results. Agents that need you will line up here, most urgent first.
       </p>
       <div className="mt-5 flex flex-wrap justify-center gap-2">
-        <Button variant="primary" onClick={() => setView("agents")}>
-          <Plus /> Start an agent
+        <Button variant="secondary" onClick={() => useUi.getState().openNewAgent()}>
+          <Plus /> New agent
         </Button>
-        <Button variant="secondary" onClick={() => setView("mission")}>
-          Mission Control
+        <Button variant="ghost" onClick={() => useUi.getState().openMission("all")}>
+          See all agents
         </Button>
       </div>
     </div>
+  );
+}
+
+/** The keys that do something for the selected agent: Allow / Deny only exist for an approval. */
+function KeyHints({ reason, asking }: { reason: NeedsReason; asking: boolean }) {
+  return (
+    <div className="texture flex h-10 shrink-0 items-center justify-center gap-4 border-t border-line bg-panel px-3 text-[11.5px] text-steel @3xl:gap-5">
+      <Hint keys={["J", "K"]} label="Move" />
+      <Hint keys={["E"]} label="Done" />
+      {asking ? (
+        <Hint keys={["↵"]} label="Open to answer" />
+      ) : reason !== "permission" ? (
+        <Hint keys={["↵"]} label="Open agent" />
+      ) : (
+        <>
+          <Hint keys={["A"]} label="Allow" />
+          <span className="hidden @3xl:contents">
+            <Hint keys={["⇧", "A"]} label="Always (twice)" />
+          </span>
+          <Hint keys={["D"]} label="Deny" />
+          <span className="hidden @3xl:contents">
+            <Hint keys={["↵"]} label="Open agent" />
+          </span>
+        </>
+      )}
+      <span className="hidden @3xl:contents">
+        <Hint keys={[modKey, "J"]} label="Next waiting" />
+      </span>
+      <Tooltip
+        content={
+          <span className="flex flex-col gap-1 py-0.5">
+            <Hint keys={["J", "K"]} label="Move between agents" />
+            <Hint keys={["E"]} label="Done (mark handled)" />
+            <Hint keys={["⇧", "E"]} label="Archive" />
+            <Hint keys={["A"]} label="Allow once" />
+            <Hint keys={["⇧", "A"]} label="Always allow (press twice)" />
+            <Hint keys={["D"]} label="Deny" />
+            <Hint keys={["⇧", "D"]} label="Deny with a reason (opens the agent)" />
+            <Hint keys={["↵"]} label="Open the agent" />
+          </span>
+        }
+      >
+        <button
+          type="button"
+          aria-label="All keyboard shortcuts"
+          className="flex h-6 w-6 items-center justify-center rounded-md border border-line-strong text-[11px] font-medium text-muted transition-colors hover:text-fg @3xl:hidden"
+        >
+          ?
+        </button>
+      </Tooltip>
+    </div>
+  );
+}
+
+function Hint({ keys, label }: { keys: string[]; label: string }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="flex gap-0.5">
+        {keys.map((k) => (
+          <Kbd key={k}>{k}</Kbd>
+        ))}
+      </span>
+      {label}
+    </span>
   );
 }

@@ -114,14 +114,17 @@ export function SyncChip({ agent }: { agent: Agent }) {
   );
 }
 
-/** Shown under a helper's header while its merge is stuck. */
-export function ConflictBanner({ agent }: { agent: Agent }) {
+/** Shown while a helper's merge is stuck (`embedded`: a row of the pinned dock, no banner chrome). */
+export function ConflictBanner({ agent, embedded = false }: { agent: Agent; embedded?: boolean }) {
   const ctx = useMain(agent);
   if (!ctx || agent.helperSync?.state !== "conflict") return null;
   return (
     <div
       role="status"
-      className="flex shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-warn/25 bg-warn/[0.07] px-4 py-2 text-[12px]"
+      className={cn(
+        "flex shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 px-4 py-2 text-[12px]",
+        !embedded && "border-b border-warn/25 bg-warn/[0.07]",
+      )}
     >
       <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warn" />
       <span className="min-w-[120px] flex-1 truncate text-fg" title={agent.helperSync.detail ?? undefined}>

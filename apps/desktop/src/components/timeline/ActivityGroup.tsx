@@ -117,7 +117,7 @@ export const ActivityGroup = memo(function ActivityGroup({
         <span className="shrink-0 text-[11.5px] tabular-nums text-steel">· {pluralize(items.length, "step")}</span>
         <ChevronRight
           className={cn(
-            "h-3 w-3 shrink-0 text-steel/70 transition-transform duration-150 group-hover/trace:text-muted",
+            "h-3 w-3 shrink-0 text-steel transition-transform duration-150 group-hover/trace:text-muted",
             open && "rotate-90",
           )}
         />
@@ -143,7 +143,7 @@ export const ActivityGroup = memo(function ActivityGroup({
                   case "thought":
                     return <ThoughtBlock key={it.id} item={it} live={tail} agentId={agent.id} />;
                   case "agent_message":
-                    return <AgentMessage key={it.id} item={it} agent={agent} interim streaming={tail} />;
+                    return <AgentMessage key={it.id} item={it} agent={agent} role="narration" streaming={tail} />;
                   default:
                     return null;
                 }

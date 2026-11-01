@@ -27,8 +27,8 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
       { keys: [modKey, "K"], label: "Command palette (type > to start an agent)" },
       { keys: [modKey, "N"], label: "New agent" },
       { keys: [modKey, "J"], label: "Needs you (press again for the next one)" },
-      { keys: [modKey, "I"], label: "Inbox" },
-      { keys: [modKey, "⇧", "M"], label: "Mission Control" },
+      { keys: [modKey, "I"], label: "Needs you (same as J)" },
+      { keys: [modKey, "⇧", "M"], label: "Mission Control: All agents" },
       { keys: [modKey, "⇧", "A"], label: "Voice assistant: start or end (Esc ends)" },
       { keys: [modKey, "B"], label: "Show or hide the agent list" },
       { keys: [modKey, "1–9"], label: "Jump to an agent" },
@@ -41,7 +41,7 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
     ],
   },
   {
-    title: "Approvals (agent view, Needs you, Inbox)",
+    title: "Approvals (agent view, Mission Control)",
     rows: [...APPROVAL_KEYS, { keys: ["⏎"], label: "Allow once, when focus is on the approval card" }],
   },
   {
@@ -62,21 +62,13 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
     ],
   },
   {
-    title: "Needs you",
+    title: "Mission Control: Needs you",
     rows: [
       { keys: ["J"], label: "Next" },
       { keys: ["K"], label: "Previous" },
       { keys: ["⏎"], label: "Open the agent" },
       { keys: ["E"], label: "Done (mark it handled)" },
       { keys: ["⇧", "E"], label: "Archive" },
-    ],
-  },
-  {
-    title: "Inbox",
-    rows: [
-      { keys: ["J"], label: "Next request" },
-      { keys: ["K"], label: "Previous request" },
-      { keys: ["⏎"], label: "Open the agent" },
     ],
   },
   {

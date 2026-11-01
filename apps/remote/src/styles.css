@@ -207,6 +207,16 @@
     mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
   }
 
+  /* The dock's chips (plan, sub-agents) step aside while the keyboard is up or the screen is short. */
+  .kb-open .dock-chips {
+    display: none;
+  }
+  @media (orientation: landscape) and (max-height: 500px) {
+    .dock-chips {
+      display: none;
+    }
+  }
+
   .line-clamp-2 {
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -219,7 +229,8 @@
    * same sizes, heading scale, list indents, code, quote and table look. */
   .md {
     font-size: 15px;
-    line-height: 1.68;
+    /* Whole pixels keep measured row heights exact (see lib/collapse.ts). */
+    line-height: 24px;
     overflow-wrap: anywhere;
     color: var(--text-1);
   }
@@ -447,11 +458,24 @@
   .md-table tr:last-child td {
     border-bottom: 0;
   }
-  /* Narration between tool calls: same size, softer color. */
+  /* Working notes between tool calls: smaller, softer, tighter than the answer. */
   .md-interim,
   .md-interim strong,
   .md-interim .md-code {
     color: var(--text-2);
+  }
+  .md-interim {
+    font-size: 13.5px;
+    line-height: 21px;
+  }
+  .fold-fade-code {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
+  }
+  /* A folded message fades out instead of being cut mid-line. */
+  .fold-fade {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 56px), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 56px), transparent);
   }
 }
 
@@ -574,6 +598,13 @@
     opacity: 1;
     transform: translateY(-2px);
   }
+}
+
+/* Nothing animates in a hidden page. */
+.page-hidden *,
+.page-hidden *::before,
+.page-hidden *::after {
+  animation-play-state: paused !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

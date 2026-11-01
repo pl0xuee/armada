@@ -76,7 +76,7 @@ export const SubagentCard = memo(function SubagentCard({
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="inline-flex h-5 items-center rounded-md border border-violet/30 bg-violet/10 px-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-violet">
+            <span className="inline-flex h-5 items-center rounded-md border border-violet/30 bg-violet/10 px-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-violet">
               {kind}
             </span>
             <SubagentChips chips={chips} />
@@ -172,7 +172,7 @@ export const SubagentCard = memo(function SubagentCard({
 
       {!unfinished && !bgRunning && item.output.trim() && (
         <div className="border-t border-line bg-base/30 px-3 py-2.5">
-          <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-steel">Result</div>
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel">Result</div>
           <Markdown text={item.output} className="!text-[12.5px]" />
         </div>
       )}

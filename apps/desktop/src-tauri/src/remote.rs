@@ -39,7 +39,8 @@ use std::time::{Duration, Instant};
 use sha2::{Digest, Sha256};
 
 use armada_core::{
-    now_ms, Agent, ArmadaEvent, Attachment, Core, CreateAgentRequest, Provider, RemoteSettings,
+    now_ms, Agent, ArmadaEvent, Attachment, BusySend, Core, CreateAgentRequest, Provider,
+    RemoteSettings,
 };
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
@@ -1453,6 +1454,7 @@ impl Remote {
             .route("/api/agents/{id}/account", post(switch_account))
             .route("/api/agents/{id}/archive", post(archive))
             .route("/api/agents/{id}/read", post(mark_read))
+            .route("/api/agents/{id}/acknowledge", post(acknowledge))
             .route("/api/agents/{id}/queue/{qid}", delete(remove_queued))
             .route("/api/agents/{id}/queue/{qid}/send", post(send_queued_now))
             .route("/api/agents/{id}/queue/resume", post(resume_queue))
@@ -2230,6 +2232,10 @@ struct PromptBody {
     text: String,
     #[serde(default)]
     attachments: Vec<Attachment>,
+    /// While the agent works: hand it to the running turn (true), or queue it (false).
+    /// Unset follows Settings → "when an agent is busy": queue only if that says so.
+    #[serde(default)]
+    deliver: Option<bool>,
 }
 
 /// The request's Idempotency-Key, scoped to its route.
@@ -2318,11 +2324,25 @@ struct CreateBody {
     /// "auto" or "ask"; omitted uses the settings default.
     #[serde(default)]
     permission_mode: Option<String>,
+    /// Agents started together share one; "Add agents" on the phone joins the siblings' group.
+    #[serde(default)]
+    group_id: Option<String>,
     #[serde(default)]
     attachments: Vec<Attachment>,
 }
 
 /// Starts a new agent (any provider: Claude, Codex, Grok or a custom ACP agent).
+/// A group id the phone may send: a short token (UUIDs are what the desktop makes). Anything else
+/// is dropped rather than stored on the agent.
+fn clean_group_id(id: Option<String>) -> Option<String> {
+    id.map(|g| g.trim().to_string()).filter(|g| {
+        !g.is_empty()
+            && g.len() <= 64
+            && g.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    })
+}
+
 async fn create_agent(
     State(c): State<Ctx>,
     ConnectInfo(peer): Peer,
@@ -2348,7 +2368,7 @@ async fn create_agent(
                 title: body.title,
                 worktree,
                 model: body.model.filter(|m| !m.trim().is_empty()),
-                group_id: None,
+                group_id: clean_group_id(body.group_id),
                 custom_agent_id: body.custom_agent_id,
                 permission_mode: body.permission_mode,
                 attachments: body.attachments,
@@ -2376,7 +2396,19 @@ async fn prompt(
     let core = c.remote.core();
     let key = idem_key(&headers, &format!("prompt:{id}"));
     once(&c.remote, key, async move {
-        core.send_prompt(&id, &body.text, body.attachments).await?;
+        let deliver = match body.deliver {
+            Some(d) => d,
+            None => core
+                .settings()
+                .map(|s| s.busy_send != BusySend::Queue)
+                .unwrap_or(true),
+        };
+        if deliver {
+            core.deliver_prompt(&id, &body.text, body.attachments)
+                .await?;
+        } else {
+            core.send_prompt(&id, &body.text, body.attachments).await?;
+        }
         Ok((StatusCode::NO_CONTENT, String::new()))
     })
     .await
@@ -2794,6 +2826,18 @@ async fn mark_read(
 ) -> Result<StatusCode, ApiError> {
     owner(&c.auth(&peer, &headers)?)?;
     c.remote.core().mark_read(&id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// "Done" in Needs you: dismisses an error / usage-limit / finished agent until it does something new.
+async fn acknowledge(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    c.remote.core().acknowledge_agent(&id)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -3245,6 +3289,23 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn only_short_tokens_are_accepted_as_a_group_id() {
+        let ok = |s: &str| clean_group_id(Some(s.to_string()));
+        assert_eq!(
+            ok("3f2b1c9e-8a4d-4e6b-9c1d-0a1b2c3d4e5f").as_deref(),
+            Some("3f2b1c9e-8a4d-4e6b-9c1d-0a1b2c3d4e5f")
+        );
+        assert_eq!(ok("  grp_1  ").as_deref(), Some("grp_1"));
+        assert_eq!(clean_group_id(None), None);
+        assert_eq!(ok(""), None);
+        assert_eq!(ok("   "), None);
+        assert_eq!(ok("has space"), None);
+        assert_eq!(ok("semi;colon"), None);
+        assert_eq!(ok(&"a".repeat(65)), None);
+        assert!(ok(&"a".repeat(64)).is_some());
+    }
     use armada_core::{CreateAgentRequest, EventSink, ItemBody, Provider};
     use std::io::BufRead;
 

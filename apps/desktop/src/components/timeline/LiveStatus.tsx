@@ -31,7 +31,7 @@ export function SubagentChips({ chips, className }: { chips: SubagentChip[]; cla
           key={c.key}
           title={c.key === "model" ? "Model" : "Reasoning effort"}
           className={cn(
-            "inline-flex h-4 shrink-0 items-center rounded border px-1 text-[10px] font-medium",
+            "inline-flex h-4 shrink-0 items-center rounded border px-1 text-[11px] font-medium",
             c.inherited ? "border-line text-steel" : "border-line-strong bg-raised/60 text-muted",
             className,
           )}
@@ -114,23 +114,16 @@ export function LiveStatus({
     <>
       <span className="relative inline-flex h-6 w-6 shrink-0 items-center justify-center" aria-hidden>
         <span className="absolute inset-0 animate-spin-slow rounded-full border border-transparent border-t-accent/70" />
-        <ProviderGlyph
-          provider={agent.provider}
-          customAgentId={agent.customAgentId}
-          size="xs"
-          className="animate-breathe"
-        />
+        {/* The ring around it spins: one moving thing is enough to say "working". */}
+        <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="xs" className="opacity-80" />
       </span>
       <span className="flex min-w-0 items-baseline gap-1.5 text-[12.5px]" title={label}>
         {text}
         {cycling && (
-          <span className="flex gap-[3px] self-center" aria-hidden>
+          // One layer breathing as a group (three staggered dots are three layers per tile).
+          <span className="flex animate-breathe gap-[3px] self-center" aria-hidden>
             {[0, 1, 2].map((i) => (
-              <span
-                key={i}
-                className="h-[3px] w-[3px] animate-breathe rounded-full bg-steel"
-                style={{ animationDelay: `${i * 0.25}s` }}
-              />
+              <span key={i} className="h-[3px] w-[3px] rounded-full bg-steel" />
             ))}
           </span>
         )}
@@ -138,7 +131,7 @@ export function LiveStatus({
       </span>
       {expandable && (
         <ChevronRight
-          className={cn("h-3 w-3 shrink-0 text-steel/70 transition-transform duration-150", expanded && "rotate-90")}
+          className={cn("h-3 w-3 shrink-0 text-steel transition-transform duration-150", expanded && "rotate-90")}
           aria-hidden
         />
       )}
@@ -176,7 +169,7 @@ export function LiveStatus({
           >
             {running.map((r) => (
               <li key={r.itemId} className="flex h-6 items-center gap-1.5 text-[12px]">
-                <span className="inline-flex h-4 shrink-0 items-center gap-1 rounded border border-violet/30 bg-violet/10 px-1 text-[10px] font-semibold uppercase tracking-[0.05em] text-violet">
+                <span className="inline-flex h-4 shrink-0 items-center gap-1 rounded border border-violet/30 bg-violet/10 px-1 text-[11px] font-semibold uppercase tracking-[0.05em] text-violet">
                   <Bot className="h-2.5 w-2.5" aria-hidden />
                   {r.kind ?? "Sub-agent"}
                 </span>

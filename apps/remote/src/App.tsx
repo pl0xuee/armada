@@ -4,7 +4,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Toasts } from "./components/Toasts";
 import { ensureTimeline } from "./lib/controller";
 import { navigate, useRoute } from "./lib/router";
-import { useInboxCount } from "./lib/selectors";
+import { useNeedsYouCount } from "./lib/selectors";
 import { useStore } from "./lib/store";
 import { AgentDetail } from "./screens/AgentDetail";
 import { Fleet } from "./screens/Fleet";
@@ -114,7 +114,7 @@ function Screen({ route, viewerAgent }: { route: ReturnType<typeof useRoute>; vi
 }
 
 function useDocumentTitle() {
-  const count = useInboxCount();
+  const count = useNeedsYouCount();
   useEffect(() => {
     document.title = count > 0 ? `(${count}) Armada` : "Armada";
   }, [count]);

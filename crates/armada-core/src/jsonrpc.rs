@@ -377,6 +377,37 @@ impl Peer {
         }
     }
 
+    /// Writes a request and returns the wait for its reply (no timeout). The
+    /// request is on the wire when this returns, so whatever the caller sends next
+    /// reaches the agent after it.
+    pub async fn send_request(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> anyhow::Result<impl std::future::Future<Output = anyhow::Result<Value>> + Send + 'static>
+    {
+        let id = json!(self.next_id.fetch_add(1, Ordering::Relaxed));
+        let (tx, rx) = oneshot::channel();
+        self.closer.pending.lock().insert(id_key(&id), tx);
+        if self.is_closed() {
+            self.closer.pending.lock().remove(&id_key(&id));
+            return Err(anyhow!("{method}: the agent process exited"));
+        }
+        let msg = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        if let Err(e) = self.write(&msg).await {
+            self.closer.pending.lock().remove(&id_key(&id));
+            return Err(e);
+        }
+        let method = method.to_string();
+        Ok(async move {
+            match rx.await {
+                Ok(Ok(v)) => Ok(v),
+                Ok(Err(e)) => Err(anyhow::Error::new(e).context(format!("{method} failed"))),
+                Err(_) => Err(anyhow!("{method}: connection closed")),
+            }
+        })
+    }
+
     pub async fn notify(&self, method: &str, params: Value) -> anyhow::Result<()> {
         self.write(&json!({ "jsonrpc": "2.0", "method": method, "params": params }))
             .await

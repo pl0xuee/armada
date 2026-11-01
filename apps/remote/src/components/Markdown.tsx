@@ -2,11 +2,14 @@
  * Renders the AST from `lib/markdown.ts` as React elements. Untrusted text is
  * only ever placed in text nodes and sanitized `href`s, never parsed as HTML.
  */
-import { memo, useMemo, type ReactNode } from "react";
+import { createContext, memo, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 import { CARET, inlineText, linkHostHint, parseBlocksCached, parseInlineCached, safeHref, splitSegments, type Block, type Inline } from "@/lib/markdown";
 import { highlight } from "@/lib/highlight";
 import { markdownImagePath } from "@/lib/localImages";
 import { cn } from "@/lib/cn";
+import { CODE_PREVIEW_LINES, codeCollapses } from "@/lib/collapse";
+import { noteUserLayoutChange } from "@/lib/scroll";
+import { numericColumns } from "@/lib/tables";
 import { CopyButton } from "./CopyButton";
 import { Icon } from "./Icon";
 import { inlineImageSrc } from "@shared/inlineImage";
@@ -114,9 +117,18 @@ function Tokens({ code, lang }: { code: string; lang: string }) {
   );
 }
 
+/** The reader watched this message stream in: its code blocks stay open instead of folding under them. */
+const WatchedCtx = createContext(false);
+
 function CodeBlock({ lang, text: raw }: { lang: string; text: string }) {
   const caret = raw.includes(CARET);
   const text = caret ? raw.split(CARET).join("") : raw;
+  const watched = useContext(WatchedCtx);
+  const lineCount = text.replace(/\n$/, "").split("\n").length;
+  const foldable = !caret && codeCollapses(lineCount, watched);
+  const [open, setOpen] = useState(false);
+  const folded = foldable && !open;
+  const shown = folded ? text.split("\n").slice(0, CODE_PREVIEW_LINES).join("\n") : text;
   // Only the language word of the info string ("rust,ignore" -> "rust"), as on the desktop.
   const name = /^[\w+-]+/.exec(lang)?.[0] ?? "";
   const diff = name === "diff" || name === "patch";
@@ -126,10 +138,10 @@ function CodeBlock({ lang, text: raw }: { lang: string; text: string }) {
         <span className="font-mono text-[11px] tracking-wide text-steel/90 lowercase">{name || "text"}</span>
         <CopyButton text={text} label="Copy code" />
       </div>
-      <pre className="overflow-x-auto px-3.5 py-3 font-mono text-[12.5px] leading-[1.65] text-fg">
+      <pre className={cn("overflow-x-auto px-3.5 py-3 font-mono text-[12.5px] leading-[1.65] text-fg", folded && "fold-fade-code")}>
         <code>
           {diff ? (
-            text.split("\n").map((l, i) => (
+            shown.split("\n").map((l, i) => (
               <span
                 key={i}
                 className={cn(
@@ -143,11 +155,24 @@ function CodeBlock({ lang, text: raw }: { lang: string; text: string }) {
               </span>
             ))
           ) : (
-            <Tokens code={text} lang={name} />
+            <Tokens code={shown} lang={name} />
           )}
         </code>
         {caret && <Caret />}
       </pre>
+      {foldable && (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => {
+            noteUserLayoutChange();
+            setOpen((v) => !v);
+          }}
+          className="press-row flex h-11 w-full items-center justify-center gap-1.5 border-t border-line/70 text-[12.5px] font-medium text-muted"
+        >
+          {open ? "Show less" : `Show all ${lineCount} lines`}
+        </button>
+      )}
     </div>
   );
 }
@@ -224,14 +249,16 @@ function renderBlocks(blocks: Block[], tight = false, lead?: ReactNode): ReactNo
           </ul>
         );
       }
-      case "table":
+      case "table": {
+        const numeric = numericColumns(b.head, b.rows, b.align);
+        const alignOf = (j: number) => (numeric[j] ? "right" : (b.align[j] ?? undefined));
         return (
           <div key={i} className="md-table-wrap">
             <table className="md-table">
               <thead>
                 <tr>
                   {b.head.map((c, j) => (
-                    <th key={j} style={{ textAlign: b.align[j] ?? undefined }}>
+                    <th key={j} style={{ textAlign: alignOf(j) }}>
                       {inline(c)}
                     </th>
                   ))}
@@ -241,7 +268,7 @@ function renderBlocks(blocks: Block[], tight = false, lead?: ReactNode): ReactNo
                 {b.rows.map((r, j) => (
                   <tr key={j}>
                     {b.head.map((_, k) => (
-                      <td key={k} className={(r[k]?.length ?? 0) > WRAP_CELL ? "md-wrap" : undefined} style={{ textAlign: b.align[k] ?? undefined }}>
+                      <td key={k} className={(r[k]?.length ?? 0) > WRAP_CELL ? "md-wrap" : undefined} style={{ textAlign: alignOf(k) }}>
                         {inline(r[k] ?? "")}
                       </td>
                     ))}
@@ -251,6 +278,7 @@ function renderBlocks(blocks: Block[], tight = false, lead?: ReactNode): ReactNo
             </table>
           </div>
         );
+      }
     }
   });
 }
@@ -278,11 +306,16 @@ export const Markdown = memo(function Markdown({
   className?: string;
 }) {
   const segments = useMemo(() => splitSegments(caret ? text + CARET : text), [text, caret]);
+  // Once streamed in front of the reader, always open (its code blocks never fold under them).
+  const watched = useRef(false);
+  if (caret) watched.current = true;
   return (
-    <div className={cn("md", interim && "md-interim", className)}>
-      {segments.map((seg, i) => (
-        <Segment key={i} text={seg} />
-      ))}
-    </div>
+    <WatchedCtx.Provider value={watched.current}>
+      <div className={cn("md", interim && "md-interim", className)}>
+        {segments.map((seg, i) => (
+          <Segment key={i} text={seg} />
+        ))}
+      </div>
+    </WatchedCtx.Provider>
   );
 });

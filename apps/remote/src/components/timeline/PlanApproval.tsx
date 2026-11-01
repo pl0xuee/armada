@@ -4,12 +4,14 @@ import { respondToPermission } from "@/lib/controller";
 import { cn } from "@/lib/cn";
 import { relativeTime } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
+import { useIsDocked } from "@/lib/selectors";
 import { useStore } from "@/lib/store";
 import type { PermissionItem } from "@/lib/types";
 import { DenyReasonSheet } from "../DenyReasonSheet";
 import { Icon, Spinner } from "../Icon";
 import { Markdown } from "../Markdown";
 import { Button } from "../ui";
+import { DockedNote } from "./DockedNote";
 
 /** The plan folds to this height until you ask for all of it (a plan can run to pages). */
 const FOLDED = "max-h-72";
@@ -19,9 +21,10 @@ const FOLDED = "max-h-72";
  * approve it, and "Keep planning", which can carry feedback through the deny-with-reason sheet.
  * Each approval is its own button, named for what it does, so none needs the "always" confirmation.
  */
-export const PlanApprovalCard = memo(function PlanApprovalCard({ item, readOnly }: { item: PermissionItem; readOnly: boolean }) {
+export const PlanApprovalCard = memo(function PlanApprovalCard({ item, readOnly, inSheet = false }: { item: PermissionItem; readOnly: boolean; /** Shown in the dock's sheet: it keeps its buttons there. */ inSheet?: boolean }) {
   const plan = item.plan ?? "";
   const sending = useStore((s) => s.resolving[item.requestId]);
+  const docked = useIsDocked(item) && !readOnly && !inSheet;
   const now = useNow();
   const [full, setFull] = useState(false);
   const [reasonOpen, setReasonOpen] = useState(false);
@@ -95,6 +98,8 @@ export const PlanApprovalCard = memo(function PlanApprovalCard({ item, readOnly 
               <Icon name="eye" size={16} className="shrink-0 text-steel" />
               Waiting for the owner to respond.
             </p>
+          ) : docked ? (
+            <DockedNote />
           ) : (
             <div className="space-y-2">
               {approve.map((c, i) => (

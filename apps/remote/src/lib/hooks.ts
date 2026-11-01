@@ -5,7 +5,10 @@ export function useNow(interval = 30_000): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const tick = () => setNow(Date.now());
-    const id = setInterval(tick, interval);
+    // A hidden page re-renders nothing (and wakes nothing): it catches up when it comes back.
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") tick();
+    }, interval);
     const onVisible = () => {
       if (document.visibilityState === "visible") tick();
     };

@@ -146,7 +146,12 @@ export function CompareView() {
               hint={`Start more agents in ${basename(group.agents[0].projectPath)}`}
               onClick={() => openNewAgent({ projectPath: group.agents[0].projectPath })}
             />
-            <HeaderAction icon={<Sparkles />} label="New comparison" onClick={() => openNewAgent({ compare: true })} />
+            <HeaderAction
+              icon={<Sparkles />}
+              label="New comparison"
+              variant="ghost"
+              onClick={() => openNewAgent({ compare: true })}
+            />
           </>
         }
       >
@@ -207,7 +212,7 @@ export function CompareView() {
         <div className="flex shrink-0 flex-wrap items-start gap-x-3 gap-y-1.5 rounded-xl border border-line bg-panel/60 px-4 py-3 edge">
           <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
           <div className="min-w-0 flex-1">
-            <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-steel">Prompt</div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-steel">Prompt</div>
             <p className="selectable mt-0.5 line-clamp-3 text-[13px] leading-relaxed text-fg">
               {prompt ?? group.title}
             </p>

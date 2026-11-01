@@ -191,13 +191,13 @@ function ServerRow({
                 {shownArgs.map((a, i) => (
                   <span
                     key={i}
-                    className="min-w-0 max-w-[180px] truncate rounded border border-line bg-base/50 px-1 font-mono text-[10.5px] text-muted"
+                    className="min-w-0 max-w-[180px] truncate rounded border border-line bg-base/50 px-1 font-mono text-[11px] text-muted"
                   >
                     {a}
                   </span>
                 ))}
                 {server.args.length > shownArgs.length && (
-                  <span className="shrink-0 text-[10.5px] text-steel">+{server.args.length - shownArgs.length}</span>
+                  <span className="shrink-0 text-[11px] text-steel">+{server.args.length - shownArgs.length}</span>
                 )}
               </>
             ) : (

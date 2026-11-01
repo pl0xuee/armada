@@ -215,3 +215,51 @@ export function latestPendingQuestion(items: TimelineItem[] | undefined): Questi
   }
   return null;
 }
+
+// ---------------------------------------------------------------- answering from the pinned dock
+
+/** A single-choice question with at most this many options is answered with one click. */
+export const QUICK_SINGLE_MAX = 4;
+/** A multi-select question with at most this many options is answered from the dock. */
+export const QUICK_MULTI_MAX = 6;
+
+/** How the pinned dock lets the user answer a question. */
+export type QuestionShape =
+  | { mode: "single"; group: QuestionGroup }
+  | { mode: "multi"; group: QuestionGroup }
+  | { mode: "bool"; group: QuestionGroup }
+  /** Several questions, or one that needs typing a value: a step-by-step form. */
+  | { mode: "stepper"; groups: QuestionGroup[] };
+
+export function questionShape(fields: QuestionField[]): QuestionShape {
+  const groups = questionGroups(fields);
+  if (groups.length === 1) {
+    const g = groups[0];
+    const n = g.field.options?.length ?? 0;
+    if (g.field.kind === "single" && n >= 1 && n <= QUICK_SINGLE_MAX) return { mode: "single", group: g };
+    if (g.field.kind === "multi" && n >= 1 && n <= QUICK_MULTI_MAX) return { mode: "multi", group: g };
+    if (g.field.kind === "boolean") return { mode: "bool", group: g };
+  }
+  return { mode: "stepper", groups };
+}
+
+/** The answers of picking option `index` of the group at `groupIndex` and nothing else (one click). */
+export function pickAnswers(fields: QuestionField[], groupIndex: number, index: number): QuestionAnswers | null {
+  const g = questionGroups(fields)[groupIndex];
+  const option = g?.field.options?.[index];
+  if (!g || !option) return null;
+  return buildAnswers(fields, togglePick(EMPTY_DRAFT, g, option.value));
+}
+
+/** The answers of a yes/no field answered with `value`. */
+export function boolAnswers(fields: QuestionField[], groupIndex: number, value: boolean): QuestionAnswers | null {
+  const g = questionGroups(fields)[groupIndex];
+  if (!g || g.field.kind !== "boolean") return null;
+  return buildAnswers(fields, setBool(EMPTY_DRAFT, g.field.id, value));
+}
+
+/** The question's text for a headline: its message, else the first field's text, else a plain fallback. */
+export function questionHeadline(item: Pick<QuestionItem, "message" | "fields">): string {
+  const f = questionGroups(item.fields)[0]?.field;
+  return item.message || f?.description || f?.title || "Question";
+}

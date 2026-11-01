@@ -1,18 +1,8 @@
-import {
-  CalendarClock,
-  ChartColumn,
-  Columns3,
-  Inbox,
-  LayoutGrid,
-  ListTodo,
-  MessagesSquare,
-  Settings,
-  Users,
-} from "lucide-react";
+import { CalendarClock, ChartColumn, Columns3, LayoutGrid, MessagesSquare, Settings, Users } from "lucide-react";
 import { m } from "motion/react";
-import { useEffect, type ComponentType } from "react";
+import type { ComponentType } from "react";
 import { useTriageCount } from "./triage/useTriage";
-import { pendingCount, useApp } from "@/store/app";
+import { useApp } from "@/store/app";
 import { useUi, type View } from "@/store/ui";
 import { cn, modKey } from "@/lib/utils";
 import { CountBadge } from "./ui/misc";
@@ -27,9 +17,7 @@ interface RailItem {
 
 const TOP: RailItem[] = [
   { view: "agents", label: "Projects", icon: MessagesSquare },
-  { view: "triage", label: "Needs you", icon: ListTodo, shortcut: [modKey, "J"] },
   { view: "mission", label: "Mission Control", icon: LayoutGrid, shortcut: [modKey, "⇧", "M"] },
-  { view: "inbox", label: "Inbox", icon: Inbox, shortcut: [modKey, "I"] },
   { view: "compare", label: "Compare", icon: Columns3 },
   { view: "schedules", label: "Schedules", icon: CalendarClock },
   { view: "usage", label: "Usage", icon: ChartColumn },
@@ -41,30 +29,27 @@ const BOTTOM: RailItem[] = [{ view: "settings", label: "Settings", icon: Setting
 export function Rail() {
   const view = useUi((s) => s.view);
   const setView = useUi((s) => s.setView);
-  const pending = useApp((s) => pendingCount(s.agents));
   const working = useApp((s) => Object.values(s.agents).filter((a) => a.status === "working").length);
+  // The same count as the Needs you tab and the window title.
   const needs = useTriageCount();
-
-  // Window title carries the "needs you" count, so it shows in the taskbar / tiling WM bar.
-  useEffect(() => {
-    document.title = needs > 0 ? `(${needs}) Armada` : "Armada";
-  }, [needs]);
 
   const render = (item: RailItem) => {
     const active = view === item.view;
     const Icon = item.icon;
-    const badge = item.view === "inbox" ? pending : item.view === "triage" ? needs : 0;
+    const mission = item.view === "mission";
+    const badge = mission ? needs : 0;
     // Screen readers get the counts in the name (badges are visual only).
-    const label =
-      item.view === "triage" && needs > 0
-        ? `${item.label}, ${needs} waiting`
-        : item.view === "inbox" && pending > 0
-          ? `${item.label}, ${pending} waiting`
-          : item.view === "mission" && working > 0
-            ? `${item.label}, ${working} working`
-            : item.label;
+    const waiting = mission && needs > 0 ? `${needs} need${needs === 1 ? "s" : ""} you` : null;
+    const label = mission
+      ? [item.label, waiting, working > 0 ? `${working} working` : null].filter(Boolean).join(", ")
+      : item.label;
     return (
-      <Tooltip key={item.view} content={item.label} shortcut={item.shortcut} side="right">
+      <Tooltip
+        key={item.view}
+        content={waiting ? `${item.label} · ${waiting}` : item.label}
+        shortcut={item.shortcut}
+        side="right"
+      >
         <button
           type="button"
           aria-label={label}
@@ -96,7 +81,7 @@ export function Rail() {
               <CountBadge count={badge} />
             </span>
           )}
-          {item.view === "mission" && working > 0 && (
+          {mission && working > 0 && (
             <span
               aria-hidden
               className="absolute right-1.5 top-1.5 z-20 h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_6px_var(--accent)] animate-breathe"

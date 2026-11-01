@@ -8,22 +8,13 @@ import { cn } from "@/lib/cn";
 import { retryState, stopAgent, unpair } from "@/lib/controller";
 import { confirmAction } from "@/lib/confirm";
 import { devParam } from "@/lib/dev";
-import { basename, plainPreview, plural, relativeTime, relativeTimeLong } from "@/lib/format";
+import { plainPreview, plural, relativeTime, relativeTimeLong } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
 import { agentIdentity, safeColor, statusMeta } from "@/lib/meta";
 import { navigate } from "@/lib/router";
-import {
-  accountOf,
-  filterAgents,
-  groupFleet,
-  isUsageLimited,
-  pendingKindOf,
-  permissionIndex,
-  USAGE_LIMIT_LABEL,
-  useAgentPending,
-  useInbox,
-  waitingLabel,
-} from "@/lib/selectors";
+import { accountOf, filterAgents, isUsageLimited, pendingKindOf, permissionIndex, USAGE_LIMIT_LABEL, useAgentPending, useTriage } from "@/lib/selectors";
+import { storage } from "@/lib/storage";
+import { groupByProject, needsYouLabel, projectSummary, type NeedsReason, type ProjectGroup, type TriageEntry } from "@/lib/triage";
 import { useStore } from "@/lib/store";
 import type { Agent } from "@/lib/types";
 import { InstallTip, installTipApplies } from "@/components/InstallTip";
@@ -36,8 +27,16 @@ export function Fleet() {
   const agents = useStore((s) => s.agents);
   const stateStatus = useStore((s) => s.stateStatus);
   const stateError = useStore((s) => s.stateError);
-  const inbox = useInbox();
+  const triage = useTriage();
   const now = useNow();
+  const [collapsed, setCollapsed] = useState(loadCollapsed);
+  const toggleProject = (path: string) =>
+    setCollapsed((cur) => {
+      const next = new Set(cur);
+      if (!next.delete(path)) next.add(path);
+      storage.set(COLLAPSED_KEY, JSON.stringify([...next]));
+      return next;
+    });
   const [showArchived, setShowArchived] = useState(false);
   const [settings, setSettings] = useState(devParam("sheet") === "settings");
   const owner = useStore((s) => s.session?.scope === "owner");
@@ -46,8 +45,8 @@ export function Fleet() {
   const list = useMemo(() => Object.values(agents), [agents]);
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => filterAgents(list, query), [list, query]);
-  const groups = useMemo(() => groupFleet(filtered), [filtered]);
-  const working = groups.find((g) => g.id === "working")?.agents.length ?? 0;
+  const { projects, archived } = useMemo(() => groupByProject(filtered, "", (a) => triage.reasons.get(a.id) ?? null), [filtered, triage.reasons]);
+  const working = useMemo(() => list.filter((a) => !a.archived && (a.status === "working" || a.status === "starting")).length, [list]);
   const active = list.filter((a) => !a.archived).length;
 
   useLayoutEffect(() => {
@@ -65,7 +64,7 @@ export function Fleet() {
       ) : (
         <FleetSkeleton />
       );
-  } else if (active === 0 && groups[3].agents.length === 0) {
+  } else if (active === 0 && archived.length === 0) {
     body = (
       <EmptyState
         icon="sparkle"
@@ -96,49 +95,42 @@ export function Fleet() {
           </div>
         )}
         {query && !filtered.length && <p className="px-1 text-[14px] text-muted">No agents match "{query}".</p>}
-        {!query && inbox.count > 0 && <InboxCallout count={inbox.count} questions={inbox.questions} />}
-        {groups.map((g) => {
-          if (!g.agents.length) return null;
-          const archived = g.id === "archived";
-          const open = !archived || showArchived;
-          return (
-            <section key={g.id} aria-labelledby={`group-${g.id}`}>
-              <h2 id={`group-${g.id}`} className="mb-2 flex items-center px-1">
-                {archived ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowArchived((v) => !v)}
-                    aria-expanded={showArchived}
-                    className="press -mx-1 flex h-9 items-center gap-1.5 rounded-lg px-1 text-[12px] font-semibold tracking-[0.08em] text-steel uppercase"
-                  >
-                    {g.label}
-                    <span className="tabular">{g.agents.length}</span>
-                    <Icon name="chevronDown" size={15} className={cn("transition-transform duration-150", !showArchived && "-rotate-90")} />
-                  </button>
-                ) : (
-                  <span
-                    className={cn(
-                      "flex h-9 items-center gap-1.5 text-[12px] font-semibold tracking-[0.08em] uppercase",
-                      g.id === "needs" ? "text-warn" : "text-steel",
-                    )}
-                  >
-                    {g.label}
-                    <span className="tabular opacity-80">{g.agents.length}</span>
-                  </span>
-                )}
-              </h2>
-              {open && (
-                <ul className="overflow-hidden rounded-2xl border border-line bg-panel edge">
-                  {g.agents.map((a, i) => (
-                    <li key={a.id} className={cn(i > 0 && "border-t border-line/70")}>
-                      <AgentRow agent={a} now={now} />
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          );
-        })}
+        {!query && triage.count > 0 && <NeedsYouCallout queue={triage.queue} />}
+        {projects.map((p) => (
+          <ProjectSection
+            key={p.path || "none"}
+            project={p}
+            reasons={triage.reasons}
+            open={!collapsed.has(p.path) || !!query}
+            onToggle={() => toggleProject(p.path)}
+            now={now}
+          />
+        ))}
+        {archived.length > 0 && (
+          <section aria-labelledby="group-archived">
+            <h2 id="group-archived" className="mb-2 flex items-center px-1">
+              <button
+                type="button"
+                onClick={() => setShowArchived((v) => !v)}
+                aria-expanded={showArchived}
+                className="press -mx-1 flex h-11 items-center gap-1.5 rounded-lg px-1 text-[12px] font-semibold tracking-[0.08em] text-steel uppercase"
+              >
+                Archived
+                <span className="tabular">{archived.length}</span>
+                <Icon name="chevronDown" size={15} className={cn("transition-transform duration-150", !showArchived && "-rotate-90")} />
+              </button>
+            </h2>
+            {showArchived && (
+              <ul className="overflow-hidden rounded-2xl border border-line bg-panel edge">
+                {archived.map((a, i) => (
+                  <li key={a.id} className={cn(i > 0 && "border-t border-line/70")}>
+                    <AgentRow agent={a} now={now} reason={null} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
       </div>
     );
   }
@@ -163,7 +155,7 @@ export function Fleet() {
         right={
           <div className="flex items-center gap-0.5">
             <ConnectionPill className="mr-1.5" />
-            <IconButton icon="inbox" label="Inbox" badge={inbox.count} tone="warn" onClick={() => navigate({ name: "inbox" })} />
+            <IconButton icon="inbox" label="Needs you" badge={triage.count} tone="warn" onClick={() => navigate({ name: "inbox" })} />
             <IconButton icon="sliders" label="Settings" onClick={() => setSettings(true)} />
           </div>
         }
@@ -197,31 +189,101 @@ export function Fleet() {
   );
 }
 
-function InboxCallout({ count, questions }: { count: number; questions: number }) {
+const COLLAPSED_KEY = "armada.fleet.collapsed";
+
+function loadCollapsed(): Set<string> {
+  try {
+    const raw: unknown = JSON.parse(storage.get(COLLAPSED_KEY) ?? "[]");
+    return new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** "2 blocked · 1 to review": what the queue holds, in the words of its sections. */
+function queueSummary(queue: readonly TriageEntry[]): string {
+  const review = queue.filter((e) => e.reason === "done").length;
+  const blocked = queue.length - review;
+  return [blocked ? `${blocked} blocked` : null, review ? `${review} to review` : null].filter(Boolean).join(" · ");
+}
+
+function NeedsYouCallout({ queue }: { queue: readonly TriageEntry[] }) {
+  const blocked = queue.some((e) => e.reason !== "done");
   return (
     <button
       type="button"
       onClick={() => navigate({ name: "inbox" })}
-      className="press animate-enter flex w-full items-center gap-3 rounded-2xl border border-warn/40 bg-warn/[0.08] p-3 pr-2 text-left shadow-[0_12px_32px_-18px_color-mix(in_srgb,var(--warn)_60%,transparent)]"
+      className={cn(
+        "press animate-enter flex w-full items-center gap-3 rounded-2xl border p-3 pr-2 text-left",
+        blocked ? "border-warn/40 bg-warn/[0.08]" : "border-ok/30 bg-ok/[0.06]",
+      )}
     >
-      <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-warn text-warn-fg">
-        <Icon name="shield" size={20} strokeWidth={2} />
+      <span className={cn("inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", blocked ? "bg-warn text-warn-fg" : "bg-ok/90 text-base")}>
+        <Icon name={blocked ? "shield" : "check"} size={20} strokeWidth={2} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-[15px] font-semibold text-fg">
-          {waitingLabel(count, questions)}
-        </span>
-        <span className="block truncate text-[13px] text-muted">Agents are waiting on you</span>
+        <span className="block text-[15px] font-semibold text-fg">{needsYouLabel(queue.length)}</span>
+        <span className="block truncate text-[13px] text-muted">{queueSummary(queue)}</span>
       </span>
-      <span className="inline-flex h-11 shrink-0 items-center gap-0.5 pr-1 pl-2 text-[14px] font-semibold text-warn">
-        <span className="max-[359px]:sr-only">Review</span>
+      <span className={cn("inline-flex h-11 shrink-0 items-center gap-0.5 pr-1 pl-2 text-[14px] font-semibold", blocked ? "text-warn" : "text-ok")}>
+        <span className="max-[359px]:sr-only">Open</span>
         <Icon name="chevronRight" size={18} />
       </span>
     </button>
   );
 }
 
-const AgentRow = memo(function AgentRow({ agent, now }: { agent: Agent; now: number }) {
+/** One project: a header (name, counts, "N need you") that folds its agents. */
+const ProjectSection = memo(function ProjectSection({
+  project,
+  reasons,
+  open,
+  onToggle,
+  now,
+}: {
+  project: ProjectGroup;
+  reasons: ReadonlyMap<string, NeedsReason>;
+  open: boolean;
+  onToggle: () => void;
+  now: number;
+}) {
+  const id = `project-${project.path || "none"}`;
+  return (
+    <section aria-labelledby={id}>
+      <h2 id={id} className="mb-1.5">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          className="press-row -mx-1 flex min-h-12 w-[calc(100%+0.5rem)] items-center gap-2 rounded-xl px-1 text-left"
+        >
+          <Icon name="chevronDown" size={16} className={cn("shrink-0 text-steel transition-transform duration-150", !open && "-rotate-90")} />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[15.5px] leading-tight font-semibold text-fg">{project.name}</span>
+            <span className="block truncate text-[12.5px] leading-tight text-steel">{projectSummary(project)}</span>
+          </span>
+          {project.needs > 0 && (
+            <span className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-warn/14 px-2.5 text-[12px] font-semibold text-warn tabular">
+              <span className="h-1.5 w-1.5 rounded-full bg-warn" aria-hidden />
+              {project.needs} {project.needs === 1 ? "needs" : "need"} you
+            </span>
+          )}
+        </button>
+      </h2>
+      {open && (
+        <ul className="overflow-hidden rounded-2xl border border-line bg-panel edge">
+          {project.agents.map((a, i) => (
+            <li key={a.id} className={cn(i > 0 && "border-t border-line/70")}>
+              <AgentRow agent={a} now={now} reason={reasons.get(a.id) ?? null} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+});
+
+const AgentRow = memo(function AgentRow({ agent, now, reason }: { agent: Agent; now: number; reason: string | null }) {
   const account = useStore((s) => accountOf(s.accounts, agent));
   const customAgents = useStore((s) => s.customAgents);
   const pending = useAgentPending(agent);
@@ -230,7 +292,8 @@ const AgentRow = memo(function AgentRow({ agent, now }: { agent: Agent; now: num
   const id = agentIdentity(agent, customAgents);
   const preview = agent.lastMessage ? plainPreview(agent.lastMessage) : null;
   const limited = isUsageLimited(agent);
-  const needs = agent.status === "needs_permission" || pending > 0 || limited;
+  // One definition of "needs you" (lib/triage), the same as the badge and the queue.
+  const needs = reason !== null && reason !== "done";
   const pendingIcon = pendingKind === "question" ? "sparkle" : "shield";
 
   return (
@@ -268,14 +331,6 @@ const AgentRow = memo(function AgentRow({ agent, now }: { agent: Agent; now: num
             </span>
           ) : (
             <span className="max-w-[50%] shrink-0 truncate text-muted">{id.short}</span>
-          )}
-          {agent.projectPath && (
-            <>
-              <span className="text-line-strong" aria-hidden>
-                ·
-              </span>
-              <span className="min-w-0 truncate text-steel">{basename(agent.projectPath)}</span>
-            </>
           )}
         </span>
         {(preview || pending > 0) && (

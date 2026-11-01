@@ -4,6 +4,7 @@
  * with the main flow.
  */
 import { groupActivity } from "./activity";
+import { runText, stitchMessages } from "./messageFlow";
 import { estimateQuestion, summarize } from "./question";
 import type { TimelineItem, ToolCallItem } from "./types";
 
@@ -20,7 +21,11 @@ export type Row =
   | { kind: "tools"; key: string; tools: ToolCallItem[] }
   /** A run of tool calls and thoughts folded into one line. */
   | { kind: "group"; key: string; items: TimelineItem[] }
-  | { kind: "subagent"; key: string; node: SubagentNode };
+  | { kind: "subagent"; key: string; node: SubagentNode }
+  /** Agent messages with nothing shown between them: one piece of writing (see `stitchMessages`). */
+  | { kind: "message"; key: string; items: AgentMessageItem[] };
+
+export type AgentMessageItem = Extract<TimelineItem, { kind: "agent_message" }>;
 
 export const isRunning = (c: ToolCallItem) => c.status === "pending" || c.status === "in_progress";
 
@@ -72,10 +77,14 @@ export function buildRows(items: TimelineItem[]): Row[] {
   const grouped = groupActivity(items, top);
 
   const rows: Row[] = [];
-  for (const i of grouped.rows) {
+  const stitched = stitchMessages(items, grouped.rows);
+  for (const i of stitched.rows) {
     const item = items[i];
     const members = grouped.groups.get(i);
-    if (members) {
+    const run = stitched.runs.get(i);
+    if (run) {
+      rows.push({ kind: "message", key: item.id, items: run.map((m) => items[m] as AgentMessageItem) });
+    } else if (members) {
       rows.push({ kind: "group", key: item.id, items: members.map((m) => items[m]) });
     } else if (item.kind === "tool_call") {
       if (isLauncher(item) && launchers.has(item.toolCallId)) rows.push({ kind: "subagent", key: item.id, node: build(item, new Set()) });
@@ -84,6 +93,9 @@ export function buildRows(items: TimelineItem[]): Row[] {
   }
   return rows;
 }
+
+/** The text a message row shows (a run of messages reads as one flow). */
+export const messageRowText = (r: Extract<Row, { kind: "message" }>): string => runText(r.items);
 
 /** A reply that is only pictures (empty text): never the turn's answer, and not a streaming text target. */
 export const isPictureOnly = (it: TimelineItem | undefined): boolean =>
@@ -105,6 +117,28 @@ export function finalAnswerIds(items: TimelineItem[]): Set<string> {
   }
   if (last) ids.add(last);
   return ids;
+}
+
+/**
+ * The latest turn's answer and whether tool calls, thoughts or approvals follow it in its turn (then, while the
+ * agent is still working, it was narration all along: see `messageRole`).
+ */
+export function latestAnswer(items: TimelineItem[], finals: ReadonlySet<string>): { id: string | null; trailingActivity: boolean } {
+  let at = -1;
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (items[i].kind === "agent_message" && finals.has(items[i].id)) {
+      at = i;
+      break;
+    }
+  }
+  if (at < 0) return { id: null, trailingActivity: false };
+  let trailing = false;
+  for (let i = at + 1; i < items.length; i++) {
+    const k = items[i].kind;
+    if (k === "user_message") break;
+    if (k === "tool_call" || k === "thought" || k === "permission" || k === "question") trailing = true;
+  }
+  return { id: items[at].id, trailingActivity: trailing };
 }
 
 /** The most recent child activity of a sub-agent, for its collapsed card. */
@@ -138,8 +172,8 @@ export function sameRow(a: Row, b: Row): boolean {
     const t = (b as typeof a).tools;
     return a.tools.length === t.length && a.tools.every((x, i) => x === t[i]);
   }
-  if (a.kind === "group") {
-    const t = (b as typeof a).items;
+  if (a.kind === "group" || a.kind === "message") {
+    const t = (b as typeof a).items as readonly TimelineItem[];
     return a.items.length === t.length && a.items.every((x, i) => x === t[i]);
   }
   return sameNode(a.node, (b as typeof a).node);
@@ -149,6 +183,7 @@ export function sameRow(a: Row, b: Row): boolean {
 export function estimateRow(r: Row): number {
   if (r.kind === "tools") return 16 + 2 + r.tools.reduce((h, t) => h + 49 + (t.images?.length ? 108 : 0), 0);
   if (r.kind === "subagent") return 16 + 96;
+  if (r.kind === "message") return 16 + 25 * Math.max(1, Math.ceil(runText(r.items).length / 42));
   // Folded: groups only open when the reader opens them, and that row is measured at once.
   if (r.kind === "group") return 16 + 44;
   const it = r.item;

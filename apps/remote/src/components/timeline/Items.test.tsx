@@ -10,6 +10,7 @@ vi.mock("../Markdown", () => ({ Markdown: ({ text, caret, interim }: { text: str
 vi.mock("../Images", () => ({ ImageStrip: ({ images, large }: { images: Attachment[]; large?: boolean }) => <div data-strip={images.map((i) => i.name).join(",")} data-large={large ? "1" : undefined} /> }));
 vi.mock("../LocalImage", () => ({ LocalImage: () => null }));
 vi.mock("../CopyButton", () => ({ CopyButton: () => null }));
+vi.mock("../MessageFold", () => ({ MessageFold: ({ children }: { children: unknown }) => children }));
 vi.mock("../Icon", () => ({ Icon: () => null, Spinner: () => null }));
 vi.mock("@/lib/dev", () => ({ devParam: () => null }));
 vi.mock("./DiffView", () => ({ DiffList: () => null }));

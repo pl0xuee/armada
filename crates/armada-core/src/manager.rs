@@ -1170,6 +1170,9 @@ impl Core {
             None => self.inner.settings.lock().default_permission_mode == "auto",
         };
 
+        let response_style = self.inner.settings.lock().response_style;
+        let guidance = crate::guidance::guidance(response_style);
+        let guide_tag = crate::guidance::tag(response_style);
         let started = match agent.provider {
             Provider::Codex | Provider::Local => CodexDriver::start(
                 ctx.clone(),
@@ -1189,6 +1192,7 @@ impl Core {
                     attachments_dir: &attachments_dir,
                     version: VERSION,
                     mcp_servers: &mcp_servers,
+                    guidance: &guidance,
                     local_models: local_models.as_deref(),
                 },
             )
@@ -1207,6 +1211,7 @@ impl Core {
                     resume,
                     version: VERSION,
                     mcp_servers: &mcp_servers,
+                    guidance: &guidance,
                 },
             )
             .await
@@ -1258,11 +1263,12 @@ impl Core {
                 ctx.set_preamble(brief);
             }
         }
-        // Agents need to know they can show pictures. A new session got that as its system
-        // prompt; a resumed one ignores a system prompt, so the note goes ahead of its next
-        // prompt instead, once (the session keeps it from then on).
-        if !agent.guided && !driver.guided() {
-            let note = crate::guidance::note();
+        // Agents need to know they can show pictures and how to write their replies. A new
+        // session got that as its system prompt; a resumed one ignores a system prompt, so the
+        // note goes ahead of its next prompt instead, once per version and style (the session
+        // keeps it from then on).
+        if !driver.guided() && agent.guide_tag != guide_tag {
+            let note = crate::guidance::note(response_style, !agent.guide_tag.is_empty());
             ctx.set_preamble(match ctx.take_preamble() {
                 Some(pre) => format!("{note}\n\n---\n\n{pre}"),
                 None => note,
@@ -1276,7 +1282,7 @@ impl Core {
             a.session_id = Some(session_id);
             a.running = true;
             a.needs_briefing = false;
-            a.guided = true;
+            a.guide_tag = guide_tag;
         })?;
         Ok(driver)
     }
@@ -1711,7 +1717,7 @@ impl Core {
             permission_mode,
             acknowledged_at: None,
             needs_briefing: false,
-            guided: false,
+            guide_tag: String::new(),
             parent_id: helper.as_ref().map(|h| h.parent_id.clone()),
             helper_sync: helper.as_ref().map(|_| HelperSync {
                 state: HelperSyncState::InSync,
@@ -1830,6 +1836,63 @@ impl Core {
         text: &str,
         attachments: Vec<Attachment>,
     ) -> Result<()> {
+        self.send_prompt_inner(agent_id, text, attachments, false)
+            .await
+    }
+
+    /// Like `send_prompt`, but while a turn is running the message goes into that turn
+    /// right away (the agent reads it at its next step and nothing is stopped), the way
+    /// typing into Claude Code while it works does. It is queued instead when the agent
+    /// can't take messages mid-turn, the queue is on hold, or it is a slash command
+    /// (those only work at the start of a turn). A delivery that fails never loses the
+    /// message: it is queued, with a note saying why.
+    pub async fn deliver_prompt(
+        &self,
+        agent_id: &str,
+        text: &str,
+        attachments: Vec<Attachment>,
+    ) -> Result<()> {
+        let text = text.trim();
+        if text.is_empty() && attachments.is_empty() {
+            bail!("Nothing to send");
+        }
+        if self.is_shutting_down() {
+            bail!(SHUTTING_DOWN);
+        }
+        validate_attachments(&attachments)?;
+        self.agent(agent_id)?;
+        let ctx = self.ctx(agent_id);
+        if ctx.is_turn_active() && !ctx.is_queue_paused() && !text.starts_with('/') {
+            if let Some(driver) = self.live_driver(agent_id) {
+                if driver.steerable() {
+                    let prompt = Prompt {
+                        text: text.to_string(),
+                        attachments: attachments.clone(),
+                        token: 0,
+                    };
+                    match driver.steer(&prompt).await {
+                        Ok(Steer::Injected) => {
+                            ctx.record_steered(&prompt);
+                            self.update_agent(agent_id, |a| {
+                                a.unread = false;
+                                a.last_activity_at = now_ms();
+                            })?;
+                            return Ok(());
+                        }
+                        // The turn ended meanwhile, or this agent can't after all: normal send.
+                        Ok(Steer::NotRunning | Steer::Unsupported) => {}
+                        Err(e) => {
+                            ctx.notice(
+                                NoticeLevel::Warn,
+                                format!(
+                                    "Couldn't add your message to the running turn ({e:#}), so it is queued and runs when the turn ends."
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
+        }
         self.send_prompt_inner(agent_id, text, attachments, false)
             .await
     }
@@ -2179,11 +2242,12 @@ impl Core {
             }))
     }
 
-    /// Runs a queued message now, interrupting the current turn if there is one.
-    /// Runs a queued message now. While a turn is running it goes into that turn
-    /// (steering: the agent keeps working and reads it at its next step) when the
-    /// agent supports that; with `interrupt`, or when it doesn't, the turn is
-    /// stopped and the message runs next.
+    /// Runs a queued message now. While a turn is running it never stops it unless
+    /// `interrupt` says so. The message goes into that turn when the agent takes
+    /// messages mid-turn (it reads it at its next step and keeps working); when it
+    /// can't (or the message is a slash command, which only works at the start of a
+    /// turn) it moves to the front of the queue and runs the moment the turn ends.
+    /// With `interrupt` the turn is stopped and the message runs next.
     pub async fn send_queued_now(
         &self,
         agent_id: &str,
@@ -2192,41 +2256,35 @@ impl Core {
     ) -> Result<()> {
         self.agent(agent_id)?;
         let ctx = self.ctx(agent_id);
-        if !interrupt {
+        if !interrupt && ctx.is_turn_active() {
             if let Some(driver) = self.live_driver(agent_id) {
-                // A slash command only works at the start of a turn (steered in, the model
-                // would get it as text): it goes first in line instead.
-                if driver.steerable()
-                    && ctx.is_turn_active()
-                    && ctx
-                        .queued_text(queued_id)
-                        .is_some_and(|t| t.trim_start().starts_with('/'))
-                {
-                    if ctx.move_queued_to_front(queued_id) {
-                        return Ok(());
-                    }
-                    bail!("That message is no longer queued");
-                }
-                if let Some((pos, prompt)) = ctx.take_queued_for_steer(queued_id) {
-                    match driver.steer(&prompt).await {
-                        Ok(Steer::Injected) => {
-                            ctx.record_steered(&prompt);
-                            return Ok(());
-                        }
-                        // The turn ended meanwhile (runs it next below), or this agent
-                        // can't steer (stops the turn below, as before).
-                        Ok(Steer::NotRunning | Steer::Unsupported) => {
-                            ctx.put_back_queued(pos, queued_id, prompt);
-                        }
-                        Err(e) => {
-                            ctx.put_back_queued(pos, queued_id, prompt);
-                            return Err(e.context("Couldn't add it to the running turn"));
+                // A slash command only works at the start of a turn (delivered mid-turn,
+                // the model would get it as text): it goes first in line instead.
+                let command = ctx
+                    .queued_text(queued_id)
+                    .is_some_and(|t| t.trim_start().starts_with('/'));
+                if driver.steerable() && !command {
+                    if let Some((pos, prompt)) = ctx.take_queued_for_steer(queued_id) {
+                        match driver.steer(&prompt).await {
+                            Ok(Steer::Injected) => {
+                                ctx.record_steered(&prompt);
+                                return Ok(());
+                            }
+                            // The turn ended meanwhile, or this agent can't take it
+                            // mid-turn after all: it waits its turn below.
+                            Ok(Steer::NotRunning | Steer::Unsupported) => {
+                                ctx.put_back_queued(pos, queued_id, prompt);
+                            }
+                            Err(e) => {
+                                ctx.put_back_queued(pos, queued_id, prompt);
+                                return Err(e.context("Couldn't add it to the running turn"));
+                            }
                         }
                     }
                 }
             }
         }
-        match ctx.send_queued_now(queued_id) {
+        match ctx.send_queued_now(queued_id, interrupt) {
             None => bail!("That message is no longer queued"),
             Some((Some(prompt), _)) => {
                 self.run_prompt(agent_id, prompt, None);

@@ -103,6 +103,8 @@ describe("composer placeholder", () => {
     expect(composerPlaceholders(a("needs_permission"), "Claude")[0]).toBe("Waiting for you above. Queue a message to run after this turn…");
     expect(composerPlaceholders(a("working"), "Claude")[0]).toBe("Claude is working. Queue a follow-up message…");
     expect(composerPlaceholders(a("starting"), "Claude")[0]).toBe("Claude is working. Queue a follow-up message…");
+    // An agent that takes messages mid-turn reads a typed follow-up at its next step: not "queue".
+    expect(composerPlaceholders(a("working", { steerable: true }), "Claude")[0]).toBe("Claude is working. Type a follow-up: it reads it at its next step…");
     expect(composerPlaceholders(a("idle", { unread: true }), "Claude")[0]).toBe("Done. Reply, or start something new…");
   });
   it("offers slash commands only when the agent has them", () => {

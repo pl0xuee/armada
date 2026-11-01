@@ -131,6 +131,8 @@ struct CtxState {
     /// "Send now" interrupted the turn: when it ends, run the head of the queue.
     advance_on_cancel: bool,
     pending_permissions: HashSet<String>,
+    /// Requests whose answer is being written to the agent right now.
+    answering: HashSet<String>,
     /// Context to prepend to the next prompt (used when a session could not be resumed).
     preamble: Option<String>,
     /// Generation whose `session/load` history replay is in progress, if any.
@@ -154,6 +156,25 @@ struct CtxState {
     cost_last: f64,
 }
 
+/// See `AgentCtx::begin_answer`. Dropped without the request resolved (the write
+/// failed): it is cancellable again, and cancelled now if its turn is over.
+pub struct AnswerGuard<'a> {
+    ctx: &'a AgentCtx,
+    request_id: String,
+}
+
+impl Drop for AnswerGuard<'_> {
+    fn drop(&mut self) {
+        let over = {
+            let mut st = self.ctx.st.lock();
+            st.answering.remove(&self.request_id) && !st.turn_active
+        };
+        if over {
+            self.ctx.cancel_pending(&self.request_id);
+        }
+    }
+}
+
 pub struct AgentCtx {
     pub agent_id: String,
     core: WeakCore,
@@ -161,6 +182,9 @@ pub struct AgentCtx {
     /// Serializes ending a turn early, so a second caller (e.g. Stop racing the
     /// exit handler) returns only after the first has fully settled the agent.
     settle: Mutex<()>,
+    /// Orders a process's event handling against retiring/replacing it (see
+    /// `with_current_generation`). Always taken before `st`, never the other way.
+    gate: Mutex<()>,
 }
 
 impl AgentCtx {
@@ -192,6 +216,7 @@ impl AgentCtx {
                 turn_picture_ids: HashSet::new(),
                 advance_on_cancel: false,
                 pending_permissions: HashSet::new(),
+                answering: HashSet::new(),
                 preamble: None,
                 replaying: None,
                 lens: HashMap::new(),
@@ -205,6 +230,7 @@ impl AgentCtx {
                 cost_last: 0.0,
             }),
             settle: Mutex::new(()),
+            gate: Mutex::new(()),
         }
     }
 
@@ -778,16 +804,36 @@ impl AgentCtx {
 
     /// Closes an approval or question that can't be answered anymore.
     fn cancel_pending(&self, request_id: &str) {
-        let question = self
-            .st
-            .lock()
-            .ext
-            .contains_key(&format!("question:{request_id}"));
+        let question = {
+            let st = self.st.lock();
+            // Being answered: the agent may already have the answer (and have ended
+            // the turn on it); the answerer records how it ended.
+            if st.answering.contains(request_id) {
+                return;
+            }
+            st.ext.contains_key(&format!("question:{request_id}"))
+        };
         if question {
             self.question_resolved(request_id, "cancelled", None);
         } else {
             self.permission_resolved(request_id, "cancelled");
         }
+    }
+
+    /// The user's answer to `request_id` is about to be written to the agent. Until
+    /// the guard is dropped or the request resolved, the request isn't cancelled by
+    /// the turn ending: the agent can reply to the answer and finish the turn before
+    /// the write call returns, and the answer must not then be recorded as
+    /// "cancelled". None if the request isn't (or isn't only) waiting for this answer.
+    pub fn begin_answer(&self, request_id: &str) -> Option<AnswerGuard<'_>> {
+        let mut st = self.st.lock();
+        if !st.pending_permissions.contains(request_id) || !st.answering.insert(request_id.into()) {
+            return None;
+        }
+        Some(AnswerGuard {
+            ctx: self,
+            request_id: request_id.into(),
+        })
     }
 
     /// The fields of a question still waiting for an answer.
@@ -825,6 +871,7 @@ impl AgentCtx {
                 });
             }
             st.pending_permissions.remove(request_id);
+            st.answering.remove(request_id);
             st.pending_permissions.len() as i64
         };
         self.update_agent_settled(|a, turn_active| {
@@ -851,6 +898,7 @@ impl AgentCtx {
                 });
             }
             st.pending_permissions.remove(request_id);
+            st.answering.remove(request_id);
             st.pending_permissions.len() as i64
         };
         self.update_agent_settled(|a, turn_active| {
@@ -869,6 +917,7 @@ impl AgentCtx {
 
     /// A new adapter process is starting. Returns its generation.
     pub fn begin_start(&self) -> u64 {
+        let _gate = self.gate.lock();
         let mut st = self.st.lock();
         st.generation += 1;
         st.exit_intent = ExitIntent::None;
@@ -900,14 +949,36 @@ impl AgentCtx {
         }
     }
 
-    /// Whether `generation` is still the agent's current process.
+    /// Whether `generation` is still the agent's current process. Only a hint
+    /// (it can change right after); to act on it, use `with_current_generation`.
     pub fn is_current(&self, generation: u64) -> bool {
         self.st.lock().generation == generation
+    }
+
+    /// Runs `f` (an event of process `generation` being applied: items appended,
+    /// permissions shown, ...) only if that process is still the current one, and
+    /// returns None otherwise.
+    ///
+    /// Invariant: "still current" and everything `f` does are one step with respect
+    /// to `retire_generation`/`begin_start`, which take the same gate. Once a stop
+    /// has retired the process, none of its events is mid-application and none will
+    /// start, so nothing from it can land after the user message of the next turn.
+    /// Checking `is_current` and then appending through separate lock acquisitions
+    /// does not give that. `f` is synchronous (so the gate is never held across an
+    /// `.await`) and must not call `retire_generation`, `begin_start` or this again.
+    pub fn with_current_generation<R>(&self, generation: u64, f: impl FnOnce() -> R) -> Option<R> {
+        let _gate = self.gate.lock();
+        if self.st.lock().generation != generation {
+            return None;
+        }
+        Some(f())
     }
 
     /// The current process was stopped and its effects already settled: anything
     /// it still reports (late exit, failed prompt, queued output) is ignored.
     pub fn retire_generation(&self, generation: u64) {
+        // Waits for the event of this process being applied right now, if any.
+        let _gate = self.gate.lock();
         let mut st = self.st.lock();
         // Only the process being stopped; a newer one must not be retired.
         if st.generation != generation {
@@ -1017,6 +1088,7 @@ impl AgentCtx {
             ItemBody::UserMessage {
                 text: prompt.text.clone(),
                 attachments: prompt.attachments.clone(),
+                mid_turn: false,
             },
         );
         st.last_user_item = Some(id);
@@ -1156,9 +1228,11 @@ impl AgentCtx {
     }
 
     /// Runs a queued message next. Returns it if no turn is running (the caller
-    /// starts it now); otherwise it moves to the front and `true` is returned in
-    /// the second slot, meaning the caller should cancel the current turn.
-    pub fn send_queued_now(&self, id: &str) -> Option<(Option<Prompt>, bool)> {
+    /// starts it now). While a turn runs the message moves to the front of the queue,
+    /// to run the moment the turn ends; with `interrupt`, `true` is returned in the
+    /// second slot too, meaning the caller should cancel the current turn. Without
+    /// it nothing running is ever stopped.
+    pub fn send_queued_now(&self, id: &str, interrupt: bool) -> Option<(Option<Prompt>, bool)> {
         let result = {
             let mut st = self.st.lock();
             let pos = st.queue.iter().position(|(qid, _)| qid == id)?;
@@ -1166,8 +1240,8 @@ impl AgentCtx {
             st.queue_paused = false;
             if st.turn_active {
                 st.queue.push_front(item);
-                st.advance_on_cancel = true;
-                (None, true)
+                st.advance_on_cancel = interrupt;
+                (None, interrupt)
             } else {
                 st.turn_active = true;
                 item.1.token = Self::next_token_locked(&mut st);
@@ -1205,27 +1279,6 @@ impl AgentCtx {
             .map(|(_, p)| p.text.clone())
     }
 
-    /// Moves a queued message to the front, to run as soon as the current turn ends.
-    pub fn move_queued_to_front(&self, id: &str) -> bool {
-        let moved = {
-            let mut st = self.st.lock();
-            match st.queue.iter().position(|(qid, _)| qid == id) {
-                Some(pos) => {
-                    if let Some(item) = st.queue.remove(pos) {
-                        st.queue.push_front(item);
-                    }
-                    st.queue_paused = false;
-                    true
-                }
-                None => false,
-            }
-        };
-        if moved {
-            self.publish_queue();
-        }
-        moved
-    }
-
     /// Returns a message whose steer didn't land to its place in the queue.
     pub fn put_back_queued(&self, pos: usize, id: &str, prompt: Prompt) {
         {
@@ -1236,10 +1289,36 @@ impl AgentCtx {
         self.publish_queue();
     }
 
-    /// Shows a message the running turn took in (steering) where it was sent.
+    /// Shows a message the running turn took in (steering) where it was sent. It
+    /// isn't the turn's own prompt, so checkpoints keep pointing at that.
     pub fn record_steered(&self, prompt: &Prompt) {
         let mut st = self.st.lock();
-        self.record_prompt_locked(&mut st, prompt);
+        self.push_locked(
+            &mut st,
+            ItemBody::UserMessage {
+                text: prompt.text.clone(),
+                attachments: prompt.attachments.clone(),
+                mid_turn: true,
+            },
+        );
+    }
+
+    /// Whether the queue is on hold (after a stop or an error).
+    pub fn is_queue_paused(&self) -> bool {
+        let st = self.st.lock();
+        st.queue_paused && !st.queue.is_empty()
+    }
+
+    /// Puts a message the agent never got back at the front of the queue, on hold,
+    /// so a failed delivery doesn't lose it.
+    pub fn requeue_front_paused(&self, prompt: Prompt) {
+        {
+            let mut st = self.st.lock();
+            st.queue
+                .push_front((uuid::Uuid::new_v4().to_string(), prompt));
+            st.queue_paused = true;
+        }
+        self.publish_queue();
     }
 
     /// Pauses the queue after an abnormal end so nothing runs unexpectedly.
@@ -1641,6 +1720,8 @@ impl AgentCtx {
 
     /// The adapter process for `generation` went away.
     pub fn process_exited(&self, generation: u64, detail: String) {
+        // Like any event of the process: not to be interleaved with its retirement.
+        let _gate = self.gate.lock();
         let (current, intent, busy, starting, cancelled) = {
             let mut st = self.st.lock();
             if st.replaying == Some(generation) {
@@ -2035,6 +2116,70 @@ mod tests {
         assert!(ctx.is_turn_active(), "the old process ended the new turn");
     }
 
+    /// Kinds of the timeline items, oldest first.
+    fn kinds(ctx: &AgentCtx) -> Vec<String> {
+        let st = ctx.st.lock();
+        let mut items: Vec<_> = st.items.values().collect();
+        items.sort_by_key(|i| i.seq);
+        items
+            .iter()
+            .map(|i| match &i.body {
+                ItemBody::UserMessage { text, .. } => format!("user: {text}"),
+                b => b.kind_str().to_string(),
+            })
+            .collect()
+    }
+
+    /// The flaky-CI race, forced: an event of the old process has passed the
+    /// "still current" check and is being applied when Stop retires it and the next
+    /// prompt is accepted. Retiring must wait for that event, so it lands before the
+    /// new user message, never after it.
+    #[test]
+    fn retire_waits_for_the_event_being_applied() {
+        use std::sync::mpsc;
+        let ctx = Arc::new(ctx());
+        let old = ctx.begin_start();
+        ctx.end_start(old);
+        run(&ctx, "one");
+        ctx.set_exit_intent(ExitIntent::Stop);
+        ctx.end_turn_early(ExitIntent::Stop);
+
+        let (started_tx, started_rx) = mpsc::channel();
+        let (go_tx, go_rx) = mpsc::channel::<()>();
+        let handler = {
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                ctx.with_current_generation(old, || {
+                    started_tx.send(()).unwrap();
+                    go_rx.recv().unwrap();
+                    ctx.append_text(StreamKind::Thought, None, "late");
+                })
+            })
+        };
+        started_rx.recv().unwrap();
+        let stopper = {
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                ctx.retire_generation(old);
+                ctx.submit_prompt("two", vec![]).expect("runs now");
+            })
+        };
+        // The stopper can't get past the event that is mid-application.
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(!stopper.is_finished(), "retire did not wait for the event");
+        go_tx.send(()).unwrap();
+        assert_eq!(handler.join().unwrap(), Some(()));
+        stopper.join().unwrap();
+
+        assert_eq!(kinds(&ctx), ["notice", "thought", "user: two"]);
+        // Anything the old process reports from here on is dropped untouched.
+        let ran = ctx.with_current_generation(old, || {
+            ctx.append_text(StreamKind::Thought, None, "later");
+        });
+        assert_eq!(ran, None);
+        assert_eq!(kinds(&ctx), ["notice", "thought", "user: two"]);
+    }
+
     /// An exit during the handshake is reported by the starter, not here.
     #[test]
     fn exit_while_starting_does_not_end_the_turn() {
@@ -2084,7 +2229,7 @@ mod tests {
         run(&ctx, "one");
         assert!(ctx.submit_prompt("queued", vec![]).is_none());
         let id = ctx.st.lock().queue[0].0.clone();
-        assert!(matches!(ctx.send_queued_now(&id), Some((None, true))));
+        assert!(matches!(ctx.send_queued_now(&id, true), Some((None, true))));
         // The turn completes on its own before the cancel lands: head runs.
         let next = ctx.turn_finished(TurnOutcome::Completed).expect("advances");
         assert!(ctx.begin_turn(next.token));
@@ -2102,7 +2247,7 @@ mod tests {
         let first = ctx.submit_prompt("first", vec![]).unwrap();
         assert!(ctx.submit_prompt("second", vec![]).is_none());
         let id = ctx.st.lock().queue[0].0.clone();
-        ctx.send_queued_now(&id);
+        ctx.send_queued_now(&id, true);
         assert!(ctx.turn_pending());
         let next = ctx
             .turn_finished(TurnOutcome::Cancelled)
@@ -2110,6 +2255,56 @@ mod tests {
         assert_eq!(next.text, "second");
         assert!(!ctx.begin_turn(first.token));
         assert!(ctx.begin_turn(next.token));
+    }
+
+    /// "Send now" without `interrupt` never stops the turn: the message just moves to
+    /// the front, and nothing advances on a later cancel.
+    #[test]
+    fn send_now_without_interrupt_only_reorders() {
+        let ctx = ctx();
+        run(&ctx, "one");
+        assert!(ctx.submit_prompt("a", vec![]).is_none());
+        assert!(ctx.submit_prompt("b", vec![]).is_none());
+        let b = ctx.st.lock().queue[1].0.clone();
+        assert!(matches!(
+            ctx.send_queued_now(&b, false),
+            Some((None, false))
+        ));
+        let texts: Vec<String> = ctx
+            .st
+            .lock()
+            .queue
+            .iter()
+            .map(|(_, p)| p.text.clone())
+            .collect();
+        assert_eq!(texts, ["b", "a"]);
+        assert!(!ctx.st.lock().advance_on_cancel);
+        // The turn ends: the moved message runs first.
+        let next = ctx.turn_finished(TurnOutcome::Completed).expect("advances");
+        assert_eq!(next.text, "b");
+    }
+
+    /// A turn that ends in an error keeps what was queued (paused), in order.
+    #[test]
+    fn queue_survives_a_failed_turn() {
+        let ctx = ctx();
+        run(&ctx, "one");
+        assert!(ctx.submit_prompt("a", vec![]).is_none());
+        assert!(ctx.submit_prompt("b", vec![]).is_none());
+        assert!(ctx
+            .turn_finished(TurnOutcome::Failed("boom".into()))
+            .is_none());
+        let texts: Vec<String> = ctx
+            .st
+            .lock()
+            .queue
+            .iter()
+            .map(|(_, p)| p.text.clone())
+            .collect();
+        assert_eq!(texts, ["a", "b"]);
+        assert!(ctx.st.lock().queue_paused);
+        let next = ctx.resume_queue().expect("resuming runs the head");
+        assert_eq!(next.text, "a");
     }
 
     #[test]
@@ -2125,6 +2320,34 @@ mod tests {
         assert!(ctx.begin_turn(next.token));
         assert_eq!(ctx.clear_queue(), 1);
         assert!(ctx.turn_finished(TurnOutcome::Completed).is_none());
+    }
+
+    /// The agent can reply to an answer and end the turn before the write that
+    /// carried the answer returns; the answer must still be recorded as answered.
+    #[test]
+    fn an_answer_being_written_survives_the_turn_ending() {
+        let ctx = ctx();
+        run(&ctx, "one");
+        ctx.permission_requested("p1", "x".into(), None, None, vec![], vec![]);
+        let answering = ctx.begin_answer("p1").expect("pending");
+        assert!(ctx.begin_answer("p1").is_none(), "answered once");
+        assert!(ctx.turn_finished(TurnOutcome::Completed).is_none());
+        ctx.permission_resolved("p1", "yes");
+        drop(answering);
+        let resolution = ctx.st.lock().items.values().find_map(|i| match &i.body {
+            ItemBody::Permission { resolution, .. } => Some(resolution.clone()),
+            _ => None,
+        });
+        assert_eq!(resolution, Some(Some("yes".to_string())));
+
+        // A failed write: cancellable again, and cancelled now as its turn is over.
+        run(&ctx, "two");
+        ctx.permission_requested("p2", "y".into(), None, None, vec![], vec![]);
+        let answering = ctx.begin_answer("p2").expect("pending");
+        assert!(ctx.turn_finished(TurnOutcome::Completed).is_none());
+        assert!(ctx.st.lock().pending_permissions.contains("p2"));
+        drop(answering);
+        assert!(ctx.st.lock().pending_permissions.is_empty());
     }
 
     /// L1: per-turn bookkeeping is dropped when a new turn begins.

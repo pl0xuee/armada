@@ -241,7 +241,7 @@ function HighlightedBody({ body }: { body: string }) {
 
 export function FieldChip({ name }: { name: string }) {
   return (
-    <span className="inline-flex h-[18px] items-center rounded-md border border-accent/25 bg-accent/[0.08] px-1.5 font-mono text-[10.5px] text-accent">
+    <span className="inline-flex h-[18px] items-center rounded-md border border-accent/25 bg-accent/[0.08] px-1.5 font-mono text-[11px] text-accent">
       {name}
     </span>
   );

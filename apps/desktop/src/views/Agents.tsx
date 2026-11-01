@@ -1,7 +1,6 @@
 import {
   Columns3,
   LayoutGrid,
-  ListTodo,
   PanelLeftOpen,
   Play,
   RotateCcw,
@@ -16,13 +15,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentHeader } from "@/components/agent/AgentHeader";
 import { AgentList } from "@/components/agent/AgentList";
 import { Composer } from "@/components/agent/Composer";
-import { ConflictBanner } from "@/components/agent/HelperBits";
 import { TileRow } from "@/components/agent/TileGroup";
 import { TimelinePane } from "@/components/agent/TimelinePane";
+import { agentDerived } from "@/components/agent/derived";
 import { Inspector } from "@/components/agent/Inspector";
 import { AppMark } from "@/components/AppMark";
 import { HomeComposer } from "@/components/home/HomeComposer";
-import { ProjectView } from "@/components/project/ProjectView";
 import { RelTime } from "@/components/RelTime";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { PreviewTab } from "@/components/workspace/PreviewTab";
@@ -35,12 +33,15 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { resumeAgent } from "@/lib/actions";
 import { triageQueue } from "@/lib/agents";
 import { api } from "@/lib/api";
-import { helperGroupOf } from "@/lib/helpers";
+import { formatCost } from "@/lib/format";
+import { tileIdsFor } from "@/lib/helpers";
+import { selectFromAgents } from "@/lib/memoSelector";
 import type { Agent } from "@/lib/types";
 import { basename, modKey } from "@/lib/utils";
 import { useAgentListLayout } from "@/hooks/useAgentListLayout";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useElementWidth } from "@/hooks/useElementWidth";
+import { useBudgetStatus } from "@/hooks/useBudgetStatus";
 import {
   clampPreviewWidth,
   INSPECTOR_DOCK_QUERY,
@@ -57,18 +58,23 @@ import { useUi } from "@/store/ui";
 export function AgentsView() {
   const selectedId = useUi((s) => s.selectedAgentId);
   const agent = useApp((s) => (selectedId ? s.agents[selectedId] : undefined));
-  const projectPath = useUi((s) => s.selectedProjectPath);
   const list = useAgentListLayout();
-  // "main,helper,helper" while the open agent is part of a main + helpers group (and tiling is on).
+  // "a,b,c" while several agents are shown together: started together, or a main agent and its helpers (when tiling is on).
   const tileOn = useUi((s) => s.tileHelpers);
-  const familyKey = useApp((s) => {
-    if (!selectedId || !tileOn) return null;
-    const g = helperGroupOf(Object.values(s.agents), selectedId);
-    return g ? [g.main.id, ...g.helpers.map((h) => h.id)].join(",") : null;
-  });
+  const tileGroup = useUi((s) => s.tileGroup);
+  const familyKey = useApp(
+    useMemo(
+      () =>
+        selectFromAgents((agents) => {
+          const ids = tileIdsFor(agents, selectedId, tileGroup, tileOn);
+          return ids.length > 1 ? ids.join(",") : null;
+        }),
+      [selectedId, tileGroup, tileOn],
+    ),
+  );
 
   // Narrow window, nothing open: the list is the main area.
-  if (!list.docked && !agent && !projectPath) {
+  if (!list.docked && !agent) {
     return (
       <div className="flex h-full flex-col">
         <div className="mx-auto w-full max-w-[760px] shrink-0 px-3 pt-3">
@@ -91,8 +97,6 @@ export function AgentsView() {
           agentId={agent.id}
           tileIds={familyKey ? familyKey.split(",") : undefined}
         />
-      ) : projectPath ? (
-        <ProjectView key={projectPath} path={projectPath} />
       ) : (
         <Welcome />
       )}
@@ -137,8 +141,9 @@ function AgentDrawer({ open, onClose }: { open: boolean; onClose: () => void }) 
 }
 
 function InspectorPane({ agent, className }: { agent: Agent; className?: string }) {
-  const items = useApp((s) => s.items[agent.id]);
-  return <Inspector agent={agent} items={items} className={className} />;
+  // Structure-derived and reference-stable across streamed text, so the panel doesn't re-render per frame.
+  const derived = useApp((s) => agentDerived(agent.id, s.items[agent.id]));
+  return <Inspector agent={agent} derived={derived} className={className} />;
 }
 
 /** One agent's header, conversation and composer. In a tiled group, one of several. */
@@ -147,6 +152,7 @@ const Tile = memo(function Tile({
   focused,
   tiled,
   first,
+  index,
   headerRef,
   composerRef,
   between,
@@ -156,6 +162,7 @@ const Tile = memo(function Tile({
   focused: boolean;
   tiled: boolean;
   first: boolean;
+  index?: number;
   headerRef?: React.Ref<HTMLDivElement>;
   composerRef?: React.Ref<HTMLDivElement>;
   /** Between conversation and composer (the workspace panel, in a single pane). */
@@ -173,8 +180,13 @@ const Tile = memo(function Tile({
   if (!agent) return null;
   return (
     <section
-      aria-label={agent.title}
+      // Agents started together often share a title: the number tells the panes apart.
+      aria-label={tiled && index ? `${agent.title} (agent ${index})` : agent.title}
       className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-base"
+      // The pinned dock above the composer sizes itself against this pane.
+      data-pane=""
+      // Ambient animation (see globals.css) runs in the focused tile only.
+      data-tile={tiled ? (focused ? "focused" : "idle") : undefined}
       onPointerDownCapture={() => {
         if (tiled && !focused) useUi.getState().openAgent(agentId);
       }}
@@ -189,13 +201,12 @@ const Tile = memo(function Tile({
         />
       )}
       <div ref={headerRef} className="shrink-0">
-        <AgentHeader agent={agent} tile={tiled ? { focused, first } : undefined} />
+        <AgentHeader agent={agent} tile={tiled ? { focused, first, index } : undefined} />
       </div>
-      <ConflictBanner agent={agent} />
       <TimelinePane agent={agent} focused={focused} />
       {between}
       <div ref={composerRef} className="shrink-0">
-        <Composer agent={agent} focused={focused} />
+        <Composer agent={agent} focused={focused} compact={tiled} />
       </div>
     </section>
   );
@@ -273,6 +284,7 @@ function AgentPane({ agentId, tileIds }: { agentId: string; tileIds?: string[] }
               focused={ctx.focused}
               tiled={ctx.tiled}
               first={ctx.first}
+              index={ctx.index}
               headerRef={ctx.focused ? headerRef : undefined}
               composerRef={ctx.focused ? composerRef : undefined}
               between={
@@ -299,7 +311,11 @@ function AgentPane({ agentId, tileIds }: { agentId: string; tileIds?: string[] }
                 size="xs"
                 variant="ghost"
                 className="ml-auto"
-                onClick={() => useUi.getState().setTileHelpers(false)}
+                onClick={() =>
+                  useUi.getState().tileGroup
+                    ? useUi.setState({ tileGroup: null })
+                    : useUi.getState().setTileHelpers(false)
+                }
               >
                 Show one pane
               </Button>
@@ -390,11 +406,14 @@ function Welcome() {
   const listLayout = useAgentListLayout();
   const openNewAgent = useUi((s) => s.openNewAgent);
   const setView = useUi((s) => s.setView);
+  const openMission = useUi((s) => s.openMission);
   const openAgent = useUi((s) => s.openAgent);
   const list = useMemo(() => Object.values(agents), [agents]);
   const interrupted = list.filter((a) => a.status === "interrupted" && !a.archived);
   const needs = useMemo(() => triageQueue(list).length, [list]);
   const live = list.filter((a) => a.status === "working").length;
+  const fleetCost = useMemo(() => list.reduce((sum, a) => sum + a.costUsd, 0), [list]);
+  const budget = useBudgetStatus(fleetCost);
   const [confirmResume, setConfirmResume] = useState(false);
 
   const shortcuts: [string, string[]][] = [
@@ -434,17 +453,20 @@ function Welcome() {
           </div>
           <div className="min-w-0">
             <h1 className="text-[20px] font-semibold tracking-[-0.02em]">Command your fleet</h1>
-            <p className="text-[12.5px] text-muted">
-              {live > 0 ? `${live} agent${live === 1 ? " is" : "s are"} working` : "All quiet"}
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              {live === 0 && needs === 0 && <span className="text-[12.5px] text-muted">All quiet</span>}
+              {live > 0 && <PulseChip tone="accent" label={`${live} working`} onClick={() => openMission("all")} />}
               {needs > 0 && (
-                <>
-                  {" · "}
-                  <button type="button" onClick={() => setView("triage")} className="text-warn hover:underline">
-                    {needs} need{needs === 1 ? "s" : ""} you
-                  </button>
-                </>
+                <PulseChip
+                  tone="warn"
+                  label={`${needs} need${needs === 1 ? "s" : ""} you`}
+                  onClick={() => openMission("needs")}
+                />
               )}
-            </p>
+              {budget && budget.todayUsd > 0 && (
+                <PulseChip label={`${formatCost(budget.todayUsd)} today`} onClick={() => setView("usage")} />
+              )}
+            </div>
           </div>
         </div>
 
@@ -453,7 +475,6 @@ function Welcome() {
         <div className="mt-3 flex flex-wrap gap-1.5">
           <QuickAction icon={<SlidersHorizontal />} label="All options" onClick={() => openNewAgent()} />
           <QuickAction icon={<Columns3 />} label="Compare providers" onClick={() => openNewAgent({ compare: true })} />
-          <QuickAction icon={<ListTodo />} label="Needs you" badge={needs} onClick={() => setView("triage")} />
           <QuickAction icon={<LayoutGrid />} label="Mission Control" onClick={() => setView("mission")} />
         </div>
 
@@ -531,17 +552,26 @@ function Welcome() {
   );
 }
 
-function QuickAction({
-  icon,
-  label,
-  onClick,
-  badge,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  badge?: number;
-}) {
+/** One number of the fleet's pulse; a link to where you act on it. */
+function PulseChip({ label, tone, onClick }: { label: string; tone?: "accent" | "warn"; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex h-6 items-center gap-1.5 rounded-full border border-line bg-card/60 px-2.5 text-[12px] tabular text-muted transition-colors hover:border-line-strong hover:bg-raised hover:text-fg"
+    >
+      {tone && (
+        <span
+          aria-hidden
+          className={cn("h-1.5 w-1.5 rounded-full", tone === "warn" ? "bg-warn" : "bg-accent animate-breathe")}
+        />
+      )}
+      {label}
+    </button>
+  );
+}
+
+function QuickAction({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -550,11 +580,6 @@ function QuickAction({
     >
       {icon}
       {label}
-      {badge ? (
-        <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-warn px-1 text-[10px] font-semibold text-warn-fg tabular">
-          {badge}
-        </span>
-      ) : null}
     </button>
   );
 }

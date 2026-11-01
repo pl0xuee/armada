@@ -26,7 +26,10 @@ const ag = (id: string, over: Partial<Agent> = {}): Agent =>
 
 describe("decideBusySend", () => {
   it("follows the setting for plain sends", () => {
-    expect(decideBusySend("ask", "enter")).toBe("ask");
+    expect(decideBusySend("deliver", "enter", true, true)).toBe("deliver");
+    // The old default "ask" now means deliver when the agent can take it, else queue: no chooser.
+    expect(decideBusySend("ask", "enter", true, true)).toBe("deliver");
+    expect(decideBusySend("ask", "enter")).toBe("queue");
     expect(decideBusySend("queue", "queueButton")).toBe("queue");
     expect(decideBusySend("helper", "enter")).toBe("helper");
   });
@@ -37,6 +40,18 @@ describe("decideBusySend", () => {
   it("queues when helpers aren't allowed", () => {
     expect(decideBusySend("helper", "enter", false)).toBe("queue");
     expect(decideBusySend("ask", "modEnter", false)).toBe("queue");
+  });
+  it("an explicit queue choice always holds the message, even when it could be delivered", () => {
+    expect(decideBusySend("queue", "enter", true, true)).toBe("queue");
+    expect(decideBusySend("deliver", "queueMenu", true, true)).toBe("queue");
+  });
+  it("the menu can deliver into the turn when the agent takes it, else it queues", () => {
+    expect(decideBusySend("queue", "deliverMenu", true, true)).toBe("deliver");
+    expect(decideBusySend("queue", "deliverMenu", true, false)).toBe("queue");
+  });
+  it("a helper setting from an agent that can't start helpers delivers or queues", () => {
+    expect(decideBusySend("helper", "enter", false, true)).toBe("deliver");
+    expect(decideBusySend("helper", "modEnter", false, false)).toBe("queue");
   });
   it("helpers and stopped agents cannot start helpers", () => {
     expect(canStartHelper(ag("a"))).toBe(true);

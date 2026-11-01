@@ -1,9 +1,12 @@
 import { create } from "zustand";
 import { PREVIEW_DEFAULT_WIDTH } from "@/lib/layout";
+import { createCoalescedWriter } from "@/lib/throttle";
 import type { Agent, Provider, Schedule } from "@/lib/types";
 
-export type View =
-  "agents" | "triage" | "mission" | "inbox" | "compare" | "schedules" | "usage" | "accounts" | "settings";
+export type View = "agents" | "mission" | "compare" | "schedules" | "usage" | "accounts" | "settings";
+
+/** Mission Control's two lenses on the fleet: the agents that need you, and every agent. */
+export type MissionTab = "needs" | "all";
 
 export type SettingsSection =
   | "appearance"
@@ -48,11 +51,11 @@ export interface NewAgentPreset {
 
 interface UiStore {
   view: View;
+  /** Which Mission Control tab is showing. null: not chosen yet, so the view picks one when it opens. */
+  missionTab: MissionTab | null;
   selectedAgentId: string | null;
-  /** The project whose agents the Projects tab shows as a grid (when no single agent is open). */
-  selectedProjectPath: string | null;
-  /** The agent card to select when the project page opens (the one you came back from). */
-  projectFocusId: string | null;
+  /** Agents shown together in a grid on the Agents page (the open agent is one of them). null: just the open agent. */
+  tileGroup: string[] | null;
   compareGroupId: string | null;
   settingsSection: SettingsSection;
   inspectorOpen: boolean;
@@ -95,9 +98,11 @@ interface UiStore {
   revealTarget: { agentId: string; itemId: string; tick: number } | null;
 
   setView: (v: View) => void;
+  /** Open Mission Control on a tab. */
+  openMission: (tab: MissionTab) => void;
   openAgent: (id: string) => void;
-  /** Show a project's agents together in the Projects tab. */
-  openProject: (path: string, focusAgentId?: string) => void;
+  /** Show several agents together in a grid (and focus one of them). */
+  openAgents: (ids: string[], focusId?: string) => void;
   /** Open an agent and scroll its timeline to one item (e.g. a sub-agent's card). */
   revealItem: (agentId: string, itemId: string) => void;
   clearRevealTarget: () => void;
@@ -186,6 +191,7 @@ function readAllTileWeights(): Record<string, Record<string, number>> {
 
 /** Saved tile divider weights for a main agent's group; only ids in `ids`, clamped to a sane range. */
 export function readTileWeights(mainId: string, ids: readonly string[]): Record<string, number> {
+  tileWeightsWriter.flush(); // a save still waiting for its 150 ms is part of what was saved
   const saved = readAllTileWeights()[mainId];
   const out: Record<string, number> = {};
   if (!saved || typeof saved !== "object") return out;
@@ -196,16 +202,24 @@ export function readTileWeights(mainId: string, ids: readonly string[]): Record<
   return out;
 }
 
-/** Persist a group's weights (empty removes the entry). */
-export function saveTileWeights(mainId: string, weights: Record<string, number>) {
+// Dragging a divider saves on every pointermove; write the latest weights once the drag settles.
+const tileWeightsWriter = createCoalescedWriter<string, Record<string, number>>(150, (entries) => {
   try {
     const all = readAllTileWeights();
-    if (Object.keys(weights).length) all[mainId] = weights;
-    else delete all[mainId];
+    for (const [mainId, weights] of entries) {
+      if (Object.keys(weights).length) all[mainId] = weights;
+      else delete all[mainId];
+    }
     localStorage.setItem(TILE_WEIGHTS_KEY, JSON.stringify(all));
   } catch {
     /* ignore */
   }
+});
+if (typeof window !== "undefined") window.addEventListener("pagehide", tileWeightsWriter.flush);
+
+/** Persist a group's weights (empty removes the entry). Written shortly after the last call. */
+export function saveTileWeights(mainId: string, weights: Record<string, number>) {
+  tileWeightsWriter.set(mainId, weights);
 }
 
 const INSPECTOR_KEY = "armada.inspectorOpen";
@@ -232,16 +246,30 @@ function readInspector(): boolean {
   }
 }
 
-const VIEWS: View[] = ["agents", "triage", "mission", "inbox", "compare", "schedules", "usage", "accounts", "settings"];
+const VIEWS: View[] = ["agents", "mission", "compare", "schedules", "usage", "accounts", "settings"];
 
-/** Dev/review convenience: ?view=mission&agent=<id> picks the initial screen. */
-function initialFromUrl(): { view: View; agent: string | null } {
+/**
+ * A `?view=` value as a view plus (for Mission Control) the tab it implies. "triage" and "inbox" are the
+ * names of the views Mission Control replaced; old links and bookmarks keep opening its Needs you tab.
+ */
+export function viewFromUrl(name: string | null): { view: View; tab: MissionTab | null } | null {
+  if (name === "triage" || name === "inbox") return { view: "mission", tab: "needs" };
+  return name && (VIEWS as string[]).includes(name) ? { view: name as View, tab: null } : null;
+}
+
+/** Dev/review convenience: ?view=mission&tab=needs&agent=<id> picks the initial screen. */
+function initialFromUrl(): { view: View; tab: MissionTab | null; agent: string | null } {
   try {
     const p = new URLSearchParams(location.search);
-    const v = p.get("view") as View | null;
-    return { view: v && VIEWS.includes(v) ? v : "agents", agent: p.get("agent") };
+    const r = viewFromUrl(p.get("view"));
+    const tab = p.get("tab");
+    return {
+      view: r?.view ?? "agents",
+      tab: tab === "needs" || tab === "all" ? tab : (r?.tab ?? null),
+      agent: p.get("agent"),
+    };
   } catch {
-    return { view: "agents", agent: null };
+    return { view: "agents", tab: null, agent: null };
   }
 }
 
@@ -249,9 +277,9 @@ const initial = initialFromUrl();
 
 export const useUi = create<UiStore>((set) => ({
   view: initial.view,
+  missionTab: initial.tab,
   selectedAgentId: initial.agent,
-  selectedProjectPath: null,
-  projectFocusId: null,
+  tileGroup: null,
   compareGroupId: null,
   settingsSection: "appearance",
   inspectorOpen: readInspector(),
@@ -295,15 +323,28 @@ export const useUi = create<UiStore>((set) => ({
   },
   setWorkspaceRoom: (workspaceRoom) => set((s) => (s.workspaceRoom === workspaceRoom ? s : { workspaceRoom })),
 
-  setView: (view) => set({ view }),
-  openAgent: (id) => set({ view: "agents", selectedAgentId: id, selectedProjectPath: null }),
-  openProject: (path, focusAgentId) =>
-    set({ view: "agents", selectedAgentId: null, selectedProjectPath: path, projectFocusId: focusAgentId ?? null }),
+  setView: (view) => {
+    if (!VIEWS.includes(view)) return;
+    // Arriving from elsewhere re-picks the tab; clicking Mission Control while on it keeps yours.
+    set((s) => ({ view, missionTab: view === "mission" && s.view !== "mission" ? null : s.missionTab }));
+  },
+  openMission: (missionTab) => set({ view: "mission", missionTab }),
+  // Opening one of the agents already shown together just moves focus; anything else leaves the grid.
+  openAgent: (id) =>
+    set((s) => ({ view: "agents", selectedAgentId: id, tileGroup: s.tileGroup?.includes(id) ? s.tileGroup : null })),
+  openAgents: (ids, focusId) => {
+    const group = [...new Set(ids)];
+    set({
+      view: "agents",
+      selectedAgentId: focusId && group.includes(focusId) ? focusId : (group[0] ?? null),
+      tileGroup: group.length > 1 ? group : null,
+    });
+  },
   revealItem: (agentId, itemId) =>
     set((s) => ({
       view: "agents",
       selectedAgentId: agentId,
-      selectedProjectPath: null,
+      tileGroup: s.tileGroup?.includes(agentId) ? s.tileGroup : null,
       revealTarget: { agentId, itemId, tick: (s.revealTarget?.tick ?? 0) + 1 },
     })),
   clearRevealTarget: () => set({ revealTarget: null }),

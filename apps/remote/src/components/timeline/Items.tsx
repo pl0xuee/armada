@@ -12,6 +12,8 @@ import { ImageStrip } from "../Images";
 import { LocalImage } from "../LocalImage";
 import { isLocalImagePath } from "@/lib/localImages";
 import { Markdown } from "../Markdown";
+import { MessageFold } from "../MessageFold";
+import type { MessageRole } from "@/lib/collapse";
 import { DiffList } from "./DiffView";
 
 type Of<K extends TimelineItem["kind"]> = Extract<TimelineItem, { kind: K }>;
@@ -45,6 +47,8 @@ export const UserBubble = memo(function UserBubble({
   attachments,
   state,
   progress = null,
+  midTurn = false,
+  awaiting = false,
   onRetry,
   onEdit,
 }: {
@@ -54,6 +58,10 @@ export const UserBubble = memo(function UserBubble({
   /** Upload progress (0..1) while photos are sent. */
   progress?: number | null;
   state?: "sending" | "failed";
+  /** Sent while the agent was working (it went into the running turn). */
+  midTurn?: boolean;
+  /** ...and the agent hasn't produced anything since: it reads it at its next step. */
+  awaiting?: boolean;
   onRetry?: () => void;
   onEdit?: () => void;
 }) {
@@ -82,6 +90,9 @@ export const UserBubble = memo(function UserBubble({
           </button>
         )}
       </div>
+      )}
+      {midTurn && !state && (
+        <span className="mt-1 mr-1 text-[11.5px] text-steel">{awaiting ? "Sent while it was working · read at its next step" : "Sent while it was working"}</span>
       )}
       {state === "sending" &&
         (progress !== null && progress < 1 ? (
@@ -120,10 +131,13 @@ export const AgentMessage = memo(function AgentMessage({
   item,
   streaming,
   interim = false,
+  role = interim ? "narration" : "answer",
 }: {
   item: Of<"agent_message">;
   streaming: boolean;
-  /** Narration between tool calls (not the turn's final answer). */
+  /** How it is typeset: the turn's answer carries the weight, working notes between steps are quiet and fold sooner. */
+  role?: MessageRole;
+  /** Shorthand for `role="narration"`. */
   interim?: boolean;
 }) {
   const images = item.images ?? [];
@@ -135,7 +149,11 @@ export const AgentMessage = memo(function AgentMessage({
   return (
     <div className="min-w-0">
       {images.length > 0 && <ImageStrip images={images} large className={item.text ? "mb-2" : undefined} />}
-      {item.text && <Markdown text={item.text} caret={streaming} interim={interim} />}
+      {item.text && (
+        <MessageFold id={item.id} role={role} streaming={streaming}>
+          <Markdown text={item.text} caret={streaming} interim={role === "narration"} />
+        </MessageFold>
+      )}
     </div>
   );
 });
@@ -165,7 +183,7 @@ export const ThoughtRow = memo(function ThoughtRow({ item, streaming }: { item: 
         aria-expanded={open}
         className="press-row flex min-h-11 w-full items-center gap-2 rounded-xl px-1 text-left text-[13.5px] text-steel"
       >
-        <Icon name="sparkle" size={16} className={cn("shrink-0", streaming && "animate-breathe text-accent")} />
+        <Icon name="sparkle" size={16} className={cn("shrink-0", streaming && "text-accent")} />
         <span className="font-medium">Thought</span>
         {!streaming && <span className="text-steel">· {words} {words === 1 ? "word" : "words"}</span>}
         <Icon name="chevronDown" size={16} className={cn("ml-auto shrink-0 transition-transform duration-150", !open && "-rotate-90")} />
@@ -238,7 +256,7 @@ export function OutputBlock({ text: raw, label = "Output", live = false }: { tex
           {label}
           {live && (
             <span className="inline-flex items-center gap-1 tracking-normal text-accent normal-case">
-              <span className="animate-breathe h-1.5 w-1.5 rounded-full bg-accent" aria-hidden />
+              <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden />
               Live
             </span>
           )}

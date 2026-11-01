@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { CompareColumn } from "@/components/compare/CompareColumn";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { useNow } from "@/hooks/useNow";
+import { idealTileColumns } from "@/lib/helpers";
 import { identityFor } from "@/lib/identity";
 import type { Agent } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -11,11 +12,6 @@ import { useUi } from "@/store/ui";
 /** Narrowest a column can be before the agents go behind tabs instead. */
 const MIN_CELL = 300;
 const GAP = 12;
-
-/** Columns that look right for `n` agents: 2 → 2, 4 → 2×2, 5–6 → 3×2, 7+ → 4 wide. */
-export function idealColumns(n: number): number {
-  return n <= 3 ? n : n === 4 ? 2 : n <= 6 ? 3 : 4;
-}
 
 /** Agents of the same kind (e.g. four Claudes) get #1, #2… so they can be told apart. */
 export function agentNumbers(agents: Agent[]): Map<string, string> {
@@ -61,15 +57,9 @@ export function AgentGrid({
   agents,
   onKeep,
   keepDisabled,
-  selectedId,
-  onSelect,
 }: {
   agents: Agent[];
-  /** Makes cards selectable (click a card, or its "Tell it something" button). */
-  selectedId?: string | null;
-  onSelect?: (a: Agent) => void;
-  /** Shows "Keep this one" on each card (comparisons). */
-  onKeep?: (a: Agent) => void;
+  onKeep: (a: Agent) => void;
   keepDisabled?: (a: Agent) => boolean;
 }) {
   const items = useApp((s) => s.items);
@@ -94,7 +84,7 @@ export function AgentGrid({
   const showCheapest = agents.length > 1 && !agents.some(isBusyStatus) && minCost < Math.max(...costs);
   const activeTab = agents.find((a) => a.id === tabId) ?? agents[0];
   const fit = Math.max(1, Math.floor((areaWidth + GAP) / (MIN_CELL + GAP)));
-  const cols = Math.max(1, Math.min(fit, idealColumns(agents.length)));
+  const cols = Math.max(1, Math.min(fit, idealTileColumns(agents.length)));
   const tabbed = agents.length > 1 && cols < 2;
   const rows = Math.ceil(agents.length / cols);
   const minRow = agents.length > 3 ? 300 : 360;
@@ -147,7 +137,7 @@ export function AgentGrid({
                 {a.status === "working" || a.status === "starting" ? (
                   <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent animate-breathe" aria-label="Working" />
                 ) : showCheapest && a.costUsd === minCost ? (
-                  <span className="hidden text-[10.5px] font-normal text-ok @md:inline">cheapest</span>
+                  <span className="hidden text-[11px] font-normal text-ok @md:inline">cheapest</span>
                 ) : null}
               </button>
             );
@@ -171,30 +161,8 @@ export function AgentGrid({
               id={`cmp-col-${a.id}`}
               role={tabbed ? "tabpanel" : undefined}
               aria-labelledby={tabbed ? `cmp-tab-${a.id}` : undefined}
-              tabIndex={onSelect ? 0 : undefined}
-              aria-current={onSelect && a.id === selectedId ? "true" : undefined}
-              onClick={
-                onSelect
-                  ? (e) => {
-                      // Buttons, links and copy buttons inside the card keep their own meaning.
-                      if ((e.target as HTMLElement).closest("a,button,[role=button]")) return;
-                      onSelect(a);
-                    }
-                  : undefined
-              }
-              onKeyDown={
-                onSelect
-                  ? (e) => {
-                      if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
-                        e.preventDefault();
-                        onSelect(a);
-                      }
-                    }
-                  : undefined
-              }
               className={cn(
-                "group relative flex min-h-0 min-w-0 rounded-xl outline-none",
-                onSelect && "cursor-pointer",
+                "relative flex min-h-0 min-w-0 rounded-xl",
                 tabbed && a.id !== activeTab.id && "hidden",
                 a.archived && "opacity-55",
               )}
@@ -207,24 +175,9 @@ export function AgentGrid({
                 cheapest={showCheapest && a.costUsd === minCost}
                 badge={numbers.get(a.id)}
                 onOpen={() => openAgent(a.id)}
-                onKeep={onKeep ? () => onKeep(a) : undefined}
-                onSelect={onSelect ? () => onSelect(a) : undefined}
-                selected={a.id === selectedId}
+                onKeep={() => onKeep(a)}
                 keeping={keepDisabled?.(a) ?? false}
               />
-              {onSelect && (
-                // One outline on the card's own edge (inset, so the scroll area can't clip it), in place
-                // of the status-coloured border while selected. Keyboard focus shows a fainter one.
-                <span
-                  aria-hidden
-                  className={cn(
-                    "pointer-events-none absolute inset-0 z-10 rounded-xl ring-inset transition-shadow",
-                    a.id === selectedId
-                      ? "ring-2 ring-accent"
-                      : "group-focus-visible:ring-2 group-focus-visible:ring-accent/50",
-                  )}
-                />
-              )}
             </div>
           ))}
         </div>

@@ -2,6 +2,7 @@ import { memo, useState } from "react";
 import { answerQuestion } from "@/lib/controller";
 import { cn } from "@/lib/cn";
 import { relativeTime } from "@/lib/format";
+import { questionHeadline } from "@/lib/dock";
 import { useNow } from "@/lib/hooks";
 import {
   buildAnswers,
@@ -14,6 +15,7 @@ import {
   summarize,
   type Draft,
 } from "@/lib/question";
+import { useIsDocked } from "@/lib/selectors";
 import { useStore } from "@/lib/store";
 import type { QuestionField, QuestionItem } from "@/lib/types";
 import { Icon, Spinner } from "../Icon";
@@ -285,13 +287,31 @@ function FieldBlock({
   );
 }
 
-export const QuestionCard = memo(function QuestionCard({ item, readOnly }: { item: QuestionItem; readOnly: boolean }) {
+export const QuestionCard = memo(function QuestionCard({ item, readOnly, inSheet = false }: { item: QuestionItem; readOnly: boolean; /** Shown in a sheet: it keeps its form there. */ inSheet?: boolean }) {
   const sending = useStore((s) => s.resolving[item.requestId]);
+  const docked = useIsDocked(item) && !readOnly && !inSheet;
   const now = useNow();
   const [draft, setDraft] = useState<Draft>(() => drafts.get(item.requestId) ?? {});
   const [touched, setTouched] = useState(false);
   if (item.resolution !== null) return <ResolvedQuestion item={item} resolution={item.resolution} pending={false} />;
   if (sending) return <ResolvedQuestion item={item} resolution={sending} pending />;
+  if (docked) {
+    // The dock above the message box answers it (or opens this form in a sheet): the card is just the record.
+    return (
+      <section aria-label={`Question: ${item.message}`} className="rounded-2xl border border-warn/45 bg-card p-4">
+        <div className="flex items-start gap-2.5">
+          <Icon name="sparkle" size={18} className="mt-0.5 shrink-0 text-warn" />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-[15.5px] leading-snug font-semibold break-words text-fg">{questionHeadline(item)}</h3>
+            <p className="mt-1.5 flex items-center gap-1.5 text-[13px] text-muted">
+              <Icon name="arrowDown" size={15} className="shrink-0 text-steel" />
+              Answer in the panel below the conversation.
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   const fields = primaryFields(item.fields);
   const single = fields.length === 1;

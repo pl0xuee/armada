@@ -1,4 +1,4 @@
-// One approval-key vocabulary everywhere (agent pane, Needs you, Inbox, cheat sheet):
+// One approval-key vocabulary everywhere (agent pane, Mission Control, cheat sheet):
 //   A or Y        allow once            (allow_once only)
 //   Shift+A       always allow          (press twice within ARM_MS to confirm)
 //   D or N        deny                  (reject_once, else reject_always)

@@ -88,7 +88,7 @@ describe("runningSubagents", () => {
     ];
     const list = runningSubagents(items, subagentRuns(items, true));
     expect(list.map((s) => s.id)).toEqual(["a", "b"]);
-    expect(list[0]).toEqual({ id: "a", kind: "Explore", description: "Find the router", model: "haiku", effort: "low", startedAt: 5, toolCalls: 2 });
+    expect(list[0]).toEqual({ id: "a", kind: "Explore", description: "Find the router", model: "haiku", effort: "low", startedAt: 5, toolCalls: 2, step: "c2" });
     expect(list[1]).toMatchObject({ kind: "Sub-agent", description: "Task B", model: null, effort: null, toolCalls: 0 });
   });
   it("counts the calls of sub-agents a sub-agent started", () => {

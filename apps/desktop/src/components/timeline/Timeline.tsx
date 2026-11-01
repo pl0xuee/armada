@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type { Agent, TimelineItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
+import { useScrollFade } from "@/hooks/useScrollFade";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { Spinner } from "../ui/misc";
@@ -21,6 +22,9 @@ import {
 } from "./items";
 import { ActivityGroup } from "./ActivityGroup";
 import { finalAnswers, groupActivity } from "./activityGroups";
+import { messageRole } from "./collapse";
+import { stitchMessages } from "./messageFlow";
+import { UNFOLLOW_EVENT } from "./MessageFold";
 import { SubagentCard } from "./SubagentCard";
 import { useRunningSubagentCount, useSubagentRuns } from "../agent/useSubagents";
 import { useHeld, WAITING_HOLD_MS } from "@/hooks/useHeld";
@@ -33,6 +37,7 @@ import { isPlanApproval } from "@/lib/planApproval";
 import { PlanApprovalCard } from "./PlanApprovalCard";
 import { latestPending, usePermissionKeys } from "./usePermissionKeys";
 import { latestPendingQuestion } from "@/lib/question";
+import { midTurnAwaiting } from "@/lib/sendNow";
 
 /** Within this distance of the bottom counts as "following" the stream. */
 const STICK_THRESHOLD = 24;
@@ -40,13 +45,13 @@ const STICK_THRESHOLD = 24;
 const LOAD_OLDER_PX = 600;
 
 /** Rough height by kind, refined by measurement once a row renders. */
-function estimateSize(it: TimelineItem | undefined): number {
+function estimateSize(it: TimelineItem | undefined, messageChars?: number): number {
   if (!it) return 60;
   switch (it.kind) {
     case "user_message":
       return 72 + Math.min(240, Math.floor(it.text.length / 90) * 22);
     case "agent_message":
-      return 60 + Math.min(900, Math.floor(it.text.length / 80) * 24) + (it.images?.length ? 340 : 0);
+      return 60 + Math.min(900, Math.floor((messageChars ?? it.text.length) / 80) * 24) + (it.images?.length ? 340 : 0);
     case "thought":
       return 34;
     case "tool_call":
@@ -81,6 +86,7 @@ export function Timeline({
   footer?: ReactNode;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  useScrollFade(scrollRef);
   const [atBottom, setAtBottom] = useState(true);
   const [hasNew, setHasNew] = useState(false);
   const stick = useRef(true);
@@ -117,6 +123,8 @@ export function Timeline({
   const rows = view.top;
   const childrenOf = useResolvedLists(view.children, list, isToolItem);
   const groupItems = useResolvedLists(view.groups, list);
+  // Runs of consecutive agent messages (one continuous text), resolved to the current items.
+  const runItems = useResolvedLists(view.runs, list);
 
   // Expanded activity groups, keyed by group id (kept here so it survives row virtualization).
   const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(new Set());
@@ -140,6 +148,8 @@ export function Timeline({
       const it = list[rows[i]];
       const g = it && groupItems.get(it.id);
       if (g) return openGroups.has(it.id) ? 60 + g.length * 48 : 48;
+      const run = it && runItems.get(it.id);
+      if (run && it?.kind === "agent_message") return estimateSize(it, runLength(run));
       return estimateSize(it);
     },
     getItemKey: (i) => list[rows[i]]?.id ?? i,
@@ -171,6 +181,18 @@ export function Timeline({
     });
     ro.observe(content);
     return () => ro.disconnect();
+  }, []);
+
+  // A row asks to stop following the stream (the reader expanded a long message under them).
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const release = () => {
+      stick.current = false;
+      setAtBottom(false);
+    };
+    el.addEventListener(UNFOLLOW_EVENT, release);
+    return () => el.removeEventListener(UNFOLLOW_EVENT, release);
   }, []);
 
   const scrollToBottom = useCallback(() => {
@@ -313,6 +335,15 @@ export function Timeline({
   const live = agent.status === "working" || agent.status === "starting";
   const lastId = list[list.length - 1]?.id;
   const lastPrompt = view.lastPromptIdx !== null ? (list[view.lastPromptIdx] ?? null) : null;
+  // Messages sent mid-turn that the agent hasn't answered yet get a quiet note, only while it is still on the turn.
+  const midTurnWaiting = useMemo(
+    () =>
+      agent.running &&
+      (agent.status === "working" || agent.status === "needs_permission" || agent.status === "starting")
+        ? midTurnAwaiting(list)
+        : NO_IDS,
+    [list, agent.running, agent.status],
+  );
 
   // "Deny with reason" editor for a request (opened by the card button or Shift+N).
   const [reasonFor, setReasonFor] = useState<string | null>(null);
@@ -373,7 +404,12 @@ export function Timeline({
   const virtualRows = virtualizer.getVirtualItems();
 
   // Live status line: the one place that says what a busy agent is doing right now.
-  const lastRowItem = rows.length ? list[rows[rows.length - 1]] : undefined;
+  const lastRowRun = rows.length ? runItems.get(list[rows[rows.length - 1]]?.id) : undefined;
+  const lastRowItem = lastRowRun
+    ? lastRowRun[lastRowRun.length - 1]
+    : rows.length
+      ? list[rows[rows.length - 1]]
+      : undefined;
   const messageSettled = useQuietFor(
     lastRowItem?.kind === "agent_message" ? `${lastRowItem.id}:${lastRowItem.text.length}` : null,
     MESSAGE_SETTLE_MS,
@@ -407,7 +443,8 @@ export function Timeline({
         onTouchMove={markIntent}
         onPointerDown={markIntent}
         onKeyDown={onKeyDownScroll}
-        className="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]"
+        data-timeline-scroll=""
+        className="scroll-fade min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]"
         aria-busy={live}
       >
         <div ref={contentRef} className="mx-auto w-full max-w-[780px] px-3.5 pb-6 @lg:px-6">
@@ -428,6 +465,8 @@ export function Timeline({
                 const prev = v.index > 0 ? list[rows[v.index - 1]] : undefined;
                 const group = groupItems.get(it.id);
                 const turnStart = startsAgentTurn(it, prev, hasOlder);
+                const run = runItems.get(it.id);
+                const tailId = run ? run[run.length - 1].id : it.id;
                 return (
                   <div
                     key={v.key}
@@ -436,7 +475,7 @@ export function Timeline({
                     ref={virtualizer.measureElement}
                     className={cn(
                       "absolute left-0 top-0 w-full",
-                      spacingFor(it, prev, !!group, !!prev && groupItems.has(prev.id)),
+                      spacingFor(it, prev, !!group, !!prev && groupItems.has(prev.id), view.finalIds.has(it.id)),
                       flashId === it.id && "[&>*]:rounded-xl [&>*]:ring-2 [&>*]:ring-accent/50",
                     )}
                     style={{ transform: `translateY(${v.start}px)` }}
@@ -456,11 +495,13 @@ export function Timeline({
                       renderItem(it, {
                         agent: stableAgent,
                         prev,
-                        liveTail: live && it.id === lastId,
+                        liveTail: live && tailId === lastId,
+                        parts: run,
                         view,
                         childrenOf,
                         bgRunningIds,
                         lastPrompt: lastPrompt?.kind === "user_message" ? lastPrompt : null,
+                        midTurnWaiting,
                         pendingId,
                         questionId,
                         reasonFor,
@@ -488,9 +529,11 @@ export function Timeline({
       </div>
       {/* Floats over the conversation instead of taking layout space: a strip that shrinks the
           scroller when it appears leaves the bottom 44px out of reach of the "at bottom" check, so
-          it would never go away. Only shown while scrolled up, so it never hides the last lines. */}
+          it would never go away. Only shown while scrolled up, so it never hides the last lines.
+          A compact corner button (the label only when something new arrived) so it stays clear of
+          the cards' own controls, like a question's options. */}
       {!atBottom && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-end px-3.5 @lg:px-6">
           <button
             type="button"
             onClick={() => {
@@ -499,10 +542,15 @@ export function Timeline({
               setAtBottom(true);
               scrollToBottom();
             }}
-            className="glass pointer-events-auto flex h-8 items-center gap-1.5 rounded-full border border-line-strong px-3 text-[12px] font-medium text-fg shadow-md shadow-black/30 edge transition-colors hover:border-accent/50"
+            aria-label={hasNew ? "New activity, jump to latest" : "Jump to latest"}
+            title="Jump to latest"
+            className={cn(
+              "glass pointer-events-auto flex h-8 items-center justify-center gap-1.5 rounded-full border text-[12px] font-medium text-fg shadow-md shadow-black/30 edge transition-colors hover:border-accent/50",
+              hasNew ? "border-accent/40 px-3" : "w-8 border-line-strong",
+            )}
           >
             {hasNew && <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]" />}
-            {hasNew ? "New activity" : "Jump to latest"}
+            {hasNew && "New activity"}
             <ArrowDown className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -556,11 +604,20 @@ function isTrace(it: TimelineItem, isGroup: boolean): boolean {
  * One vertical rhythm, in padding (so it's part of the measured row height): 12px between blocks
  * of a turn, 24px between turns, 4px between trace rows.
  */
-function spacingFor(it: TimelineItem, prev: TimelineItem | undefined, isGroup: boolean, prevIsGroup: boolean): string {
+function spacingFor(
+  it: TimelineItem,
+  prev: TimelineItem | undefined,
+  isGroup: boolean,
+  prevIsGroup: boolean,
+  isAnswer = false,
+): string {
   const trace = isTrace(it, isGroup);
   const base = trace ? "pb-1" : "pb-3";
   if (!prev) return base;
   if (it.kind === "user_message") return cn(base, "pt-3");
+  // The answer that closes a turn of work sets itself apart from the steps above it.
+  if (isAnswer && it.kind === "agent_message" && (prev.kind === "tool_call" || isTrace(prev, prevIsGroup)))
+    return cn(base, "pt-4");
   // After a trace row (always 4px below it), a non-trace row needs the rest of 12px.
   if (!trace && isTrace(prev, prevIsGroup)) return cn(base, "pt-2");
   return base;
@@ -585,14 +642,27 @@ interface TimelineView {
   children: Map<string, number[]>;
   /** Index of each sub-agent call by its toolCallId. */
   parentIdx: Map<string, number>;
+  /** Runs of consecutive agent messages (one continuous text): member indices keyed by the first item's id. */
+  runs: Map<string, number[]>;
   /** Item ids of each turn's closing agent message (others are interim narration). */
   finalIds: Set<string>;
+  /** The closing message of the latest turn that has one. */
+  lastFinalId: string | null;
+  /** Tool calls, thoughts or approvals follow `lastFinalId` in its turn (so, while the turn runs, it is a working note). */
+  trailingActivity: boolean;
   lastSummaryId: string | null;
   lastErrorId: string | null;
   lastPromptIdx: number | null;
 }
 
 const NO_ITEMS: TimelineItem[] = [];
+
+function runLength(run: TimelineItem[]): number {
+  let n = 0;
+  for (const p of run) if (p.kind === "agent_message") n += p.text.length;
+  return n;
+}
+const NO_IDS: ReadonlySet<string> = new Set();
 
 /** Whether an element between `target` and `root` can still scroll vertically by `deltaY`. */
 export function nestedScrollTakes(target: EventTarget | null, root: HTMLElement | null, deltaY: number): boolean {
@@ -674,9 +744,42 @@ function buildView(items: TimelineItem[], hold: ReadonlySet<string> = new Set())
   const grouped = groupActivity(items, top);
   const groups = new Map<string, number[]>();
   for (const [first, idxs] of grouped.groups) groups.set(items[first].id, idxs);
+  // Messages that touch (nothing shown between them) read as one text.
+  const stitched = stitchMessages(items, grouped.rows);
+  const runs = new Map<string, number[]>();
+  for (const [first, idxs] of stitched.runs) runs.set(items[first].id, idxs);
   const finalIds = new Set<string>();
-  for (const i of finalAnswers(items, top)) finalIds.add(items[i].id);
-  return { top: grouped.rows, groups, children, parentIdx, finalIds, lastSummaryId, lastErrorId, lastPromptIdx };
+  let lastFinalId: string | null = null;
+  for (const i of finalAnswers(items, stitched.rows)) {
+    finalIds.add(items[i].id);
+    // Rows are in order and so are the answers' indices.
+    lastFinalId = items[i].id;
+  }
+  let trailingActivity = false;
+  if (lastFinalId) {
+    const at = stitched.rows.findIndex((i) => items[i].id === lastFinalId);
+    for (const i of stitched.rows.slice(at + 1)) {
+      const k = items[i].kind;
+      if (k === "user_message") {
+        trailingActivity = false;
+        break;
+      }
+      if (k === "tool_call" || k === "thought" || k === "permission") trailingActivity = true;
+    }
+  }
+  return {
+    top: stitched.rows,
+    groups,
+    children,
+    parentIdx,
+    runs,
+    finalIds,
+    lastFinalId,
+    trailingActivity,
+    lastSummaryId,
+    lastErrorId,
+    lastPromptIdx,
+  };
 }
 
 function sameList<T>(a: T[] | undefined, b: T[]): boolean {
@@ -703,7 +806,32 @@ function useResolvedLists<T extends TimelineItem = TimelineItem>(
     if (prev.current.size) prev.current = new Map();
     return prev.current;
   }
-  let changed = src.size !== prev.current.size;
+  const old = prev.current;
+  // Nothing changed (the usual case while text streams elsewhere): compare in place, allocate nothing.
+  let same = src.size === old.size;
+  if (same) {
+    scan: for (const [k, idxs] of src) {
+      const cur = old.get(k);
+      if (!cur) {
+        same = false;
+        break;
+      }
+      let at = 0;
+      for (const i of idxs) {
+        const it = items[i];
+        if (!it || (keep && !keep(it))) continue;
+        if (cur[at++] !== it) {
+          same = false;
+          break scan;
+        }
+      }
+      if (at !== cur.length) {
+        same = false;
+        break;
+      }
+    }
+  }
+  if (same) return old;
   const next = new Map<string, T[]>();
   for (const [k, idxs] of src) {
     const resolved: T[] = [];
@@ -711,15 +839,11 @@ function useResolvedLists<T extends TimelineItem = TimelineItem>(
       const it = items[i];
       if (it && (!keep || keep(it))) resolved.push(it as T);
     }
-    const old = prev.current.get(k);
-    if (old && sameList(old, resolved)) next.set(k, old);
-    else {
-      next.set(k, resolved);
-      changed = true;
-    }
+    const prevList = old.get(k);
+    next.set(k, prevList && sameList(prevList, resolved) ? prevList : resolved);
   }
-  if (changed) prev.current = next;
-  return prev.current;
+  prev.current = next;
+  return next;
 }
 
 /** toolCallIds of background sub-agents currently counted as running (same rule as the counts). */
@@ -737,10 +861,13 @@ function renderItem(
     agent: Agent;
     prev: TimelineItem | undefined;
     liveTail: boolean;
+    /** Pieces of a run of consecutive agent messages starting at this item. */
+    parts: TimelineItem[] | undefined;
     view: TimelineView;
     childrenOf: Map<string, ToolItem[]>;
     bgRunningIds: ReadonlySet<string>;
     lastPrompt: UserItem | null;
+    midTurnWaiting: ReadonlySet<string>;
     pendingId: string | null;
     questionId: string | null;
     reasonFor: string | null;
@@ -751,9 +878,22 @@ function renderItem(
   const agentLive = agent.running && agent.status !== "interrupted";
   switch (it.kind) {
     case "user_message":
-      return <UserBubble item={it} />;
+      return <UserBubble item={it} awaiting={ctx.midTurnWaiting.has(it.id)} />;
     case "agent_message":
-      return <AgentMessage item={it} agent={agent} interim={!view.finalIds.has(it.id)} streaming={liveTail} />;
+      return (
+        <AgentMessage
+          item={it}
+          parts={ctx.parts}
+          agent={agent}
+          role={messageRole({
+            final: view.finalIds.has(it.id),
+            latest: it.id === view.lastFinalId,
+            trailingActivity: view.trailingActivity,
+            turnOpen: agent.status === "working" || agent.status === "starting" || agent.status === "needs_permission",
+          })}
+          streaming={liveTail}
+        />
+      );
     case "thought":
       return <ThoughtBlock item={it} live={liveTail} agentId={agent.id} />;
     case "tool_call":
@@ -805,23 +945,37 @@ function renderItem(
   }
 }
 
+/** Placeholder shaped like a conversation: a prompt bubble, a reply, a few tool rows, another reply. */
 function TimelineSkeleton() {
   return (
-    <div className="space-y-6 pt-2" aria-label="Loading conversation">
+    <div className="space-y-7 pt-2" role="status" aria-label="Loading conversation">
       <div className="flex justify-end">
-        <Skeleton className="h-14 w-[55%] rounded-2xl" />
+        <div className="w-[58%] space-y-2 rounded-2xl rounded-br-md border border-line bg-card/40 px-4 py-3">
+          <Skeleton className="h-3 w-[92%]" />
+          <Skeleton className="h-3 w-[56%]" />
+        </div>
       </div>
-      <div className="space-y-2">
-        <Skeleton className="h-3 w-24" />
-        <Skeleton className="h-3 w-[92%]" />
-        <Skeleton className="h-3 w-[80%]" />
-        <Skeleton className="h-3 w-[64%]" />
+      <div className="space-y-2.5">
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-5 w-5 rounded-full" />
+          <Skeleton className="h-3 w-20" />
+        </div>
+        <Skeleton className="h-3 w-[94%]" />
+        <Skeleton className="h-3 w-[82%]" />
+        <Skeleton className="h-3 w-[66%]" />
       </div>
-      <Skeleton className="h-9 w-full rounded-xl" />
-      <Skeleton className="h-9 w-full rounded-xl" />
-      <div className="space-y-2">
+      <div className="space-y-1.5">
+        {["w-[42%]", "w-[31%]", "w-[50%]"].map((w) => (
+          <div key={w} className="flex h-9 items-center gap-2.5 rounded-xl border border-line bg-card/30 px-3">
+            <Skeleton className="h-4 w-4 rounded-md" />
+            <Skeleton className={cn("h-3", w)} />
+            <Skeleton className="ml-auto h-3 w-9" />
+          </div>
+        ))}
+      </div>
+      <div className="space-y-2.5">
         <Skeleton className="h-3 w-[88%]" />
-        <Skeleton className="h-3 w-[70%]" />
+        <Skeleton className="h-3 w-[72%]" />
       </div>
     </div>
   );

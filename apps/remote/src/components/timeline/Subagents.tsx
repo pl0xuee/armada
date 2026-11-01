@@ -116,7 +116,6 @@ export const SubagentCard = memo(function SubagentCard({
           style={{ color, background: `color-mix(in srgb, ${color} 13%, transparent)` }}
         >
           <Icon name="bot" size={18} />
-          {running && <span className="animate-pulse-ring-soft absolute inset-0 rounded-[10px]" style={{ background: color }} aria-hidden />}
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-1.5 text-[11.5px] font-semibold tracking-wider text-steel uppercase">

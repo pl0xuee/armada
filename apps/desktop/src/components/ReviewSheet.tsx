@@ -258,6 +258,9 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   const lfsAssetsChanged = !!diff?.lfs?.toolMissing && diff.files.some((f) => f.lfs);
   const lfsBlocked = lfsAssetsChanged ? LFS_BLOCK_REASON : null;
   const uncommitted = diff?.uncommitted ?? 0;
+  // Until the first diff lands we can't know what Discard would throw away or what a merge carries.
+  const diffPending = loading && !diff;
+  const PENDING_REASON = "Waiting for the diff to load";
   const message = commitMsg.trim() || agent.title;
 
   const doShip = (exclude: string[]) =>
@@ -777,7 +780,11 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
           <Button
             variant={agent.worktree ? "secondary" : "primary"}
             disabled={uncommitted === 0 || busy !== null || !!gitBlocked || !!lfsBlocked}
-            title={lfsBlocked ?? gitBlocked ?? (uncommitted === 0 ? "Nothing to commit" : undefined)}
+            title={
+              diffPending
+                ? PENDING_REASON
+                : (lfsBlocked ?? gitBlocked ?? (uncommitted === 0 ? "Nothing to commit" : undefined))
+            }
             onClick={commit}
           >
             {busy === "commit" ? <Spinner className="h-3.5 w-3.5 text-current" /> : <GitCommitHorizontal />}
@@ -786,12 +793,15 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2 max-[900px]:w-full">
           <Button
-            variant="danger"
-            disabled={busy !== null || !agent.worktree || !!gitBlocked}
+            variant="ghost"
+            className="text-err hover:bg-err/12 hover:text-err"
+            disabled={busy !== null || !agent.worktree || !!gitBlocked || diffPending}
             title={
               !agent.worktree
                 ? "Only agents running in their own worktree have one to discard"
-                : (gitBlocked ?? undefined)
+                : diffPending
+                  ? PENDING_REASON
+                  : (gitBlocked ?? undefined)
             }
             onClick={() => setConfirmDiscard(true)}
           >
@@ -800,6 +810,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
           </Button>
           <Button
             variant="secondary"
+            disabled={diffPending}
             onClick={() => setGithubOpen(true)}
             title="Sign in to GitHub, push this branch, or put the project on GitHub"
           >
@@ -810,7 +821,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
             agent={agent}
             autoOpen={prIntent && !!diff}
             busy={busy === "pr"}
-            disabled={busy !== null}
+            disabled={busy !== null || diffPending}
             onSubmit={async (t, b) => {
               // Errors stay inline in the form (the popover keeps what you wrote).
               setBusy("pr");
@@ -830,6 +841,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
             busy={busy === "merge"}
             disabled={
               busy !== null ||
+              diffPending ||
               !agent.worktree ||
               uncommitted > 0 ||
               (diff?.ahead ?? 0) === 0 ||
@@ -837,17 +849,19 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
               !!lfsBlocked
             }
             disabledReason={
-              lfsBlocked
-                ? lfsBlocked
-                : gitBlocked
-                  ? gitBlocked
-                  : !agent.worktree
-                    ? "Only agents running in their own worktree can be merged"
-                    : uncommitted > 0
-                      ? "Commit first, or use Commit & merge"
-                      : (diff?.ahead ?? 0) === 0
-                        ? "No commits to merge yet"
-                        : undefined
+              diffPending
+                ? PENDING_REASON
+                : lfsBlocked
+                  ? lfsBlocked
+                  : gitBlocked
+                    ? gitBlocked
+                    : !agent.worktree
+                      ? "Only agents running in their own worktree can be merged"
+                      : uncommitted > 0
+                        ? "Commit first, or use Commit & merge"
+                        : (diff?.ahead ?? 0) === 0
+                          ? "No commits to merge yet"
+                          : undefined
             }
             onConfirm={merge}
           />
@@ -857,8 +871,15 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
               uncommitted={uncommitted}
               message={message}
               busy={busy === "ship"}
-              disabled={busy !== null || (!hasChanges && (diff?.ahead ?? 0) === 0) || !!gitBlocked || !!lfsBlocked}
+              disabled={
+                busy !== null ||
+                diffPending ||
+                (!hasChanges && (diff?.ahead ?? 0) === 0) ||
+                !!gitBlocked ||
+                !!lfsBlocked
+              }
               disabledReason={
+                (diffPending ? PENDING_REASON : null) ??
                 lfsBlocked ??
                 gitBlocked ??
                 (!hasChanges && (diff?.ahead ?? 0) === 0 ? "Nothing to ship yet" : undefined)

@@ -1,10 +1,11 @@
 import { ArrowUp, BookText, ChevronDown, FileText, GitFork, ListPlus, Play, RotateCcw, Square } from "lucide-react";
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { cancelTurn, resumeAgent } from "@/lib/actions";
 import { api } from "@/lib/api";
 import { MAX_ATTACHMENTS } from "@/lib/attachments";
 import { canStartHelper, decideBusySend, type BusyIntent } from "@/lib/helpers";
+import { isSlashCommand } from "@/lib/sendNow";
 import { commandRank, expandCommandShortcut } from "@/lib/slashCommands";
 import type { Agent, SlashCommand, Attachment } from "@/lib/types";
 import { cn, errorMessage, modKey } from "@/lib/utils";
@@ -13,6 +14,7 @@ import { useElementWidth } from "@/hooks/useElementWidth";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useAttachments } from "@/hooks/useAttachments";
 import { latestPendingQuestion } from "@/lib/question";
+import { latestPending } from "../timeline/usePermissionKeys";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { getDraft, onAttachmentsInsert, onDraftInsert, setDraft } from "./drafts";
@@ -26,10 +28,12 @@ import { Kbd } from "../ui/kbd";
 import { Tooltip } from "../ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/menu";
 import { ConfigOverflowMenu, ConfigSelect } from "./ConfigSelect";
-import { QueueStack } from "./QueueStack";
-import { RateLimitBanner } from "./RateLimitBanner";
+import { PinnedDock } from "./PinnedDock";
 
 const ESC_ARM_MS = 1500;
+/** The textarea sizes itself to its text in CSS (`field-sizing: content`); otherwise the layout effect measures. */
+const FIELD_SIZING =
+  typeof CSS !== "undefined" && typeof CSS.supports === "function" && CSS.supports("field-sizing", "content");
 
 /** IME composition in progress (WebKit reports keyCode 229 and may not set isComposing). */
 function composing(e: React.KeyboardEvent): boolean {
@@ -54,7 +58,15 @@ function slashQuery(text: string): string | null {
   return m ? m[1].toLowerCase() : null;
 }
 
-function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boolean }) {
+function ComposerImpl({
+  agent,
+  focused = true,
+  compact = false,
+}: {
+  agent: Agent;
+  focused?: boolean;
+  compact?: boolean;
+}) {
   const [text, setText] = useState(() => getDraft(agent.id));
   // Latest text for async callbacks (queue Edit resolves after an await).
   const textRef = useRef(text);
@@ -70,6 +82,8 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
   const [files, setFiles] = useState<{ query: string; list: string[] }>({ query: "", list: [] });
   const attach = useAttachments([], agent.id);
   const [wrapRef, width] = useElementWidth<HTMLDivElement>();
+  // The shortcut hints need about 520px; in a narrow tile they would be cut off mid-word.
+  const roomForHints = width === 0 || width >= 520;
   // Floating things anchored bottom-right (toasts, the voice assistant panel) sit above the
   // composer via --composer-clear, so they never cover Send / Queue / Stop.
   useLayoutEffect(() => {
@@ -96,12 +110,15 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
   const blocked = agent.status === "needs_permission";
   // A question waits above (typing here queues; it doesn't answer it).
   const asking = useApp((s) => blocked && latestPendingQuestion(s.items[agent.id]) !== null);
+  // An approval waits too: its actions are docked above the composer (see ApprovalDock), so the
+  // composer drops Stop / "Waiting…" while you answer.
+  const approving = useApp((s) => blocked && latestPending(s.items[agent.id]) !== null);
+  const docked = approving || asking;
   const resumable = agent.status === "interrupted" || agent.status === "stopped";
   const busy = working || blocked;
   // Sending while the agent works queues the message; it runs right after this turn.
-  const busySend = useApp((s) => s.settings?.busySend ?? "ask");
+  const busySend = useApp((s) => s.settings?.busySend ?? "deliver");
   const helperAllowed = canStartHelper(agent);
-  const [chooser, setChooser] = useState(false);
   const canSend = !resumable && (text.trim().length > 0 || attach.attachments.length > 0) && !sending;
 
   const query = slashQuery(text);
@@ -177,13 +194,7 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
     setText(getDraft(agent.id));
     setHint(null);
     setEscArmed(false);
-    setChooser(false);
   }, [agent.id]);
-  // The turn ended while the chooser was open: a plain Enter sends now.
-  useEffect(() => {
-    if (!busy) setChooser(false);
-  }, [busy]);
-
   useEffect(
     () => () => {
       if (escTimer.current) clearTimeout(escTimer.current);
@@ -209,11 +220,23 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
 
   useEffect(() => setSlashIndex(0), [query, debouncedMention, mode]);
 
+  // Auto-size. Browsers with `field-sizing: content` do it in CSS (no JS, no layout reads). Elsewhere:
+  // appending only ever grows the box, so that case reads once and writes only if the text overflows;
+  // anything else (a deletion, an edit in the middle) collapses and re-measures as before.
+  const sized = useRef("");
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el || FIELD_SIZING) return;
+    const prev = sized.current;
+    sized.current = text;
+    const max = Math.round(window.innerHeight * 0.4);
+    if (!el.style.height && text === "") return;
+    if (el.style.height && text.length > prev.length && text.startsWith(prev)) {
+      if (el.scrollHeight > el.clientHeight) el.style.height = `${Math.min(el.scrollHeight, max)}px`;
+      return;
+    }
     el.style.height = "0px";
-    el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.4))}px`;
+    el.style.height = `${Math.min(el.scrollHeight, max)}px`;
   }, [text]);
 
   const update = (v: string, nextCaret = v.length) => {
@@ -222,7 +245,6 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
     setCaret(nextCaret);
     setDraft(agent.id, v);
     if (escArmed) setEscArmed(false);
-    if (chooser) setChooser(false);
     if (hint && v !== hint.prefix) setHint(null);
     if (slashQuery(v) === null && mentionQuery(v, nextCaret) === null) setSlashDismissed(false);
   };
@@ -321,6 +343,10 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
       }
     });
   };
+  // A stable handle for the pinned dock (memoized), so it doesn't re-render with every keystroke here.
+  const takeBackRef = useRef(takeBack);
+  takeBackRef.current = takeBack;
+  const stableTakeBack = useCallback((body: string, images?: Attachment[]) => takeBackRef.current(body, images), []);
 
   const insertTemplate = (body: string) => {
     const el = ref.current;
@@ -363,8 +389,13 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
     else toast.info("Dictation inserted, but the message can't be sent right now");
   });
 
-  /** Queue behind the current turn (or send, when the agent is idle). */
-  const sendNow = async () => {
+  /**
+   * Sends the message. `deliver`: while the agent works it goes into the running turn right away (it reads it
+   * at its next step, nothing is stopped); otherwise it queues behind the turn (or just runs, when idle).
+   * If sending fails the text comes back into the composer; the backend queues rather than drops a message
+   * it couldn't deliver.
+   */
+  const submit = async (deliver: boolean) => {
     if (!canSend) return;
     const value = expandCommandShortcut(text.trim(), agent.availableCommands);
     const images = attach.attachments;
@@ -373,7 +404,7 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
     attach.clear();
     setHint(null);
     try {
-      await api.sendPrompt(agent.id, value, images);
+      await api.sendPrompt(agent.id, value, images, deliver);
     } catch (e) {
       update(value);
       attach.setAttachments(images);
@@ -407,35 +438,36 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
     }
   };
 
-  /** One send gesture. While busy it queues, starts a helper, or asks, per setting and gesture. */
+  /** The agent takes a message into its running turn now (not for commands, or while the queue is on hold). */
+  const canDeliver = busy && !!agent.steerable && !agent.queuePaused && !isSlashCommand(text);
+
+  /** What the main button does (and says) while busy. */
+  const primary = decideBusySend(busySend, "queueButton", helperAllowed, canDeliver);
+  /** The agent takes messages into a running turn (so the menu may offer it). */
+  const agentTakesMidTurn = !!agent.steerable && !agent.queuePaused;
+
+  /** One send gesture. While busy: into the running turn, queued, or a helper, per setting and gesture. */
   const send = async (intent: BusyIntent = "enter") => {
     if (!canSend) return;
     if (busy) {
-      if (chooser && intent === "queueButton") {
-        setChooser(false);
-        return;
-      }
-      const d = decideBusySend(busySend, intent, helperAllowed);
-      if (d === "ask") {
-        setChooser(true);
-        return;
-      }
+      const d = decideBusySend(busySend, intent, helperAllowed, canDeliver);
       if (d === "helper") return void startHelper();
+      return void submit(d === "deliver");
     }
-    await sendNow();
+    await submit(false);
   };
 
-  /** A pick in the chooser; "remember" saves it as the default for every agent. */
-  const choose = (choice: "queue" | "helper", remember: boolean) => {
-    setChooser(false);
-    if (remember) {
-      void useApp
-        .getState()
-        .patchSettings({ busySend: choice })
-        .catch((e) => toast.error("Couldn't save your choice", { description: errorMessage(e) }));
+  /** Up arrow on an empty composer: the newest queued message comes back for editing. */
+  const recallQueued = async () => {
+    const last = agent.queue[agent.queue.length - 1];
+    if (!last) return;
+    try {
+      const removed = await api.removeQueued(agent.id, last.id);
+      if (removed === null) toast("That message already ran", { description: "It's in the conversation now." });
+      else takeBack(removed.text, removed.attachments);
+    } catch (e) {
+      toast.error("Couldn't take the queued message back", { description: errorMessage(e) });
     }
-    void (choice === "helper" ? startHelper() : sendNow());
-    requestAnimationFrame(() => ref.current?.focus());
   };
 
   /** Esc on an empty draft stops the turn, but only on a second press (never by accident). */
@@ -472,13 +504,22 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
         return;
       }
     }
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (
+      e.key === "ArrowUp" &&
+      !e.shiftKey &&
+      !e.metaKey &&
+      !e.ctrlKey &&
+      !e.altKey &&
+      text === "" &&
+      attach.attachments.length === 0 &&
+      agent.queue.length > 0
+    ) {
+      // Like Claude Code: Up on an empty prompt takes your newest queued message back to edit it.
+      e.preventDefault();
+      void recallQueued();
+    } else if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void send(e.metaKey || e.ctrlKey ? "modEnter" : "enter");
-    } else if (e.key === "Escape" && chooser) {
-      e.preventDefault();
-      e.stopPropagation();
-      setChooser(false);
     } else if (e.key === "Escape" && busy && text.trim() === "" && attach.attachments.length === 0) {
       e.preventDefault();
       onEscape();
@@ -489,10 +530,18 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
   const justDone = useIsDone(agent);
   const placeholder = blocked
     ? asking
-      ? `Answer above, or queue a message…`
-      : `Waiting for you above. Queue a message to run after this turn…`
+      ? primary === "deliver"
+        ? `Answer above, or type a message…`
+        : `Answer above, or queue a message…`
+      : primary === "deliver"
+        ? `Approve or deny above, or type a message…`
+        : `Approve or deny above, or queue a message for after this turn…`
     : working
-      ? `${name} is working. Queue a follow-up message…`
+      ? agent.queue.length > 0
+        ? `${name} is working. ${primary === "deliver" ? "Type another message" : "Queue another message"}…  ↑ edits the last queued one`
+        : primary === "deliver"
+          ? `${name} is working. Type a follow-up: it reads it at its next step…`
+          : `${name} is working. Queue a follow-up message…`
       : justDone
         ? `Done. Reply, or start something new…`
         : agent.availableCommands.length > 0
@@ -502,8 +551,13 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
   return (
     <div ref={wrapRef} data-dictation-scope className={cn("shrink-0 pb-4 pt-1", tight ? "px-3" : "px-6")}>
       <div className={cn("mx-auto w-full", width >= 1330 ? "max-w-[1000px]" : "max-w-[860px]")}>
-        {agent.rateLimited && !resumable && <RateLimitBanner agent={agent} />}
-        <QueueStack agent={agent} onEdit={takeBack} />
+        <PinnedDock
+          agent={agent}
+          focused={focused}
+          compact={compact || tight}
+          resumable={resumable}
+          onEditQueued={stableTakeBack}
+        />
         {resumable ? (
           <ResumeBanner agent={agent} />
         ) : (
@@ -535,17 +589,6 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
                 onHover={setSlashIndex}
                 onPick={pick}
                 mono={mode === "slash"}
-              />
-            )}
-            {chooser && busy && (
-              <BusyChooser
-                name={name}
-                helperAllowed={helperAllowed}
-                onChoose={choose}
-                onClose={() => {
-                  setChooser(false);
-                  requestAnimationFrame(() => ref.current?.focus());
-                }}
               />
             )}
             <AttachmentStrip
@@ -583,7 +626,7 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
                 onKeyDown={onKeyDown}
                 onBlur={() => setSlashDismissed(true)}
                 onFocus={() => setSlashDismissed(false)}
-                className="relative block max-h-[40vh] min-h-[52px] w-full resize-none bg-transparent px-4 pb-1 pt-3.5 text-[13.5px] leading-relaxed text-fg placeholder:text-steel focus:outline-none"
+                className="relative block max-h-[40vh] min-h-[52px] w-full resize-none field-sizing-content bg-transparent px-4 pb-1 pt-3.5 text-[13.5px] leading-relaxed text-fg placeholder:text-steel focus:outline-none"
               />
             </div>
             <div className="flex items-center gap-2 px-2.5 pb-2.5 pt-1">
@@ -607,26 +650,24 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
                     )
                   }
                 />
-                <span className={cn("mx-1.5 h-4 w-px bg-line", !busy && "hidden xl:block")} aria-hidden />
+                <span className={cn("mx-1.5 h-4 w-px bg-line", !busy && !roomForHints && "hidden")} aria-hidden />
               </div>
               <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[11.5px] text-steel">
                 {busy ? (
                   <>
-                    <span className="relative flex h-2 w-2 shrink-0">
-                      <span
-                        className={cn(
-                          "absolute inset-0 rounded-full animate-pulse-ring",
-                          blocked ? "bg-warn" : "bg-accent",
-                        )}
-                      />
-                      <span className={cn("relative h-2 w-2 rounded-full", blocked ? "bg-warn" : "bg-accent")} />
-                    </span>
+                    {/* Still dot with a glow: the shimmer line above and the header dot already move. */}
+                    <span
+                      className={cn(
+                        "h-2 w-2 shrink-0 rounded-full",
+                        blocked ? "bg-warn shadow-[0_0_8px_var(--warn)]" : "bg-accent shadow-[0_0_8px_var(--accent)]",
+                      )}
+                    />
                     <span className={cn("min-w-0 truncate", width > 0 && width < 600 && "sr-only")}>
                       {blocked ? "Waiting for you" : "Working…"}
                     </span>
                   </>
                 ) : (
-                  <span className="hidden items-center gap-1 xl:flex">
+                  <span className={cn("items-center gap-1", roomForHints ? "flex" : "hidden")}>
                     <Kbd>⏎</Kbd> send <span className="mx-1 text-line-strong">·</span> <Kbd>⇧</Kbd>
                     <Kbd>⏎</Kbd> newline
                   </span>
@@ -634,7 +675,7 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
               </div>
               <div className="ml-auto flex shrink-0 items-center gap-1.5">
                 <ComposerVoiceButtons onText={insertDictation} />
-                {busy && (
+                {busy && !docked && (
                   <Tooltip content="Stop this turn" shortcut={["Esc ×2"]}>
                     <Button
                       size="sm"
@@ -648,13 +689,15 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
                     </Button>
                   </Tooltip>
                 )}
-                {busy ? (
-                  <div data-busy-send className="flex items-center">
+                {busy && docked && !canSend ? null : busy ? (
+                  <div className="flex items-center">
                     <Tooltip
                       content={
-                        busySend === "helper" && helperAllowed
-                          ? "Start a helper: works in parallel and merges back"
-                          : `Queue message: runs right after the current turn${helperAllowed ? ` · ${modKey}⏎ starts a helper instead` : ""}`
+                        primary === "deliver"
+                          ? `Send now: ${name} reads it at its next step and keeps working. Nothing is stopped${helperAllowed ? ` · ${modKey}⏎ starts a helper instead` : ""}`
+                          : primary === "helper"
+                            ? "Start a helper: works in parallel and merges back"
+                            : `Queue message: runs right after the current turn${helperAllowed ? ` · ${modKey}⏎ starts a helper instead` : ""}`
                       }
                       shortcut={["⏎"]}
                     >
@@ -665,52 +708,61 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
                         disabled={!canSend}
                         onClick={() => void send("queueButton")}
                         aria-label={
-                          busySend === "helper" && helperAllowed
-                            ? "Start a helper with this message"
-                            : "Queue message (runs after the current turn)"
+                          primary === "deliver"
+                            ? "Send into the running turn"
+                            : primary === "helper"
+                              ? "Start a helper with this message"
+                              : "Queue message (runs after the current turn)"
                         }
-                        className={cn("rounded-lg", helperAllowed && "rounded-r-none")}
+                        className="rounded-l-lg rounded-r-none"
                       >
-                        {busySend === "helper" && helperAllowed ? (
+                        {primary === "deliver" ? (
+                          <ArrowUp className="!h-4 !w-4" strokeWidth={2.5} />
+                        ) : primary === "helper" ? (
                           <GitFork className="!h-4 !w-4" />
                         ) : (
                           <ListPlus className="!h-4 !w-4" />
                         )}
-                        {!tight && (busySend === "helper" && helperAllowed ? "Helper" : "Queue")}
+                        {!tight && (primary === "deliver" ? "Send" : primary === "helper" ? "Helper" : "Queue")}
                       </Button>
                     </Tooltip>
-                    {helperAllowed && (
-                      <DropdownMenu>
-                        <Tooltip content="More ways to send" side="top">
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              size="icon-sm"
-                              variant={canSend ? "primary" : "secondary"}
-                              aria-label="More ways to send"
-                              className="w-6 rounded-l-none rounded-r-lg border-l border-l-black/20"
-                            >
-                              <ChevronDown className="!h-3.5 !w-3.5" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                        </Tooltip>
-                        <DropdownMenuContent align="end" side="top">
-                          {busySend === "helper" ? (
-                            <DropdownMenuItem disabled={!canSend} onSelect={() => void send("queueMenu")}>
-                              <ListPlus /> Queue for {name} instead
-                              <span className="ml-auto pl-4 text-[11px] text-steel">after this turn</span>
-                            </DropdownMenuItem>
-                          ) : (
-                            <DropdownMenuItem disabled={!canSend} onSelect={() => void send("helperMenu")}>
-                              <GitFork /> Start a helper now
-                              <span className="ml-auto pl-4 text-[11px] text-steel">{modKey}⏎</span>
-                            </DropdownMenuItem>
-                          )}
-                          {!canSend && (
-                            <div className="px-2.5 pb-1.5 pt-0.5 text-[11.5px] text-steel">Type a message first.</div>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    )}
+                    <DropdownMenu>
+                      <Tooltip content="More ways to send" side="top">
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            size="icon-sm"
+                            variant={canSend ? "primary" : "secondary"}
+                            aria-label="More ways to send"
+                            className="w-6 rounded-l-none rounded-r-lg border-l border-l-black/20"
+                          >
+                            <ChevronDown className="!h-3.5 !w-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                      </Tooltip>
+                      <DropdownMenuContent align="end" side="top">
+                        {primary !== "deliver" && agentTakesMidTurn && (
+                          <DropdownMenuItem disabled={!canSend} onSelect={() => void send("deliverMenu")}>
+                            <ArrowUp /> Send into the running turn
+                            <span className="ml-auto pl-4 text-[11px] text-steel">read at its next step</span>
+                          </DropdownMenuItem>
+                        )}
+                        {primary !== "queue" && (
+                          <DropdownMenuItem disabled={!canSend} onSelect={() => void send("queueMenu")}>
+                            <ListPlus /> Queue until the turn ends
+                            <span className="ml-auto pl-4 text-[11px] text-steel">nothing interrupted</span>
+                          </DropdownMenuItem>
+                        )}
+                        {primary !== "helper" && helperAllowed && (
+                          <DropdownMenuItem disabled={!canSend} onSelect={() => void send("helperMenu")}>
+                            <GitFork /> Start a helper now
+                            <span className="ml-auto pl-4 text-[11px] text-steel">{modKey}⏎</span>
+                          </DropdownMenuItem>
+                        )}
+                        {!canSend && (
+                          <div className="px-2.5 pb-1.5 pt-0.5 text-[11.5px] text-steel">Type a message first.</div>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 ) : (
                   <Tooltip
@@ -734,156 +786,6 @@ function ComposerImpl({ agent, focused = true }: { agent: Agent; focused?: boole
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-/**
- * Asked when you send while the agent works and the setting is "Ask": queue behind the turn, or
- * start a helper that runs now. Keyboard-first (Q / H / ⏎ / Esc); focus stays inside until closed.
- */
-function BusyChooser({
-  name,
-  helperAllowed,
-  onChoose,
-  onClose,
-}: {
-  name: string;
-  helperAllowed: boolean;
-  onChoose: (choice: "queue" | "helper", remember: boolean) => void;
-  onClose: () => void;
-}) {
-  const boxRef = useRef<HTMLDivElement>(null);
-  const [active, setActive] = useState<"queue" | "helper">("queue");
-  const [remember, setRemember] = useState(false);
-  useEffect(() => boxRef.current?.focus(), []);
-  const options = [
-    {
-      id: "queue" as const,
-      icon: <ListPlus className="h-4 w-4" />,
-      title: `Queue for ${name}`,
-      detail: "Runs right after the current turn",
-      keys: ["Q"],
-    },
-    ...(helperAllowed
-      ? [
-          {
-            id: "helper" as const,
-            icon: <GitFork className="h-4 w-4" />,
-            title: "Start a helper now",
-            detail: "Works in parallel, then merges back",
-            keys: [modKey, "⏎"],
-          },
-        ]
-      : []),
-  ];
-  return (
-    <div
-      ref={boxRef}
-      tabIndex={-1}
-      role="dialog"
-      aria-label="Send while busy"
-      data-busy-send
-      data-state="open"
-      onBlur={(e) => {
-        const next = e.relatedTarget as HTMLElement | null;
-        if (!next || (!e.currentTarget.contains(next) && !next.closest("[data-busy-send]"))) onClose();
-      }}
-      onKeyDown={(e) => {
-        if (composing(e)) return;
-        // Holding Enter in the composer repeats into the chooser: that must not pick for you.
-        if (e.repeat) return e.preventDefault();
-        const k = e.key.toLowerCase();
-        // Browser/OS chords (Ctrl+R reload, Ctrl+Q quit, ...) are not choices; only Enter takes a modifier.
-        if ((e.metaKey || e.ctrlKey || e.altKey) && e.key !== "Enter") return;
-        if (e.key === "Escape") {
-          e.preventDefault();
-          e.stopPropagation();
-          onClose();
-        } else if (k === "q") {
-          e.preventDefault();
-          onChoose("queue", remember);
-        } else if ((k === "h" && helperAllowed) || (e.key === "Enter" && (e.metaKey || e.ctrlKey) && helperAllowed)) {
-          e.preventDefault();
-          onChoose("helper", remember);
-        } else if (e.key === "Enter") {
-          e.preventDefault();
-          onChoose(active, remember);
-        } else if (k === "r") {
-          e.preventDefault();
-          setRemember((v) => !v);
-        } else if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Tab") {
-          e.preventDefault();
-          if (options.length > 1) setActive((a) => (a === "queue" ? "helper" : "queue"));
-        }
-      }}
-      className="anim-pop absolute bottom-full right-0 z-20 mb-2 w-[min(400px,100%)] overflow-hidden rounded-xl border border-line-strong bg-raised/95 shadow-[0_16px_48px_-8px_rgba(0,0,0,0.55)] outline-none backdrop-blur-xl edge"
-    >
-      <div className="flex items-center justify-between border-b border-line px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-steel">
-        <span>{name} is working</span>
-        <span className="flex items-center gap-1 font-normal normal-case tracking-normal">
-          <Kbd>Esc</Kbd> keeps your draft
-        </span>
-      </div>
-      <ul
-        role="listbox"
-        aria-label="What should happen to this message?"
-        aria-activedescendant={`busy-send-${active}`}
-        className="p-1"
-      >
-        {options.map((o) => (
-          <li
-            key={o.id}
-            id={`busy-send-${o.id}`}
-            role="option"
-            aria-selected={o.id === active}
-            onMouseEnter={() => setActive(o.id)}
-            onMouseDown={(e) => {
-              e.preventDefault();
-              onChoose(o.id, remember);
-            }}
-            className={cn(
-              "flex cursor-default items-center gap-3 rounded-lg px-2.5 py-2",
-              o.id === active && "bg-gunmetal/80",
-            )}
-          >
-            <span
-              className={cn(
-                "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border",
-                o.id === "helper"
-                  ? "border-accent/35 bg-accent/10 text-accent"
-                  : "border-line-strong bg-card text-muted",
-              )}
-            >
-              {o.icon}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px] font-medium text-fg">{o.title}</span>
-              <span className="block truncate text-[11.5px] text-steel">{o.detail}</span>
-            </span>
-            <span className="flex shrink-0 items-center gap-0.5">
-              {o.keys.map((k) => (
-                <Kbd key={k}>{k}</Kbd>
-              ))}
-              {o.id === active && o.id === "queue" && <Kbd className="ml-1">⏎</Kbd>}
-            </span>
-          </li>
-        ))}
-      </ul>
-      <label
-        className="flex cursor-pointer items-center gap-2 border-t border-line px-3 py-2 text-[12px] text-muted hover:text-fg"
-        onMouseDown={(e) => e.preventDefault()}
-      >
-        <input
-          type="checkbox"
-          tabIndex={-1}
-          checked={remember}
-          onChange={(e) => setRemember(e.target.checked)}
-          className="h-3.5 w-3.5 accent-[var(--accent)]"
-        />
-        Remember my choice
-        <Kbd className="ml-auto">R</Kbd>
-      </label>
     </div>
   );
 }

@@ -5,7 +5,8 @@ import { inheritedConfig, runningSubagents, useHeld, useSubagentState, WAITING_H
 import { useStore } from "@/lib/store";
 import { Spinner } from "../Icon";
 import { agentIdentity, isBusy } from "@/lib/meta";
-import { buildRows, estimateRow, finalAnswerIds, isPictureOnly, sameRow, withoutResumeNotice, type Row } from "@/lib/rows";
+import { messageRole, type MessageRole } from "@/lib/collapse";
+import { buildRows, estimateRow, finalAnswerIds, isPictureOnly, latestAnswer, messageRowText, sameRow, withoutResumeNotice, type Row } from "@/lib/rows";
 import type { PendingPrompt } from "@/lib/store";
 import { turnStart, waitingStatus } from "@/lib/thinking";
 import type { Agent, TimelineItem } from "@/lib/types";
@@ -14,6 +15,7 @@ import { ActivityGroup } from "./ActivityGroup";
 import { AgentMessage, NoticeRow, PlanCard, ThoughtRow, ToolGroup, UserBubble } from "./Items";
 import { LiveStatus } from "./LiveStatus";
 import { isPlanApproval } from "@shared/planApproval";
+import { midTurnAwaiting } from "@shared/sendNow";
 import { PermissionCard } from "./Permission";
 import { PlanApprovalCard } from "./PlanApproval";
 import { QuestionCard } from "./Question";
@@ -30,7 +32,8 @@ const TimelineRow = memo(
     streaming,
     readOnly,
     latest,
-    interim,
+    role,
+    awaiting,
     agentLive,
     bgRunning,
     inherited,
@@ -42,7 +45,9 @@ const TimelineRow = memo(
     streaming: boolean;
     readOnly: boolean;
     latest: boolean;
-    interim: boolean;
+    role: MessageRole;
+    /** A mid-turn message the agent hasn't answered yet. */
+    awaiting: boolean;
     /** The agent process is running (false: interrupted / stopped, so unfinished calls are paused). */
     agentLive: boolean;
     bgRunning: ReadonlySet<string>;
@@ -56,13 +61,17 @@ const TimelineRow = memo(
     if (row.kind === "tools") return <ToolGroup items={row.tools} agentLive={agentLive} />;
     if (row.kind === "group")
       return <ActivityGroup groupId={row.key} items={row.items} live={live} agentLive={agentLive} open={open} onToggle={onToggleGroup} />;
+    if (row.kind === "message") {
+      // A run of messages is one piece of writing: its first item carries the joined text.
+      return <AgentMessage item={{ ...row.items[0], text: messageRowText(row), images: undefined }} streaming={streaming} role={role} />;
+    }
     if (row.kind === "subagent") return <SubagentCard node={row.node} agentLive={agentLive} bgRunning={bgRunning} inherited={inherited} />;
     const it = row.item;
     switch (it.kind) {
       case "user_message":
-        return <UserBubble text={it.text} ts={it.ts} attachments={it.attachments} />;
+        return <UserBubble text={it.text} ts={it.ts} attachments={it.attachments} midTurn={it.midTurn} awaiting={awaiting} />;
       case "agent_message":
-        return <AgentMessage item={it} streaming={streaming} interim={interim} />;
+        return <AgentMessage item={it} streaming={streaming} role={role} />;
       case "thought":
         return <ThoughtRow item={it} streaming={streaming} />;
       case "permission":
@@ -83,7 +92,8 @@ const TimelineRow = memo(
     a.streaming === b.streaming &&
     a.readOnly === b.readOnly &&
     a.latest === b.latest &&
-    a.interim === b.interim &&
+    a.role === b.role &&
+    a.awaiting === b.awaiting &&
     a.agentLive === b.agentLive &&
     a.bgRunning === b.bgRunning &&
     a.inherited === b.inherited &&
@@ -172,14 +182,27 @@ export const Timeline = memo(function Timeline({
     return null;
   }, [items]);
   const finals = useMemo(() => finalAnswerIds(items), [items]);
+  // Messages sent into the running turn that the agent hasn't answered yet get a quiet "read at its next step" note.
+  const midTurnWaiting = useMemo(() => (busy ? midTurnAwaiting(items) : NO_OPEN), [items, busy]);
+  const latest = useMemo(() => latestAnswer(items, finals), [items, finals]);
+  const turnOpen = isBusy(agent.status);
+  const roleOf = useCallback(
+    (row: Row): MessageRole => {
+      const last = row.kind === "message" ? row.items[row.items.length - 1] : row.kind === "item" && row.item.kind === "agent_message" ? row.item : null;
+      if (!last) return "answer";
+      return messageRole({ final: finals.has(last.id), latest: last.id === latest.id, trailingActivity: latest.trailingActivity, turnOpen });
+    },
+    [finals, latest, turnOpen],
+  );
   const render = useCallback(
     (row: Row) => (
       <TimelineRow
         row={row}
-        streaming={row.key === streamingId}
+        streaming={row.key === streamingId || (row.kind === "message" && row.items[row.items.length - 1].id === streamingId)}
         readOnly={readOnly}
         latest={row.key === latestSummary}
-        interim={row.kind === "item" && row.item.kind === "agent_message" && !finals.has(row.item.id)}
+        role={roleOf(row)}
+        awaiting={row.kind === "item" && row.item.kind === "user_message" && midTurnWaiting.has(row.item.id)}
         agentLive={agentLive}
         bgRunning={bgRunning}
         inherited={inherited}
@@ -188,7 +211,7 @@ export const Timeline = memo(function Timeline({
         onToggleGroup={toggleGroup}
       />
     ),
-    [streamingId, readOnly, latestSummary, finals, agentLive, bgRunning, inherited, liveGroup, openGroups, toggleGroup],
+    [streamingId, readOnly, latestSummary, roleOf, midTurnWaiting, agentLive, bgRunning, inherited, liveGroup, openGroups, toggleGroup],
   );
 
   const hasMore = useStore((s) => !!s.timelines[agent.id]?.hasMore);

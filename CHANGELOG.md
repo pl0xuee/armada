@@ -5,6 +5,40 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.2.0 — 2026-10-31
+
+Run many agents on one project and watch them side by side, with a clearer view of what each one is doing and what needs you.
+
+### New
+
+- **Many agents, one project.** Start up to 8 on the same task: they open together as full conversations in a grid that fits the window, each in its own worktree so they can't overwrite each other. **Add agents** in an agent's header starts more in the same project, and the sidebar is now organised by project, with a grid button to show a project's agents together.
+- **One Mission Control.** Needs you, Inbox and Mission Control are a single view with a **Needs you / All agents** switch, and one count everywhere: the rail, the tabs, the window title and the menu-bar tray.
+- **Typing while an agent works behaves like Claude Code.** Press Enter and your message goes into the turn that's running: nothing is cancelled. Queue it for after the turn, start a helper, or deliberately **Stop & send** from the menu next to Send. If a message can't be delivered it goes back to your queue, never dropped. ↑ in an empty box takes your newest queued message back.
+- **What needs you stays pinned** above the message box, wherever you've scrolled: approvals, questions with one-tap answers, blockers (usage limit, error, budget cap, merge conflict), live plan progress, and sub-agents with a timer.
+- **Replies that read like a report.** Working notes between steps are quiet and the answer stands out; long replies and code fold behind “Show more”; tables line up; a sentence split across two messages joins back together. A new setting, **Settings → Behavior → How agents report** (Concise by default, Balanced, Detailed), asks agents to lead with the outcome and skip log dumps. It shapes how they write, not the work they do.
+- **New notification sounds** in three packs: Soft (the new default), Glass, and Classic (the sounds you had).
+- **The phone app catches up:** a project-grouped agent list, a Needs-you queue with big Approve and Deny buttons, the pinned dock, adding agents, and the same reply layout and typing behaviour.
+- **A calmer interface.** A slimmer agent header, two-line sidebar rows (with a Compact option), a live “working / need you / spend” line on the home screen, soft edges on scrolling content, a title-bar search box that stays put, stronger light-theme contrast, and tidier setup, review, accounts and comparison screens.
+
+### Faster
+
+- With eight agents streaming, the frame rate on a deliberately slowed computer rose from about 49 to 58 fps: animations pause while the window is hidden, long replies are redrawn less often, and extra screens load one at a time after start-up.
+- The first time you open the command palette or New agent is instant (it used to take about 0.8 s).
+
+### Changed
+
+- The separate project page from 0.1.11 is gone: clicking a project folds it, and agents open on the agent page.
+- “Send now” on a queued message adds it to the running turn instead of stopping the agent. For an agent that can't take messages mid-turn it says **Run next** and the message goes first in line.
+- The “Ask” choice for what Enter does while an agent works is now “Deliver to the running turn”; nobody is asked each time anymore. If you chose Queue or Helper before, that choice is kept.
+
+### Fixed
+
+- Stopping an agent and sending a message right away could let a stray line from the stopped reply appear in the new one.
+- Answering a question or an approval a split second before the agent finished could be recorded as cancelled.
+- A failed first start could make your next try fail too (“The agent process exited unexpectedly”), and a message sent while an approval was pending could reach the agent after your approval instead of before it.
+- A sentence could break in two in the middle of a reply, with the second half brighter.
+- Tooltips piling up when you Tab quickly, clipped focus rings, the Copy button printing over a message's last line, review buttons being live while the diff loaded, and the menu-bar “Needs you” count disagreeing with the app.
+
 ## v0.1.11 — 2026-10-30
 
 ### New
