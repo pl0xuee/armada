@@ -6,6 +6,7 @@
 //! the token. `gh auth setup-git` installs one; [`setup_git`] is that step, run on request.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{anyhow, bail};
 use armada_core::Agent;
@@ -17,6 +18,22 @@ use crate::git_review::{
 };
 
 const HOST: &str = "github.com";
+
+/// How long the status checks may take. They only read a login and a config, so a longer wait
+/// means `gh` is stuck (typically on a locked system keyring), not busy.
+const STATUS_TIMEOUT: Duration = Duration::from_secs(15);
+
+fn quick() -> Opts<'static> {
+    Opts {
+        timeout: Some(STATUS_TIMEOUT),
+        ..Opts::default()
+    }
+}
+
+/// A program run past its time limit (see `output`).
+fn is_timeout(e: &anyhow::Error) -> bool {
+    format!("{e:#}").contains("timed out after")
+}
 
 /// Where `gh` and global git config are asked from when no repository is involved.
 fn neutral_dir() -> PathBuf {
@@ -37,7 +54,9 @@ pub struct GithubStatus {
     pub git_ready: bool,
 }
 
-pub async fn status() -> GithubStatus {
+/// Fails, instead of reporting "signed out", when `gh` doesn't answer in time: that says nothing
+/// about whether there is a login.
+pub async fn status() -> anyhow::Result<GithubStatus> {
     let cwd = neutral_dir();
     let none = GithubStatus {
         gh_installed: false,
@@ -46,37 +65,31 @@ pub async fn status() -> GithubStatus {
         git_ready: false,
     };
     if armada_core::providers::resolve_program("gh").is_none() {
-        return none;
+        return Ok(none);
     }
-    let logged_in = output(
-        "gh",
-        &cwd,
-        &["auth", "status", "--hostname", HOST],
-        Opts::default(),
-    )
-    .await
-    .map(|o| o.status.success())
-    .unwrap_or(false);
+    let logged_in = match output("gh", &cwd, &["auth", "status", "--hostname", HOST], quick()).await {
+        Ok(o) => o.status.success(),
+        Err(e) if is_timeout(&e) => bail!(
+            "GitHub didn't answer within {} seconds. The GitHub CLI may be waiting for your system keyring to unlock; unlock it (or run `gh auth status` in a terminal), then try again.",
+            STATUS_TIMEOUT.as_secs()
+        ),
+        Err(_) => false,
+    };
     let user = if logged_in {
-        run_opts(
-            "gh",
-            &cwd,
-            &["api", "user", "--jq", ".login"],
-            Opts::default(),
-        )
-        .await
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+        run_opts("gh", &cwd, &["api", "user", "--jq", ".login"], quick())
+            .await
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
     } else {
         None
     };
-    GithubStatus {
+    Ok(GithubStatus {
         gh_installed: true,
         logged_in,
         user,
         git_ready: git_has_credential_helper(&cwd).await,
-    }
+    })
 }
 
 /// A `credential.*helper` that can keep a login between runs: anything with a value except
@@ -86,7 +99,7 @@ async fn git_has_credential_helper(cwd: &Path) -> bool {
         "git",
         cwd,
         &["config", "--get-regexp", r"^credential\..*helper$"],
-        Opts::default(),
+        quick(),
     )
     .await
     else {
@@ -275,7 +288,7 @@ pub async fn publish(
 ) -> anyhow::Result<PublishResult> {
     let name = name.trim();
     validate_repo_name(name)?;
-    let st = status().await;
+    let st = status().await?;
     if !st.gh_installed {
         bail!("The GitHub CLI (gh) is not installed. Get it from https://cli.github.com");
     }
@@ -472,6 +485,12 @@ mod tests {
         assert_eq!(suggest_name(Path::new("/x/My App (v2)")), "My-App--v2");
         assert_eq!(suggest_name(Path::new("/x/.hidden")), "hidden");
         assert_eq!(suggest_name(Path::new("/")), "my-project");
+    }
+
+    #[test]
+    fn timeouts_are_told_apart_from_other_failures() {
+        assert!(is_timeout(&anyhow!("gh auth timed out after 15 s")));
+        assert!(!is_timeout(&anyhow!("gh auth failed: not logged in")));
     }
 
     #[test]
