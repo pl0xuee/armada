@@ -26,7 +26,6 @@ import {
   ChartColumn,
   Columns3,
   CornerDownLeft,
-  History,
   LayoutGrid,
   ListTodo,
   Rocket,
@@ -60,8 +59,9 @@ import {
 import { orderedAgents } from "@/lib/agents";
 import { api } from "@/lib/api";
 import { openToolkit } from "@/store/toolkit";
-import { relativeTime } from "@/lib/format";
-import type { Agent, SearchHit, Settings as SettingsT } from "@/lib/types";
+import type { Agent, SearchResults, Settings as SettingsT } from "@/lib/types";
+import { openSearchHit, searchTerm } from "@/lib/search";
+import { ConversationHits } from "./search/ConversationHits";
 import { basename, errorMessage, isMac, modKey } from "@/lib/utils";
 import { launchAgent, resolveLaunch } from "@/lib/launchDefaults";
 import { useIdentity } from "@/hooks/useIdentity";
@@ -143,6 +143,8 @@ function escapeRe(t: string) {
 function paletteFilter(value: string, search: string, keywords?: string[]): number {
   const q = search.trim();
   if (q.startsWith(">")) return value.startsWith("start:") ? 1 : 0;
+  // "?" searches conversations only; those rows are always shown (forceMount).
+  if (q.startsWith("?")) return value.startsWith("history:") ? 1 : 0;
   if (value.startsWith("start:")) return 0;
   const hay = (keywords && keywords.length ? keywords.join(" ") : value).toLowerCase();
   const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
@@ -150,11 +152,13 @@ function paletteFilter(value: string, search: string, keywords?: string[]): numb
 }
 
 function Palette({ onClose }: { onClose: () => void }) {
-  const [query, setQuery] = useState("");
+  // "Search conversations" opens the palette with "? " already typed.
+  const [query, setQuery] = useState(() => useUi.getState().paletteSeed ?? "");
+  useEffect(() => useUi.setState({ paletteSeed: null }), []);
   // Inline rename of the current agent (palette "Rename…" switches into this mode).
   const [renaming, setRenaming] = useState<Agent | null>(null);
-  const debounced = useDebounced(query, 220);
-  const [hits, setHits] = useState<SearchHit[]>([]);
+  const debounced = useDebounced(query, 160);
+  const [results, setResults] = useState<SearchResults | null>(null);
   const [searching, setSearching] = useState(false);
   const agentsMap = useApp((s) => s.agents);
   const settings = useApp((s) => s.settings);
@@ -165,6 +169,8 @@ function Palette({ onClose }: { onClose: () => void }) {
   // The first "Start agent" item uses the default permission mode; the second offers the other one.
   const defaultMode: "auto" | "ask" = settings?.defaultPermissionMode ?? "ask";
   const startMode = query.trimStart().startsWith(">");
+  const searchMode = query.trimStart().startsWith("?");
+  const term = searchTerm(query);
   const task = (startMode ? query.trimStart().slice(1) : query).trim();
   const ui = useUi.getState();
 
@@ -175,23 +181,28 @@ function Palette({ onClose }: { onClose: () => void }) {
   const current = ui.view === "agents" && ui.selectedAgentId ? agentsMap[ui.selectedAgentId] : undefined;
   const previewOpen = usePreview((s) => (current ? previewOf(s, current.id).open : false));
 
+  // Conversation search: debounced, and an answer to an older query is dropped.
+  const debouncedTerm = searchTerm(debounced);
   useEffect(() => {
-    const q = debounced.trim();
-    if (q.length < 2 || q.startsWith(">") || renaming) {
-      setHits([]);
+    if (debouncedTerm.length < 2 || debounced.trimStart().startsWith(">") || renaming) {
+      setResults(null);
+      setSearching(false);
       return;
     }
     let cancelled = false;
     setSearching(true);
     api
-      .search(q)
-      .then((h) => !cancelled && setHits(h))
-      .catch(() => !cancelled && setHits([]))
+      .searchConversations(debouncedTerm)
+      .then((r) => !cancelled && setResults(r))
+      .catch(() => !cancelled && setResults(null))
       .finally(() => !cancelled && setSearching(false));
     return () => {
       cancelled = true;
     };
-  }, [debounced, renaming]);
+  }, [debounced, debouncedTerm, renaming]);
+  // What is typed isn't what was searched yet: don't show the older answer as if it were.
+  const settled = debouncedTerm === term ? results : null;
+  const hasHits = (settled?.groups.length ?? 0) > 0;
 
   const run = (fn: () => void) => {
     onClose();
@@ -259,17 +270,27 @@ function Palette({ onClose }: { onClose: () => void }) {
           value={query}
           onValueChange={setQuery}
           autoFocus
-          aria-label={startMode ? "Describe a task to start an agent" : "Search agents, actions and history"}
-          placeholder="Search agents, actions and history…  (type > to start an agent)"
+          aria-label={
+            startMode
+              ? "Describe a task to start an agent"
+              : searchMode
+                ? "Search every conversation"
+                : "Search agents, actions and conversations"
+          }
+          placeholder={
+            searchMode
+              ? "Search every conversation…"
+              : "Search agents, actions and conversations…  (> start an agent, ? search chats)"
+          }
           className="h-12 flex-1 bg-transparent text-[14px] text-fg placeholder:text-steel focus:outline-none"
         />
         {searching && <Spinner className="h-3.5 w-3.5" />}
         <Kbd>Esc</Kbd>
       </div>
       <Command.List className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1.5 [&_[cmdk-list-sizer]]:space-y-0.5">
-        {hits.length === 0 && !startMode && (
+        {!hasHits && !startMode && !searchMode && (
           <Command.Empty className="px-4 py-10 text-center text-[13px] text-steel">
-            {searching ? "Searching history…" : "No results. Try a different phrase."}
+            {searching ? "Searching conversations…" : "No results. Try a different phrase."}
           </Command.Empty>
         )}
 
@@ -312,7 +333,7 @@ function Palette({ onClose }: { onClose: () => void }) {
           </Command.Group>
         )}
 
-        {!startMode && (
+        {!startMode && !searchMode && (
           <>
             <Command.Group heading="Agents" className={groupClass}>
               {[...agents, ...archived].map((a, i) => (
@@ -461,6 +482,13 @@ function Palette({ onClose }: { onClose: () => void }) {
             )}
 
             <Command.Group heading="Actions" className={groupClass}>
+              <PaletteAction
+                icon={<Search />}
+                label="Search conversations…"
+                shortcut={[modKey, "⇧", "F"]}
+                keywords={["find", "history", "messages", "grep", "files", "tools"]}
+                onSelect={() => setQuery("? ")}
+              />
               <PaletteAction
                 icon={<Plus />}
                 label="New agent"
@@ -678,37 +706,19 @@ function Palette({ onClose }: { onClose: () => void }) {
                 ))}
               </Command.Group>
             )}
-
-            {hits.length > 0 && (
-              <Command.Group heading="History" className={groupClass} forceMount>
-                {hits.map((h) => {
-                  const a = agentsMap[h.agentId];
-                  return (
-                    <Command.Item
-                      key={`${h.agentId}-${h.itemId}`}
-                      // Stable value + forceMount: rows don't remount or vanish while the query is retyped.
-                      value={`history:${h.agentId}:${h.itemId}`}
-                      forceMount
-                      onSelect={() => run(() => ui.openAgent(h.agentId))}
-                      className={`${itemClass} h-auto min-h-10 py-2`}
-                    >
-                      <IconBox>
-                        <History />
-                      </IconBox>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[12.5px] text-fg/90">
-                          {h.snippet.replace(/[`*#>_]+/g, "")}
-                        </span>
-                        <span className="block truncate text-[11px] text-steel">
-                          {a?.title ?? "Deleted agent"} · {h.kind.replace("_", " ")} · {relativeTime(h.ts)}
-                        </span>
-                      </span>
-                    </Command.Item>
-                  );
-                })}
-              </Command.Group>
-            )}
           </>
+        )}
+
+        {!startMode && (
+          <ConversationHits
+            results={settled}
+            agents={agentsMap}
+            searching={searching || debouncedTerm !== term}
+            full={searchMode}
+            term={term}
+            onOpen={(hit) => run(() => void openSearchHit(hit))}
+            onSeeAll={() => setQuery(`? ${term}`)}
+          />
         )}
       </Command.List>
       <div className="flex items-center gap-3 border-t border-line bg-panel/60 px-4 py-2 text-[11px] text-steel">
@@ -722,7 +732,7 @@ function Palette({ onClose }: { onClose: () => void }) {
           </Kbd>
           select
         </span>
-        {!startMode && task.length >= 3 ? (
+        {!startMode && !searchMode && task.length >= 3 ? (
           <span className="ml-auto flex min-w-0 items-center gap-1 truncate">
             <Kbd>{modKey}</Kbd>
             <Kbd>
@@ -732,7 +742,11 @@ function Palette({ onClose }: { onClose: () => void }) {
           </span>
         ) : (
           <span className="ml-auto max-[520px]:hidden">
-            {startMode ? "Enter starts the agent" : "Type > to start an agent · 2+ characters search history"}
+            {startMode
+              ? "Enter starts the agent"
+              : searchMode
+                ? "Searched on this computer only · archived agents included"
+                : "Type > to start an agent · ? to search every conversation"}
           </span>
         )}
       </div>

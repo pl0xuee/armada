@@ -149,9 +149,20 @@ pub fn settings_section(settings: &Settings) -> String {
                 "set (hidden)".into()
             };
         }
-        for key in ["templates", "mcpServers", "customAgents", "recentProjects"] {
+        for key in [
+            "templates",
+            "mcpServers",
+            "customAgents",
+            "recentProjects",
+            "alertTargets",
+            "projectBudgets",
+        ] {
             if let Some(slot) = o.get_mut(key) {
-                let n = slot.as_array().map_or(0, Vec::len);
+                let n = slot
+                    .as_array()
+                    .map(Vec::len)
+                    .or_else(|| slot.as_object().map(serde_json::Map::len))
+                    .unwrap_or(0);
                 *slot = format!("{n} configured (hidden)").into();
             }
         }
@@ -668,6 +679,28 @@ mod tests {
     fn scrub_keeps_ordinary_text() {
         let t = "INFO armada: agent started in 12 ms (pid 4411) path=/tmp/x/y";
         assert_eq!(scrub(t), t);
+    }
+
+    #[test]
+    fn settings_hide_webhook_urls_and_project_budgets() {
+        let mut s = Settings::default();
+        s.alert_targets.push(armada_core::AlertTarget {
+            id: "t1".into(),
+            name: "ops-room".into(),
+            url: "https://hooks.slack.com/services/T0/B0/webhooksecret123".into(),
+            ..Default::default()
+        });
+        s.project_budgets.insert(
+            "/home/zed/secret-project".into(),
+            armada_core::budget::BudgetCap {
+                usd: Some(5.0),
+                tokens: None,
+            },
+        );
+        let out = settings_section(&s);
+        assert!(!out.contains("webhooksecret123") && !out.contains("hooks.slack.com"));
+        assert!(!out.contains("ops-room") && !out.contains("secret-project"));
+        assert!(out.contains("1 configured (hidden)"), "{out}");
     }
 
     #[test]

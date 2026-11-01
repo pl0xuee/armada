@@ -314,6 +314,7 @@ impl Core {
             }),
         };
         core.restore_queues();
+        core.spawn_search_backfill();
         Ok(core)
     }
 
@@ -518,12 +519,13 @@ impl Core {
             .agents
             .lock()
             .values()
-            .filter(|r| {
-                r.agent.status == AgentStatus::Interrupted
-                    && !r.agent.archived
-                    && !self.budget_blocks_resume(r.agent.cost_usd)
-            })
+            .filter(|r| r.agent.status == AgentStatus::Interrupted && !r.agent.archived)
             .map(|r| r.agent.id.clone())
+            .collect();
+        // Checked outside the agents lock: it reads every agent's spend.
+        let interrupted: Vec<String> = interrupted
+            .into_iter()
+            .filter(|id| !self.budget_blocks_resume(id))
             .collect();
         // A few at a time: starting every agent at once overwhelms the machine
         // (and the providers).
@@ -789,6 +791,38 @@ impl Core {
 
     pub fn search(&self, query: &str) -> Result<Vec<SearchHit>> {
         self.inner.db.search(query)
+    }
+
+    /// Full-text search over every conversation (archived ones too), grouped by agent.
+    pub fn search_conversations(&self, query: &str) -> Result<SearchResults> {
+        self.inner.db.search_grouped(query)
+    }
+
+    /// Indexes timelines stored before search existed, in the background, a small
+    /// batch at a time so agents and the UI never wait for it. Stops when done.
+    fn spawn_search_backfill(&self) {
+        if !self.inner.db.has_unindexed() {
+            return;
+        }
+        let core = self.clone();
+        let spawned = std::thread::Builder::new()
+            .name("armada-search-index".into())
+            .spawn(move || loop {
+                if core.is_shutting_down() {
+                    return;
+                }
+                match core.inner.db.index_step(250) {
+                    Ok(0) => return,
+                    Ok(_) => std::thread::sleep(std::time::Duration::from_millis(25)),
+                    Err(e) => {
+                        tracing::warn!("search indexing stopped: {e:#}");
+                        return;
+                    }
+                }
+            });
+        if let Err(e) = spawned {
+            tracing::warn!("couldn't start the search indexer: {e}");
+        }
     }
 
     pub fn settings(&self) -> Result<Settings> {
@@ -1720,6 +1754,8 @@ impl Core {
             permission_mode,
             acknowledged_at: None,
             needs_briefing: false,
+            budget: None,
+            budget_hold: None,
             guide_tag: String::new(),
             parent_id: helper.as_ref().map(|h| h.parent_id.clone()),
             helper_sync: helper.as_ref().map(|_| HelperSync {

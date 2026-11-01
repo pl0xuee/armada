@@ -44,6 +44,7 @@ export function selectNextTriage(queue: TriageEntry[]) {
 
 export const REASON_LABEL: Record<NeedsReason, string> = {
   permission: "Needs approval",
+  budget: "Spending limit",
   rate_limited: "Usage limit",
   error: "Error",
   done: "Done · unread",
@@ -66,6 +67,7 @@ export function useQuestionAgents(): ReadonlySet<string> {
 
 export const REASON_TONE: Record<NeedsReason, string> = {
   permission: "border-warn/35 bg-warn/10 text-warn",
+  budget: "border-warn/35 bg-warn/10 text-warn",
   rate_limited: "border-warn/35 bg-warn/10 text-warn",
   error: "border-err/35 bg-err/10 text-err",
   done: "border-ok/30 bg-ok/10 text-ok",
