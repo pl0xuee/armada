@@ -438,6 +438,11 @@ import { toJpeg, toPng } from "html-to-image";
       case "ping":
         post({ type: "ready", url: location.href, title: clip(document.title, 200) });
         break;
+      case "history":
+        // The page's own back / forward (the app can't reach a cross-origin frame's history).
+        if (d.dir === "back") W.history.back();
+        else if (d.dir === "forward") W.history.forward();
+        break;
     }
   });
 

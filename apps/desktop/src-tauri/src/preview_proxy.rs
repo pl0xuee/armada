@@ -1054,6 +1054,17 @@ mod tests {
     }
 
     /// Manual: `ARMADA_PROXY_TARGET=http://localhost:5173 cargo test -p armada-desktop proxy_for_manual_checks -- --ignored --nocapture`
+    /// The committed bundle must be rebuilt (`npm run build:preview-agent`) when the agent's commands change.
+    #[test]
+    fn bundled_agent_handles_page_commands() {
+        for cmd in ["screenshot", "inspect", "ping", "history"] {
+            assert!(
+                AGENT_JS.contains(&format!("case`{cmd}`")),
+                "preview-agent.js lacks the `{cmd}` command: rebuild it"
+            );
+        }
+    }
+
     /// runs a proxy in front of a real dev server and prints its URL (used to check Vite HMR).
     #[tokio::test]
     #[ignore]

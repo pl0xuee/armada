@@ -1,6 +1,8 @@
 import {
   ArrowLeft,
   Camera,
+  ChevronLeft,
+  ChevronRight,
   CircleAlert,
   Crosshair,
   Ellipsis,
@@ -40,6 +42,7 @@ import { api } from "@/lib/api";
 import { openExternal } from "@/lib/external";
 import { effectiveLoopbackUrl, parseLoopbackUrl, urlPort } from "@/lib/ports";
 import { formatErrorsSummary, formatPicked, shotToAttachment, type ShotResult } from "@/lib/previewBridge";
+import { projectUrl, rememberProjectUrl } from "@/lib/previewMemory";
 import type { Agent } from "@/lib/types";
 import { modKey } from "@/lib/utils";
 import { closePreview, markPreviewSeen, patchPreview, previewOf, usePreview } from "@/store/preview";
@@ -104,11 +107,13 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
   const [shooting, setShooting] = useState(false);
 
   // Showing the pane acknowledges any detected server (clears the header's "new" dot), and picks the
-  // most recently mentioned live one when nothing is selected yet.
+  // most recently mentioned live one (else the project's last address) when nothing is selected yet.
   useEffect(() => {
     markPreviewSeen(agent.id);
-    if (newest && !previewOf(usePreview.getState(), agent.id).url) patchPreview(agent.id, { url: newest, auto: true });
-  }, [agent.id, newest]);
+    if (previewOf(usePreview.getState(), agent.id).url) return;
+    const first = newest ?? projectUrl(agent.projectPath);
+    if (first) patchPreview(agent.id, { url: first, auto: true });
+  }, [agent.id, agent.projectPath, newest]);
 
   // The field follows the store (links, detection, the servers menu).
   useEffect(() => setText(st.url), [st.url]);
@@ -153,6 +158,11 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
       if (timer) clearTimeout(timer);
     };
   }, [port, reload, agent.id, url]);
+
+  // A server that answered becomes the project's remembered address.
+  useEffect(() => {
+    if (probe === "up" && url) rememberProjectUrl(agent.projectPath, url);
+  }, [probe, url, agent.projectPath]);
 
   // Never leave the loading veil up forever (a page that loads slowly is still visible behind it).
   useEffect(() => {
@@ -336,6 +346,30 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
             </Button>
           </Tooltip>
         )}
+        <Tooltip content={toolsReady ? "Back" : `Back: ${toolsWhy}`}>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Back in the page"
+            className="hidden @[520px]:inline-flex"
+            disabled={!url || !toolsReady}
+            onClick={() => page.navigate("back")}
+          >
+            <ChevronLeft />
+          </Button>
+        </Tooltip>
+        <Tooltip content={toolsReady ? "Forward" : `Forward: ${toolsWhy}`}>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Forward in the page"
+            className="mr-0.5 hidden @[520px]:inline-flex"
+            disabled={!url || !toolsReady}
+            onClick={() => page.navigate("forward")}
+          >
+            <ChevronRight />
+          </Button>
+        </Tooltip>
         <form
           className="mr-1 flex min-w-0 flex-1 items-center"
           onSubmit={(e) => {
@@ -463,6 +497,16 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
             <DropdownMenuItem disabled={!url} onSelect={() => url && void openExternal(url)}>
               <ExternalLink /> Open in browser
             </DropdownMenuItem>
+            {body.w < 520 && (
+              <>
+                <DropdownMenuItem disabled={!url || !toolsReady} onSelect={() => page.navigate("back")}>
+                  <ChevronLeft /> Back
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={!url || !toolsReady} onSelect={() => page.navigate("forward")}>
+                  <ChevronRight /> Forward
+                </DropdownMenuItem>
+              </>
+            )}
             {body.w < 420 && (
               <>
                 <DropdownMenuItem disabled={!url || !toolsReady || shooting} onSelect={() => void screenshot()}>
