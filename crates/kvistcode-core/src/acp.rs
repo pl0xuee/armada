@@ -99,6 +99,17 @@ pub struct StartOptions<'a> {
     pub mcp_servers: &'a [McpServer],
     /// Kvistcode's note to the agent (see `guidance`).
     pub guidance: &'a str,
+    /// `_meta` for `session/new`, `session/resume` and `session/load` (Claude: skills
+    /// switched off, see `skill_prefs`).
+    pub session_meta: Option<Value>,
+}
+
+/// `params` with the session `_meta` attached (when there is any).
+fn with_meta(mut params: Value, meta: &Option<Value>) -> Value {
+    if let Some(meta) = meta {
+        params["_meta"] = meta.clone();
+    }
+    params
 }
 
 impl AcpDriver {
@@ -215,7 +226,10 @@ impl AcpDriver {
         if let Some(prev) = opts.resume {
             let can_resume = caps["sessionCapabilities"].get("resume").is_some();
             let can_load = caps["loadSession"].as_bool().unwrap_or(false);
-            let params = json!({ "sessionId": prev, "cwd": cwd, "mcpServers": mcp });
+            let params = with_meta(
+                json!({ "sessionId": prev, "cwd": cwd, "mcpServers": mcp }),
+                &opts.session_meta,
+            );
             let mut resumed = None;
             if can_resume {
                 match peer
@@ -251,7 +265,8 @@ impl AcpDriver {
         let (session_id, resp) = match session {
             Some(s) => s,
             None => {
-                let mut params = json!({ "cwd": cwd, "mcpServers": mcp });
+                let mut params =
+                    with_meta(json!({ "cwd": cwd, "mcpServers": mcp }), &opts.session_meta);
                 if let Some(prompt) = system_prompt(caps, opts.guidance) {
                     params["systemPrompt"] = prompt;
                     driver
@@ -1596,5 +1611,20 @@ mod subagent_tests {
             }),
         );
         assert!(!sub(&b).unwrap().background);
+    }
+}
+
+#[cfg(test)]
+mod session_meta_tests {
+    use super::*;
+
+    #[test]
+    fn session_meta_is_attached_only_when_there_is_one() {
+        let base = json!({ "cwd": "/p", "mcpServers": [] });
+        assert_eq!(with_meta(base.clone(), &None), base);
+        let meta = json!({ "claudeCode": { "options": { "settings": { "skillOverrides": { "pdf": "off" } } } } });
+        let with = with_meta(base.clone(), &Some(meta.clone()));
+        assert_eq!(with["_meta"], meta);
+        assert_eq!(with["cwd"], "/p");
     }
 }

@@ -1207,6 +1207,16 @@ impl Core {
             None => self.inner.settings.lock().default_permission_mode == "auto",
         };
 
+        // Skills switched off in Skills settings reach Claude when it starts (a running
+        // agent keeps the skills it started with).
+        let session_meta = (agent.provider == Provider::Claude)
+            .then(|| {
+                crate::skill_prefs::claude_meta(&crate::skill_prefs::disabled_for_project(
+                    &self.inner.data_dir,
+                    &providers::expand_home(&agent.project_path),
+                ))
+            })
+            .flatten();
         let response_style = self.inner.settings.lock().response_style;
         let guidance = crate::guidance::guidance(response_style);
         let guide_tag = crate::guidance::tag(response_style);
@@ -1249,6 +1259,7 @@ impl Core {
                     version: VERSION,
                     mcp_servers: &mcp_servers,
                     guidance: &guidance,
+                    session_meta,
                 },
             )
             .await
