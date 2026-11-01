@@ -6,6 +6,7 @@ import type { KvistcodeApi } from "./api";
 import { emitVoiceBus } from "./voiceBus";
 import { budgetLevel } from "./budget";
 import { searchItems } from "./mock-search";
+import { mockWorkflowProgress, mockWorkflowStart } from "./mock-workflow";
 import { validateAlertUrl } from "./alertTargets";
 import { mockProjectConfig, mockSaveInstruction, mockSaveRules } from "./mock-project-config";
 import {
@@ -666,6 +667,31 @@ function startLiveActivity() {
       });
       bgChildren.push(c.id);
     }
+    // A Claude "Workflow": five agents in their own worktrees; the call returns at launch.
+    mockWorkflowStart("gk-wf");
+    addItem("a-research", {
+      kind: "tool_call",
+      toolCallId: "gk-wf",
+      title: "Workflow",
+      toolKind: "think",
+      status: "completed",
+      locations: [],
+      diffs: [],
+      output:
+        "Workflow launched in background. Task ID: w4cpfsvul\nSummary: Five parallel agents build the follow-ups (phone parity, PR safety, tools cleanup, turn limits, preview tour)\nTranscript dir: /mock/projects/p/s/subagents/workflows/wf_mock-1",
+      command: null,
+      subagent: {
+        kind: "workflow",
+        description:
+          "Five parallel agents build the follow-ups (phone parity, PR safety, tools cleanup, turn limits, preview tour)",
+        background: true,
+        workflow: {
+          taskId: "w4cpfsvul",
+          runId: "wf_mock-1",
+          transcriptDir: "/mock/projects/p/s/subagents/workflows/wf_mock-1",
+        },
+      },
+    });
     const childTitles = [
       ['Search "qdrant filtered search benchmark 2025"', "search"],
       ["Fetch qdrant.tech/benchmarks/filtered", "fetch"],
@@ -1168,6 +1194,10 @@ export const mockApi: KvistcodeApi = {
     if (opts?.beforeSeq !== undefined) list = list.filter((i) => i.seq < (opts.beforeSeq ?? Infinity));
     if (opts?.limit !== undefined) list = list.slice(Math.max(0, list.length - opts.limit));
     return delay(clone(list), 220);
+  },
+
+  async workflowProgress(_agentId, toolCallId) {
+    return delay(mockWorkflowProgress(toolCallId), 120);
   },
 
   async searchConversations(query) {

@@ -475,6 +475,23 @@ pub struct SubAgent {
     /// input), not a sub-agent of its own: shown, but never counted as running.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub control: bool,
+    /// Set when this is a Claude Code "Workflow" run (several agents in parallel) rather
+    /// than a single sub-agent; `kind` is then "workflow".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<Box<WorkflowLaunch>>,
+}
+
+/// Where a launched Workflow keeps its transcripts, read from the launch call's output.
+/// The directory is never trusted blindly: `workflow::progress` re-validates it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowLaunch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub transcript_dir: String,
 }
 
 /// An image attached to a prompt (base64 payload, no data: prefix).

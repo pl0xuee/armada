@@ -84,7 +84,8 @@ export function planIsLive(items: readonly TimelineItem[]): boolean {
 
 // ---------------------------------------------------------------- what the dock shows
 
-export type DockSection = "needs_you" | "rate_limit" | "error" | "budget" | "conflict" | "plan" | "subagents" | "queue";
+export type DockSection =
+  "needs_you" | "rate_limit" | "error" | "budget" | "conflict" | "plan" | "workflow" | "subagents" | "queue";
 
 export type DockFlags = Record<DockSection, boolean>;
 
@@ -96,6 +97,7 @@ export const DOCK_ORDER: readonly DockSection[] = [
   "budget",
   "conflict",
   "plan",
+  "workflow",
   "subagents",
   "queue",
 ];

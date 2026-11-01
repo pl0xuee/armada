@@ -230,7 +230,8 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, c
   const runs: SubagentRun[] = [];
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
-    if (it.kind !== "tool_call" || !it.subagent || it.subagent.control) continue;
+    // Workflow runs have their own progress (see workflows.ts), not the child-call rules below.
+    if (it.kind !== "tool_call" || !it.subagent || it.subagent.control || it.subagent.workflow) continue;
     const bg = !!it.subagent.background;
     const open = unfinished(it.status) || (bg && it.status === "completed" && i > turnStartIdx);
     let running = open && busy;

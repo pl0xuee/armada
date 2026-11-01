@@ -756,6 +756,39 @@ impl Core {
         self.inner.db.items(agent_id)
     }
 
+    /// Progress of the Workflow run a tool call launched. The transcript folder is taken
+    /// from the stored call (never from the caller) and validated by `workflow::resolve_dir`.
+    pub fn workflow_progress(
+        &self,
+        agent_id: &str,
+        tool_call_id: &str,
+    ) -> Result<crate::workflow::WorkflowProgress> {
+        self.flush_ctx(agent_id);
+        let launch = match self.inner.db.tool_call(agent_id, tool_call_id)? {
+            Some(TimelineItem {
+                body:
+                    ItemBody::ToolCall {
+                        subagent:
+                            Some(SubAgent {
+                                workflow: Some(launch),
+                                ..
+                            }),
+                        ..
+                    },
+                ..
+            }) => launch,
+            _ => return Err(anyhow!("That isn't a workflow run")),
+        };
+        let agent = self.agent(agent_id)?;
+        let account = self.account(&agent.account_id).ok();
+        let config_dir = account
+            .as_ref()
+            .filter(|a| !a.is_system)
+            .and_then(|a| a.config_dir.as_deref());
+        let roots = crate::workflow::config_roots(config_dir);
+        crate::workflow::progress_for(&launch, &roots)
+    }
+
     /// The last `limit` timeline items with `seq < before_seq` (the newest ones when
     /// None), oldest first. Page backwards by passing the first item's seq.
     pub fn items_page(
