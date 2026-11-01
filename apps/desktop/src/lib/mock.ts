@@ -6,6 +6,13 @@ import type { ArmadaApi } from "./api";
 import { emitVoiceBus } from "./voiceBus";
 import { budgetLevel } from "./budget";
 import { mockProjectConfig, mockSaveInstruction, mockSaveRules } from "./mock-project-config";
+import {
+  mockInstructionsSave,
+  mockReadInstruction,
+  mockSkillsCreate,
+  mockSkillsList,
+  mockSkillsRead,
+} from "./mock-toolkit";
 import { configDefaultsKey, isRememberableOption } from "./configMemory";
 import { isStressMode, STRESS_AGENTS, STRESS_TICK_MS, stressAgents, stressItems, stressWords } from "./mock-stress";
 import {
@@ -2540,6 +2547,31 @@ export const mockApi: ArmadaApi = {
   async projectSaveRules(project, scope, rules) {
     await sleep(rand(150, 350));
     return mockSaveRules(project, scope, rules);
+  },
+
+  async instructionsRead(project, file) {
+    await sleep(rand(60, 160));
+    return mockReadInstruction(project, file);
+  },
+
+  async instructionsSave(project, file, content, expectedStamp, force) {
+    await sleep(rand(150, 350));
+    return mockInstructionsSave(project, file, content, expectedStamp, force);
+  },
+
+  async skillsList(project) {
+    await sleep(rand(100, 260));
+    return mockSkillsList(project);
+  },
+
+  async skillsRead(project, id) {
+    await sleep(rand(60, 160));
+    return mockSkillsRead(project, id);
+  },
+
+  async skillsCreate(project, scope, name, description) {
+    await sleep(rand(150, 350));
+    return mockSkillsCreate(project, scope, name, description);
   },
 
   async listFiles(agentId, query) {

@@ -12,12 +12,15 @@ import {
   Moon,
   Pencil,
   Play,
+  Plug,
+  Puzzle,
   Power,
   Square,
   SquareTerminal,
   Sun,
   CalendarClock,
   Download,
+  FileText,
   Radio,
   Repeat,
   ChartColumn,
@@ -56,6 +59,7 @@ import {
 } from "@/lib/actions";
 import { orderedAgents } from "@/lib/agents";
 import { api } from "@/lib/api";
+import { openToolkit } from "@/store/toolkit";
 import { relativeTime } from "@/lib/format";
 import type { Agent, SearchHit, Settings as SettingsT } from "@/lib/types";
 import { basename, errorMessage, isMac, modKey } from "@/lib/utils";
@@ -116,7 +120,11 @@ const SETTINGS_SECTIONS: { id: SettingsSection; label: string; keywords: string[
   { id: "notifications", label: "Notifications", keywords: ["notify", "quiet hours", "dnd"] },
   { id: "behavior", label: "Behavior", keywords: ["tray", "hotkey", "failover", "permission mode"] },
   { id: "templates", label: "Templates", keywords: ["prompts", "snippets"] },
-  { id: "mcp", label: "Tools (MCP)", keywords: ["mcp", "servers", "tools"] },
+  {
+    id: "toolkit",
+    label: "Tools & instructions",
+    keywords: ["mcp", "servers", "skills", "claude.md", "agents.md", "instructions"],
+  },
   { id: "providers", label: "Providers", keywords: ["install", "cli", "claude", "codex", "grok"] },
   { id: "agents", label: "Agents (ACP)", keywords: ["custom agents", "acp", "gemini", "goose"] },
   { id: "remote", label: "Remote & mobile", keywords: ["phone", "share", "pairing", "lan"] },
@@ -539,6 +547,24 @@ function Palette({ onClose }: { onClose: () => void }) {
                 label="Copy diagnostics"
                 keywords={["bug", "report", "debug", "logs", "support"]}
                 onSelect={() => run(() => void copyDiagnostics())}
+              />
+              <PaletteAction
+                icon={<FileText />}
+                label="Edit project instructions"
+                keywords={["claude.md", "agents.md", "tools", "instructions"]}
+                onSelect={() => run(() => openToolkit("instructions"))}
+              />
+              <PaletteAction
+                icon={<Plug />}
+                label="Manage MCP servers"
+                keywords={["mcp", "tools", "servers", "connectors"]}
+                onSelect={() => run(() => openToolkit("mcp"))}
+              />
+              <PaletteAction
+                icon={<Puzzle />}
+                label="Browse skills"
+                keywords={["skills", "tools", "skill.md"]}
+                onSelect={() => run(() => openToolkit("skills"))}
               />
               {SETTINGS_SECTIONS.map((sec) => (
                 <PaletteAction

@@ -10,15 +10,15 @@ use armada_core::project_config::{
 use armada_core::{providers, Core};
 use tauri::State;
 
-type CmdResult<T> = Result<T, String>;
+pub(crate) type CmdResult<T> = Result<T, String>;
 
-fn err(e: anyhow::Error) -> String {
+pub(crate) fn err(e: anyhow::Error) -> String {
     format!("{e:#}")
 }
 
 /// The canonical folder of `project`, which must be one Armada already knows (a recent
 /// project or an agent's project), so the UI can't point these commands at any folder.
-fn known_project(core: &Core, project: &str) -> CmdResult<PathBuf> {
+pub(crate) fn known_project(core: &Core, project: &str) -> CmdResult<PathBuf> {
     let wanted = providers::expand_home(project.trim());
     let root = project_config::resolve_root(&wanted).map_err(err)?;
     let mut known = core.settings().map_err(err)?.recent_projects;
@@ -38,7 +38,7 @@ fn known_project(core: &Core, project: &str) -> CmdResult<PathBuf> {
     }
 }
 
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     job: impl FnOnce() -> CmdResult<T> + Send + 'static,
 ) -> CmdResult<T> {
     tauri::async_runtime::spawn_blocking(job)

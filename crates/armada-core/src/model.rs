@@ -1159,7 +1159,7 @@ pub enum McpTransport {
     Http,
 }
 
-/// An MCP server made available to every agent (all providers).
+/// An MCP server made available to agents of every provider: all projects, or just one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServer {
@@ -1183,6 +1183,9 @@ pub struct McpServer {
     pub url: String,
     #[serde(default)]
     pub headers: Vec<KeyValue>,
+    /// Empty: available to every project. Otherwise only to agents in that project folder.
+    #[serde(default)]
+    pub project_path: String,
 }
 
 /// Starts an agent automatically at `time` (local, "HH:MM") on the given weekdays.

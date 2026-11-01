@@ -16,7 +16,7 @@ export type SettingsSection =
   | "budgets"
   | "templates"
   | "projects"
-  | "mcp"
+  | "toolkit"
   | "providers"
   | "tools"
   | "agents"
