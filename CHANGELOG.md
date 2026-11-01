@@ -26,6 +26,7 @@ The phone app catches up with the desktop, merging a pull request is safer, and 
 - Small dependency updates.
 
 ### Fixed
+- A message sent right after an agent's process died could vanish: it stayed in the conversation but was never sent or queued, and the agent could show an error while still looking busy. It now goes back into a paused queue with a note so nothing you typed is lost.
 - The pull request chip no longer overflows in narrow panels.
 
 ## v0.3.0 — 2026-11-01
