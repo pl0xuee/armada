@@ -56,7 +56,7 @@ export function BudgetHoldPanel({ agent }: { agent: Agent }) {
           </p>
           {hold.metric === "cost" && equivalent && (
             <p className="mt-1 text-[12px] leading-relaxed text-steel">
-              Subscriptions aren&rsquo;t billed per token, so a token limit may fit this account better.
+              Subscriptions aren&rsquo;t billed per token, so a turn or token limit may fit this account better.
             </p>
           )}
           {where && <p className="mt-1 text-[12px] leading-relaxed text-steel">{where}</p>}

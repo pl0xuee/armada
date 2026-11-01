@@ -127,6 +127,21 @@ if (params?.get("budget") === "hold") {
   db.settings.budgetAction = "pause";
 }
 
+// ?budget=turns: an agent paused at its turn limit (20 of 20), to see the turn-limit hold and meter.
+if (params?.get("budget") === "turns") {
+  const held = db.agents.find((a) => a.id === "a-e2e");
+  if (held) {
+    held.unread = false;
+    held.turns = 20;
+    held.budgetHold = { scope: "agent", metric: "turns", spent: 20, cap: 20, since: Date.now() - 90_000 };
+    held.queue = [{ id: "q-b1", text: "Now also run the e2e suite against staging.", attachments: 0 }];
+    held.queuedPrompts = 1;
+    held.queuePaused = true;
+  }
+  db.settings.budgetAction = "pause";
+  db.settings.agentBudgetTurns = 20;
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const clone = <T>(v: T): T => structuredClone(v);
@@ -520,13 +535,25 @@ function finishTurn(agentId: string, text: string) {
       });
     }
   }
+  const turns = (getAgent(agentId).turns ?? 0) + 1;
+  const hold = turnHold(getAgent(agentId), turns);
   patchAgent(agentId, {
     status: "idle",
     lastMessage: preview,
     lastActivityAt: Date.now(),
     unread: true,
+    turns,
+    ...(hold ? { budgetHold: hold } : {}),
   });
-  attention(agentId, "done", preview);
+  if (!hold) attention(agentId, "done", preview);
+}
+
+/** The turn limit an agent has just reached (with the Pause action), if any: the agent's own, else the default. */
+function turnHold(a: Agent, turns: number): Agent["budgetHold"] {
+  if (db.settings.budgetAction !== "pause") return null;
+  const cap = a.budget?.turns ?? db.settings.agentBudgetTurns;
+  if (cap == null || turns < cap) return null;
+  return { scope: "agent", metric: "turns", spent: turns, cap, since: Date.now() };
 }
 
 // ---------------------------------------------------------------- boot-time live activity
@@ -1209,6 +1236,7 @@ export const mockApi: KvistcodeApi = {
       lastActivityAt: now,
       costUsd: 0,
       tokensUsed: 0,
+      turns: 0,
       contextUsed: 0,
       contextSize: req.provider === "claude" ? 200_000 : req.provider === "codex" ? 272_000 : 256_000,
       unread: false,
@@ -2421,19 +2449,25 @@ export const mockApi: KvistcodeApi = {
     const midnight = new Date().setHours(0, 0, 0, 0);
     const todayUsd = db.agents.filter((a) => a.lastActivityAt >= midnight).reduce((sum, a) => sum + a.costUsd, 0);
     const todayTokens = db.agents.filter((a) => a.lastActivityAt >= midnight).reduce((sum, a) => sum + a.tokensUsed, 0);
+    const todayTurns = db.agents.filter((a) => a.lastActivityAt >= midnight).reduce((sum, a) => sum + (a.turns ?? 0), 0);
     const cap = db.settings.dailyBudgetUsd;
     const tokenCap = db.settings.dailyBudgetTokens;
+    const turnCap = db.settings.dailyBudgetTurns;
     const day = new Date().toLocaleDateString("en-CA");
     const rank = { under: 0, warn: 1, hit: 2 } as const;
     const a = budgetLevel(todayUsd, cap);
     const b = budgetLevel(todayTokens, tokenCap);
+    const c = budgetLevel(todayTurns, turnCap);
+    const worst = [a, b, c].reduce((x, y) => (rank[y] > rank[x] ? y : x));
     return {
       day,
       todayUsd,
       dailyBudgetUsd: cap,
       todayTokens,
       dailyBudgetTokens: tokenCap,
-      level: rank[a] >= rank[b] ? a : b,
+      todayTurns,
+      dailyBudgetTurns: turnCap,
+      level: worst,
     };
   },
 
@@ -2445,14 +2479,15 @@ export const mockApi: KvistcodeApi = {
       if (!(choice.by > 0)) throw new Error("Enter an amount above zero");
       const cap = hold.cap + choice.by;
       if (cap <= hold.spent) throw new Error("That is still under what was spent. Raise it by more.");
-      const field = hold.metric === "cost" ? "usd" : "tokens";
+      const field = hold.metric === "cost" ? "usd" : hold.metric === "turns" ? "turns" : "tokens";
       if (hold.scope === "agent") {
-        patchAgent(agentId, { budget: { usd: null, tokens: null, ...agent.budget, [field]: cap } });
+        patchAgent(agentId, { budget: { usd: null, tokens: null, turns: null, ...agent.budget, [field]: cap } });
       } else if (hold.scope === "project") {
-        const cur = db.settings.projectBudgets[agent.projectPath] ?? { usd: null, tokens: null };
+        const cur = db.settings.projectBudgets[agent.projectPath] ?? { usd: null, tokens: null, turns: null };
         db.settings.projectBudgets[agent.projectPath] = { ...cur, [field]: cap };
       } else {
-        const key = hold.metric === "cost" ? "dailyBudgetUsd" : "dailyBudgetTokens";
+        const key =
+          hold.metric === "cost" ? "dailyBudgetUsd" : hold.metric === "turns" ? "dailyBudgetTurns" : "dailyBudgetTokens";
         db.settings[key] = cap;
       }
     }
@@ -3248,6 +3283,9 @@ function validateSettings(s: Settings): string | null {
   }
   for (const cap of [s.dailyBudgetTokens, s.agentBudgetTokens]) {
     if (cap != null && (!Number.isFinite(cap) || cap <= 0)) return "Token budgets must be more than 0 (or empty for no cap)";
+  }
+  for (const cap of [s.dailyBudgetTurns, s.agentBudgetTurns]) {
+    if (cap != null && (!Number.isFinite(cap) || cap <= 0)) return "Turn budgets must be more than 0 (or empty for no cap)";
   }
   return null;
 }

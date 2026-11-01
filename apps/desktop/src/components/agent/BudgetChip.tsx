@@ -3,14 +3,14 @@ import { useMemo } from "react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/misc";
 import { BUDGET_LEVEL_LABEL } from "@/lib/budget";
-import { budgetMeters, costIsEquivalent, meterLine, worstMeter } from "@/lib/budgetMeters";
+import { budgetMeters, costIsEquivalent, meterLine, meterShort, worstMeter } from "@/lib/budgetMeters";
 import { useBudgetStatus } from "@/hooks/useBudgetStatus";
 import type { Agent, BudgetStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/store/app";
 
 /** What the agents of one project have spent together. */
-function useProjectSpend(projectPath: string): { usd: number; tokens: number } {
+function useProjectSpend(projectPath: string): { usd: number; tokens: number; turns: number } {
   const usd = useApp((s) => {
     let sum = 0;
     for (const a of Object.values(s.agents)) if (a.projectPath === projectPath) sum += a.costUsd;
@@ -21,7 +21,12 @@ function useProjectSpend(projectPath: string): { usd: number; tokens: number } {
     for (const a of Object.values(s.agents)) if (a.projectPath === projectPath) sum += a.tokensUsed;
     return sum;
   });
-  return useMemo(() => ({ usd, tokens }), [usd, tokens]);
+  const turns = useApp((s) => {
+    let sum = 0;
+    for (const a of Object.values(s.agents)) if (a.projectPath === projectPath) sum += a.turns ?? 0;
+    return sum;
+  });
+  return useMemo(() => ({ usd, tokens, turns }), [usd, tokens, turns]);
 }
 
 const BAR = { under: "bg-accent", warn: "bg-warn", hit: "bg-err" } as const;
@@ -119,7 +124,7 @@ function HeaderMeter({ agent, compact }: { agent: Agent; compact?: boolean }) {
                   style={{ width: `${Math.min(100, worst.pct)}%` }}
                 />
               </span>
-              <span className="tabular">{worst.pct}%</span>
+              <span className="tabular">{meterShort(worst)}</span>
             </>
           )}
         </Badge>

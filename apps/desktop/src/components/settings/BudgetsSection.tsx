@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/segmented";
 import { Select } from "@/components/ui/select";
 import { capText, parseCap } from "@/lib/budget";
-import { parseTokenCap, tokenCapText } from "@/lib/budgetMeters";
+import { parseTokenCap, parseTurnCap, tokenCapText, turnCapText } from "@/lib/budgetMeters";
 import type { BudgetAction, BudgetCap, Settings } from "@/lib/types";
 import { basename } from "@/lib/utils";
 import { useApp } from "@/store/app";
@@ -28,9 +28,12 @@ const ACTIONS: { value: BudgetAction; label: string; description: string }[] = [
   },
 ];
 
-type Unit = "usd" | "tokens";
+type Unit = "usd" | "tokens" | "turns";
 
-/** A limit field that saves on blur or Enter; empty means no limit. Dollars or tokens. */
+const PARSE = { usd: parseCap, tokens: parseTokenCap, turns: parseTurnCap } as const;
+const SHOW = { usd: capText, tokens: tokenCapText, turns: turnCapText } as const;
+
+/** A limit field that saves on blur or Enter; empty means no limit. Dollars, tokens or turns. */
 function CapField({
   id,
   label,
@@ -46,8 +49,8 @@ function CapField({
   onSave: (value: number | null) => Promise<boolean>;
   width?: number;
 }) {
-  const parse = unit === "usd" ? parseCap : parseTokenCap;
-  const show = unit === "usd" ? capText : tokenCapText;
+  const parse = PARSE[unit];
+  const show = SHOW[unit];
   const [text, setText] = useState(show(value));
   const [error, setError] = useState<string>();
   // Follow the stored value when it changes elsewhere (the phone, another window).
@@ -83,8 +86,8 @@ function CapField({
           id={id}
           aria-label={label}
           aria-invalid={error ? true : undefined}
-          inputMode={unit === "usd" ? "decimal" : "text"}
-          placeholder={unit === "usd" ? "No limit" : "No limit"}
+          inputMode={unit === "usd" ? "decimal" : unit === "turns" ? "numeric" : "text"}
+          placeholder="No limit"
           className={`h-8 tabular ${unit === "usd" ? "pl-6" : ""}`}
           style={{ width }}
           value={text}
@@ -97,9 +100,9 @@ function CapField({
             if (e.key === "Enter") e.currentTarget.blur();
           }}
         />
-        {unit === "tokens" && text !== "" && (
+        {unit !== "usd" && text !== "" && (
           <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-steel">
-            tokens
+            {unit}
           </span>
         )}
       </div>
@@ -113,21 +116,25 @@ function CapField({
   );
 }
 
-/** Cost and token fields for one scope, side by side. */
+/** Cost, token and turn fields for one scope, side by side. */
 function CapPair({
   idBase,
   what,
   usd,
   tokens,
+  turns,
   onUsd,
   onTokens,
+  onTurns,
 }: {
   idBase: string;
   what: string;
   usd: number | null;
   tokens: number | null;
+  turns: number | null;
   onUsd: (v: number | null) => Promise<boolean>;
   onTokens: (v: number | null) => Promise<boolean>;
+  onTurns: (v: number | null) => Promise<boolean>;
 }) {
   return (
     <div className="flex flex-wrap items-start justify-end gap-2">
@@ -140,6 +147,7 @@ function CapPair({
         onSave={onTokens}
         width={150}
       />
+      <CapField id={`${idBase}-turns`} label={`${what} in turns`} unit="turns" value={turns} onSave={onTurns} width={130} />
     </div>
   );
 }
@@ -154,11 +162,13 @@ export function BudgetsSection({ settings }: { settings: Settings }) {
     settings.agentBudgetUsd == null &&
     settings.dailyBudgetTokens == null &&
     settings.agentBudgetTokens == null &&
+    settings.dailyBudgetTurns == null &&
+    settings.agentBudgetTurns == null &&
     Object.keys(projects).length === 0;
 
   const setProject = (path: string, cap: BudgetCap) => {
     const next = { ...projects };
-    if (cap.usd == null && cap.tokens == null) delete next[path];
+    if (cap.usd == null && cap.tokens == null && cap.turns == null) delete next[path];
     else next[path] = cap;
     return save({ projectBudgets: next });
   };
@@ -167,7 +177,7 @@ export function BudgetsSection({ settings }: { settings: Settings }) {
     <div className="space-y-8">
       <SectionHeader
         title="Budgets"
-        description="Optional spending limits, in dollars and/or tokens. Leave a field empty for no limit."
+        description="Optional limits, in dollars, tokens and/or turns. Leave a field empty for no limit."
       />
       <SettingGroup>
         <SettingRow
@@ -180,8 +190,10 @@ export function BudgetsSection({ settings }: { settings: Settings }) {
             what="Daily limit"
             usd={settings.dailyBudgetUsd}
             tokens={settings.dailyBudgetTokens}
+            turns={settings.dailyBudgetTurns}
             onUsd={(v) => save({ dailyBudgetUsd: v })}
             onTokens={(v) => save({ dailyBudgetTokens: v })}
+            onTurns={(v) => save({ dailyBudgetTurns: v })}
           />
         </SettingRow>
         <SettingRow
@@ -194,8 +206,10 @@ export function BudgetsSection({ settings }: { settings: Settings }) {
             what="Limit per agent"
             usd={settings.agentBudgetUsd}
             tokens={settings.agentBudgetTokens}
+            turns={settings.agentBudgetTurns}
             onUsd={(v) => save({ agentBudgetUsd: v })}
             onTokens={(v) => save({ agentBudgetTokens: v })}
+            onTurns={(v) => save({ agentBudgetTurns: v })}
           />
         </SettingRow>
         <ProjectLimits projects={projects} onChange={setProject} />
@@ -221,8 +235,10 @@ export function BudgetsSection({ settings }: { settings: Settings }) {
           <span className="text-fg/80">Dollars</span> are what each runtime reports, as in the Usage view. API-key
           accounts are billed that amount; subscription plans (Claude Max, ChatGPT Pro, …) show an API-equivalent
           figure and are not billed per token; local models report no cost at all.{" "}
-          <span className="text-fg/80">Tokens</span> are counted for every agent, so use a token limit for those. A
-          restarted or reset agent never lowers today&rsquo;s total.
+          <span className="text-fg/80">Tokens</span> are counted for every agent, so use a token limit for those.{" "}
+          <span className="text-fg/80">Turns</span> count every completed reply to a prompt (a failed or cancelled turn
+          doesn&rsquo;t count) and are the simplest limit for a subscription. A restarted or reset agent never lowers
+          today&rsquo;s total.
         </p>
       </div>
     </div>
@@ -250,7 +266,7 @@ function ProjectLimits({
     <SettingRow
       stack
       title="Per project"
-      description="What all the agents of one project (past and present) may spend together. Warns at 80% and again when reached."
+      description="What all the agents of one project (past and present) may use together. Warns at 80% and again when reached."
     >
       <div className="w-full space-y-2.5">
         {paths.map((path) => {
@@ -270,14 +286,16 @@ function ProjectLimits({
                   what={`${basename(path)} limit`}
                   usd={cap.usd}
                   tokens={cap.tokens}
+                  turns={cap.turns ?? null}
                   onUsd={(usd) => onChange(path, { ...cap, usd })}
                   onTokens={(tokens) => onChange(path, { ...cap, tokens })}
+                  onTurns={(turns) => onChange(path, { ...cap, turns })}
                 />
                 <Button
                   size="icon-sm"
                   variant="ghost"
                   aria-label={`Remove the limit for ${basename(path)}`}
-                  onClick={() => void onChange(path, { usd: null, tokens: null })}
+                  onClick={() => void onChange(path, { usd: null, tokens: null, turns: null })}
                 >
                   <X />
                 </Button>
@@ -292,7 +310,7 @@ function ProjectLimits({
             placeholder="Add a project limit…"
             className="h-8 max-w-[320px]"
             // A limit needs a value: start with a token-free, cost-free row the user then fills in.
-            onValueChange={(path) => void onChange(path, { usd: 10, tokens: null })}
+            onValueChange={(path) => void onChange(path, { usd: 10, tokens: null, turns: null })}
             options={known.map((p) => ({ value: p, label: basename(p), description: p }))}
           />
         )}
