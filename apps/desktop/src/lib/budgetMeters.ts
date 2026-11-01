@@ -32,6 +32,22 @@ export function tokenCapText(cap: number | null | undefined): string {
   return String(cap);
 }
 
+/** Parses a turn-limit field: a whole number of turns. Empty = no limit (null). */
+export function parseTurnCap(text: string): { value: number | null; error?: string } {
+  const t = text.trim().replace(/,/g, "");
+  if (t === "") return { value: null };
+  if (!/^\d+$/.test(t)) return { value: null, error: "Enter a whole number of turns like 20" };
+  const n = Number(t);
+  if (n <= 0) return { value: null, error: "Must be more than 0 (or leave empty for no limit)" };
+  if (n > 1_000_000) return { value: null, error: "That's more than a million turns" };
+  return { value: n };
+}
+
+/** What a turn-limit field shows for a stored limit. */
+export function turnCapText(cap: number | null | undefined): string {
+  return cap == null ? "" : String(cap);
+}
+
 /** True when the agent's cost is an API-equivalent figure (a subscription), not a bill per token. */
 export function costIsEquivalent(agent: Agent, accounts: readonly Account[]): boolean {
   const account = accounts.find((a) => a.id === agent.accountId);
@@ -65,31 +81,41 @@ export const SCOPE_NAME: Record<BudgetScope, string> = {
   agent: "This agent",
 };
 
-/** "$1.20 of $5.00" or "12k of 50k tokens". */
+/** "$1.20 of $5.00", "12k of 50k tokens" or "7 of 20 turns". */
 export function meterAmounts(metric: BudgetMetric, spent: number, cap: number): string {
-  return metric === "cost"
-    ? `${formatCost(spent)} of ${formatCost(cap)}`
-    : `${formatTokens(spent)} of ${formatTokens(cap)} tokens`;
+  if (metric === "cost") return `${formatCost(spent)} of ${formatCost(cap)}`;
+  if (metric === "turns") return `${Math.round(spent)} of ${Math.round(cap)} turns`;
+  return `${formatTokens(spent)} of ${formatTokens(cap)} tokens`;
+}
+
+/** What a header meter says next to its bar: "7 / 20 turns" for a turn limit, else the percent. */
+export function meterShort(m: BudgetMeter): string {
+  return m.metric === "turns" ? `${Math.round(m.spent)} / ${Math.round(m.cap)} turns` : `${m.pct}%`;
 }
 
 /** The limits that apply to an agent and where it stands against each (only those that are set). */
 export function budgetMeters(
   agent: Agent,
-  project: { usd: number; tokens: number },
+  project: { usd: number; tokens: number; turns?: number },
   settings: Pick<
     Settings,
     "dailyBudgetUsd" | "dailyBudgetTokens" | "agentBudgetUsd" | "agentBudgetTokens" | "projectBudgets"
-  >,
+  > &
+    Partial<Pick<Settings, "dailyBudgetTurns" | "agentBudgetTurns">>,
   daily: BudgetStatus | null,
 ): BudgetMeter[] {
   const own: BudgetCap = agent.budget ?? { usd: null, tokens: null };
+  const projectCap = settings.projectBudgets[agent.projectPath];
   const rows: [BudgetScope, BudgetMetric, number, number | null | undefined][] = [
     ["agent", "cost", agent.costUsd, own.usd ?? settings.agentBudgetUsd],
     ["agent", "tokens", agent.tokensUsed, own.tokens ?? settings.agentBudgetTokens],
-    ["project", "cost", project.usd, settings.projectBudgets[agent.projectPath]?.usd],
-    ["project", "tokens", project.tokens, settings.projectBudgets[agent.projectPath]?.tokens],
+    ["agent", "turns", agent.turns ?? 0, own.turns ?? settings.agentBudgetTurns],
+    ["project", "cost", project.usd, projectCap?.usd],
+    ["project", "tokens", project.tokens, projectCap?.tokens],
+    ["project", "turns", project.turns ?? 0, projectCap?.turns],
     ["daily", "cost", daily?.todayUsd ?? 0, settings.dailyBudgetUsd],
     ["daily", "tokens", daily?.todayTokens ?? 0, settings.dailyBudgetTokens],
+    ["daily", "turns", daily?.todayTurns ?? 0, settings.dailyBudgetTurns],
   ];
   const blind = !reportsCost(agent);
   const out: BudgetMeter[] = [];
@@ -128,8 +154,12 @@ export function meterLine(m: BudgetMeter, equivalent: boolean): string {
   return `${name}: ${meterAmounts(m.metric, m.spent, m.cap)}${note}`;
 }
 
-/** The dollar/token increments a "Raise limit" button can offer for a hold. */
+/** The dollar/token/turn increments a "Raise limit" button can offer for a hold. */
 export function raiseSteps(hold: BudgetHold): number[] {
+  if (hold.metric === "turns") {
+    const base = hold.cap <= 10 ? 5 : hold.cap <= 40 ? 10 : hold.cap <= 100 ? 25 : 50;
+    return [base, base * 2];
+  }
   if (hold.metric === "cost") {
     const base = hold.cap < 10 ? 5 : hold.cap < 50 ? 10 : hold.cap < 200 ? 25 : 100;
     return [base, base * 2];
@@ -140,8 +170,9 @@ export function raiseSteps(hold: BudgetHold): number[] {
   return [step, step * 2];
 }
 
-/** "$5" / "50k tokens". */
+/** "$5" / "50k tokens" / "10 turns". */
 export function raiseLabel(hold: BudgetHold, by: number): string {
+  if (hold.metric === "turns") return `${by} turns`;
   return hold.metric === "cost" ? formatCost(by).replace(/\.00$/, "") : `${formatTokens(by)} tokens`;
 }
 
