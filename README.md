@@ -276,6 +276,10 @@ Add a user-facing entry under `## Unreleased` in [`CHANGELOG.md`](CHANGELOG.md) 
 
 Kvistcode is free and open source. If it saves you time, you can help keep it maintained. It is entirely optional and unlocks nothing.
 
+[![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/pl0xuee) &nbsp; [Other ways to support: kvistcode.com/support](https://kvistcode.com/support/)
+
+Or send crypto directly:
+
 | Network | Address |
 |---|---|
 | Bitcoin | `bc1qytsjzn85eax5th8qdfvspluzlnfmempzcr7e8g` |

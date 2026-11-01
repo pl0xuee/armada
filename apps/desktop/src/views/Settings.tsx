@@ -19,6 +19,7 @@ import {
   Mic,
   AudioLines,
   ExternalLink,
+  Heart,
   Download,
   Sparkles,
   X,
@@ -1055,6 +1056,16 @@ function About() {
           <Button asChild size="sm" variant="ghost">
             <a href="https://github.com/pl0xuee/kvistcode/releases" rel="noreferrer noopener">
               Release notes <ExternalLink />
+            </a>
+          </Button>
+          <Button asChild size="sm" variant="ghost">
+            <a href="https://github.com/sponsors/pl0xuee" rel="noreferrer noopener">
+              <Heart /> Sponsor
+            </a>
+          </Button>
+          <Button asChild size="sm" variant="ghost">
+            <a href="https://kvistcode.com/support/" rel="noreferrer noopener">
+              Other ways to support <ExternalLink />
             </a>
           </Button>
         </div>
