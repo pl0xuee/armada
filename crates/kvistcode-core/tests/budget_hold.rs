@@ -197,6 +197,12 @@ async fn a_hit_mid_turn_never_stops_the_turn_and_the_queue_waits() {
     })
     .await
     .expect("permission");
+    // The item is announced before the agent's status changes; the alert comes after both.
+    wait_for(&mut env.rx, |e| {
+        is_attention(e, AttentionReason::Permission)
+    })
+    .await
+    .expect("permission alert");
     env.core
         .send_prompt(&agent.id, "COST second", vec![])
         .await
