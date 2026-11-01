@@ -16,8 +16,10 @@ The phone app catches up with the desktop, merging a pull request is safer, and 
 - **The phone app does more.** It shows agents held at a spending limit and lets you raise the limit, continue once or stop; shows pull request and CI status on the agent screen; searches conversations; and can change how agents report.
 - **A short tour** on first launch of this version covers the agent grid, the pinned dock, search and spending limits. Skip it any time; Settings → About → Show the tour brings it back.
 - **Issues and Open pull request** are now in the command palette.
+- **Support links.** Settings → About has a Sponsor button and a link to kvistcode.com/support. Both are entirely optional.
 
 ### Changed
+- **No more early “Done”.** When an agent's turn ends while its Workflow or background agents are still running, it now reads “Turn finished · Workflow 3 of 5 running”, counts as working, and shows “Everything finished” when the last one ends. The turn-end notification says work is still running, and a quiet second alert follows when it finishes if you are looking elsewhere. Background sub-agents are described as “may be running” because their end can't always be known. The phone app still says “Done”.
 - Merging a pull request is pinned to the exact commit you reviewed. If the branch changes after you looked, nothing is merged and you are asked to review again.
 - The merge dialog says “not known” when GitHub hasn't answered, instead of implying a pass, and GitHub errors read as sentences with a Copy details button.
 - The Preview address bar and Back/Forward buttons now follow the page as you click links.
