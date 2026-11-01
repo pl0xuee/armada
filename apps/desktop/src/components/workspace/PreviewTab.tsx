@@ -115,10 +115,21 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
     if (first) patchPreview(agent.id, { url: first, auto: true });
   }, [agent.id, agent.projectPath, newest]);
 
-  // The field follows the store (links, detection, the servers menu).
-  useEffect(() => setText(st.url), [st.url]);
+  // The field follows the store (links, detection, the servers menu, and the page's own navigation),
+  // except while the user is typing in it.
+  const fieldRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (document.activeElement !== fieldRef.current) setText(st.url);
+  }, [st.url]);
 
+  // `url` is the address shown (it follows the page as it navigates); `frameUrl` is what the iframe was
+  // told to load. They differ after in-page navigation: the frame must not reload itself to the new address.
   const url = parseLoopbackUrl(st.url);
+  const [frameUrl, setFrameUrl] = useState(url);
+  const reported = useRef<string | null>(null);
+  useEffect(() => {
+    if (url !== reported.current) setFrameUrl(url);
+  }, [url]);
   const port = url ? urlPort(url) : null;
   const urlRef = useRef(url);
   urlRef.current = url;
@@ -157,9 +168,9 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [port, reload, agent.id, url]);
+  }, [port, reload, agent.id, frameUrl]);
 
-  // A server that answered becomes the project's remembered address.
+  // A server that answered becomes the project's remembered address (and follows the page as it navigates).
   useEffect(() => {
     if (probe === "up" && url) rememberProjectUrl(agent.projectPath, url);
   }, [probe, url, agent.projectPath]);
@@ -169,7 +180,7 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
     if (probe !== "up" || loaded) return;
     const t = setTimeout(() => setLoaded(true), 12_000);
     return () => clearTimeout(t);
-  }, [probe, loaded, reload, url]);
+  }, [probe, loaded, reload, frameUrl]);
 
   const go = (raw: string) => {
     const u = parseLoopbackUrl(raw);
@@ -178,7 +189,14 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
       return;
     }
     setText(u);
+    setFrameUrl(u);
     patchPreview(agent.id, { url: u, auto: false });
+    setReload((n) => n + 1);
+  };
+
+  // Reload keeps the page the user is on (which may differ from the address the frame first loaded).
+  const reloadPage = () => {
+    setFrameUrl(urlRef.current);
     setReload((n) => n + 1);
   };
 
@@ -194,10 +212,14 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
   };
   const page = usePreviewPage({
     agentId: agent.id,
-    url,
+    url: frameUrl,
     enabled: prefs.tools,
-    frameKey: `${url}#${reload}`,
+    frameKey: `${frameUrl}#${reload}`,
     handlers: {
+      navigated: (devUrl) => {
+        reported.current = devUrl;
+        if (previewOf(usePreview.getState(), agent.id).url !== devUrl) patchPreview(agent.id, { url: devUrl });
+      },
       picked: (info) => {
         insertIntoDraft(agent.id, formatPicked(info, { pageUrl: urlRef.current ?? "", width: st.width }));
         if (!usePreviewTools.getState().pickShot) afterInsert();
@@ -312,7 +334,7 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
     // so no localhost page can invoke commands. allow-same-origin here applies to the *page's*
     // origin so dev servers can use storage/cookies; there is no top-navigation permission.
     <iframe
-      key={`${url}#${reload}`}
+      key={`${frameUrl}#${reload}`}
       ref={page.iframeRef}
       src={page.frameSrc ?? undefined}
       title="App preview"
@@ -352,7 +374,7 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
             variant="ghost"
             aria-label="Back in the page"
             className="hidden @[520px]:inline-flex"
-            disabled={!url || !toolsReady}
+            disabled={!url || !toolsReady || !page.canBack}
             onClick={() => page.navigate("back")}
           >
             <ChevronLeft />
@@ -364,7 +386,7 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
             variant="ghost"
             aria-label="Forward in the page"
             className="mr-0.5 hidden @[520px]:inline-flex"
-            disabled={!url || !toolsReady}
+            disabled={!url || !toolsReady || !page.canForward}
             onClick={() => page.navigate("forward")}
           >
             <ChevronRight />
@@ -384,8 +406,10 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
               aria-label="Preview URL"
               placeholder="localhost:3000"
               spellCheck={false}
+              ref={fieldRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
+              onBlur={() => setText(st.url)}
             />
           </div>
         </form>
@@ -439,7 +463,7 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
           </DropdownMenuContent>
         </DropdownMenu>
         <Tooltip content="Reload">
-          <Button size="icon-sm" variant="ghost" aria-label="Reload preview" onClick={() => setReload((n) => n + 1)}>
+          <Button size="icon-sm" variant="ghost" aria-label="Reload preview" onClick={reloadPage}>
             <RefreshCw />
           </Button>
         </Tooltip>
@@ -499,10 +523,10 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
             </DropdownMenuItem>
             {body.w < 520 && (
               <>
-                <DropdownMenuItem disabled={!url || !toolsReady} onSelect={() => page.navigate("back")}>
+                <DropdownMenuItem disabled={!url || !toolsReady || !page.canBack} onSelect={() => page.navigate("back")}>
                   <ChevronLeft /> Back
                 </DropdownMenuItem>
-                <DropdownMenuItem disabled={!url || !toolsReady} onSelect={() => page.navigate("forward")}>
+                <DropdownMenuItem disabled={!url || !toolsReady || !page.canForward} onSelect={() => page.navigate("forward")}>
                   <ChevronRight /> Forward
                 </DropdownMenuItem>
               </>

@@ -1065,6 +1065,23 @@ mod tests {
         }
     }
 
+    /// The address bar follows the page: the bundle must report location and history changes.
+    #[test]
+    fn bundled_agent_reports_navigation() {
+        for needle in [
+            "type:`nav`",
+            "`pushState`",
+            "`replaceState`",
+            "`popstate`",
+            "`hashchange`",
+        ] {
+            assert!(
+                AGENT_JS.contains(needle),
+                "preview-agent.js lacks {needle}: rebuild it"
+            );
+        }
+    }
+
     /// runs a proxy in front of a real dev server and prints its URL (used to check Vite HMR).
     #[tokio::test]
     #[ignore]
