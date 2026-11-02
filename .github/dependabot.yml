@@ -35,3 +35,13 @@ updates:
     groups:
       remote-minor-patch:
         update-types: [minor, patch]
+
+  # The end-to-end test's own dependencies (webdriverio). tauri-driver is pinned in ci.yml by hand.
+  - package-ecosystem: npm
+    directory: /apps/desktop/e2e
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      e2e-minor-patch:
+        update-types: [minor, patch]

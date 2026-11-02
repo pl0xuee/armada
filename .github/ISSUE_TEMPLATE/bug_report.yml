@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in Kvistcode (formerly Armada) doesn't work or looks wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Security problems: don't file them here**, see [SECURITY.md](https://github.com/pl0xuee/kvistcode/security/policy).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start a Claude agent in a project
+        2. ...
+  - type: input
+    id: version
+    attributes:
+      label: Kvistcode version
+      description: Settings, About. Upgraded from Armada? Say so.
+      placeholder: "0.3.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, Linux (AppImage), Linux (.deb), Linux (.rpm), Other]
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Which agent provider
+      multiple: true
+      options: [Claude, ChatGPT (Codex), Grok, Local model, Other ACP agent, Not about an agent]
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Settings, About, **Copy diagnostics**, pasted here. It scrubs secrets, but read it before you post.
+      render: text

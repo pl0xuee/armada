@@ -19,8 +19,12 @@ on:
 permissions:
   contents: read
 
-# Runs on main queue up behind each other (never cancel a release half-way); a newer push to
-# a pull request replaces its running check.
+# Pull requests: a newer push replaces the running check. Pushes to main are never cancelled
+# while running, so a release is never cut off half-way. GitHub keeps one running and ONE queued
+# run per group, though: a third push cancels the queued second run. That is safe here: the
+# release decision (is the version in Cargo.toml tagged yet?) is made by whichever run reaches
+# the draft job, and the newest run contains every earlier commit. Do not "fix" this by adding
+# cancel-in-progress for main: that could kill the installer builds of a release.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -48,6 +52,11 @@ jobs:
       - name: UI and Rust command contract
         run: python3 scripts/check_contract.py
 
+      # Tests that start python3 mock agents or call libc must be `#![cfg(unix)]`; Linux CI can't
+      # see a missing gate, Windows fails on it later.
+      - name: Unix-only tests are gated
+        run: python3 scripts/check_unix_tests.py
+
       - name: Install Linux system dependencies
         run: |
           sudo apt-get update
@@ -69,7 +78,7 @@ jobs:
           toolchain: stable
           components: clippy, rustfmt
 
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: ". -> target"
           shared-key: linux
@@ -139,7 +148,7 @@ jobs:
           toolchain: stable
           components: clippy
 
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: ". -> target"
           shared-key: ${{ matrix.os }}
@@ -184,7 +193,7 @@ jobs:
           toolchain: stable
 
       # Also caches ~/.cargo/bin, so tauri-driver is only compiled on a cold cache.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: ". -> target"
           shared-key: e2e
@@ -334,7 +343,7 @@ jobs:
           targets: ${{ matrix.rust-targets }}
 
       # Own key: release builds never restore caches written by check runs.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: ". -> target"
           key: release-${{ matrix.platform }}
