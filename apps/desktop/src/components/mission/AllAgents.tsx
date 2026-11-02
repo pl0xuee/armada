@@ -135,7 +135,7 @@ export function AllAgentsPane({
       <EmptyState
         className="my-auto"
         icon={<Radar />}
-        title="Your fleet is docked"
+        title="No agents yet"
         description="Launch an agent and it shows up here as a live tile: status, last action and approvals at a glance."
         action={
           <Button variant="primary" onClick={() => openNewAgent()}>
