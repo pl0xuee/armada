@@ -2732,10 +2732,25 @@ export const mockApi: KvistcodeApi = {
   },
 
   async applyTokenSaver() {
-    db.settings = { ...db.settings, autoCompactWindow: 250_000, responseStyle: "concise" };
+    const prev = db.settings.tokenSaver;
+    db.settings = {
+      ...db.settings,
+      autoCompactWindow: 250_000,
+      responseStyle: "concise",
+      tokenSaver: {
+        outputFilter: true,
+        bashOutputMaxChars: prev.bashOutputMaxChars ?? 12_000,
+        subagentModel: prev.subagentModel ?? "sonnet",
+      },
+    };
     const claude = (configDefaultsDb.claude ??= {});
     if (claude.effort !== "low" && claude.effort !== "medium") claude.effort = "medium";
     return delay(clone(db.settings), 200);
+  },
+
+  async outputFilterStats() {
+    // Pretend a filtered session ran once the filter is on.
+    return delay(db.settings.tokenSaver.outputFilter ? { calls: 42, before: 380_000, after: 196_000 } : { calls: 0, before: 0, after: 0 }, 80);
   },
 
   async updateSettings(settings: Settings) {
@@ -3495,6 +3510,11 @@ function validateSettings(s: Settings): string | null {
     return `Unknown response style “${s.responseStyle}”`;
   if (s.autoCompactWindow != null && (s.autoCompactWindow < 100_000 || s.autoCompactWindow > 1_000_000))
     return "The auto-compact size must be between 100,000 and 1,000,000 tokens (or empty for Claude's default)";
+  const ts = s.tokenSaver;
+  if (ts.bashOutputMaxChars != null && (ts.bashOutputMaxChars < 4_000 || ts.bashOutputMaxChars > 128_000))
+    return "The command output limit must be between 4,000 and 128,000 characters (or empty for Claude's default)";
+  if (ts.subagentModel != null && !["sonnet", "haiku"].includes(ts.subagentModel))
+    return `Unknown helper model “${ts.subagentModel}”`;
   if (!["off", "ask", "auto"].includes(s.failover)) return `Unknown failover setting “${s.failover}”`;
   if (!["auto", "ask"].includes(s.defaultPermissionMode)) return `Unknown permission mode “${s.defaultPermissionMode}”`;
   if (!Number.isInteger(s.remote.port) || s.remote.port < 1 || s.remote.port > 65535) {

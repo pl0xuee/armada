@@ -283,6 +283,7 @@ export function seedSettings(onboarded: boolean): Settings {
     projectBudgets: {},
     alertTargets: [],
     autoCompactWindow: 250_000,
+    tokenSaver: { outputFilter: false, bashOutputMaxChars: null, subagentModel: null },
     remote: { enabled: false, lan: false, port: 47821, tailscale: false, lanAddress: null },
     voice: { inputDevice: null, model: "base.en", language: "auto", autoSend: false },
     voiceAssistant: {

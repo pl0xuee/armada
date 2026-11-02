@@ -103,6 +103,7 @@ macro_rules! handler {
             commands::clear_config_defaults,
             commands::handoff_agent,
             commands::apply_token_saver,
+            commands::output_filter_stats,
             commands::set_focus,
             commands::chime_watched,
             commands::background_finished,

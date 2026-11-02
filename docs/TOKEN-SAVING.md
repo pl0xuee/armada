@@ -36,7 +36,7 @@ first turns of a project cost more (A4: 3-4x, A3: the opposite; inconclusive).
 | 4 | Medium effort by default for new agents | 5-15% (thinking is output tokens; Claude Code's own default on the 5.5 models is medium) | low-medium (no Claude numbers published; community Codex figures of 40-60% are unverified) | **Built** (preset + one-click per agent) |
 | 5 | Warn when many agents work at once on one account | prevents hitting the wall, no direct saving | high | **Built** (insight, tied to the account's window) |
 | 6 | Don't switch model or let a cache idle over an hour on a big context (rebuild reads it all uncached) | situational | high | In insight text |
-| 7 | Cap huge tool output (hooks that filter test/log output) | 3-5% | low | Not built (needs per-project hooks) |
+| 7 | Cap huge tool output (hooks that filter test/log output) | 3-5% | low | **Built in round 2** (tidy hook + inline limit; see below) |
 | 8 | Per-project brief so agents don't re-explore | 5-10% | low | Not built (below) |
 | 9 | Trim Kvistcode guidance / briefing | <0.1% | high | Not worth it |
 | 10 | Disable unused skills (each agent lists ~4.7k tokens of commands/skills) | ~1% on big agents, ~20% on small ones | medium | Exists (Skills settings) |
@@ -69,7 +69,82 @@ cheapest first step. Not built: the data does not show a clear saving and it wou
 - Not verified at runtime: that the ACP Claude adapter passes the environment variable through to Claude Code
   (it inherits the process environment; the setting is off by default, so nothing changes until chosen).
 
-## What was built
+## What others do (round 2: community research)
+
+Confidence: **primary** = stated in Anthropic or OpenAI documentation and, where noted, found in the installed
+Claude Code 2.1.x binary (names grepped, nothing run against a model); **reported** = a blog or repo author's
+own measurement, not independent; **anecdote** = one person's claim. Search covered blogs, GitHub, Dev.to, docs.
+Reddit and Hacker News threads were not reachable through search (the engine returned summaries of
+blog posts instead), so no Reddit number below is first-hand.
+
+| Technique | Reported effect | Confidence | Source |
+|-----------|-----------------|-----------|--------|
+| Compress shell output with a hook (RTK "Rust Token Killer": rewrites/filters `cargo test`, `git`, `npm`, logs) | 60-90% on build/test/log output (README estimates); one user: 108k tokens over 19 `dotnet test` runs | reported; author warns it hides passing output and only covers Bash, not Read/Grep | github.com/rtk-ai/rtk, madplay.github.io/en/post/rtk-reduce-ai-coding-agent-token-usage |
+| Claude Code's own cost guide: a `PreToolUse` hook that filters test output; subagents for verbose work; Sonnet default, Opus for hard problems; `model: haiku` for simple helpers; `/clear` between tasks; CLAUDE.md under 200 lines; skills instead of long instructions | no numbers; average API cost $13/dev/day | primary | code.claude.com/docs/en/costs |
+| `PostToolUse` hook may replace a tool's output with `updatedToolOutput` (any tool; must keep the tool's output shape); command hooks can run an executable directly with `args` (no shell) | n/a (mechanism) | primary; both names found in the installed binary | code.claude.com/docs/en/hooks |
+| `bashOutputMaxChars` setting (default 30,000, clamps 4,000-128,000): longer output is saved to a file and the model gets a preview | n/a (mechanism) | primary: found in the installed binary only (its text matches the docs' description) | installed `claude` 0.3.312 |
+| Route models: Opus plans, Sonnet/Haiku executes (`opusplan` alias, `CLAUDE_CODE_SUBAGENT_MODEL`) | "up to 75% cost" with deliberate routing (Firecrawl); agent teams cost ~7x tokens in plan mode (Anthropic) | reported / primary; both names are in the installed binary | firecrawl.dev/blog/claude-code-token-efficiency, code.claude.com/docs/en/costs |
+| `.claudeignore` / `permissions.deny` for `node_modules`, build output | ".claudeignore alone: 85.5% context reduction" (one benchmark, unexplained method) | anecdote; `permissions.deny` is primary but does not stop Bash `cat` | firecrawl.dev blog above |
+| Trim CLAUDE.md, path-scoped rules, skills (30-100 tokens each until used) | 92% on one CLAUDE.md (3.8k to 0.3k tokens), 41% fewer always-loaded lines | reported | firecrawl.dev blog |
+| MCP overhead: each server 10-20k tokens per session; prefer CLI tools; Codex `enabled_tools` allowlists took a 93-tool server from ~55k to ~3k tokens | large, mostly for many-tool servers | reported; Claude Code now defers MCP tool definitions by default (primary) | firecrawl blog, codex.danielvaughan.com (2026-06-10), code.claude.com/docs/en/costs |
+| Code-index / repo-map MCPs (jCodeMunch, codebase-memory, code-nav) to avoid whole-file reads | vendor claims 10-28x fewer tokens on structural queries; a practitioner measured 48k to 23k; tool-layer-only savings 15-25% | reported; helps only for lookups, adds a fixed tool cost | pypi.org/project/jcodemunch-mcp, medium.com/@aitrends24/i-gave-claude-code-a-map-of-my-repo-it-used-half-the-tokens-882e090cd0ca |
+| Language-server "code intelligence" plugins instead of grep + read | no number | primary | code.claude.com/docs/en/costs |
+| Compact early (`/compact` at 250-300k, custom compact instructions), `/clear`, `/rewind` | no standalone number; Codex compaction events 3-5 to 0-1 per session with a lower threshold | reported | firecrawl blog, codex.danielvaughan.com |
+| Cache TTL: main conversation 1 h on a subscription, but sub-agents and workflows 5 min; `subagentPromptCacheTtl: "1h"` (env `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`) keeps them warm; batching sub-agent work closer than 5 min helps | one Reddit-sourced report: a 5-hour window use of 100% fell to 22% (unverified); 1 h writes cost more | anecdote; setting names primary and present in the installed binary | dev.to/akaranjkar08/prompt-cache-orchestration-beat-the-5-min-ttl-miss-2026-2e31, note.com/hacklog_stealth/n/n8d10073d9834 |
+| Background token use: prompt suggestions (a request after every turn), session recap, idle compaction can each be turned off (`promptSuggestionEnabled`, `awaySummaryEnabled`, `idleCompaction`) | small per call, but each re-reads the cache | primary | code.claude.com/docs/en/costs ("Background token usage") |
+| Thinking: lower effort, or `MAX_THINKING_TOKENS=8000` on fixed-budget models (adaptive 5.5 models ignore it) | thinking is billed as output | primary | code.claude.com/docs/en/costs |
+| Codex: `model_reasoning_effort` low/medium for routine work (profiles), `tool_output_token_limit`, `model_auto_compact_token_limit`, `model_reasoning_summary = "none"`, MCP `enabled_tools` | "40-60% on scaffolding" (unmeasured); `tool_output_token_limit` e.g. 12000 | reported; the three config key names exist in the installed Codex binary, units and defaults not confirmed | codex.danielvaughan.com (2026-06-10, 2026-05-02), tech.autoscout24.com blog |
+| Peak hours burn the 5-hour window faster (weekdays 5-11am PT); some users saw a Max 20x window gone in 19 minutes in March 2026 | n/a; a counter bug was suspected (GitHub issues 38335, 39507) | reported by press and users | techradar.com, dev.to/portkey/everything-we-know-about-claude-code-limits-3984 |
+| `/usage` in Claude Code (2.1.2xx+) breaks plan use down by skill, sub-agent, plugin and MCP server, with recommendations | n/a | primary | code.claude.com/docs/en/costs |
+
+### Checked against this owner's data (7 Claude agents, 6,815 tool calls; aggregates only)
+
+- **Sub-agents do most of the work.** 79% of tool calls (5,366 of 6,815) ran inside 44 sub-agent runs. This
+  corrects the first round's "cannot be told apart": the call records carry a parent id. Helper-model routing
+  therefore has the most lever (up to 3 in 4 tool calls), and cannot be measured in tokens from the data.
+- **Shell output is mostly file reading, not test logs.** `sed`, `cat` and `grep` are 76% of all shell
+  output characters; `cargo test` is 0.4%. A RTK-style filter that only touches build/test tools applies to
+  40 of 5,068 commands (0.8%) and saved nothing on replay. It is built because it is safe and cheap, and
+  because other workloads (npm/pytest/cargo-heavy projects) are what the published 60-90% figures describe,
+  but this owner should not expect it to matter.
+- **Long outputs are where the characters are.** 384 outputs over 8k characters (7.6% of commands) hold 42%
+  of shell-output characters. Capping the inline size at 12k would have cut 8% of the volume re-read by later
+  steps (estimated as output size times the following 100 calls); 8k would cut 17%; 20k only 1.5%.
+- **Repeat reads are real but modest.** 17% of Read-tool calls and 18% of shell file reads repeated a file the
+  same agent had already read. Nothing blocks that safely; it is a prompting matter (AGENTS.md) rather than a setting.
+- **A deny-list would not help.** 0 of 817 reads were in `node_modules`, `target`, `dist`, lockfiles or `.git`;
+  `permissions.deny` also does not stop shell `cat`. Not built.
+- **All seven agents are Claude**, so the Codex/Grok settings would change nothing here. Not built.
+
+### Ranked for this owner (evidence x fit / risk and effort)
+
+1. Compact window (built in round 1). 2. Helper agents on a smaller model (79% of calls). 3. Turn off
+next-prompt prediction (a full-context request after every turn that Kvistcode never shows; zero risk). 4. Inline
+output limit of 12k. 5. Warn before resuming a big, cold-cache conversation. 6. Output tidy-up (built, little
+effect here). Not built: deny-lists (no evidence), repeat-read blocking (no safe signal), `opusplan` as a preset (the
+alias may not be in an agent's model list; changing the main model stays the owner's choice), 1-hour sub-agent
+cache (anecdote only, 1 h writes cost more), Codex limits (no Codex usage here), MCP code indexes (adds a tool
+cost; unproven for this repo).
+
+## What was built, round 2
+
+- `output_filter.rs` and `kvistcode filter-output`: a `PostToolUse` hook for Claude's Bash tool, run through the
+  Kvistcode binary itself (exec form, so it needs no shell or script and behaves the same on Windows). It
+  tidies only build/test/install/git-status output (allowlist) and never `cat`, `sed`, `grep`, `git diff`, `ls`
+  or anything piped through them. It removes colors, redrawn progress lines, runs of identical lines, runs of
+  `Compiling`/`Downloaded` lines, runs of passing-test lines and git's `(use "git ...")` hints; errors, warnings and
+  failures stay. Any problem means no change. Savings are logged to `output-filter-stats.jsonl` in the data folder
+  and shown in Settings.
+- `Settings.tokenSaver` (`outputFilter`, `bashOutputMaxChars`, `subagentModel`), all off by default and all set by
+  the "Save tokens" preset (filter on, 12k limit, helpers on Sonnet). Passed to Claude as `--settings` through the
+  session `_meta` (same route as skill overrides) and `CLAUDE_CODE_SUBAGENT_MODEL`.
+- Always on for Claude agents: prompt suggestions off (`promptSuggestions: false`, `promptSuggestionEnabled: false`).
+- Two new Usage insights: a big conversation idle past the one-hour cache, and helpers running on the agent's model.
+- Not verified without a model call: that Claude Code applies the hook's `updatedToolOutput` for a live Bash call,
+  and the size of the saving from prompt suggestions and the helper model.
+
+## What was built, round 1
+
 
 `Settings.autoCompactWindow` (new file `token_saver.rs`; one-line hook where the agent's environment is built),
 the "Save tokens" preset (`apply_token_saver`: 250k window, concise replies, medium effort for new Claude agents;
