@@ -593,7 +593,10 @@ const AgentRow = memo(function AgentRow({
               onNavigate?.();
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !renaming) {
+              // Keys pressed on something inside the row (Resume, the title field) are theirs, not the row's.
+              if (e.target !== e.currentTarget) return;
+              if ((e.key === "Enter" || e.key === " ") && !renaming) {
+                e.preventDefault();
                 openAgent(agent.id);
                 onNavigate?.();
               }

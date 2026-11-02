@@ -82,7 +82,7 @@ export const UserBubble = memo(function UserBubble({
           <AttachmentStrip attachments={item.attachments} size={88} className="mb-1.5 justify-end" />
         )}
         {item.text && (
-          <div className="selectable whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-line/70 bg-raised/60 px-3.5 py-2 text-[14.5px] leading-[1.55] text-fg">
+          <div dir="auto" className="selectable whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-line/70 bg-raised/60 px-3.5 py-2 text-[14.5px] leading-[1.55] text-fg">
             {item.text}
           </div>
         )}

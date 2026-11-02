@@ -21,9 +21,16 @@ export function uuid(): string {
 
 export function errorMessage(e: unknown): string {
   if (typeof e === "string") return e;
-  if (e instanceof Error) return e.message;
+  if (e instanceof Error) return e.message || e.name || "Something went wrong";
+  if (e === null || e === undefined) return "Something went wrong";
+  // A plain object (a plugin's error, a rejected response): show its message, never the raw JSON.
+  if (typeof e === "object") {
+    const o = e as { message?: unknown; error?: unknown };
+    if (typeof o.message === "string" && o.message) return o.message;
+    if (typeof o.error === "string" && o.error) return o.error;
+  }
   try {
-    return JSON.stringify(e);
+    return JSON.stringify(e) ?? String(e);
   } catch {
     return String(e);
   }

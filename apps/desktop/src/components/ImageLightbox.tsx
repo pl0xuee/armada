@@ -2,6 +2,7 @@ import * as D from "@radix-ui/react-dialog";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { attachmentSrc } from "@/lib/attachments";
 import type { Attachment } from "@/lib/types";
+import { useReturnFocus } from "./ui/returnFocus";
 
 /** Full-size image viewer with arrow-key navigation. */
 export function ImageLightbox({
@@ -17,6 +18,8 @@ export function ImageLightbox({
   const at = index !== null && images.length > 0 ? Math.min(index, images.length - 1) : null;
   const current = at !== null ? images[at] : undefined;
   const many = images.length > 1;
+  // Opened from a thumbnail (no Radix trigger): focus goes back to it on close.
+  const focus = useReturnFocus();
   const step = (d: number) => at !== null && onIndexChange((at + d + images.length) % images.length);
 
   return (
@@ -25,6 +28,8 @@ export function ImageLightbox({
         <D.Overlay className="anim-fade fixed inset-0 z-[90] bg-black/80 backdrop-blur-sm" />
         <D.Content
           aria-describedby={undefined}
+          onOpenAutoFocus={focus.onOpenAutoFocus}
+          onCloseAutoFocus={focus.onCloseAutoFocus}
           onKeyDown={(e) => {
             if (!many) return;
             if (e.key === "ArrowRight") step(1);
