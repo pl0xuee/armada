@@ -145,10 +145,12 @@ fn match_token(b: &[u8], i: usize) -> Option<(usize, usize)> {
     {
         return Some((i, i + 39));
     }
-    if starts("glpat-") {
-        let n = key_chars(i + 6);
-        if n >= 20 {
-            return Some((i, i + 6 + n));
+    for prefix in ["glpat-", "glrt-", "glptt-", "gldt-", "glsoat-"] {
+        if starts(prefix) {
+            let n = key_chars(i + prefix.len());
+            if n >= 20 {
+                return Some((i, i + prefix.len() + n));
+            }
         }
     }
     if starts("npm_") {
@@ -157,11 +159,63 @@ fn match_token(b: &[u8], i: usize) -> Option<(usize, usize)> {
             return Some((i, i + 4 + n));
         }
     }
-    for prefix in ["sk_live_", "rk_live_"] {
+    for prefix in ["sk_live_", "rk_live_", "sk_test_", "rk_test_", "whsec_"] {
         if starts(prefix) {
-            let n = run(b, i + 8, |c| c.is_ascii_alphanumeric());
+            let n = run(b, i + prefix.len(), |c| c.is_ascii_alphanumeric());
             if n >= 16 {
-                return Some((i, i + 8 + n));
+                return Some((i, i + prefix.len() + n));
+            }
+        }
+    }
+    // More provider keys that show up in env files and shell history. `(prefix, shortest tail)`;
+    // the tail is letters, digits, `_` and `-`.
+    for (prefix, min) in [
+        ("xai-", 32),      // xAI (Grok)
+        ("xapp-", 20),     // Slack app-level token
+        ("gsk_", 40),      // Groq
+        ("dckr_pat_", 20), // Docker personal access token
+        ("lin_api_", 30),  // Linear
+        ("pypi-", 50),     // PyPI upload token
+        ("ya29.", 20),     // Google OAuth access token
+        ("shpat_", 20),    // Shopify
+        ("shpca_", 20),
+        ("shppa_", 20),
+        ("shpss_", 20),
+        ("dop_v1_", 40), // DigitalOcean
+        ("doo_v1_", 40),
+        ("dor_v1_", 40),
+        ("AGE-SECRET-KEY-1", 50), // age
+    ] {
+        if starts(prefix) {
+            let n = key_chars(i + prefix.len());
+            if n >= min {
+                return Some((i, i + prefix.len() + n));
+            }
+        }
+    }
+    // SendGrid: SG.<id>.<secret>
+    if starts("SG.") {
+        let id = key_chars(i + 3);
+        if id >= 16 && b.get(i + 3 + id) == Some(&b'.') {
+            let secret = key_chars(i + 4 + id);
+            if secret >= 16 {
+                return Some((i, i + 4 + id + secret));
+            }
+        }
+    }
+    // A webhook URL is a password: the secret is in its path.
+    for prefix in [
+        "hooks.slack.com/services/",
+        "discord.com/api/webhooks/",
+        "discordapp.com/api/webhooks/",
+    ] {
+        if starts(prefix) {
+            let from = i + prefix.len();
+            let n = run(b, from, |c| {
+                c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-' | b'/')
+            });
+            if n >= 16 {
+                return Some((from, from + n));
             }
         }
     }
@@ -197,7 +251,7 @@ fn match_token(b: &[u8], i: usize) -> Option<(usize, usize)> {
     }
     if rest.len() > 5
         && starts("xox")
-        && matches!(rest[3], b'a' | b'b' | b'p' | b'r')
+        && matches!(rest[3], b'a' | b'b' | b'p' | b'r' | b's' | b'e')
         && rest[4] == b'-'
     {
         let n = run(b, i + 5, |c| c.is_ascii_alphanumeric() || c == b'-');
@@ -474,6 +528,7 @@ const SECRET_NAMES: &[&str] = &[
     "privatekey",
     "credentials",
     "clientsecret",
+    "accountkey",
 ];
 
 fn is_secret_name(name: &str) -> bool {
@@ -805,6 +860,69 @@ mod tests {
         assert_eq!(
             r(&k(&["日本語 s", "k-abcdefghijklmnopqrstuv 日本語"])),
             "日本語 [REDACTED] 日本語"
+        );
+    }
+
+    #[test]
+    fn more_provider_keys_and_webhook_urls() {
+        let long = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        let secrets = [
+            k(&["xai", "-", long]),
+            k(&["xa", "pp-1-A0123456789-1234567890123-", long]),
+            k(&["xo", "xe-1-", long]),
+            k(&["sk_te", "st_abcdefghijklmnop1234"]),
+            k(&["whs", "ec_abcdefghijklmnopqrstuvwxyz012345"]),
+            k(&["shp", "at_0123456789abcdef0123456789abcdef"]),
+            k(&["S", "G.abcdefghijklmnopqrstuv.", long]),
+            k(&["ya", "29.a0AfH6SMBabcdefghijklmnopqrstuvwxyz0123456789"]),
+            k(&["pyp", "i-", long]),
+            k(&["dckr", "_pat_abcdefghijklmnopqrstuvwxyz0"]),
+            k(&[
+                "dop",
+                "_v1_0123456789abcdef0123456789abcdef0123456789abcdef",
+            ]),
+            k(&["glr", "t-abcdefghijklmnopqrstuvwx"]),
+            k(&["lin_", "api_", long]),
+            k(&["gs", "k_", long]),
+            k(&[
+                "AGE-SECRET-",
+                "KEY-1ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUV",
+            ]),
+        ];
+        for s in &secrets {
+            let said = format!("export SOME_VAR={s} # note");
+            assert_eq!(r(&said), "export SOME_VAR=[REDACTED] # note", "{s}");
+            assert_eq!(r(&format!("see {s}.")), "see [REDACTED].", "{s}");
+        }
+        // The webhook URLs Kvistcode itself sends alerts to: the path is the secret.
+        let slack = k(&[
+            "https://hooks.sl",
+            "ack.com/services/T01234567/B01234567/abcdefghijklmnopqrstuvwx",
+        ]);
+        assert_eq!(
+            r(&format!("curl -d x {slack} now")),
+            "curl -d x https://hooks.slack.com/services/[REDACTED] now"
+        );
+        for host in ["discord.com", "ptb.discord.com", "discordapp.com"] {
+            let hook = k(&["https://", host, "/api/webhooks/123456789012345678/", long]);
+            assert_eq!(r(&hook), format!("https://{host}/api/webhooks/[REDACTED]"));
+        }
+        // Names, prose and look-alikes stay.
+        for plain in [
+            "xai-grok and xai-short",
+            "gsk_short dckr_pat_x shpat_x dop_v1_x",
+            "SG.short.short",
+            "pypi-package-name-for-the-project",
+            "https://hooks.slack.com/services/",
+            "https://discord.com/api/webhooks/123",
+            "notdiscord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz",
+            "ya29.x lin_api_x",
+        ] {
+            assert_eq!(r(plain), plain, "{plain}");
+        }
+        assert_eq!(
+            r("AccountKey=abcdef0123456789abcdef=="),
+            "AccountKey=[REDACTED]"
         );
     }
 }

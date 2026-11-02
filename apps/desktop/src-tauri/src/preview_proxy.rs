@@ -37,6 +37,9 @@ type Body = BoxBody<Bytes, io::Error>;
 /// The agent script, built by `npm run build:preview-agent`.
 const AGENT_JS: &str = include_str!("../assets/preview-agent.js");
 const AGENT_PATH: &str = "/__kvistcode/preview-agent.js";
+/// Stands for the session secret inside `AGENT_JS`; replaced when the script is served, so only a
+/// page on the proxy's own origin can read it (a site that merely frames the proxy cannot).
+const AGENT_KEY_PLACEHOLDER: &str = "__KVISTCODE_PREVIEW_KEY__";
 const SCRIPT_TAG: &str = "<script src=\"/__kvistcode/preview-agent.js\"></script>";
 /// How much HTML is looked at for an insertion point before giving up on `<head>`.
 const SNIFF_LIMIT: usize = 64 * 1024;
@@ -187,6 +190,7 @@ impl PreviewProxies {
         let ctx = Arc::new(Ctx {
             target: target.clone(),
             proxy_port: port,
+            token: token.clone(),
         });
         tokio::spawn(serve(listener, ctx, rx));
         let info = ProxyInfo {
@@ -240,6 +244,14 @@ pub async fn preview_proxy_stop(
 struct Ctx {
     target: Target,
     proxy_port: u16,
+    /// The pane's session secret (see `agent_script`).
+    token: String,
+}
+
+/// The preview agent for one proxy session, bound to the secret the app holds: the agent ignores
+/// any parent frame that doesn't present it.
+fn agent_script(token: &str) -> String {
+    AGENT_JS.replace(AGENT_KEY_PLACEHOLDER, token)
 }
 
 async fn serve(listener: TcpListener, ctx: Arc<Ctx>, mut stop: watch::Receiver<bool>) {
@@ -301,7 +313,7 @@ async fn route(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Body> {
     }
     if req.uri().path() == AGENT_PATH {
         let mut r = Response::new(
-            Full::new(Bytes::from_static(AGENT_JS.as_bytes()))
+            Full::new(Bytes::from(agent_script(&ctx.token)))
                 .map_err(|n| match n {})
                 .boxed(),
         );
@@ -968,6 +980,13 @@ mod tests {
         // The agent script is served by the proxy itself.
         let (_, h, body) = get(p, &own, "GET", AGENT_PATH, "", "").await;
         assert!(h.contains("no-store") && body.len() > 1000);
+        // ...bound to this session's secret: a page that only frames the proxy doesn't know it.
+        let script = String::from_utf8(body).unwrap();
+        assert!(
+            script.contains(&info.token),
+            "the agent must carry the session secret"
+        );
+        assert!(!script.contains(AGENT_KEY_PLACEHOLDER));
 
         // DNS rebinding: any other Host is refused.
         let (st, _, _) = get(p, "evil.example", "GET", "/", "", "").await;
@@ -1063,6 +1082,19 @@ mod tests {
                 "preview-agent.js lacks the `{cmd}` command: rebuild it"
             );
         }
+    }
+
+    /// The bundle checks the parent's secret against a placeholder the proxy fills in per session.
+    #[test]
+    fn bundled_agent_has_the_key_placeholder() {
+        assert!(
+            AGENT_JS.contains(AGENT_KEY_PLACEHOLDER),
+            "preview-agent.js lacks the key placeholder: rebuild it"
+        );
+        let a = agent_script("aaaa");
+        let b = agent_script("bbbb");
+        assert!(a.contains("aaaa") && !a.contains(AGENT_KEY_PLACEHOLDER));
+        assert_ne!(a, b);
     }
 
     /// The address bar follows the page: the bundle must report location and history changes.
