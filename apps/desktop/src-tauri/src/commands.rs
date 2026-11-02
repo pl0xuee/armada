@@ -352,6 +352,13 @@ pub async fn handoff_agent(
     .map_err(err)
 }
 
+/// The "Save tokens" preset: a shorter conversation window, concise replies and medium effort
+/// for new agents. Returns the saved settings.
+#[tauri::command]
+pub async fn apply_token_saver(core: State<'_, Core>) -> CmdResult<Settings> {
+    core.apply_token_saver().map_err(err)
+}
+
 #[tauri::command]
 pub async fn set_focus(
     attention: State<'_, Arc<Attention>>,

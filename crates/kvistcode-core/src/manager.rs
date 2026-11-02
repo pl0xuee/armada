@@ -1254,6 +1254,8 @@ impl Core {
             }
             (program, args, acct_env, acct_env_remove)
         };
+        let mut env = env;
+        crate::token_saver::extend_env(&mut env, agent.provider, &self.inner.settings.lock());
         let children_file = self.inner.data_dir.join("children.json");
         let attachments_dir = self.attachments_dir();
         let mcp_servers = crate::mcp::servers_for_project(
