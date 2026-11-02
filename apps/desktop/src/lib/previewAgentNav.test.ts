@@ -1,9 +1,11 @@
 // Runs the built preview agent (src-tauri/assets/preview-agent.js) against a minimal fake page and checks
 // what it reports about location and history. Rebuild the bundle with `npm run build:preview-agent`.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import BUNDLE from "../../src-tauri/assets/preview-agent.js?raw";
+import RAW_BUNDLE from "../../src-tauri/assets/preview-agent.js?raw";
 
 const TOKEN = "tok";
+// The proxy fills in the session secret when it serves the script.
+const BUNDLE = RAW_BUNDLE.replaceAll("__KVISTCODE_PREVIEW_KEY__", TOKEN);
 const ORIGIN = "http://127.0.0.1:4000";
 
 type Listener = (e: unknown) => void;

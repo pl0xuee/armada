@@ -100,6 +100,14 @@ const MAX_REMOTE_UPLOAD: usize = 28 * 1024 * 1024;
 /// A request body must arrive within this time (stops slow-drip uploads holding
 /// connection slots).
 const BODY_READ_TIMEOUT: Duration = Duration::from_secs(150);
+/// The unauthenticated pairing request is a few dozen bytes: it must arrive quickly, or the
+/// connection (a scarce slot for unknown hosts) is closed.
+const PAIR_BODY_LIMIT: usize = 4 * 1024;
+const PAIR_BODY_TIMEOUT: Duration = if cfg!(test) {
+    Duration::from_secs(1)
+} else {
+    Duration::from_secs(10)
+};
 /// How long a finished request's result is replayed for a retried Idempotency-Key.
 const IDEMPOTENCY_TTL: Duration = Duration::from_secs(10 * 60);
 /// Live event streams per token: owners (several devices/tabs) and share links.
@@ -1490,7 +1498,7 @@ impl Remote {
             // Unauthenticated by design (it trades a one-time code for a token).
             .route(
                 "/api/pair",
-                post(pair).layer(DefaultBodyLimit::max(4 * 1024)),
+                post(pair).layer(DefaultBodyLimit::max(PAIR_BODY_LIMIT)),
             )
             .merge(api)
             .layer(axum::middleware::map_response(no_store))
@@ -2034,7 +2042,7 @@ async fn pair(
     State(c): State<Ctx>,
     ConnectInfo(peer): Peer,
     headers: HeaderMap,
-    Json(body): Json<PairBody>,
+    req: axum::extract::Request,
 ) -> Result<Json<Value>, ApiError> {
     let remote = &c.remote;
     remote.check_origin(c.epoch, &headers)?;
@@ -2045,6 +2053,45 @@ async fn pair(
             "Too many failed attempts. Try again in a few minutes.".into(),
         ));
     }
+    // Read the body here, within a short time: this route needs no token, so a client that
+    // stalls mid-body must not be able to keep its connection.
+    let is_json = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| {
+            v.trim_start()
+                .to_ascii_lowercase()
+                .starts_with("application/json")
+        });
+    if !is_json {
+        return Err(ApiError(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "Send the pairing code as JSON.".into(),
+        ));
+    }
+    let bytes = tokio::time::timeout(
+        PAIR_BODY_TIMEOUT,
+        axum::body::to_bytes(req.into_body(), PAIR_BODY_LIMIT),
+    )
+    .await
+    .map_err(|_| {
+        ApiError(
+            StatusCode::REQUEST_TIMEOUT,
+            "The request took too long.".into(),
+        )
+    })?
+    .map_err(|_| {
+        ApiError(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "That request is too large.".into(),
+        )
+    })?;
+    let body: PairBody = serde_json::from_slice(&bytes).map_err(|_| {
+        ApiError(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "That isn't a pairing request.".into(),
+        )
+    })?;
     if !remote.redeem_pairing(&body.code) {
         return Err(remote.record_failure(
             ip,
@@ -4302,6 +4349,63 @@ mod tests {
         std::fs::create_dir_all(dir.join("data")).unwrap();
         let remote = Remote::new(core.clone(), "0.0.0".into(), dir.join("data"));
         (remote, core)
+    }
+
+    /// The unauthenticated pairing route must not let a client hold a connection open by sending
+    /// its body one byte at a time (or not at all).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_stalled_pairing_body_is_cut_off() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let dir = temp_dir();
+        let (remote, core) = test_remote(&dir);
+        let mut port = 0;
+        for _ in 0..5 {
+            port = std::net::TcpListener::bind("127.0.0.1:0")
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            remote
+                .apply(&RemoteSettings {
+                    enabled: true,
+                    lan: false,
+                    port,
+                    ..Default::default()
+                })
+                .await;
+            if remote.status().running {
+                break;
+            }
+        }
+        assert!(remote.status().running, "{:?}", remote.status().error);
+        let mut slow = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        slow.write_all(
+            format!(
+                "POST /api/pair HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: 200\r\n\r\n{{\"code\":"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+        let mut buf = [0u8; 512];
+        let closed = tokio::time::timeout(Duration::from_secs(6), async {
+            loop {
+                match slow.read(&mut buf).await {
+                    Ok(0) | Err(_) => return,
+                    Ok(_) => continue,
+                }
+            }
+        })
+        .await;
+        assert!(
+            closed.is_ok(),
+            "a stalled pairing request held its connection"
+        );
+        remote.shutdown().await;
+        core.shutdown().await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test(flavor = "multi_thread")]

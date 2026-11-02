@@ -410,13 +410,15 @@ pub async fn push_agent(agent: &Agent) -> anyhow::Result<String> {
     let remote = push_remote(cwd, &branch).await.map_err(|e| {
         anyhow!("{e:#} If this folder isn't on GitHub yet, use “Publish to GitHub”.")
     })?;
+    let remote = checked_remote(&remote)?;
     let pushed = run_opts(
         "git",
         cwd,
         &[
             "push",
             "-u",
-            &remote,
+            "--",
+            remote,
             &format!("refs/heads/{branch}:refs/heads/{branch}"),
         ],
         Opts {
@@ -436,6 +438,16 @@ pub async fn push_agent(agent: &Agent) -> anyhow::Result<String> {
         return Err(explain_push_failure(e));
     }
     Ok(format!("Pushed {branch} to {remote}"))
+}
+
+/// A remote name read from the repository's config. It goes on a `git push` command line, and
+/// the repository (or the agent working in it) controls that config: a name that looks like an
+/// option (`--receive-pack=…` runs a program) is refused.
+fn checked_remote(remote: &str) -> anyhow::Result<&str> {
+    if remote.is_empty() || remote.starts_with('-') || remote.chars().any(char::is_control) {
+        bail!("The branch's remote in this repository's git config isn't a valid remote name, so Kvistcode won't push to it. Check `git config branch.<name>.remote`.");
+    }
+    Ok(remote)
 }
 
 /// Whether a failed push/clone reads as "git had no usable credentials".
@@ -548,6 +560,74 @@ mod tests {
         // A second run changes nothing.
         let (again, _) = prepare_repo(&dir, after).await.unwrap();
         assert!(again.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remote_names_that_look_like_options_are_refused() {
+        for ok in ["origin", "fork", "my-remote", "up.stream"] {
+            assert_eq!(checked_remote(ok).unwrap(), ok);
+        }
+        for bad in [
+            "",
+            "-x",
+            "--receive-pack=touch /tmp/x",
+            "--upload-pack=x",
+            "a\nb",
+        ] {
+            assert!(checked_remote(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    /// A repository whose config names `--receive-pack=<program>` as the branch's remote must not
+    /// get that program run by "Push".
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pushing_does_not_run_a_program_named_by_the_repository_config() {
+        let dir = std::env::temp_dir().join(format!("kvistcode-gh-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        let sh = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=T", "-c", "user.email=t@example.invalid"])
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        sh(&["init", "-q"]);
+        sh(&["commit", "-q", "--allow-empty", "-m", "x"]);
+        sh(&["branch", "-M", "main"]);
+        let marker = dir.join("PWNED");
+        sh(&[
+            "config",
+            "branch.main.remote",
+            &format!("--receive-pack=touch {};true", marker.display()),
+        ]);
+        // A bare repository where git would take the refspec to be the remote's path.
+        let hostile = "refs/heads/main:refs/heads/main";
+        std::fs::create_dir_all(dir.join(hostile)).unwrap();
+        sh(&["init", "-q", "--bare", hostile]);
+
+        let agent: Agent = serde_json::from_value(serde_json::json!({
+            "id": "a1", "title": "Agent", "provider": "grok", "accountId": "acc",
+            "projectPath": dir.display().to_string(), "cwd": dir.display().to_string(),
+            "worktree": false, "status": "idle", "running": false,
+            "createdAt": 0, "updatedAt": 0, "lastActivityAt": 0,
+            "costUsd": 0.0, "tokensUsed": 0, "unread": false, "archived": false,
+            "pendingPermissions": 0
+        }))
+        .unwrap();
+        let err = push_agent(&agent).await.unwrap_err();
+        assert!(
+            !marker.exists(),
+            "the repository's config ran a program: {err:#}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
