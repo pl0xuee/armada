@@ -88,6 +88,8 @@ export interface RemoteAccount {
   provider: Provider;
   color: string;
   label: string | null;
+  /** "api_key": billed per token. Absent on older servers (then a cost is not called API-equivalent). */
+  authKind?: "default" | "oauth" | "api_key";
   /** null/absent = unknown (not checked yet, or an older server). */
   loggedIn?: boolean | null;
   /** Last problem checking or using the account, if any. */

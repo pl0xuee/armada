@@ -1199,6 +1199,7 @@ export function toRemoteAccount(a: unknown): RemoteAccount | null {
     name?: unknown;
     provider?: unknown;
     color?: unknown;
+    authKind?: unknown;
     status?: { label?: unknown; loggedIn?: unknown; error?: unknown } | null;
   };
   if (
@@ -1213,6 +1214,7 @@ export function toRemoteAccount(a: unknown): RemoteAccount | null {
     name: x.name,
     provider: x.provider as RemoteAccount["provider"],
     color: typeof x.color === "string" ? x.color : "#7D8B99",
+    ...(x.authKind === "default" || x.authKind === "oauth" || x.authKind === "api_key" ? { authKind: x.authKind } : {}),
     label: st && typeof st.label === "string" ? st.label : null,
     loggedIn: st && typeof st.loggedIn === "boolean" ? st.loggedIn : null,
     error: st && typeof st.error === "string" ? st.error : null,

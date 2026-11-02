@@ -54,9 +54,13 @@ const SCOPE_PHRASE: Record<string, string> = {
 };
 
 /** The sentence a held agent leads with. */
-export function holdText(hold: HoldLike): string {
-  return `Reached ${SCOPE_PHRASE[hold.scope] ?? "a limit"}: ${holdAmounts(hold)}.`;
+export function holdText(hold: HoldLike, equivalent = false): string {
+  const note = hold.metric === "cost" && equivalent ? " (API-equivalent cost, not a bill)" : "";
+  return `Reached ${SCOPE_PHRASE[hold.scope] ?? "a limit"}: ${holdAmounts(hold)}${note}.`;
 }
+
+/** A hint for a cost limit on a subscription: it is not billed per token, so another kind of limit may fit better. */
+export const SUBSCRIPTION_HOLD_HINT = "Subscriptions aren't billed per token, so a turn or token limit may fit this account better.";
 
 /** Whose limit changes when it is raised, when that is more than this agent. */
 export function holdReach(hold: HoldLike, projectPath: string | undefined): string | null {

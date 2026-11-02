@@ -221,3 +221,31 @@ export function withoutResumeNotice(items: TimelineItem[], status: string): Time
   const out = items.filter((it) => !(it.kind === "notice" && /\bresume\b/i.test(it.text)));
   return out.length === items.length ? items : out;
 }
+
+const firstSeq = (r: Row): number =>
+  r.kind === "item" ? r.item.seq : r.kind === "tools" ? r.tools[0].seq : r.kind === "subagent" ? r.node.call.seq : r.items[0].seq;
+
+const nodeHas = (n: SubagentNode, id: string): boolean =>
+  n.call.id === id || n.children.some((c) => (isSubagentNode(c) ? nodeHas(c, id) : c.id === id));
+
+/**
+ * The row that shows `itemId` (a search hit): the row of that item, or the one that folded it in (an activity group,
+ * a run of messages, a sub-agent's calls). An item no row shows (hidden kinds) falls back to the last row at or
+ * before `seq`; null when the conversation doesn't reach back that far.
+ */
+export function rowKeyForItem(rows: readonly Row[], itemId: string, seq: number): string | null {
+  for (const r of rows) {
+    const found =
+      r.kind === "item"
+        ? r.item.id === itemId
+        : r.kind === "tools"
+          ? r.tools.some((t) => t.id === itemId)
+          : r.kind === "subagent"
+            ? nodeHas(r.node, itemId)
+            : r.items.some((i) => i.id === itemId);
+    if (found) return r.key;
+  }
+  let best: Row | null = null;
+  for (const r of rows) if (firstSeq(r) <= seq) best = r;
+  return best && rows.length && firstSeq(rows[0]) <= seq ? best.key : null;
+}

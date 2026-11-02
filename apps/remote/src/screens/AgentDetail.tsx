@@ -14,7 +14,8 @@ import { TopBar } from "@/components/TopBar";
 import { Button, IconButton } from "@/components/ui";
 import { backgroundActive, backgroundDetail, backgroundPill, backgroundShort, withSubagents } from "@/lib/background";
 import { holdLabel } from "@/lib/budgetHold";
-import { loadTimeline, markRead, resumeAgent, unpair } from "@/lib/controller";
+import { loadOlder, loadTimeline, markRead, resumeAgent, unpair } from "@/lib/controller";
+import { clearSearchFocus, MAX_FOCUS_PAGES, peekSearchFocus } from "@/lib/searchFocus";
 import { devParam } from "@/lib/dev";
 import { basename, formatCost, formatTokens, plainPreview, relativeTimeLong } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
@@ -22,7 +23,8 @@ import { agentIdentity, isBusy, isResumable, safeColor, statusMeta } from "@/lib
 import { useDelayed } from "@/lib/hooks";
 import { goBack, navigate } from "@/lib/router";
 import { isProgrammaticScroll, isUserLayoutChange } from "@/lib/scroll";
-import { accountOf, useBackground, useOtherPendingCount } from "@/lib/selectors";
+import { accountOf, useBackground, useCostIsEquivalent, useOtherPendingCount } from "@/lib/selectors";
+import { EQUIVALENT_NOTE } from "@/lib/cost";
 import { useBackgroundSubagentCount } from "@/lib/subagents";
 import { useStore, type PendingPrompt, type Timeline as TimelineState } from "@/lib/store";
 import type { Agent, TimelineItem } from "@/lib/types";
@@ -207,6 +209,15 @@ function AgentView({
   const initialScrollDone = useRef(false);
   const ready = timeline?.status === "ready";
   const items = timeline?.items;
+  // A search result that was tapped: the conversation loads back to it and scrolls there instead of to the end.
+  const [focus, setFocus] = useState(() => peekSearchFocus(agent.id));
+  const endFocus = useCallback(() => {
+    clearSearchFocus();
+    setFocus(null);
+  }, []);
+  useEffect(() => clearSearchFocus, []);
+  const focusing = useRef(false);
+  focusing.current = !!focus;
 
   // Track whether the reader is following the bottom.
   useEffect(() => {
@@ -271,10 +282,28 @@ function AgentView({
   useLayoutEffect(() => {
     if (ready && !initialScrollDone.current) {
       initialScrollDone.current = true;
+      if (focus) {
+        pinned.current = false; // the timeline scrolls to the search result instead
+        return;
+      }
       scrollToBottom();
       pinned.current = true;
     }
-  }, [ready]);
+  }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load back (a page at a time) until the search result is among the loaded messages.
+  const pagesToFocus = useRef(0);
+  const first = items?.[0]?.seq;
+  const more = !!timeline?.hasMore;
+  const loadingOlder = !!timeline?.loadingOlder;
+  useEffect(() => {
+    if (!focus || !ready || first === undefined || loadingOlder) return;
+    if (first <= focus.seq) return; // reached: the timeline finds its row
+    if (more && pagesToFocus.current < MAX_FOCUS_PAGES) {
+      pagesToFocus.current += 1;
+      void loadOlder(agent.id);
+    } else endFocus(); // the conversation doesn't reach back that far: stay where it opens
+  }, [focus, ready, first, more, loadingOlder, agent.id, endFocus]);
 
   // Follow growth (new items, streaming text) while pinned.
   useEffect(() => {
@@ -286,7 +315,7 @@ function AgentView({
       const grew = h > lastHeight;
       lastHeight = h;
       if (!grew || !initialScrollDone.current) return;
-      if (isUserLayoutChange()) return;
+      if (isUserLayoutChange() || focusing.current) return;
       if (pinned.current) scrollToBottom();
       else setJump("new");
     });
@@ -350,7 +379,7 @@ function AgentView({
             />
           ) : (
             <ImageSource.Provider value={agent.id}>
-              <Timeline agent={agent} items={items ?? []} pending={pending} readOnly={readOnly} onEditPrompt={editPrompt} />
+              <Timeline agent={agent} items={items ?? []} pending={pending} readOnly={readOnly} onEditPrompt={editPrompt} focus={focus} onFocused={endFocus} />
             </ImageSource.Provider>
           )}
           {readOnly && <StatusBanner agent={agent} readOnly inline />}
@@ -605,6 +634,7 @@ function AgentDetailsSheet({
   const ctx = agent.contextUsed != null && agent.contextSize ? agent.contextUsed / agent.contextSize : null;
   const bg = withSubagents(useBackground(agent), useBackgroundSubagentCount(agent.id));
   const running = backgroundActive(bg);
+  const equivalent = useCostIsEquivalent(agent);
 
   return (
     <Sheet open={open} onClose={onClose} title={agent.title} description={`${id.name}${model ? ` · ${model}` : ""}`}>
@@ -643,6 +673,7 @@ function AgentDetailsSheet({
         )}
         <DetailRow label="Cost">
           <span className="tabular">{formatCost(agent.costUsd)}</span>
+          {equivalent && agent.costUsd > 0 && <span className="ml-1.5 text-[12.5px] text-steel">{EQUIVALENT_NOTE}</span>}
         </DetailRow>
         <DetailRow label="Tokens">
           <span className="tabular">{formatTokens(agent.tokensUsed)}</span>

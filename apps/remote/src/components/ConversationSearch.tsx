@@ -7,6 +7,7 @@ import { basename, relativeTime } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
 import { safeColor } from "@/lib/meta";
 import { navigate } from "@/lib/router";
+import { setSearchFocus } from "@/lib/searchFocus";
 import { accountOf } from "@/lib/selectors";
 import { kindLabel, matchCount, resultGroups, searchText, splitSnippet } from "@/lib/search";
 import { useStore } from "@/lib/store";
@@ -106,17 +107,26 @@ export function ConversationSearch({ query }: { query: string }) {
                     aria-label={`${agent.title}, ${matchCount(group.total)}`}
                   >
                     <GroupHeader agent={agent} total={group.total} />
-                    {group.hits.map((h) => (
-                      <span key={h.itemId} className="block border-t border-line/60 px-3.5 py-2">
-                        <span className="line-clamp-2 block text-[13.5px] leading-[1.4] break-words text-fg/90">
-                          <Snippet text={h.snippet} />
-                        </span>
-                        <span className="mt-0.5 block text-[12px] text-steel">
-                          {kindLabel(h.kind)} · {relativeTime(h.ts, now)}
-                        </span>
-                      </span>
-                    ))}
                   </button>
+                  {group.hits.map((h) => (
+                    <button
+                      key={h.itemId}
+                      type="button"
+                      onClick={() => {
+                        setSearchFocus({ agentId: agent.id, itemId: h.itemId, seq: h.seq });
+                        navigate({ name: "agent", agentId: agent.id });
+                      }}
+                      aria-label={`Open in ${agent.title}: ${splitSnippet(h.snippet).map((p) => p.text).join("")}`}
+                      className="press-row block min-h-11 w-full border-t border-line/60 px-3.5 py-2 text-left"
+                    >
+                      <span className="line-clamp-2 block text-[13.5px] leading-[1.4] break-words text-fg/90">
+                        <Snippet text={h.snippet} />
+                      </span>
+                      <span className="mt-0.5 block text-[12px] text-steel">
+                        {kindLabel(h.kind)} · {relativeTime(h.ts, now)}
+                      </span>
+                    </button>
+                  ))}
                 </li>
               ))}
             </ul>
