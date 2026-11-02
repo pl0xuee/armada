@@ -462,6 +462,9 @@ pub struct CustomAgent {
 
 /// A sub-agent an agent delegated work to (Claude's Agent/Task tool, Codex
 /// collaborator threads).
+/// How Claude Code's result for a background sub-agent launch begins.
+pub const ASYNC_LAUNCH_PREFIX: &str = "Async agent launched";
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubAgent {
@@ -794,6 +797,22 @@ pub enum ItemBody {
 }
 
 impl ItemBody {
+    /// A sub-agent launch whose result says "Async agent launched" runs in the background even when
+    /// the request did not carry `run_in_background` (a custom agent that always runs that way, or
+    /// Claude Code backgrounding it): the call completes at once but the sub-agent keeps working.
+    pub fn adopt_async_launch(&mut self) {
+        if let ItemBody::ToolCall {
+            subagent: Some(sa),
+            output,
+            ..
+        } = self
+        {
+            if !sa.control && sa.workflow.is_none() && output.starts_with(ASYNC_LAUNCH_PREFIX) {
+                sa.background = true;
+            }
+        }
+    }
+
     pub fn kind_str(&self) -> &'static str {
         match self {
             ItemBody::UserMessage { .. } => "user_message",

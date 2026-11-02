@@ -516,8 +516,12 @@ impl Db {
         let mut unreadable = 0usize;
         for row in rows {
             let (id, seq, ts, data) = row?;
-            match serde_json::from_str(&data) {
-                Ok(item) => out.push(item),
+            match serde_json::from_str::<TimelineItem>(&data) {
+                Ok(mut item) => {
+                    // Rows saved before launches were read from their result.
+                    item.body.adopt_async_launch();
+                    out.push(item);
+                }
                 Err(e) => {
                     unreadable += 1;
                     tracing::debug!("unreadable item {id}: {e}");
@@ -975,6 +979,41 @@ mod tests {
         db.delete_agent("a").unwrap();
         assert!(db.items("a").unwrap().is_empty());
         assert_eq!(db.max_seq("a").unwrap(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_old_async_launch_loads_as_a_background_sub_agent() {
+        let dir = temp("async-launch");
+        let db = Db::open(&dir.join("armada.db")).unwrap();
+        db.put_item(&TimelineItem {
+            id: "t1".into(),
+            agent_id: "a".into(),
+            seq: 1,
+            ts: 1,
+            body: ItemBody::ToolCall {
+                tool_call_id: "toolu_1".into(),
+                title: "Agent".into(),
+                tool_kind: crate::model::ToolKind::Think,
+                status: crate::model::ToolStatus::Completed,
+                locations: Vec::new(),
+                diffs: Vec::new(),
+                output: "Async agent launched successfully. (internal metadata)".into(),
+                command: None,
+                images: Vec::new(),
+                subagent: Some(crate::model::SubAgent {
+                    kind: Some("godot-engineer".into()),
+                    ..Default::default()
+                }),
+                parent_tool_call_id: None,
+            },
+        })
+        .unwrap();
+        let items = db.items("a").unwrap();
+        assert!(matches!(
+            &items[0].body,
+            ItemBody::ToolCall { subagent: Some(sa), .. } if sa.background
+        ));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

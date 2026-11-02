@@ -1366,6 +1366,16 @@ fn apply_tool_fields(b: &mut ItemBody, u: &Value) {
     {
         adopt_workflow(output, subagent, tool_kind);
     }
+    // A launch the adapter reports as asynchronous runs in the background even when the request
+    // did not say so (see `ItemBody::adopt_async_launch`).
+    if let Some(sa) = subagent {
+        if !sa.control
+            && sa.workflow.is_none()
+            && output.starts_with(crate::model::ASYNC_LAUNCH_PREFIX)
+        {
+            sa.background = true;
+        }
+    }
 }
 
 /// Claude Code's Workflow tool returns at launch with where the run keeps its
@@ -1632,6 +1642,40 @@ mod subagent_tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn a_launch_reported_as_async_is_background_without_the_request_flag() {
+        let mut b = blank_tool();
+        apply_tool_fields(
+            &mut b,
+            &json!({
+                "sessionUpdate": "tool_call", "toolCallId": "toolu_9", "title": "Agent",
+                "status": "in_progress", "kind": "think",
+                "rawInput": {"description": "Finish card", "subagent_type": "godot-engineer", "prompt": "go"},
+                "_meta": {"claudeCode": {"toolName": "Agent"}}
+            }),
+        );
+        assert!(!sub(&b).unwrap().background);
+        apply_tool_fields(
+            &mut b,
+            &json!({
+                "sessionUpdate": "tool_call_update", "toolCallId": "toolu_9", "status": "completed",
+                "content": [{"type": "content", "content": {"type": "text",
+                    "text": "Async agent launched successfully. (internal metadata)"}}],
+                "_meta": {"claudeCode": {"toolName": "Agent"}}
+            }),
+        );
+        assert!(sub(&b).unwrap().background);
+        // Rows saved before this was read from the result are fixed when loaded.
+        if let ItemBody::ToolCall {
+            subagent: Some(sa), ..
+        } = &mut b
+        {
+            sa.background = false;
+        }
+        b.adopt_async_launch();
+        assert!(sub(&b).unwrap().background);
     }
 
     const WF_OUT: &str = "Workflow launched in background. Task ID: w4cpfsvul\nSummary: Five parallel agents\nTranscript dir: /h/projects/p/s/subagents/workflows/wf_d5cc071f-a40\nScript file: /h/x.js";

@@ -31,6 +31,7 @@ import { WorkflowCard } from "./WorkflowCard";
 import { useRunningSubagentCount, useSubagentRuns } from "../agent/useSubagents";
 import { useHeld, WAITING_HOLD_MS } from "@/hooks/useHeld";
 import { LiveStatus } from "./LiveStatus";
+import { isBackgroundLaunch } from "@/lib/agents";
 import { backgroundActive, backgroundShort } from "@/lib/background";
 import { useBackground, useBackgroundStore } from "@/store/background";
 import { shouldShowThinking, turnEndOf, turnStart, waitingStatus } from "./thinking";
@@ -893,7 +894,8 @@ function renderItem(
   switch (it.kind) {
     case "user_message":
       return <UserBubble item={it} awaiting={ctx.midTurnWaiting.has(it.id)} />;
-    case "agent_message":
+    case "agent_message": {
+      const turnOpen = agent.status === "working" || agent.status === "starting" || agent.status === "needs_permission";
       return (
         <AgentMessage
           item={it}
@@ -903,11 +905,13 @@ function renderItem(
             final: view.finalIds.has(it.id),
             latest: it.id === view.lastFinalId,
             trailingActivity: view.trailingActivity,
-            turnOpen: agent.status === "working" || agent.status === "starting" || agent.status === "needs_permission",
+            turnOpen,
           })}
+          turnOpen={turnOpen}
           streaming={liveTail}
         />
       );
+    }
     case "thought":
       return <ThoughtBlock item={it} live={liveTail} agentId={agent.id} />;
     case "tool_call":
@@ -915,7 +919,7 @@ function renderItem(
       if (it.subagent) {
         // Same rule as the sub-agent counts: a background sub-agent's call completes at launch but
         // it keeps running while subagentRuns counts it.
-        const bgRunning = !!it.subagent.background && it.status === "completed" && ctx.bgRunningIds.has(it.toolCallId);
+        const bgRunning = isBackgroundLaunch(it) && it.status === "completed" && ctx.bgRunningIds.has(it.toolCallId);
         return (
           <SubagentCard
             item={it}

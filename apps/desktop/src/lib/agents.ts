@@ -193,6 +193,16 @@ const SUBAGENT_STALE_CHILD_MS = 30 * 60_000;
 /** Resolution of the shared sub-agent clock; derived data is cached per bucket. */
 export const SUBAGENT_TICK_MS = 5_000;
 
+/**
+ * Whether a tool call launched a sub-agent in the background: flagged by the request, or reported
+ * by the result ("Async agent launched"), which is all a custom agent that always runs that way shows.
+ */
+export function isBackgroundLaunch(it: ToolItem): boolean {
+  const sa = it.subagent;
+  if (!sa || sa.control || sa.workflow) return !!sa?.background;
+  return !!sa.background || it.output.startsWith("Async agent launched");
+}
+
 /** The wall clock and liveness an agent's background sub-agents are judged by. */
 export interface SubagentClock {
   now: number;
@@ -244,7 +254,7 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, c
     const it = items[i];
     // Workflow runs have their own progress (see workflows.ts), not the child-call rules below.
     if (it.kind !== "tool_call" || !it.subagent || it.subagent.control || it.subagent.workflow) continue;
-    const bg = !!it.subagent.background;
+    const bg = isBackgroundLaunch(it);
     const open = unfinished(it.status) || (bg && it.status === "completed" && i > turnStartIdx);
     let running = open && busy;
     if (bg && clock && it.status === "completed") {

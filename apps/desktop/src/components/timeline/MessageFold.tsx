@@ -12,8 +12,11 @@ const opened = new Set<string>();
 /**
  * Folds a tall message behind a soft fade and a "Show more" control. The content is measured once it
  * stops streaming (and whenever its size changes after that); a message that streamed while mounted
- * is never folded under the reader, and neither is anything while it is still growing. The control is a
- * real button (keyboard reachable); focus moving into hidden content opens the message.
+ * is never folded under the reader, and neither is anything while it is still growing. How tall it may be
+ * is fixed at that first measurement: a message's role changes as the turn goes on (the answer in the
+ * making becomes a working note, and back when the turn ends), and that must never fold or unfold it by
+ * itself. Only the reader's click does. The control is a real button (keyboard reachable); focus moving
+ * into hidden content opens the message.
  */
 export function MessageFold({
   id,
@@ -49,7 +52,12 @@ export function MessageFold({
     return () => ro.disconnect();
   }, [streaming]);
 
-  const foldable = height !== null && shouldCollapse(height, role, { streaming, watched: watched.current });
+  // The role the fold limit follows: the one the message had when it was first measured.
+  const limitRole = useRef<MessageRole | null>(null);
+  if (height !== null && limitRole.current === null) limitRole.current = role;
+  const foldRole = limitRole.current ?? role;
+
+  const foldable = height !== null && shouldCollapse(height, foldRole, { streaming, watched: watched.current });
   const collapsed = foldable && !expanded;
 
   // After folding back up, keep the message's top in view instead of leaving the reader below it.
@@ -82,7 +90,7 @@ export function MessageFold({
       <div
         id={bodyId}
         className={cn("relative", collapsed && "overflow-hidden fold-fade")}
-        style={collapsed ? { maxHeight: collapseLimitPx(role) } : undefined}
+        style={collapsed ? { maxHeight: collapseLimitPx(foldRole) } : undefined}
         onFocusCapture={() => {
           if (collapsed) setExpanded(true);
         }}
@@ -100,7 +108,7 @@ export function MessageFold({
           {collapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
           {collapsed ? "Show more" : "Show less"}
           {collapsed && (
-            <span className="font-normal tabular-nums text-steel">· {hiddenLines(height, role)} more lines</span>
+            <span className="font-normal tabular-nums text-steel">· {hiddenLines(height, foldRole)} more lines</span>
           )}
         </button>
       )}

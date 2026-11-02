@@ -159,7 +159,8 @@ export const AgentMessage = memo(function AgentMessage({
   item,
   parts,
   agent,
-  role = "answer",
+  role: wanted = "answer",
+  turnOpen = false,
   streaming,
 }: {
   /** The message (the first of a run of consecutive ones). */
@@ -169,8 +170,17 @@ export const AgentMessage = memo(function AgentMessage({
   agent: Agent;
   /** "narration": a working note between tool calls, quiet and compact. "answer"/"latest": what closes a turn. */
   role?: MessageRole;
+  /** The agent is mid-turn. */
+  turnOpen?: boolean;
   streaming: boolean;
 }) {
+  // One way while the turn runs: a message that became a working note stays one until the turn ends. A
+  // stray call that shows for a moment and then moves into its sub-agent's card must not flip the
+  // message between answer and note typesetting (a jump of tens of pixels each time).
+  const noted = useRef(false);
+  if (!turnOpen) noted.current = false;
+  else if (wanted === "narration") noted.current = true;
+  const role: MessageRole = wanted === "latest" && noted.current ? "narration" : wanted;
   const images = item.images ?? [];
   const text = useMemo(() => (parts ? runText(parts) : item.text), [parts, item.text]);
   // Demoted while on screen (the answer in the making turned out to be a working note): ease into the new style.

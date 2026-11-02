@@ -778,9 +778,10 @@ function startLiveActivity() {
           kind,
           description,
           prompt: description,
-          background: true,
-          // The Explore one names a cheap model; the other inherits the main agent's.
-          ...(kind === "Explore" ? { model: "Haiku", effort: "low" } : {}),
+          // The Explore one names a cheap model; the other inherits the main agent's, and (like a
+          // custom agent that always runs in the background) its launch carries no flag: only its
+          // "Async agent launched" result says so.
+          ...(kind === "Explore" ? { background: true, model: "Haiku", effort: "low" } : {}),
         },
       });
       const c = addItem("a-research", {

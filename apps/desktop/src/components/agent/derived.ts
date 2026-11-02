@@ -5,6 +5,7 @@
 // allocate, no sorting, and stable references (so selectors don't re-render) per frame.
 import {
   filesTouched,
+  isBackgroundLaunch,
   latestPlan,
   runningCount,
   SUBAGENT_TICK_MS,
@@ -111,7 +112,7 @@ function signature(items: TimelineItem[]): unknown[] {
 
 const hasBackground = (items: TimelineItem[]) =>
   items.some(
-    (it) => it.kind === "tool_call" && it.subagent?.background && !it.subagent.control && !it.subagent.workflow,
+    (it) => it.kind === "tool_call" && !!it.subagent && isBackgroundLaunch(it) && !it.subagent.control && !it.subagent.workflow,
   );
 
 /**
