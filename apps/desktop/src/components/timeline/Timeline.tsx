@@ -994,6 +994,17 @@ function TimelineSkeleton() {
 }
 
 /**
+ * What a screen reader is told when a new timeline item arrives. Tool calls are not announced: a working
+ * agent makes dozens, and each would queue behind the last.
+ */
+export function announcementFor(kind: TimelineItem["kind"] | undefined, name: string, title: string): string | null {
+  if (kind === "agent_message") return `${name} replied`;
+  if (kind === "permission") return `${name} needs approval: ${title}`;
+  if (kind === "question") return `${name} asks: ${title}`;
+  return null;
+}
+
+/**
  * Screen-reader announcements for new items and status changes only. The timeline
  * itself isn't a live region (streaming deltas would be read out character by character).
  */
@@ -1004,7 +1015,7 @@ function LiveAnnouncer({ agent, items }: { agent: Agent; items: TimelineItem[] |
   const lastKind = items?.[items.length - 1]?.kind;
   const lastTitle = (() => {
     const it = items?.[items.length - 1];
-    return it && (it.kind === "permission" || it.kind === "tool_call")
+    return it && it.kind === "permission"
       ? it.title
       : it?.kind === "question"
         ? it.message
@@ -1016,10 +1027,8 @@ function LiveAnnouncer({ agent, items }: { agent: Agent; items: TimelineItem[] |
   useEffect(() => {
     if (lastId && lastId !== seen.current) {
       seen.current = lastId;
-      if (lastKind === "agent_message") setMessage(`${name} replied`);
-      else if (lastKind === "permission") setMessage(`${name} needs approval: ${lastTitle}`);
-      else if (lastKind === "question") setMessage(`${name} asks: ${lastTitle}`);
-      else if (lastKind === "tool_call") setMessage(`${name}: ${lastTitle}`);
+      const said = announcementFor(lastKind, name, lastTitle);
+      if (said) setMessage(said);
     }
   }, [lastId, lastKind, lastTitle, name]);
 
