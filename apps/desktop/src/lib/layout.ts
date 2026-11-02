@@ -46,3 +46,19 @@ export function previewLayout(container: number, inspectorDocked: boolean, want:
   if (container > 0 && room < need) return { mode: "full", inspector: false, width: container };
   return { mode: "split", inspector, width: clampPreviewWidth(want, room) };
 }
+
+/** How much of the agent header fits in `width`: labelled buttons, icon buttons, or the rest folded into the ⋯ menu. */
+export type HeaderTier = "full" | "icons" | "compact";
+
+/**
+ * Below this width the status chips and action buttons would squeeze the title to a few letters (at 200% zoom it
+ * vanished), so the header folds its secondary actions into the ⋯ menu first.
+ */
+export const HEADER_ICONS_MIN_WIDTH = 800;
+export const HEADER_FULL_MIN_WIDTH = 1000;
+
+export function headerTier(width: number, tiled: boolean): HeaderTier {
+  if (tiled) return "compact";
+  if (width === 0 || width >= HEADER_FULL_MIN_WIDTH) return "full";
+  return width >= HEADER_ICONS_MIN_WIDTH ? "icons" : "compact";
+}

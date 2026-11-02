@@ -66,3 +66,18 @@ export const CODE_PREVIEW_LINES = 14;
 export function codeCollapses(lineCount: number, watched: boolean): boolean {
   return !watched && lineCount > CODE_COLLAPSE_LINES;
 }
+
+/** A message you wrote folds behind "Show all" past this many (wrapped) lines: a pasted log would fill the conversation. */
+export const USER_FOLD_LINES = 24;
+const USER_LINE_CHARS = 80;
+
+/** Wrapped lines of a message, roughly (a bubble is about 80 characters wide). */
+export function userMessageLines(text: string): number {
+  let n = 0;
+  for (const line of text.split("\n")) n += Math.max(1, Math.ceil(line.length / USER_LINE_CHARS));
+  return n;
+}
+
+export function userMessageFolds(text: string): boolean {
+  return userMessageLines(text) > USER_FOLD_LINES + SLACK_LINES;
+}

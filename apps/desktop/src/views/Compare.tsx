@@ -11,7 +11,7 @@ import { useNow } from "@/hooks/useNow";
 import { relativeTimeLong } from "@/lib/format";
 import { identityFor } from "@/lib/identity";
 import { providerRank } from "@/lib/providers";
-import type { Agent } from "@/lib/types";
+import type { Agent, TimelineItem } from "@/lib/types";
 import { basename, cn, errorMessage } from "@/lib/utils";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
@@ -48,7 +48,6 @@ function buildGroups(agents: Record<string, Agent>): Group[] {
 
 export function CompareView() {
   const agents = useApp((s) => s.agents);
-  const items = useApp((s) => s.items);
   const compareGroupId = useUi((s) => s.compareGroupId);
   const openCompare = useUi((s) => s.openCompare);
   const openNewAgent = useUi((s) => s.openNewAgent);
@@ -65,14 +64,19 @@ export function CompareView() {
     for (const id of groupIds.split(",")) void useApp.getState().ensureItems(id);
   }, [groupIds]);
 
-  const prompt = useMemo(() => {
-    if (!group) return null;
-    for (const a of group.agents) {
-      const first = items[a.id]?.find((i) => i.kind === "user_message");
-      if (first && first.kind === "user_message") return first.text;
-    }
-    return null;
-  }, [group, items]);
+  // Returns the prompt text itself, so streamed frames of the columns don't re-render this whole page.
+  const prompt = useApp(
+    useMemo(
+      () => (s: { items: Record<string, TimelineItem[]> }) => {
+        for (const id of groupIds ? groupIds.split(",") : []) {
+          const first = s.items[id]?.find((i) => i.kind === "user_message");
+          if (first && first.kind === "user_message") return first.text;
+        }
+        return null;
+      },
+      [groupIds],
+    ),
+  );
 
   if (!group) {
     return (

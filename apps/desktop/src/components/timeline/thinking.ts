@@ -1,5 +1,6 @@
 import type { AgentStatus, ConfigOption, TimelineItem } from "@/lib/types";
 import { pluralize } from "@/lib/format";
+import { startsTurn } from "@/lib/agents";
 
 /** Friendly status verbs the indicator cycles through while the agent is busy. */
 export const THINKING_VERBS = [
@@ -125,7 +126,7 @@ export function liveStep(items: readonly TimelineItem[], messageSettled = false)
 
 /** Start of the current turn: the latest user message, else `fallback`. */
 export function turnStart(items: readonly TimelineItem[], fallback: number): number {
-  for (let i = items.length - 1; i >= 0; i--) if (items[i].kind === "user_message") return items[i].ts;
+  for (let i = items.length - 1; i >= 0; i--) if (startsTurn(items[i])) return items[i].ts;
   return fallback;
 }
 
@@ -173,7 +174,7 @@ export function turnEndOf(
 ): TurnEnd | null {
   if (status !== "idle" && status !== "error") return null;
   if (!lastRow || lastRow.kind === "turn_summary") return null;
-  const start = items.findLast((i) => i.kind === "user_message");
+  const start = items.findLast(startsTurn);
   if (!start) return null;
   // An error notice is already the last row: don't say it a second time.
   if (status === "error" && lastRow.kind === "notice" && lastRow.level === "error") return null;

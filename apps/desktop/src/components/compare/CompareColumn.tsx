@@ -14,6 +14,7 @@ import { useIsDone } from "@/store/completion";
 import { useIdentity } from "@/hooks/useIdentity";
 import type { Account, Agent, FileDiff, TimelineItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { lastAnswer } from "./lastAnswer";
 
 export function CompareColumn({
   agent,
@@ -48,13 +49,7 @@ export function CompareColumn({
     const diffs: FileDiff[] = [];
     const paths = new Set<string>();
     if (items) {
-      for (let i = items.length - 1; i >= 0; i--) {
-        const it = items[i];
-        if (message === null && it.kind === "agent_message" && it.text.trim()) {
-          message = it.text;
-          streaming = i === items.length - 1;
-        }
-      }
+      ({ text: message, streaming } = lastAnswer(items));
       for (const it of items) {
         if (it.kind === "tool_call") {
           for (const d of it.diffs) {

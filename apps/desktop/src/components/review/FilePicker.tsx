@@ -72,6 +72,8 @@ export function FilePicker({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
+            // IME candidate selection uses the arrows and Enter: not ours while composing.
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (e.key === "ArrowDown") {
               e.preventDefault();
               setActive((i) => Math.min(rows.length - 1, i + 1));
