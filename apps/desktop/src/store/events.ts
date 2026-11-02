@@ -78,6 +78,11 @@ function offerFailover(agent: Agent) {
   });
 }
 
+/** How long events wait for the next frame in a visible window before being applied anyway. */
+const VISIBLE_FALLBACK_MS = 120;
+/** A hidden window has no frames and nobody watching: events are applied in coarse batches (and at once on return). */
+const HIDDEN_FLUSH_MS = 1000;
+
 /** Subscribe the stores to backend events. Returns an unsubscribe function. */
 export function connectEvents(): () => void {
   let unlisten: (() => void) | null = null;
@@ -107,9 +112,15 @@ export function connectEvents(): () => void {
   const schedule = () => {
     if (raf) return;
     raf = requestAnimationFrame(flush);
-    // rAF doesn't run while the window is hidden; don't let events pile up.
-    fallback = setTimeout(flush, 120);
+    // rAF doesn't run while the window is hidden; don't let events pile up. Nobody is watching then, so the
+    // batches are far apart: a hidden window with eight agents streaming costs one render a second, not eight.
+    fallback = setTimeout(flush, document.hidden ? HIDDEN_FLUSH_MS : VISIBLE_FALLBACK_MS);
   };
+  // Coming back: show everything that arrived meanwhile right away.
+  const onVisible = () => {
+    if (!document.hidden && queue.length > 0) flush();
+  };
+  document.addEventListener("visibilitychange", onVisible);
 
   void onKvistcodeEvent((e) => {
     // Terminal output is latency-sensitive and doesn't touch the store.
@@ -130,6 +141,7 @@ export function connectEvents(): () => void {
     });
   return () => {
     disposed = true;
+    document.removeEventListener("visibilitychange", onVisible);
     if (raf) cancelAnimationFrame(raf);
     if (fallback) clearTimeout(fallback);
     unlisten?.();

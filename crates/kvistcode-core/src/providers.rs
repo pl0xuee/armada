@@ -151,11 +151,15 @@ fn capture_output(program: &str, args: &[&str], timeout: std::time::Duration) ->
     // The child leads its own session and process group.
     let pgid = child.id() as libc::pid_t;
     let deadline = std::time::Instant::now() + timeout;
+    // Starts tight and backs off: a login shell that finishes in 30 ms shouldn't wait out a
+    // 20 ms poll on the startup path (the window can't open before this returns).
+    let mut nap = std::time::Duration::from_millis(1);
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) if std::time::Instant::now() < deadline => {
-                std::thread::sleep(std::time::Duration::from_millis(20));
+                std::thread::sleep(nap);
+                nap = (nap * 2).min(std::time::Duration::from_millis(20));
             }
             _ => {
                 // SAFETY: plain syscall; pgid is the group we created above.

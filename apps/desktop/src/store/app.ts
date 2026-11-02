@@ -49,8 +49,8 @@ export interface AppStore {
   applyEvent: (e: KvistcodeEvent) => void;
   applyEvents: (events: KvistcodeEvent[]) => void;
   ensureItems: (agentId: string, force?: boolean) => Promise<void>;
-  /** Page in the previous PAGE_SIZE items before the loaded ones. */
-  loadOlder: (agentId: string) => Promise<void>;
+  /** Page in the `limit` (default PAGE_SIZE) items before the loaded ones; a search jump asks for a bigger page. */
+  loadOlder: (agentId: string, limit?: number) => Promise<void>;
   setSettings: (s: Settings) => Promise<void>;
   patchSettings: (patch: Partial<Settings>) => Promise<void>;
   upsertAgent: (a: Agent) => void;
@@ -342,7 +342,7 @@ export const useApp = create<AppStore>((set, get) => ({
     }
   },
 
-  loadOlder: async (agentId) => {
+  loadOlder: async (agentId, limit = PAGE_SIZE) => {
     const { items, hasOlder, olderLoading } = get();
     const list = items[agentId];
     if (!list || !hasOlder[agentId] || olderLoading[agentId]) return;
@@ -350,14 +350,14 @@ export const useApp = create<AppStore>((set, get) => ({
     if (first === undefined) return;
     set({ olderLoading: { ...olderLoading, [agentId]: true } });
     try {
-      const page = await api.listItems(agentId, { beforeSeq: first, limit: PAGE_SIZE });
+      const page = await api.listItems(agentId, { beforeSeq: first, limit });
       const cur = get().items[agentId];
       if (!cur || removed.has(agentId)) return;
       const have = new Set(cur.map((i) => i.id));
       const older = page.filter((i) => !have.has(i.id)).sort((a, b) => a.seq - b.seq);
       set({
         items: { ...get().items, [agentId]: [...older, ...cur] },
-        hasOlder: { ...get().hasOlder, [agentId]: page.length >= PAGE_SIZE },
+        hasOlder: { ...get().hasOlder, [agentId]: page.length >= limit },
       });
     } catch (e) {
       set({ itemsError: { ...get().itemsError, [agentId]: errorMessage(e) } });
