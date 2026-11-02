@@ -3814,6 +3814,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn binary_files_are_listed_without_counts_or_garbage() {
+        let repo = Repo::new();
+        std::fs::write(repo.dir.join("logo.bin"), b"\x00\x01\x02binary\x00").unwrap();
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+        // Changed, renamed-with-change, and brand new binaries.
+        std::fs::write(repo.dir.join("logo.bin"), b"\x00\x09\x09other\x00\xff").unwrap();
+        std::fs::write(repo.dir.join("fresh.bin"), b"\x00\x00\x00\x00").unwrap();
+        let diff = diff_worktree(&repo.dir, None).await.unwrap();
+        let mut files: Vec<_> = diff
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), f.status, f.additions, f.deletions))
+            .collect();
+        files.sort_by_key(|f| f.0);
+        assert_eq!(
+            files,
+            vec![
+                ("fresh.bin", ChangeStatus::Added, 0, 0),
+                ("logo.bin", ChangeStatus::Modified, 0, 0),
+            ]
+        );
+        assert!(diff.patch.contains("Binary files"), "{:?}", diff.patch);
+        assert!(!diff.patch.contains('\u{0}'), "{:?}", diff.patch);
+        assert_eq!(diff.uncommitted, 2);
+    }
+
+    #[tokio::test]
     async fn repositories_without_lfs_report_none() {
         let repo = Repo::new();
         repo.write("a.txt", "one\n");
