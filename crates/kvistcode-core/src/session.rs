@@ -145,6 +145,9 @@ struct CtxState {
     lens: HashMap<(String, LenField), usize>,
     /// Which adapter process is current; exits from older ones are ignored.
     generation: u64,
+    /// The generation whose handshake completed and was handed out as the agent's
+    /// live process (a process that died before that never got a prompt).
+    up_generation: u64,
     exit_intent: ExitIntent,
     /// The current process is still in its handshake (start errors are reported
     /// by the starter, not by the exit handler).
@@ -225,6 +228,7 @@ impl AgentCtx {
                 replaying: None,
                 lens: HashMap::new(),
                 generation: 0,
+                up_generation: 0,
                 exit_intent: ExitIntent::None,
                 starting: false,
                 start_peer: None,
@@ -953,6 +957,11 @@ impl AgentCtx {
         }
     }
 
+    /// The process of `generation` finished starting and is now the agent's live one.
+    pub fn mark_up(&self, generation: u64) {
+        self.st.lock().up_generation = generation;
+    }
+
     /// Whether `generation` is still the agent's current process. Only a hint
     /// (it can change right after); to act on it, use `with_current_generation`.
     pub fn is_current(&self, generation: u64) -> bool {
@@ -1426,13 +1435,48 @@ impl AgentCtx {
     /// Ends the turn. Returns the next queued prompt if there is one (the caller
     /// should start it immediately).
     pub fn turn_finished(&self, outcome: TurnOutcome) -> Option<Prompt> {
-        self.finish_turn(None, outcome)
+        self.finish_turn(None, None, outcome, false)
     }
 
     /// `turn_finished` reported by the process of `generation`: ignored if that
     /// process was retired meanwhile (checked atomically with the turn state).
     pub fn turn_finished_by(&self, generation: u64, outcome: TurnOutcome) -> Option<Prompt> {
-        self.finish_turn(Some(generation), outcome)
+        self.finish_turn(Some(generation), None, outcome, false)
+    }
+
+    /// `turn_finished_by` for the task that sent the prompt with `token`: it can
+    /// only end its own turn. A task whose process died can report that late, after
+    /// the exit handler has already ended the turn and the user's next message has
+    /// started one on the same (dead) process; that report must not fail the new turn.
+    pub fn turn_finished_for(
+        &self,
+        generation: u64,
+        token: u64,
+        outcome: TurnOutcome,
+    ) -> Option<Prompt> {
+        self.finish_turn(Some(generation), Some(token), outcome, false)
+    }
+
+    /// The process of `generation` went away under the turn with `token` (`None`:
+    /// whichever turn is running). The turn fails, and if the agent produced nothing
+    /// for it, its prompt may never have arrived, so it goes back to the front of the
+    /// queue, on hold, rather than being lost.
+    pub fn turn_lost_with_process(
+        &self,
+        generation: u64,
+        token: Option<u64>,
+        msg: String,
+        requeue_unheard: bool,
+    ) {
+        self.finish_turn(
+            Some(generation),
+            token,
+            TurnOutcome::Failed(msg),
+            requeue_unheard,
+        );
+        // `begin_turn` can have set "running" after the exit was handled: a dead
+        // process can't be running.
+        self.with_current_generation(generation, || self.update_agent(|a| a.running = false));
     }
 
     /// At a turn boundary: the spending limit the agent must wait at, if one is hit.
@@ -1448,8 +1492,15 @@ impl AgentCtx {
         self.core.upgrade()?.budget_gate(&self.agent_id, completed)
     }
 
-    fn finish_turn(&self, generation: Option<u64>, outcome: TurnOutcome) -> Option<Prompt> {
+    fn finish_turn(
+        &self,
+        generation: Option<u64>,
+        token: Option<u64>,
+        outcome: TurnOutcome,
+        requeue_unheard: bool,
+    ) -> Option<Prompt> {
         let hold = self.budget_gate(&outcome);
+        let mut requeued = false;
         let stale: Vec<String>;
         let dropped: usize;
         let next: Option<Prompt>;
@@ -1459,7 +1510,10 @@ impl AgentCtx {
         let turn_tree: Option<String>;
         {
             let mut st = self.st.lock();
-            if !st.turn_active || generation.is_some_and(|g| g != st.generation) {
+            if !st.turn_active
+                || generation.is_some_and(|g| g != st.generation)
+                || token.is_some_and(|t| t != st.turn_epoch)
+            {
                 return None;
             }
             // A turn that ended because we stopped the process wasn't a failure.
@@ -1496,7 +1550,12 @@ impl AgentCtx {
             } else {
                 None
             };
-            st.turn_prompt = None;
+            // Nothing from the agent after the user's message: it may never have got it.
+            let unheard = st
+                .turn_prompt
+                .take()
+                .filter(|(_, seq)| *seq == st.seq)
+                .map(|(p, _)| p);
             // This turn is over either way; its token is spent.
             finish_epoch = Self::next_token_locked(&mut st);
             if next.is_none() {
@@ -1504,6 +1563,16 @@ impl AgentCtx {
                 dropped = Self::pause_queue_locked(&mut st);
             } else {
                 dropped = 0;
+            }
+            // Decided under the same lock as the turn's end, so it is always the
+            // prompt of the turn that just ended, and only once.
+            if requeue_unheard && next.is_none() {
+                if let Some(prompt) = unheard {
+                    st.queue
+                        .push_front((uuid::Uuid::new_v4().to_string(), prompt));
+                    st.queue_paused = true;
+                    requeued = true;
+                }
             }
         }
         for id in &stale {
@@ -1583,6 +1652,8 @@ impl AgentCtx {
         }
         if dropped > 0 {
             self.notice(NoticeLevel::Info, paused_notice(dropped));
+        }
+        if dropped > 0 || requeued {
             self.publish_queue();
         }
         if let (Some(hold), Some(core)) = (hold, self.core.upgrade()) {
@@ -1633,6 +1704,12 @@ impl AgentCtx {
             }
             TurnOutcome::Failed(msg) => {
                 self.notice(NoticeLevel::Error, msg.clone());
+                if requeued {
+                    self.notice(
+                        NoticeLevel::Info,
+                        "The agent exited before answering. Your message is back in the queue in case it never arrived; send it again to retry.",
+                    );
+                }
                 let limited = is_rate_limit(msg);
                 self.update_agent_settled(|a, active| {
                     if !active {
@@ -1775,7 +1852,7 @@ impl AgentCtx {
     pub fn process_exited(&self, generation: u64, detail: String) {
         // Like any event of the process: not to be interleaved with its retirement.
         let _gate = self.gate.lock();
-        let (current, intent, busy, starting, cancelled) = {
+        let (current, intent, busy, starting, cancelled, was_up) = {
             let mut st = self.st.lock();
             if st.replaying == Some(generation) {
                 st.replaying = None;
@@ -1786,7 +1863,15 @@ impl AgentCtx {
                 st.starting = false;
             }
             let cancelled = st.cancelled_start == Some(generation);
-            (current, st.exit_intent, st.turn_active, starting, cancelled)
+            let was_up = st.up_generation == generation;
+            (
+                current,
+                st.exit_intent,
+                st.turn_active,
+                starting,
+                cancelled,
+                was_up,
+            )
         };
         if let Some(core) = self.core.upgrade() {
             core.driver_exited(&self.agent_id);
@@ -1795,13 +1880,7 @@ impl AgentCtx {
         if !current {
             return;
         }
-        // Whether the process had come up before it died (a start that never got that far
-        // is retried from the timeline, see below).
-        let mut was_running = false;
-        self.update_agent(|a| {
-            was_running = a.running;
-            a.running = false;
-        });
+        self.update_agent(|a| a.running = false);
         // Starting: the starter sees the failed handshake and reports it.
         // Cancelled mid-start (Stop, cancel, "send now"): killing it was the point;
         // whoever cancelled settles the turn (the exit can land after the starter
@@ -1817,24 +1896,11 @@ impl AgentCtx {
                     msg.push_str(detail.trim());
                 }
                 // A process that died before producing anything for the turn may
-                // never have got the message: keep it, on hold, rather than lose it.
-                // Only if the process had come up: a start that never got that far is retried
-                // from the timeline (and briefed), so queueing it too would run it twice.
-                let unheard = {
-                    let st = self.st.lock();
-                    st.turn_prompt
-                        .as_ref()
-                        .filter(|(_, seq)| was_running && *seq == st.seq)
-                        .map(|(p, _)| p.clone())
-                };
-                self.turn_finished_by(generation, TurnOutcome::Failed(msg));
-                if let Some(prompt) = unheard {
-                    self.requeue_front_paused(prompt);
-                    self.notice(
-                        NoticeLevel::Info,
-                        "The agent exited before answering. Your message is back in the queue in case it never arrived; send it again to retry.",
-                    );
-                }
+                // never have got the message: it goes back on hold in the queue rather
+                // than being lost (only if the process had come up: a start that never
+                // got that far is retried from the timeline, and briefed, so queueing
+                // it too would run it twice).
+                self.finish_turn(Some(generation), None, TurnOutcome::Failed(msg), was_up);
                 // `begin_turn` can have raced the exit handler and set this again.
                 self.update_agent(|a| a.running = false);
             }
@@ -2267,6 +2333,83 @@ mod tests {
         });
         assert_eq!(ran, None);
         assert_eq!(kinds(&ctx), ["notice", "thought", "user: two"]);
+    }
+
+    fn queued_texts(ctx: &AgentCtx) -> Vec<String> {
+        ctx.st
+            .lock()
+            .queue
+            .iter()
+            .map(|(_, p)| p.text.clone())
+            .collect()
+    }
+
+    /// The known residual of the crash race: the dead process's two reporters (its
+    /// exit handler and the task waiting on the prompt) both fail the turn. The
+    /// second, late one must not fail the turn the user's next message started on
+    /// the same process generation.
+    #[test]
+    fn late_prompt_failure_does_not_fail_the_next_turn() {
+        let ctx = ctx();
+        let g = ctx.begin_start();
+        ctx.end_start(g);
+        ctx.mark_up(g);
+        let one = run(&ctx, "one");
+        // The exit handler gets there first and fails the turn.
+        ctx.process_exited(g, String::new());
+        assert!(!ctx.is_turn_active());
+        // The user types again; it starts a turn (the old process isn't replaced yet).
+        let two = ctx.submit_prompt("two", vec![]).expect("runs now");
+        assert!(ctx.begin_turn(two.token));
+        // The first prompt's task now reports its failure.
+        ctx.turn_lost_with_process(g, Some(one.token), "session/prompt failed".into(), true);
+        assert!(ctx.is_turn_active(), "a stale report ended the new turn");
+        assert_eq!(ctx.active_turn(), Some(two.token));
+        // "one" was never answered: it waits in the queue (it runs after "two"), once.
+        assert_eq!(queued_texts(&ctx), ["one"]);
+    }
+
+    /// A process that dies under a turn before saying anything may never have got the
+    /// message: it is kept, on hold, exactly once however the death is noticed.
+    #[test]
+    fn unanswered_prompt_is_kept_once_when_its_process_dies() {
+        let ctx = ctx();
+        let g = ctx.begin_start();
+        ctx.end_start(g);
+        ctx.mark_up(g);
+        let p = run(&ctx, "hello");
+        // The task waiting on the prompt notices first, then the exit handler.
+        ctx.turn_lost_with_process(
+            g,
+            Some(p.token),
+            "writing to agent: Broken pipe".into(),
+            true,
+        );
+        ctx.process_exited(g, String::new());
+        assert_eq!(queued_texts(&ctx), ["hello"]);
+        assert!(!ctx.is_turn_active());
+
+        // An agent that had already answered something is not asked again.
+        let g2 = ctx.begin_start();
+        ctx.end_start(g2);
+        ctx.mark_up(g2);
+        ctx.clear_queue();
+        let p = run(&ctx, "again");
+        ctx.append_text(StreamKind::Message, None, "partial");
+        ctx.turn_lost_with_process(g2, Some(p.token), "gone".into(), true);
+        assert!(queued_texts(&ctx).is_empty());
+    }
+
+    /// A process that never finished starting is retried from the timeline; its
+    /// prompt must not also be queued.
+    #[test]
+    fn prompt_of_a_process_that_never_came_up_is_not_queued() {
+        let ctx = ctx();
+        let g = ctx.begin_start();
+        ctx.end_start(g);
+        run(&ctx, "hello");
+        ctx.process_exited(g, String::new());
+        assert!(queued_texts(&ctx).is_empty());
     }
 
     /// An exit during the handshake is reported by the starter, not here.

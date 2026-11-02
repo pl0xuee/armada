@@ -430,9 +430,11 @@ impl CodexDriver {
         if self.ctx.cancel_was_requested() && self.ctx.is_current(self.generation) {
             self.cancel_requested
                 .store(false, std::sync::atomic::Ordering::SeqCst);
-            return self
-                .ctx
-                .turn_finished_by(self.generation, TurnOutcome::Cancelled);
+            return self.ctx.turn_finished_for(
+                self.generation,
+                prompt.token,
+                TurnOutcome::Cancelled,
+            );
         }
         self.peer.mark_turn();
         let mark = self.peer.stderr_mark();
@@ -473,13 +475,31 @@ impl CodexDriver {
                     self.ctx.restore_preamble(pre);
                 }
                 if self.ctx.is_current(self.generation) {
-                    let outcome = if self.ctx.cancel_was_requested() {
-                        TurnOutcome::Cancelled
-                    } else {
-                        let e = auth_hint(self.peer.with_stderr(e, mark));
-                        TurnOutcome::Failed(format!("{e:#}"))
-                    };
-                    return self.ctx.turn_finished_by(self.generation, outcome);
+                    if self.ctx.cancel_was_requested() {
+                        return self.ctx.turn_finished_for(
+                            self.generation,
+                            prompt.token,
+                            TurnOutcome::Cancelled,
+                        );
+                    }
+                    let gone = crate::jsonrpc::process_gone(&e);
+                    let msg = format!("{:#}", auth_hint(self.peer.with_stderr(e, mark)));
+                    if gone {
+                        // The process died under the turn: like its exit handler, keep
+                        // the message if Codex may never have got it.
+                        self.ctx.turn_lost_with_process(
+                            self.generation,
+                            Some(prompt.token),
+                            msg,
+                            true,
+                        );
+                        return None;
+                    }
+                    return self.ctx.turn_finished_for(
+                        self.generation,
+                        prompt.token,
+                        TurnOutcome::Failed(msg),
+                    );
                 }
             }
         }

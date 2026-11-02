@@ -1392,6 +1392,7 @@ impl Core {
             .lock()
             .insert(agent_id.to_string(), driver.clone());
         let ctx = self.ctx(agent_id);
+        ctx.mark_up(driver.generation());
         ctx.update_agent_settled(|a, active| {
             a.session_id = Some(session_id);
             a.running = true;
