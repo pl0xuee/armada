@@ -359,6 +359,14 @@ pub async fn apply_token_saver(core: State<'_, Core>) -> CmdResult<Settings> {
     core.apply_token_saver().map_err(err)
 }
 
+/// What the shell-output tidy-up has saved so far (characters before and after).
+#[tauri::command]
+pub async fn output_filter_stats(
+    core: State<'_, Core>,
+) -> CmdResult<kvistcode_core::output_filter::Saved> {
+    Ok(core.output_filter_stats())
+}
+
 #[tauri::command]
 pub async fn set_focus(
     attention: State<'_, Arc<Attention>>,

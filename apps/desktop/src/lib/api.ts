@@ -41,6 +41,7 @@ import type {
   Settings,
   BudgetChoice,
   BudgetStatus,
+  OutputFilterStats,
   AlertKind,
   ShareLink,
   ShipResult,
@@ -359,6 +360,8 @@ const tauriApi = {
   // settings & attention
   /** Apply the "Save tokens" preset (shorter conversations, concise replies, medium effort). */
   applyTokenSaver: () => invoke<Settings>("apply_token_saver"),
+  /** What tidying shell output has saved so far (characters before and after). */
+  outputFilterStats: () => invoke<OutputFilterStats>("output_filter_stats"),
   updateSettings: (settings: Settings) => invoke<Settings>("update_settings", { settings }),
   /** Today's spend (since local midnight) against the daily budget limits. */
   budgetStatus: () => invoke<BudgetStatus>("budget_status"),

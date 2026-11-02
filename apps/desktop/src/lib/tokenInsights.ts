@@ -16,6 +16,10 @@ export const VERY_LONG_CONTEXT = 350_000;
 export const PRESET_COMPACT_WINDOW = 250_000;
 /** Agents working at once on one account before it is worth a warning. */
 export const PARALLEL_WARN = 4;
+/** Context above which an expired prompt cache is worth a warning. */
+export const CACHE_COLD_CONTEXT = 150_000;
+/** Idle time after which Claude's one-hour prompt cache has expired. */
+export const CACHE_TTL_MS = 60 * 60_000;
 /** Dollars per million tokens above which an agent is on a much pricier model than usual. */
 const PRICEY_PER_MTOK = 2.5;
 
@@ -153,6 +157,46 @@ export function tokenInsights(input: {
       detail:
         "Claude Code defers MCP tool definitions by default, so the cost is usually small, but where that isn't available every tool of every server is re-sent on each step. Turn off the servers you are not using.",
       action: { kind: "open-settings", label: "Open MCP settings" },
+    });
+  }
+
+  // 7. A big conversation whose prompt cache has expired: the next message re-reads all of it
+  // at full price (Claude Code's cache lasts an hour on a subscription, five minutes otherwise).
+  const cold = agents
+    .filter(
+      (a) =>
+        a.provider === "claude" &&
+        !BUSY.has(a.status) &&
+        (a.contextUsed ?? 0) >= CACHE_COLD_CONTEXT &&
+        a.lastActivityAt > 0 &&
+        now - a.lastActivityAt >= CACHE_TTL_MS,
+    )
+    .sort((a, b) => (b.contextUsed ?? 0) - (a.contextUsed ?? 0));
+  if (cold.length) {
+    const worst = cold[0];
+    out.push({
+      id: "cold-cache",
+      severity: (worst.contextUsed ?? 0) >= VERY_LONG_CONTEXT ? "high" : "medium",
+      title:
+        cold.length === 1
+          ? `"${worst.title}" has been idle over an hour with ${formatTokens(worst.contextUsed ?? 0)} tokens of context`
+          : `${cold.length} agents have been idle over an hour with ${formatTokens(CACHE_COLD_CONTEXT)}+ tokens of context`,
+      detail:
+        "Claude's prompt cache has expired, so the next message re-reads the whole conversation at full price, once. If you only need a result, start a fresh agent from a short handoff summary instead of continuing this one.",
+      action: { kind: "open-agent", agentId: worst.id, label: "Open it" },
+    });
+  }
+
+  // 8. Claude's helper agents run on the same (often pricier) model as the agent itself.
+  const heavyClaude = agents.some((a) => a.provider === "claude" && a.tokensUsed >= 2_000_000);
+  if (settings?.tokenSaver && !settings.tokenSaver.subagentModel && heavyClaude) {
+    out.push({
+      id: "helper-model",
+      severity: "info",
+      title: "Claude's helper agents run on the same model as the agent",
+      detail:
+        "Helpers (exploration, searches, test runs) each carry their own conversation and use your plan separately. Running them on Sonnet keeps the agent's own model for the hard part. The preset sets this; Settings also offers Haiku.",
+      action: { kind: "preset", label: "Save tokens" },
     });
   }
 

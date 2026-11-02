@@ -549,6 +549,24 @@ export interface Settings {
   alertTargets: AlertTarget[];
   /** Claude agents summarize their conversation at this many tokens (100k..1M); null = Claude Code's default. */
   autoCompactWindow: number | null;
+  /** The other "Save tokens" options. */
+  tokenSaver: TokenSaverOptions;
+}
+
+export interface TokenSaverOptions {
+  /** Tidy noisy build/test/install output before Claude agents read it. */
+  outputFilter: boolean;
+  /** Largest command output a Claude agent gets inline (4,000..128,000 characters); null = Claude Code's 30,000. */
+  bashOutputMaxChars: number | null;
+  /** Model for Claude's helper agents: "sonnet" | "haiku"; null = same as the agent. */
+  subagentModel: string | null;
+}
+
+/** What tidying shell output has saved so far (characters). */
+export interface OutputFilterStats {
+  calls: number;
+  before: number;
+  after: number;
 }
 
 export type BudgetAction = "notify" | "pause";
