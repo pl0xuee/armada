@@ -223,9 +223,15 @@ pub fn va_stop(va: State<'_, VoiceAssistant>) {
     va.send(Control::Stop);
 }
 
+/// Mute / unmute. Muting is the same state as "pause listening" and "go to sleep": the
+/// connection and the microphone are closed until unmuted.
 #[tauri::command]
 pub fn va_set_muted(va: State<'_, VoiceAssistant>, muted: bool) {
-    va.send(Control::Mute(muted));
+    va.send(if muted {
+        Control::Pause
+    } else {
+        Control::Resume
+    });
 }
 
 /// The user's answer to a confirmation card.

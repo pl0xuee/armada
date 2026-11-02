@@ -18,7 +18,7 @@ use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, warn};
 
-use super::audio::{self, AudioDevices, SpeakerBuffer};
+use super::audio::{self, AudioDevices, AudioIo, SpeakerBuffer};
 use super::cost::{session_cost, Usage};
 use super::protocol::{self as p, ServerEvent};
 
@@ -35,6 +35,9 @@ const STABLE_AFTER: Duration = Duration::from_secs(30);
 /// Keep the mic closed this long after the assistant's audio stops (room echo tail).
 /// How long a non-fatal notice stays beside the live session.
 const NOTICE_FOR: Duration = Duration::from_secs(8);
+/// After the model asks to pause, how long its goodbye may take before listening pauses
+/// regardless.
+const PAUSE_GRACE: Duration = Duration::from_secs(10);
 const ECHO_TAIL: Duration = Duration::from_millis(300);
 
 /// Error codes that mean the request will never work; the session ends instead of
@@ -138,6 +141,8 @@ pub enum VaState {
     Listening,
     Thinking,
     Speaking,
+    /// Muted / asleep: no connection and no microphone, nothing is sent until resumed.
+    Paused,
     Error,
 }
 
@@ -195,7 +200,10 @@ pub trait ToolHost: Send + Sync {
 #[derive(Debug)]
 pub enum Control {
     Stop,
-    Mute(bool),
+    /// Mute / pause listening / go to sleep: one state. The connection is closed and
+    /// the microphone released until [`Control::Resume`].
+    Pause,
+    Resume,
     /// The user answered a `ConfirmAction` card.
     Confirm {
         id: String,
@@ -230,6 +238,8 @@ pub struct SessionEnd {
 
 enum ConnEnd {
     Done(EndReason),
+    /// The user (or the model, on request) paused listening.
+    Paused,
     /// Connection lost; worth one retry.
     Dropped(String),
 }
@@ -275,32 +285,31 @@ pub async fn run(
     mut devices: Box<dyn AudioDevices>,
     mut control: UnboundedReceiver<Control>,
 ) -> SessionEnd {
-    let started = Instant::now();
+    // Moved forward by the time spent paused, so a pause counts toward neither the
+    // cost estimate nor the maximum session length.
+    let mut started = Instant::now();
     let mut usage = Usage::default();
-    let finish = |reason: EndReason, usage: Usage| SessionEnd {
-        reason,
-        elapsed_secs: started.elapsed().as_secs(),
-        usage,
-    };
+    fn finish(started: Instant, reason: EndReason, usage: Usage) -> SessionEnd {
+        SessionEnd {
+            reason,
+            elapsed_secs: started.elapsed().as_secs(),
+            usage,
+        }
+    }
     sink.emit(VaEvent::State {
         state: VaState::Connecting,
         message: None,
     });
-    // Opening the devices can block for seconds (the audio threads reply within 10 s).
-    let opened = tokio::task::spawn_blocking(move || devices.open()).await;
-    let mut io = match opened {
-        Ok(Ok(io)) => io,
-        Ok(Err(e)) => return finish(EndReason::Error(e), usage),
-        Err(_) => {
-            return finish(
-                EndReason::Error("Couldn't open the audio devices.".into()),
-                usage,
-            )
+    let mut io = match open_devices(devices).await {
+        Some((d, Ok(io))) => {
+            devices = d;
+            io
         }
+        Some((_, Err(e))) => return finish(started, EndReason::Error(e), usage),
+        None => return finish(started, EndReason::Error(DEVICES_ERROR.into()), usage),
     };
-    let mut muted = false;
     let mut attempt = 0;
-    let mut reconnected = false;
+    let mut announce: Option<&'static str> = None;
     loop {
         let ws = match connect(&cfg).await {
             Ok(ws) => ws,
@@ -308,7 +317,7 @@ pub async fn run(
                 let (msg, fatal) = describe_ws_error(&e);
                 warn!("realtime connect failed: {msg}");
                 if fatal || attempt >= 1 {
-                    return finish(EndReason::Error(msg), usage);
+                    return finish(started, EndReason::Error(msg), usage);
                 }
                 attempt += 1;
                 sink.emit(VaEvent::State {
@@ -328,21 +337,54 @@ pub async fn run(
             &mut io.mic,
             &io.speaker,
             &mut control,
-            &mut muted,
             &mut usage,
             started,
-            std::mem::replace(&mut reconnected, true),
+            announce.take(),
         )
         .await;
         match end {
-            ConnEnd::Done(reason) => return finish(reason, usage),
+            ConnEnd::Done(reason) => return finish(started, reason, usage),
+            ConnEnd::Paused => {
+                // Why a pause closes the connection and releases the devices instead of
+                // just not sending audio: nothing is open, so nothing can leak or be
+                // billed, the microphone indicator goes off, and no idle socket outlives
+                // OpenAI's session cap. The price is that the conversation's context is
+                // not kept (resuming starts fresh, and says so). A paused session lives
+                // only in this process: quitting Kvistcode ends it, nothing is stored.
+                drop(io);
+                sink.emit(VaEvent::State {
+                    state: VaState::Paused,
+                    message: None,
+                });
+                emit_usage(&sink, started, &usage);
+                let paused_at = Instant::now();
+                if !wait_for_resume(&mut control).await {
+                    return finish(started, EndReason::UserStopped, usage);
+                }
+                sink.emit(VaEvent::State {
+                    state: VaState::Connecting,
+                    message: None,
+                });
+                io = match open_devices(devices).await {
+                    Some((d, Ok(io))) => {
+                        devices = d;
+                        io
+                    }
+                    Some((_, Err(e))) => return finish(started, EndReason::Error(e), usage),
+                    None => return finish(started, EndReason::Error(DEVICES_ERROR.into()), usage),
+                };
+                started += paused_at.elapsed();
+                attempt = 0;
+                announce = Some("Listening again \u{2014} earlier context was not kept");
+            }
             ConnEnd::Dropped(msg) => {
                 warn!("realtime connection dropped: {msg}");
                 attempt = attempts_after_drop(attempt, connected_at.elapsed());
                 if attempt >= 1 {
-                    return finish(EndReason::Error(msg), usage);
+                    return finish(started, EndReason::Error(msg), usage);
                 }
                 attempt += 1;
+                announce = Some("Reconnected \u{2014} earlier context was lost");
                 io.speaker.clear();
                 sink.emit(VaEvent::State {
                     state: VaState::Connecting,
@@ -350,6 +392,33 @@ pub async fn run(
                 });
                 tokio::time::sleep(cfg.reconnect_delay).await;
             }
+        }
+    }
+}
+
+const DEVICES_ERROR: &str = "Couldn't open the audio devices.";
+
+/// Opening the devices can block for seconds (the audio threads reply within 10 s), so
+/// it runs off the async threads. The devices come back so they can be reopened after a
+/// pause; `None` means the opener panicked.
+async fn open_devices(
+    mut devices: Box<dyn AudioDevices>,
+) -> Option<(Box<dyn AudioDevices>, Result<AudioIo, String>)> {
+    tokio::task::spawn_blocking(move || {
+        let io = devices.open();
+        (devices, io)
+    })
+    .await
+    .ok()
+}
+
+/// Waits while paused. `true` to resume, `false` if the session was stopped.
+async fn wait_for_resume(control: &mut UnboundedReceiver<Control>) -> bool {
+    loop {
+        match control.recv().await {
+            Some(Control::Resume) => return true,
+            Some(Control::Stop) | None => return false,
+            Some(_) => {}
         }
     }
 }
@@ -420,10 +489,9 @@ async fn connection(
     mic: &mut UnboundedReceiver<Vec<i16>>,
     speaker: &Arc<SpeakerBuffer>,
     control: &mut UnboundedReceiver<Control>,
-    muted: &mut bool,
     usage: &mut Usage,
     started: Instant,
-    reconnected: bool,
+    announce: Option<&'static str>,
 ) -> ConnEnd {
     let mut pending: HashMap<String, PendingConfirm> = HashMap::new();
     let end = connection_inner(
@@ -434,10 +502,9 @@ async fn connection(
         mic,
         speaker,
         control,
-        muted,
         usage,
         started,
-        reconnected,
+        announce,
         &mut pending,
     )
     .await;
@@ -460,10 +527,9 @@ async fn connection_inner(
     mic: &mut UnboundedReceiver<Vec<i16>>,
     speaker: &Arc<SpeakerBuffer>,
     control: &mut UnboundedReceiver<Control>,
-    muted: &mut bool,
     usage: &mut Usage,
     started: Instant,
-    reconnected: bool,
+    announce: Option<&'static str>,
     pending: &mut HashMap<String, PendingConfirm>,
 ) -> ConnEnd {
     let (mut tx, mut rx) = ws.split();
@@ -501,7 +567,9 @@ async fn connection_inner(
     let mut ticker = tokio::time::interval(TICK);
     let mut echo_until: Option<Instant> = None;
     let mut notice_at: Option<Instant> = None;
-    let mut announce_reconnect = reconnected;
+    // Set when the model called `pause_listening`; the pause starts once its goodbye ends.
+    let mut pause_at: Option<Instant> = None;
+    let mut announce_reconnect = announce;
 
     macro_rules! set_state {
         ($s:expr) => {
@@ -539,7 +607,13 @@ async fn connection_inner(
         tokio::select! {
             biased;
             c = control.recv() => match c {
-                Some(Control::Mute(m)) => { *muted = m; if m { in_level = 0.0; } }
+                Some(Control::Pause) => {
+                    // Say nothing more and send nothing more: hang up right here.
+                    speaker.clear();
+                    let _ = tx.send(Message::Close(None)).await;
+                    return ConnEnd::Paused;
+                }
+                Some(Control::Resume) => {}
                 Some(Control::Confirm { id, accept }) => {
                     if let Some(entry) = pending.remove(&id) {
                         ui.emit(VaEvent::ConfirmDone { id, status: if accept { "confirmed" } else { "cancelled" } });
@@ -573,8 +647,8 @@ async fn connection_inner(
                 match event {
                     ServerEvent::SessionCreated | ServerEvent::SessionUpdated => {
                         if state == VaState::Connecting { set_state!(VaState::Listening); }
-                        if std::mem::take(&mut announce_reconnect) {
-                            set_notice!("Reconnected \u{2014} earlier context was lost");
+                        if let Some(note) = announce_reconnect.take() {
+                            set_notice!(note);
                         }
                     }
                     ServerEvent::Error { error } => {
@@ -646,6 +720,16 @@ async fn connection_inner(
                         if !transcript.is_empty() && !cancelled.contains(&item_id) {
                             ui.emit(VaEvent::Caption { role: "assistant", item_id, text: transcript, done: true });
                         }
+                    }
+                    ServerEvent::FunctionCallDone { call_id, name, .. } if name == super::tools::PAUSE_TOOL => {
+                        // Handled here, not by the host: it needs no confirmation (it only
+                        // stops things) and no follow-up reply, the goodbye came first.
+                        last_activity = Instant::now();
+                        pause_at.get_or_insert_with(Instant::now);
+                        send!(p::function_call_output(&call_id, &super::tools::wrap_data(serde_json::json!({
+                            "status": "paused",
+                            "note": "Listening pauses as soon as you stop speaking. Do not say anything more."
+                        }))));
                     }
                     ServerEvent::FunctionCallDone { call_id, name, arguments } => {
                         last_activity = Instant::now();
@@ -727,7 +811,9 @@ async fn connection_inner(
                 // Without headphones the assistant's own voice would come back through
                 // the mic, so it is not sent while that voice is playing.
                 let echo_gate = !cfg.headphones && echo_until.is_some_and(|t| now < t);
-                if !*muted && !echo_gate {
+                // Once the model has asked to pause, the user has stopped listening to
+                // be listened to: no more audio goes out while it finishes its goodbye.
+                if pause_at.is_none() && !echo_gate {
                     in_level = in_level.max(audio::level_i16(&chunk));
                     send!(p::audio_append(&audio::pcm16_to_base64(&chunk)));
                 }
@@ -757,6 +843,16 @@ async fn connection_inner(
                     pending.remove(&id);
                     ui.emit(VaEvent::ConfirmDone { id, status: "expired" });
                     inform!("Kvistcode: the user did not confirm in time. The action was cancelled and not done.");
+                }
+                if let Some(at) = pause_at {
+                    // After the goodbye has played out (or if it never comes).
+                    let quiet = !response_active && calls_in_flight == 0
+                        && speaker.queued() == 0 && out_level == 0.0;
+                    if quiet || at.elapsed() >= PAUSE_GRACE {
+                        speaker.clear();
+                        let _ = tx.send(Message::Close(None)).await;
+                        return ConnEnd::Paused;
+                    }
                 }
                 if started.elapsed().as_secs() >= cfg.max_secs {
                     let _ = tx.send(Message::Close(None)).await;

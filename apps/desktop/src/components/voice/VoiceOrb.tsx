@@ -7,6 +7,7 @@ const TONE: Record<VaPhase, string> = {
   listening: "var(--accent)",
   thinking: "var(--warn)",
   speaking: "var(--ok)",
+  paused: "var(--steel)",
   error: "var(--err)",
 };
 
@@ -18,17 +19,15 @@ const TONE: Record<VaPhase, string> = {
 export function VoiceOrb({
   phase,
   level,
-  muted,
   size = 64,
   className,
 }: {
   phase: VaPhase;
   level: number;
-  muted?: boolean;
   size?: number;
   className?: string;
 }) {
-  const tone = muted && phase === "listening" ? "var(--steel)" : TONE[phase];
+  const tone = TONE[phase];
   const lvl = Math.min(1, Math.max(0, level));
   const busy = phase === "thinking" || phase === "connecting";
   return (

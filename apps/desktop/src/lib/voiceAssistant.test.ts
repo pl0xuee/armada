@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { beginVa, formatCost, formatElapsed, initialVa, isLive, reduceVa, MAX_CAPTIONS } from "./voiceAssistant";
+import {
+  beginVa,
+  formatCost,
+  formatElapsed,
+  initialVa,
+  isLive,
+  reduceVa,
+  MAX_CAPTIONS,
+  PHASE_LABEL,
+} from "./voiceAssistant";
 
 describe("reduceVa", () => {
   it("tracks state and clears levels when the session ends", () => {
@@ -46,10 +55,28 @@ describe("reduceVa", () => {
     expect(s.actions).toHaveLength(1);
   });
 
-  it("hides mic level while muted", () => {
-    const s = reduceVa({ ...beginVa(), muted: true }, { type: "level", input: 0.9, output: 0.1 });
+  it("pausing (mute, pause listening, go to sleep) keeps the session live but silent", () => {
+    let s = reduceVa(beginVa(), { type: "state", state: "listening", message: null });
+    s = reduceVa(s, { type: "level", input: 0.9, output: 0.1 });
+    s = reduceVa(s, { type: "notice", message: "hiccup" });
+    s = reduceVa(s, { type: "state", state: "paused", message: null });
+    expect(s.phase).toBe("paused");
+    expect(isLive(s)).toBe(true);
     expect(s.inputLevel).toBe(0);
-    expect(s.outputLevel).toBe(0.1);
+    expect(s.outputLevel).toBe(0);
+    expect(s.notice).toBeNull();
+    // A late level event cannot make a paused panel look like it is hearing something.
+    expect(reduceVa(s, { type: "level", input: 0.9, output: 0.4 }).inputLevel).toBe(0);
+    expect(PHASE_LABEL.paused).toBe("Paused");
+    // Unmuting reconnects, then listens again.
+    s = reduceVa(s, { type: "state", state: "connecting", message: null });
+    s = reduceVa(s, { type: "state", state: "listening", message: null });
+    expect(reduceVa(s, { type: "level", input: 0.5, output: 0 }).inputLevel).toBe(0.5);
+  });
+
+  it("a paused session can still end", () => {
+    const s = reduceVa({ ...beginVa(), phase: "paused" }, { type: "ended", reason: "ended", error: false });
+    expect(s.phase).toBe("off");
   });
 });
 

@@ -1,7 +1,9 @@
 // Pure state for the voice assistant panel. The Rust session (src-tauri/src/voice_assistant)
 // emits `va-event`s; `reduceVa` folds them into what the panel shows.
 
-export type VaPhase = "off" | "connecting" | "listening" | "thinking" | "speaking" | "error";
+/** "paused" is one state for mute, pause listening and go to sleep: no connection and no
+ * microphone until the user unmutes (button or shortcut). */
+export type VaPhase = "off" | "connecting" | "listening" | "thinking" | "speaking" | "paused" | "error";
 
 export interface VaCaption {
   role: "user" | "assistant";
@@ -46,7 +48,6 @@ export interface VaState {
   actions: VaAction[];
   elapsedSecs: number;
   costUsd: number;
-  muted: boolean;
   /** A non-fatal message beside a live session (a transient API error, "Reconnected"). */
   notice: string | null;
   /** Actions waiting for the user's Confirm / Cancel. */
@@ -67,7 +68,6 @@ export const initialVa: VaState = {
   actions: [],
   elapsedSecs: 0,
   costUsd: 0,
-  muted: false,
   notice: null,
   confirms: [],
   endedReason: null,
@@ -83,9 +83,12 @@ export function reduceVa(s: VaState, e: VaEvent): VaState {
     case "state":
       // An error that arrives after the session ended must not resurrect the panel.
       if (s.phase === "off" && s.endedReason !== null) return s;
-      return { ...s, phase: e.state, message: e.message };
+      return e.state === "paused"
+        ? { ...s, phase: e.state, message: e.message, inputLevel: 0, outputLevel: 0, notice: null }
+        : { ...s, phase: e.state, message: e.message };
     case "level":
-      return { ...s, inputLevel: s.muted ? 0 : e.input, outputLevel: e.output };
+      // Nothing is heard while paused, whatever a late event says.
+      return s.phase === "paused" ? s : { ...s, inputLevel: e.input, outputLevel: e.output };
     case "caption": {
       const { type: _t, ...cap } = e;
       void _t;
@@ -149,6 +152,7 @@ export const PHASE_LABEL: Record<Exclude<VaPhase, "off">, string> = {
   listening: "Listening",
   thinking: "Thinking…",
   speaking: "Speaking",
+  paused: "Paused",
   error: "Something went wrong",
 };
 

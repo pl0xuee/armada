@@ -453,12 +453,28 @@ fn start_speaker(buf: Arc<SpeakerBuffer>, stop: Arc<AtomicBool>) -> Result<(), S
 }
 
 /// A device-free [`AudioDevices`] for tests: playback just accumulates in the buffer.
+/// It can be opened again after being released, like the real devices.
 #[cfg(test)]
 pub struct NullAudio {
     pub speaker: Arc<SpeakerBuffer>,
-    /// Feed extra microphone chunks to the session.
+    /// Feed extra microphone chunks to the session (the first open's channel).
     pub mic_tx: UnboundedSender<Vec<i16>>,
     mic_rx: Option<UnboundedReceiver<Vec<i16>>>,
+    /// The channel of the latest open.
+    pub live_mic: Arc<Mutex<UnboundedSender<Vec<i16>>>>,
+    pub opens: Arc<std::sync::atomic::AtomicUsize>,
+    /// How many times the devices were released (the guard dropped).
+    pub releases: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[cfg(test)]
+struct NullGuard(Arc<std::sync::atomic::AtomicUsize>);
+
+#[cfg(test)]
+impl Drop for NullGuard {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
 }
 
 #[cfg(test)]
@@ -467,8 +483,11 @@ impl NullAudio {
         let (mic_tx, mic_rx) = unbounded_channel();
         NullAudio {
             speaker: SpeakerBuffer::new(),
+            live_mic: Arc::new(Mutex::new(mic_tx.clone())),
             mic_tx,
             mic_rx: Some(mic_rx),
+            opens: Arc::default(),
+            releases: Arc::default(),
         }
     }
 }
@@ -476,13 +495,21 @@ impl NullAudio {
 #[cfg(test)]
 impl AudioDevices for NullAudio {
     fn open(&mut self) -> Result<AudioIo, String> {
-        let rx = self.mic_rx.take().ok_or("already open")?;
-        // One chunk of silence, then the channel stays open (the guard owns a sender).
-        let _ = self.mic_tx.send(vec![0i16; CHUNK_SAMPLES]);
+        let rx = match self.mic_rx.take() {
+            Some(rx) => rx,
+            None => {
+                let (tx, rx) = unbounded_channel();
+                *self.live_mic.lock() = tx;
+                rx
+            }
+        };
+        self.opens.fetch_add(1, Ordering::SeqCst);
+        // One chunk of silence, then the channel stays open until the devices are released.
+        let _ = self.live_mic.lock().send(vec![0i16; CHUNK_SAMPLES]);
         Ok(AudioIo {
             mic: rx,
             speaker: self.speaker.clone(),
-            _guard: Box::new(self.mic_tx.clone()),
+            _guard: Box::new(NullGuard(self.releases.clone())),
         })
     }
 }

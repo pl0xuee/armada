@@ -103,6 +103,8 @@ Press the mic in the message box (Ctrl/Cmd+Shift+D) and speak. Speech is transcr
 
 Optional and off by default. Press Ctrl/Cmd+Shift+A and just talk: ask what your agents are doing, start one, message or stop one, or open a view. It uses OpenAI's Realtime API (`gpt-realtime`), so it needs an OpenAI API key account, **sends your voice and the agent information it reads to OpenAI**, and is billed per minute to that account. It can never approve permissions, delete agents, commit or push.
 
+Say "mute", "pause listening", "stop listening" or "go to sleep" (or press the Mute button) and Kvistcode hangs up and releases the microphone: nothing is sent or billed while it is paused. Press Unmute or Ctrl/Cmd+Shift+A to carry on; that starts a fresh conversation, so the earlier context is not kept. Waking by voice is not possible yet, because nothing is listening while paused; that needs an on-device wake-word engine, which Kvistcode does not have.
+
 ### Phone companion
 
 Pair your phone with a QR code and run the fleet from it, from anywhere over Tailscale or on the same Wi-Fi as your computer: start agents in any project, send prompts with photos, approve or deny requests, switch mode, model and account, stop, resume or remove agents, manage queued messages, review diffs and Commit & merge, and follow sub-agents and turn summaries live. The pinned dock is there too, so what needs you stays in reach. **Read-only share links** let a teammate follow one agent live.
@@ -189,7 +191,7 @@ Kvistcode is fully usable from the keyboard. Press `Ctrl/Cmd+/` (or `?`) in the 
 | `Ctrl/Cmd+J` | Mission Control: Needs you (again for the next one) |
 | `Ctrl/Cmd+I` | Mission Control: Needs you (same as J) |
 | `Ctrl/Cmd+Shift+M` | Mission Control: All agents |
-| `Ctrl/Cmd+Shift+A` | Voice assistant: start or end (when turned on) |
+| `Ctrl/Cmd+Shift+A` | Voice assistant: start or end; unmute when it is paused (when turned on) |
 | `Ctrl/Cmd+Shift+F` | Search every conversation (or type `?` in the palette) |
 | `Ctrl/Cmd+B` | Show or hide the agent list |
 | `Ctrl/Cmd+1` to `9` | Jump to an agent |

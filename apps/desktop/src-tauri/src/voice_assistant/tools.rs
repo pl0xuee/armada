@@ -15,6 +15,9 @@ pub const MAX_QUERY_CHARS: usize = 200;
 pub const MAX_TITLE_CHARS: usize = 80;
 /// Tool output handed to the model is cut to this many characters.
 pub const MAX_RESULT_CHARS: usize = 6000;
+/// Handled by the session itself (it needs no host and no confirmation): it only stops
+/// listening.
+pub const PAUSE_TOOL: &str = "pause_listening";
 
 pub fn instructions() -> String {
     "You are the voice assistant of Kvistcode, a desktop app that runs coding agents (Claude Code, \
@@ -36,6 +39,11 @@ search_history to find something said or done earlier, and open to take the user
 - You cannot approve or deny permission requests, delete or archive agents, commit, merge, push, \
 or change settings. For approvals, use request_approval_review and tell the user to confirm on \
 screen.\n\
+- When the user asks you to mute, pause listening, stop listening or go to sleep, say a very \
+short goodbye (a few words, such as \"Okay, pausing.\") and call pause_listening in the same turn. \
+After that you cannot hear them: Kvistcode stops the microphone and sends no audio until the user \
+presses the Unmute button or the shortcut on screen. You cannot wake yourself, and you cannot \
+hear \"unmute\" or \"wake up\" while paused; do not promise to.\n\
 - If you are unsure what the user said, ask. Speak the user's language."
         .into()
 }
@@ -163,6 +171,12 @@ pub fn tool_schemas() -> Value {
                 "properties": { "agent": { "type": "string", "description": "Agent id or part of its title" } },
                 "required": ["agent"]
             }
+        },
+        {
+            "type": "function",
+            "name": PAUSE_TOOL,
+            "description": "Mute: stop listening. Call it when the user says mute, pause listening, stop listening, go to sleep or similar, after a very short spoken goodbye. No confirmation is needed. Kvistcode closes the microphone and the connection; the user resumes with the Unmute button or the shortcut on screen, not by voice.",
+            "parameters": { "type": "object", "properties": {}, "additionalProperties": false }
         }
     ])
 }
@@ -743,7 +757,7 @@ mod tests {
         ] {
             assert!(!names.iter().any(|n| n.contains(bad)), "{bad}");
         }
-        assert_eq!(names.len(), 12);
+        assert_eq!(names.len(), 13);
     }
 
     #[test]
