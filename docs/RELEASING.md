@@ -119,6 +119,12 @@ It is a minisign key made with `tauri signer generate`. No copy of the private k
 
 To rotate (this strands every existing install, so it is a last resort): run `npx tauri signer generate -w <file>`, set the new public key in `tauri.conf.json`, and set both secrets with `gh secret set NAME < file`. Ship the key change in a release signed with the **old** key first if you can, so installs pick up the new public key.
 
+### Where the signing secrets are exposed, and the `release` environment
+
+`TAURI_SIGNING_PRIVATE_KEY` and its password are set as `env` of one step only: the `tauri-action` step of the `release` job. No other job or step receives them, and that job runs only on pushes to `main` (never for pull requests, forks or Dependabot). Inside that step, though, everything `tauri build` runs sees them: the frontend build and every Cargo build script. That is why dependency updates are reviewed and builds use `--locked` and `npm ci`.
+
+The `release` job uses `environment: release`. **Give that environment required reviewers** (repository Settings → Environments → release → Required reviewers → yourself) and, ideally, restrict it to the `main` branch. Without reviewers the environment is only a label and every push that bumps the version builds and signs immediately; with them, a person approves each signing run (and pushes to `main` queue behind a run that waits, see above). The two signing secrets are repository secrets, and since the key can't be read back they can't be moved into the environment without rotating the key; so the environment's reviewers gate the job, not the secrets themselves.
+
 ### Draft, then publish
 
 CI never publishes. The `draft` job creates a draft release (`target_commitish` = the commit CI ran on), and only after that do the three build jobs upload into it by release id. A half-built release therefore never reaches users: the updater only sees published releases, and publishing is a person pressing a button after [verifying the draft](#verifying-a-draft). The tag does not exist until then, which is also how CI knows the version is still unreleased (`git/ref/tags/v<version>` returns 404). An already tagged version is skipped: bump the version to release again.
@@ -141,8 +147,10 @@ The phone companion is embedded into the desktop binary, and release builds refu
 
 ```bash
 (cd apps/remote && npm ci && npm run build)
-cd apps/desktop && npm ci && npm run tauri build
+cd apps/desktop && npm ci && npm run tauri build -- --no-bundle   # or add --config '{"bundle":{"createUpdaterArtifacts":false}}' for installers
 ```
+
+`tauri.conf.json` sets `createUpdaterArtifacts`, so a bundling build without `TAURI_SIGNING_PRIVATE_KEY` compiles everything and then fails with "A public key has been found, but no private key". That is expected locally; only CI has the key.
 
 (`beforeBuildCommand` rebuilds it too; set `KVISTCODE_ALLOW_MISSING_REMOTE=1` only for throwaway builds.)
 
