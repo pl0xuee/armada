@@ -25,7 +25,7 @@ export function Announcer() {
           const who = `${a.title} (${identityFor(a.provider, a.customAgentId, custom).short})`;
           if (a.pendingPermissions > old.pendingPermissions) lines.push(`${who} is waiting on you.`);
           else if (a.status === "error" && old.status !== "error")
-            lines.push(a.rateLimited ? `${who} hit its usage limit.` : `${who} stopped with an error.`);
+            lines.push(a.rateLimited ? `${who} hit its rate limit.` : `${who} stopped with an error.`);
         }
         if (lines.length) setMessage(lines.join(" "));
       }),

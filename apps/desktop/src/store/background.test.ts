@@ -3,17 +3,20 @@ import { seedAgents } from "@/lib/mock-data";
 import type { Agent, TimelineItem, WorkflowAgent, WorkflowProgress } from "@/lib/types";
 
 const progressFor = vi.fn<(agentId: string, toolCallId: string) => Promise<WorkflowProgress>>();
-const finishedAlert = vi.fn<(agentId: string, agents: number | null) => Promise<void>>(() => Promise.resolve());
+const finishedAlert = vi.fn<(agentId: string, agents: number | null, detail: string | null) => Promise<void>>(() =>
+  Promise.resolve(),
+);
 vi.mock("@/lib/api", () => ({
   api: {
     workflowProgress: (a: string, t: string) => progressFor(a, t),
-    backgroundFinished: (a: string, n: number | null) => finishedAlert(a, n),
+    backgroundFinished: (a: string, n: number | null, d: string | null) => finishedAlert(a, n, d),
   },
 }));
 
 const { forgetAgentDerived } = await import("@/components/agent/derived");
 const { hasBackgroundWork, NO_BACKGROUND } = await import("@/lib/background");
 const { resetWorkflows, WORKFLOW_POLL_MS } = await import("@/lib/workflows");
+const { ALERT_SETTLE_MS } = await import("@/lib/finishedAlert");
 const { SUBAGENT_ACTIVE_WINDOW_MS, SUBAGENT_LAUNCH_GRACE_MS, SUBAGENT_TICK_MS } = await import("@/lib/agents");
 const { useApp } = await import("./app");
 const { useUi } = await import("./ui");
@@ -113,9 +116,39 @@ describe("background tracker: workflows", () => {
     expect(useBackgroundStore.getState().active.has(ID)).toBe(false);
     expect(hasBackgroundWork(ID)).toBe(false);
     expect(useBackgroundStore.getState().finishedAt[ID]).toBeGreaterThan(0);
+    // Not announced at once: a run must stay finished for a minute, and is then announced with what it was.
+    expect(finishedAlert).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(ALERT_SETTLE_MS);
     expect(finishedAlert).toHaveBeenCalledTimes(1);
-    expect(finishedAlert).toHaveBeenCalledWith(ID, 5);
+    expect(finishedAlert).toHaveBeenCalledWith(ID, 5, expect.stringContaining("Workflow finished with problems"));
+    // ... and never twice for the same run, however often its state is re-read.
+    await vi.advanceTimersByTimeAsync(WORKFLOW_POLL_MS * 3 + ALERT_SETTLE_MS);
+    expect(finishedAlert).toHaveBeenCalledTimes(1);
     expect(statusView(useApp.getState().agents[ID], false, bg())).toMatchObject({ done: true, background: false });
+  });
+
+  it("does not alert for a run that starts moving again before it settles", async () => {
+    progressFor.mockResolvedValue(prog("running", ["working"]));
+    setAgent("idle", [user(), workflowCall(), message()]);
+    off = installBackgroundTracker();
+    await settle();
+    progressFor.mockResolvedValue(prog("finished", ["finished"]));
+    await vi.advanceTimersByTimeAsync(WORKFLOW_POLL_MS);
+    // A long quiet spell mid-run looked like the end; then it moves again.
+    await vi.advanceTimersByTimeAsync(ALERT_SETTLE_MS / 2);
+    progressFor.mockResolvedValue(prog("running", ["working"]));
+    await vi.advanceTimersByTimeAsync(WORKFLOW_POLL_MS);
+    await vi.advanceTimersByTimeAsync(ALERT_SETTLE_MS);
+    expect(finishedAlert).not.toHaveBeenCalled();
+  });
+
+  it("does not announce a run that was already finished when the app looked at it", async () => {
+    progressFor.mockResolvedValue(prog("finished", ["finished", "finished"]));
+    setAgent("idle", [user(), workflowCall(), message()]);
+    off = installBackgroundTracker();
+    await settle();
+    await vi.advanceTimersByTimeAsync(WORKFLOW_POLL_MS + ALERT_SETTLE_MS * 2);
+    expect(finishedAlert).not.toHaveBeenCalled();
   });
 
   it("does not alert when the user is looking at that agent", async () => {

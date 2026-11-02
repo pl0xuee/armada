@@ -5,6 +5,41 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.3.2 — 2026-11-01
+
+Agents resume on their own after a limit resets, Kvistcode helps your subscription last longer, local models work properly, and a full review of the app fixed a long list of bugs.
+
+### New
+- **Agents resume by themselves.** When a provider's rate limit stops an agent, Kvistcode continues it automatically once the limit resets, staggered so many agents don't start at once, with one summary notification. The banner, lists and Mission Control show “Resumes 6:00 PM” with a countdown and a Cancel link. Turn it off under Settings → Behavior → Rate limits. The phone shows when an agent will resume.
+- **Save tokens.** Claude agents now summarize their conversation at 250k tokens by default (a long conversation is re-read at every step, which is where most usage goes; choose “Claude's default” in Settings → Behavior to turn it off). A new Save tokens panel on Usage shows what is using your tokens, with one-click fixes, and a Save tokens preset applies cheaper defaults. You can also choose the model for Claude's helper agents, cap how much command output an agent reads, tidy noisy build and test output, and turn off the hidden next-prompt prediction that cost a request per turn. Usage warns when many agents work at once on an account with little left, or when a big conversation has sat idle past the prompt cache.
+- **Much better local models.** Local agents get a real context window instead of Ollama's 4k default (which silently cut prompts off), models without tool support are refused with alternatives named, and “Get a model” ranks downloads by what your computer can run, with a disk check. A new server panel shows version, loaded models, problems with fixes and a speed test. Local usage no longer counts against your cloud budgets. An optional setting uses a local model to condense handoff summaries.
+- **Updating from Armada is clean.** On Windows the update replaces the old Armada install instead of leaving a second app, and old startup entries are removed on every system. The Linux .deb and .rpm replace the old package.
+- **The phone app keeps up.** It shows “Workflow 3 of 5 running” instead of Idle or Done, search results open at the matching message, subscription costs are labelled as API-equivalent, and the confusing Resume queue button no longer appears beside a limit hold.
+
+### Changed
+- New tagline: “Every coding agent, one calm place.”
+- The provider's limit is now called a “rate limit”, and yours stays a “budget limit”. Settings → Agents is now “Custom agents”.
+- The “everything finished” alert for a Workflow now says which agent and which workflow finished and how it ended, instead of a generic line. It comes once per run, after the run has stayed finished for a minute, so a long quiet spell in the middle no longer triggers repeats.
+- Hold panels name the limit that was hit (spending, token or turn), budget fields say which limit is empty, and Markdown marks no longer show in search snippets.
+- Light theme: error, warning and success colors are easier to read on tinted backgrounds.
+- Small copy fixes in Accounts, Onboarding, Usage, About and the Schedule dialog.
+
+### Faster
+- Jumping to a search result deep in a very long conversation does up to 6x less work.
+- A hidden or tray-minimized window uses much less CPU while agents stream.
+
+### Fixed
+- A message sent just as an agent crashed could vanish; it now goes back into a paused queue with a note. This also holds under heavy load.
+- A long pasted draft was cut at 20,000 characters when you switched agents, and the last keystrokes were lost on quit.
+- “Send now” during a turn no longer resets the turn: running sub-agents and the timer stay.
+- One rendering error could blank the whole window; now only the broken row says it couldn't be displayed.
+- The agent header keeps its title at 200% zoom, and the title bar's update pill no longer wraps in narrow windows.
+- Markdown reference links and footnotes work, Arabic and Hebrew read right to left, and Compare shows the full answer.
+- Keyboard and screen-reader fixes: focus returns after closing the Review sheet and image viewer, Space opens an agent row, IME typing is respected, and fewer announcements.
+- The window now fits small screens and high display scaling, and a login launch no longer counts as “looking at it”, which had muted phone pushes and sounds.
+- Pasting file paths with a “%” before non-English characters no longer crashes (Linux), update checks time out instead of hanging, and old log files are pruned.
+- Security: the Preview pane's page tools only respond to Kvistcode itself, `git push` refuses a repository remote name that looks like a command option, pairing a phone times out stalled requests, and secret scrubbing in shared text, exports and error notices covers more key formats and the Slack and Discord webhook links.
+
 ## v0.3.1 — 2026-11-01
 
 The phone app catches up with the desktop, merging a pull request is safer, and Claude Code's Workflow runs finally show up.

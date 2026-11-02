@@ -231,8 +231,8 @@ const tauriApi = {
   /** Soft "the agent you're watching finished a long task" chime (backend applies sound settings). */
   chimeWatched: () => invoke<void>("chime_watched"),
   /** Quiet "everything finished" alert: an agent's last background work (a workflow) ended after its turn did. */
-  backgroundFinished: (agentId: string, agents: number | null) =>
-    invoke<void>("background_finished", { agentId, agents }),
+  backgroundFinished: (agentId: string, agents: number | null, detail: string | null = null) =>
+    invoke<void>("background_finished", { agentId, agents, detail }),
   /** Window title for taskbars / WM bars / alt-tab. */
   setWindowTitle: (title: string) => invoke<void>("set_window_title", { title }),
   /** How many agents need you (the rail badge's number) for the tray's tooltip and menu. */

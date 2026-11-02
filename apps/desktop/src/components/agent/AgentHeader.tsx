@@ -245,7 +245,7 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
           {agent.rateLimited && (
             <Chip className="border-warn/35 bg-warn/10 text-warn">
               <Gauge className="h-3 w-3" />
-              <ResumesAt agent={agent} fallback={tier === "compact" ? "Limit" : "Usage limit"} />
+              <ResumesAt agent={agent} fallback={tier === "compact" ? "Limit" : "Rate limit"} />
             </Chip>
           )}
           <BudgetChip agent={agent} compact={tier === "compact"} always />

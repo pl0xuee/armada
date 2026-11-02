@@ -588,3 +588,23 @@ fn the_quiet_finished_alert_names_what_ended() {
         "Everything finished. Its workflow is done."
     );
 }
+
+#[test]
+fn the_finished_alert_says_what_finished_and_is_one_short_clean_line() {
+    let said = finished_alert_body(
+        Some(5),
+        Some("Workflow finished: “Review”.\n All 5 agents completed."),
+    );
+    assert_eq!(said, "Workflow finished: “Review”. All 5 agents completed.");
+    // No detail (an older interface): the generic line, as before.
+    assert_eq!(
+        finished_alert_body(Some(5), None),
+        "Everything finished. Its workflow (5 agents) is done."
+    );
+    assert_eq!(
+        finished_alert_body(None, Some("   ")),
+        "Everything finished. Its workflow is done."
+    );
+    let long = finished_alert_body(None, Some(&"word ".repeat(200)));
+    assert!(long.chars().count() <= 240 && long.ends_with('…'));
+}

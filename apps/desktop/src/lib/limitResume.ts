@@ -1,4 +1,4 @@
-// Agents waiting for a usage limit to lift, as the interface words them. Kvistcode resumes them by
+// Agents waiting for a rate limit to lift, as the interface words them. Kvistcode resumes them by
 // itself (core `limit_resume`); this is only how that reads: "Resumes 6:00 PM", "in 12 min".
 import { useEffect, useState } from "react";
 import type { Agent } from "./types";
@@ -54,9 +54,9 @@ export function untilLabel(at: number, now: number = Date.now()): string {
   return h === 0 ? `in ${d} d` : `in ${d} d ${h} h`;
 }
 
-/** The backend's "Resumed 3 agents after your usage limit reset" alert (core `limit_resume::is_resumed_body`). */
+/** The backend's "Resumed 3 agents after your rate limit reset" alert (core `limit_resume::is_resumed_body`). */
 export function isResumedBody(body: string): boolean {
-  return body.startsWith("Resumed ") && body.endsWith(" after your usage limit reset");
+  return body.startsWith("Resumed ") && body.endsWith(" after your rate limit reset");
 }
 
 /** The short row/chip text: "Resumes 6:00 PM". Null when nothing is waiting. */

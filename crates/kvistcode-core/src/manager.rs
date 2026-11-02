@@ -2953,7 +2953,7 @@ impl Core {
         let Some(next) = candidate else {
             ctx.notice(
                 NoticeLevel::Warn,
-                "This account hit its usage limit and no other signed-in account for this provider is available. Add one in Accounts, or try again later.",
+                "This account hit its rate limit and no other signed-in account for this provider is available. Add one in Accounts, or try again later.",
             );
             return;
         };
@@ -2961,7 +2961,7 @@ impl Core {
             ctx.notice(
                 NoticeLevel::Warn,
                 format!(
-                    "This account hit its usage limit. You can switch this agent to \u{201c}{}\u{201d} and keep going.",
+                    "This account hit its rate limit. You can switch this agent to \u{201c}{}\u{201d} and keep going.",
                     next.name
                 ),
             );

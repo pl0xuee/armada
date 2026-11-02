@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { useApp } from "@/store/app";
 
 /**
- * "Resumes 6:00 PM" for an agent Kvistcode will continue by itself once its usage limit resets;
+ * "Resumes 6:00 PM" for an agent Kvistcode will continue by itself once its rate limit resets;
  * `fallback` (or nothing) otherwise. Plain text, so the parent decides how it truncates.
  */
 export function ResumesAt({ agent, fallback = null }: { agent: Agent; fallback?: string | null }) {

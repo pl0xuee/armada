@@ -395,8 +395,9 @@ pub async fn background_finished(
     attention: State<'_, Arc<Attention>>,
     agent_id: String,
     agents: Option<u32>,
+    detail: Option<String>,
 ) -> CmdResult<()> {
-    attention.background_finished(&agent_id, agents);
+    attention.background_finished(&agent_id, agents, detail.as_deref());
     Ok(())
 }
 

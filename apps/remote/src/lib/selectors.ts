@@ -168,11 +168,11 @@ export function needsYou(a: Agent): boolean {
   return a.status in NEEDS_RANK || a.pendingPermissions > 0 || a.rateLimited === true;
 }
 
-export const USAGE_LIMIT_LABEL = "Usage limit";
+export const USAGE_LIMIT_LABEL = "Rate limit";
 
 /**
- * The last turn hit the account's usage limit and the agent isn't doing anything
- * else: a warning ("Usage limit"), not a failure, and the fix is switching accounts.
+ * The last turn hit the account's rate limit and the agent isn't doing anything
+ * else: a warning ("Rate limit"), not a failure, and the fix is switching accounts.
  */
 export function isUsageLimited(a: Pick<Agent, "rateLimited" | "status">): boolean {
   return a.rateLimited === true && a.status !== "working" && a.status !== "starting" && a.status !== "needs_permission";
@@ -184,7 +184,7 @@ export function pendingKindOf(items: readonly PendingItem[] | undefined): "quest
   return items.every((i) => i.kind === "question") ? "question" : "permission";
 }
 
-/** Approvals first, then errors (a usage limit is one), then interrupted. */
+/** Approvals first, then errors (a rate limit is one), then interrupted. */
 function needsRank(a: Agent): number {
   return NEEDS_RANK[a.status] ?? (a.rateLimited === true ? NEEDS_RANK.error! : 0);
 }

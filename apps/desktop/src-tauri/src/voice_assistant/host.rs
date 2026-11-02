@@ -132,7 +132,7 @@ pub fn needs_you(a: &Agent) -> Option<String> {
         return Some("error".into());
     }
     if a.rate_limited {
-        return Some("hit its usage limit".into());
+        return Some("hit its rate limit".into());
     }
     if a.queue_paused && a.queued_prompts > 0 {
         return Some("queued messages paused".into());

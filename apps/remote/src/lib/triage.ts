@@ -73,7 +73,7 @@ export function triageSections(queue: readonly TriageEntry[]): TriageSection[] {
 export const REASON_LABEL: Record<NeedsReason, string> = {
   permission: "Needs approval",
   budget: "Limit reached",
-  rate_limited: "Usage limit",
+  rate_limited: "Rate limit",
   error: "Error",
   done: "Done · unread",
 };

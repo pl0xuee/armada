@@ -476,7 +476,7 @@ const lastNotice = (items: readonly { kind: string; level?: string; text?: strin
   return null;
 };
 
-/** A usage limit or an error: what happened, and the way out (switch account, retry or resume). */
+/** A rate limit or an error: what happened, and the way out (switch account, retry or resume). */
 function RecoveryCard({ agent, reason, now, onSwitch }: { agent: Agent; reason: NeedsReason; now: number; onSwitch: () => void }) {
   const accounts = useStore((s) => s.accounts);
   const notice = useStore((s) => lastNotice(s.timelines[agent.id]?.items));
@@ -495,7 +495,7 @@ function RecoveryCard({ agent, reason, now, onSwitch }: { agent: Agent; reason: 
               <Icon name={limited ? "gauge" : "alertCircle"} size={16} />
             </span>
             <div className="min-w-0 flex-1 pt-0.5">
-              <h2 className="text-[15.5px] leading-snug font-semibold text-fg">{limited ? "This account hit its usage limit" : "The last turn failed"}</h2>
+              <h2 className="text-[15.5px] leading-snug font-semibold text-fg">{limited ? "This account hit its rate limit" : "The last turn failed"}</h2>
               <p className="mt-0.5 line-clamp-3 text-[13px] leading-snug break-words text-muted">{text}</p>
             </div>
           </div>

@@ -136,8 +136,8 @@ describe("notResumingNote", () => {
 
 describe("isResumedBody", () => {
   it("matches the backend alert and nothing like it", () => {
-    expect(isResumedBody("Resumed 3 agents after your usage limit reset")).toBe(true);
-    expect(isResumedBody("Resumed Fix login after your usage limit reset")).toBe(true);
+    expect(isResumedBody("Resumed 3 agents after your rate limit reset")).toBe(true);
+    expect(isResumedBody("Resumed Fix login after your rate limit reset")).toBe(true);
     expect(isResumedBody("Resumed work on the parser")).toBe(false);
     expect(isResumedBody("Finished")).toBe(false);
   });

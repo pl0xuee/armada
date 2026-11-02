@@ -246,7 +246,7 @@ async fn resumes_by_itself_after_the_reset_time_in_the_message() {
     assert!(
         said.iter()
             .any(|(reason, body)| *reason == AttentionReason::Done
-                && body == "Resumed Fix login after your usage limit reset"),
+                && body == "Resumed Fix login after your rate limit reset"),
         "{said:?}"
     );
     r.core.shutdown().await;
@@ -407,11 +407,11 @@ async fn several_agents_resume_together_and_are_announced_once() {
     let said: Vec<_> = attentions(&mut r.rx)
         .into_iter()
         .filter(|(reason, body)| {
-            *reason == AttentionReason::Done && body.contains("after your usage limit reset")
+            *reason == AttentionReason::Done && body.contains("after your rate limit reset")
         })
         .collect();
     assert_eq!(said.len(), 1, "{said:?}");
-    assert_eq!(said[0].1, "Resumed 5 agents after your usage limit reset");
+    assert_eq!(said[0].1, "Resumed 5 agents after your rate limit reset");
     r.core.shutdown().await;
 }
 

@@ -33,7 +33,7 @@ function accountDetail(a: Account): string {
 const FAILOVER_LABEL = { off: "Off", ask: "Ask me", auto: "Switch automatically" } as const;
 
 /**
- * Shown above the composer when the agent's account hit its usage limit. `embedded`: a row of the
+ * Shown above the composer when the agent's account hit its rate limit. `embedded`: a row of the
  * pinned dock (no card of its own, compact, and the failover note folded into a link).
  */
 export function RateLimitBanner({ agent, embedded = false }: { agent: Agent; embedded?: boolean }) {
@@ -105,7 +105,7 @@ export function RateLimitBanner({ agent, embedded = false }: { agent: Agent; emb
         </span>
         <div className="min-w-[200px] flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            <span className="text-[13px] font-semibold">Usage limit reached</span>
+            <span className="text-[13px] font-semibold">Rate limit reached</span>
             {reset && !waiting && (
               <span className="rounded-md border border-warn/30 bg-warn/10 px-1.5 py-px text-[11.5px] font-medium text-warn">
                 {reset}

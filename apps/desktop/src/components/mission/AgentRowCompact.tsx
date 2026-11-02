@@ -101,8 +101,8 @@ export const AgentRowCompact = memo(function AgentRowCompact({
           </span>
           {agent.unread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-label="Unread" />}
           {agent.rateLimited && (
-            <Tooltip content="Hit its usage limit">
-              <span className="flex min-w-0 shrink-[2] items-center gap-1 text-warn" aria-label="Usage limit">
+            <Tooltip content="Hit its rate limit">
+              <span className="flex min-w-0 shrink-[2] items-center gap-1 text-warn" aria-label="Rate limit">
                 <Gauge className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate text-[11px]">
                   <ResumesAt agent={agent} />
