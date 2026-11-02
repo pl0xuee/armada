@@ -5,9 +5,9 @@ import { CHECKOUT_PNG, ORDERS_PNG } from "./images";
 export const MIN = 60_000;
 
 export const accounts: RemoteAccount[] = [
-  { id: "acc-work", name: "Work", provider: "claude", color: "#4FC3F7", label: "Claude Max" },
-  { id: "acc-personal", name: "Personal", provider: "claude", color: "#F472B6", label: "Claude Pro" },
-  { id: "acc-openai", name: "ChatGPT", provider: "codex", color: "#3DDC97", label: "ChatGPT Pro" },
+  { id: "acc-work", name: "Work", provider: "claude", color: "#4FC3F7", label: "Claude Max", authKind: "oauth" },
+  { id: "acc-personal", name: "Personal", provider: "claude", color: "#F472B6", label: "Claude Pro", authKind: "api_key" },
+  { id: "acc-openai", name: "ChatGPT", provider: "codex", color: "#3DDC97", label: "ChatGPT Pro", authKind: "oauth" },
   { id: "acc-grok", name: "xAI", provider: "grok", color: "#E5E7EB", label: "SuperGrok", loggedIn: false, error: null },
   { id: "custom-gemini", name: "Local agents", provider: "custom", color: "#B39DDB", label: null },
 ];

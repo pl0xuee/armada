@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useStore, type State } from "./store";
 import { backgroundActive, backgroundOf, NO_BACKGROUND, type BackgroundWork } from "./background";
+import { costIsEquivalent } from "./cost";
 import { dockNeed } from "./dock";
 import { triageQueue, type NeedsReason, type TriageEntry } from "./triage";
 import type { Agent, PendingItem, RemoteAccount } from "./types";
@@ -265,6 +266,11 @@ export function selectTriage(s: State): TriageData {
 
 export function useTriage(): TriageData {
   return useStore(selectTriage);
+}
+
+/** The agent's cost is an API-equivalent figure (a subscription), not a bill (see lib/cost). */
+export function useCostIsEquivalent(agent: Pick<Agent, "accountId" | "provider"> | null | undefined): boolean {
+  return useStore((s) => !!agent && costIsEquivalent(agent, accountOf(s.accounts, agent)));
 }
 
 /** Workflow runs still going behind this agent's finished turn (NO_BACKGROUND when none; stable while unchanged). */

@@ -1,6 +1,7 @@
 import { memo, useState } from "react";
 import { backgroundOf } from "@/lib/background";
 import { cn } from "@/lib/cn";
+import { costIsEquivalent, EQUIVALENT_NOTE } from "@/lib/cost";
 import { devParam } from "@/lib/dev";
 import { basename, formatCost, formatDuration, formatTokens, plural } from "@/lib/format";
 import { isRunning, isSubagentNode, latestChild, type SubagentNode } from "@/lib/rows";
@@ -13,6 +14,7 @@ import { CommitSheet, commitBlocked } from "../CommitSheet";
 import { ImageStrip } from "../Images";
 import { Button } from "../ui";
 import { navigate } from "@/lib/router";
+import { accountOf } from "@/lib/selectors";
 import { useStore } from "@/lib/store";
 import { Markdown } from "../Markdown";
 import { ToolRow } from "./Items";
@@ -210,12 +212,16 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, latest = fa
     const a = latest ? st.agents[item.agentId] : undefined;
     return !!a && backgroundOf(a, st.background[a.id]).workflows > 0;
   });
+  const equivalent = useStore((st) => {
+    const a = st.agents[item.agentId];
+    return !!a && costIsEquivalent(a, accountOf(st.accounts, a));
+  });
   const files = item.files ?? [];
   const shownFiles = allFiles ? files : files.slice(0, FILES_SHOWN);
-  const stats: { label: string; value: string }[] = [];
+  const stats: { label: string; value: string; note?: string }[] = [];
   if (item.commands > 0) stats.push({ label: item.commands === 1 ? "Command" : "Commands", value: String(item.commands) });
   if (item.toolCalls > 0) stats.push({ label: item.toolCalls === 1 ? "Tool call" : "Tool calls", value: String(item.toolCalls) });
-  if (item.costUsd > 0) stats.push({ label: "Cost", value: formatCost(item.costUsd) });
+  if (item.costUsd > 0) stats.push({ label: "Cost", value: formatCost(item.costUsd), note: equivalent ? EQUIVALENT_NOTE : undefined });
   if (item.tokens > 0) stats.push({ label: "Tokens", value: formatTokens(item.tokens) });
   const duration = formatDuration(item.durationMs);
 
@@ -286,13 +292,14 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, latest = fa
       {stats.length > 0 && (
         <dl className="mt-1 grid border-t border-line/70" style={{ gridTemplateColumns: `repeat(${stats.length}, minmax(0, 1fr))` }}>
           {stats.map((s, i) => (
-            <div key={s.label} className={cn("px-3 py-2.5 text-center", i > 0 && "border-l border-line/70")}>
+            <div key={s.label} title={s.note} className={cn("px-3 py-2.5 text-center", i > 0 && "border-l border-line/70")}>
               <dt className="truncate text-[11px] text-steel">{s.label}</dt>
               <dd className="text-[14px] font-semibold text-fg tabular">{s.value}</dd>
             </div>
           ))}
         </dl>
       )}
+      {latest && equivalent && item.costUsd > 0 && <p className="border-t border-line/70 px-4 py-1.5 text-center text-[11.5px] text-steel">Cost is {EQUIVALENT_NOTE}.</p>}
     </section>
   );
 });

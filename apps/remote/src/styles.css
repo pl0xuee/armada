@@ -521,6 +521,17 @@
   }
 }
 
+/* The message a tapped search result opened (see VirtualList `focusKey`): marked for a moment, no animation needed. */
+[data-vkey] {
+  transition: background-color 600ms ease-out;
+}
+[data-vkey][data-found] {
+  background-color: color-mix(in srgb, var(--accent) 9%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 5px;
+  border-radius: 12px;
+}
+
 @keyframes shimmer {
   to {
     transform: translateX(100%);

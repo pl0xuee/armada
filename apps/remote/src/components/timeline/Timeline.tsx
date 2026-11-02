@@ -6,7 +6,7 @@ import { useStore } from "@/lib/store";
 import { Spinner } from "../Icon";
 import { agentIdentity, isBusy } from "@/lib/meta";
 import { messageRole, type MessageRole } from "@/lib/collapse";
-import { buildRows, estimateRow, finalAnswerIds, isPictureOnly, latestAnswer, messageRowText, sameRow, withoutResumeNotice, type Row } from "@/lib/rows";
+import { buildRows, estimateRow, finalAnswerIds, isPictureOnly, latestAnswer, messageRowText, rowKeyForItem, sameRow, withoutResumeNotice, type Row } from "@/lib/rows";
 import type { PendingPrompt } from "@/lib/store";
 import { turnStart, waitingStatus } from "@/lib/thinking";
 import type { Agent, TimelineItem } from "@/lib/types";
@@ -109,12 +109,17 @@ export const Timeline = memo(function Timeline({
   pending,
   readOnly,
   onEditPrompt,
+  focus = null,
+  onFocused,
 }: {
   agent: Agent;
   items: TimelineItem[];
   pending: PendingPrompt[];
   readOnly: boolean;
   onEditPrompt: (text: string) => void;
+  /** A search hit to scroll to, once its row is loaded. */
+  focus?: { itemId: string; seq: number } | null;
+  onFocused?: () => void;
 }) {
   const items = useMemo(() => withoutResumeNotice(allItems, agent.status), [allItems, agent.status]);
   // Sub-agents still running (background ones keep running after their launch call completed).
@@ -214,6 +219,7 @@ export const Timeline = memo(function Timeline({
     [streamingId, readOnly, latestSummary, roleOf, midTurnWaiting, agentLive, bgRunning, inherited, liveGroup, openGroups, toggleGroup],
   );
 
+  const focusKey = useMemo(() => (focus ? rowKeyForItem(rows, focus.itemId, focus.seq) : null), [rows, focus]);
   const hasMore = useStore((s) => !!s.timelines[agent.id]?.hasMore);
   const loadingOlder = useStore((s) => !!s.timelines[agent.id]?.loadingOlder);
   const onReachTop = useCallback(() => void loadOlder(agent.id), [agent.id]);
@@ -233,7 +239,7 @@ export const Timeline = memo(function Timeline({
           )}
         </div>
       )}
-      <VirtualList items={rows} getKey={rowKey} estimate={estimateRow} render={render} onReachTop={hasMore ? onReachTop : undefined} />
+      <VirtualList items={rows} getKey={rowKey} estimate={estimateRow} render={render} onReachTop={hasMore ? onReachTop : undefined} focusKey={focusKey} onFocused={onFocused} />
       <div className="space-y-4">
         {pending.map((p) => (
           <UserBubble

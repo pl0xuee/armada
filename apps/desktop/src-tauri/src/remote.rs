@@ -2110,6 +2110,8 @@ async fn state(
                     "name": a.name,
                     "provider": a.provider,
                     "color": a.color,
+                    // Lets the phone say a subscription's cost is API-equivalent, not a bill.
+                    "authKind": a.auth_kind,
                     "label": a.status.as_ref().and_then(|s| s.label.clone()),
                     "loggedIn": a.status.as_ref().map(|s| s.logged_in),
                     "error": a.status.and_then(|s| s.error),
