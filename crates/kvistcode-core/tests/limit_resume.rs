@@ -84,14 +84,24 @@ async fn rig(name: &str) -> Rig {
     }
 }
 
-fn config(project: &Path, lifts_in_ms: Option<i64>, message: &str, rate_limit: serde_json::Value) {
-    let lifts_at = lifts_in_ms.map(|ms| now_ms() + ms);
+/// What the mock does: refuse every prompt with `message` until the test lifts the limit (`lift`).
+fn config(project: &Path, message: &str, rate_limit: serde_json::Value) {
     let json = serde_json::json!({
-        "lifts_at": lifts_at,
+        "lifts_at": null,
         "message": message,
         "rate_limit": rate_limit,
     });
     std::fs::write(project.join(".mock-limit.json"), json.to_string()).unwrap();
+}
+
+/// The limit lifts at `at_ms`: prompts the mock gets from then on are answered. Called once the
+/// agents are seen waiting, so a slow machine can never let a first prompt slip through.
+fn lift(project: &Path, at_ms: i64) {
+    let path = project.join(".mock-limit.json");
+    let mut json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    json["lifts_at"] = at_ms.into();
+    std::fs::write(path, json.to_string()).unwrap();
 }
 
 /// What the mock was asked, in order: (text, refused).
@@ -173,7 +183,6 @@ async fn resumes_by_itself_after_the_reset_time_in_the_message() {
     let mut r = rig("basic").await;
     config(
         r.project.path(),
-        Some(1500),
         "You've hit your limit \u{b7} resets in 2 seconds",
         serde_json::Value::Null,
     );
@@ -190,6 +199,7 @@ async fn resumes_by_itself_after_the_reset_time_in_the_message() {
         .limit_resets_at
         .expect("a reset time was read from the message");
     assert!(at >= before && at <= now_ms() + 3000, "{at} vs {before}");
+    lift(r.project.path(), at);
     let wait = a.limit_resume.unwrap();
     assert_eq!((wait.state, wait.attempts), (LimitResumeState::Waiting, 0));
     assert_eq!(
@@ -250,7 +260,6 @@ async fn the_setting_off_never_resumes() {
         .unwrap();
     config(
         r.project.path(),
-        Some(500),
         "usage limit reached, resets in 1 seconds",
         serde_json::Value::Null,
     );
@@ -274,7 +283,6 @@ async fn cancelling_for_one_agent_leaves_it_alone() {
     let r = rig("cancel").await;
     config(
         r.project.path(),
-        Some(1000),
         "usage limit reached, resets in 1 seconds",
         serde_json::Value::Null,
     );
@@ -298,7 +306,6 @@ async fn an_agent_the_user_touched_is_not_resumed() {
     let r = rig("touched").await;
     config(
         r.project.path(),
-        Some(2500),
         "usage limit reached, resets in 3 seconds",
         serde_json::Value::Null,
     );
@@ -317,7 +324,6 @@ async fn an_agent_the_user_touched_is_not_resumed() {
     // An archived one is left alone too.
     config(
         r.project.path(),
-        Some(2500),
         "usage limit reached, resets in 3 seconds",
         serde_json::Value::Null,
     );
@@ -335,7 +341,6 @@ async fn gives_up_after_three_automatic_tries_and_asks_for_you() {
     // Never lifts, and the message always promises 1 second.
     config(
         r.project.path(),
-        None,
         "usage limit reached, resets in 1 seconds",
         serde_json::Value::Null,
     );
@@ -374,7 +379,6 @@ async fn several_agents_resume_together_and_are_announced_once() {
     let resets = (now_ms() / 1000) + 6;
     config(
         r.project.path(),
-        Some(4500),
         "You've hit your usage limit",
         serde_json::json!({"status": "rejected", "unifiedWindows": {
             "five_hour": {"utilization": 1.0, "resetsAt": resets, "status": "rejected"}}}),
@@ -390,6 +394,7 @@ async fn several_agents_resume_together_and_are_announced_once() {
     for id in &ids {
         until("waiting", 30, || waiting(&r.core, id)).await;
     }
+    lift(r.project.path(), resets * 1000);
     until("all resumed and finished", 40, || {
         ids.iter().all(|id| {
             automatic_messages(&r.core, id) == 1
@@ -417,7 +422,6 @@ async fn the_accounts_usage_windows_name_the_reset() {
     let resets = (now_ms() / 1000) + 3;
     config(
         r.project.path(),
-        Some(1500),
         "You've hit your usage limit",
         serde_json::json!({"status": "rejected", "unifiedWindows": {
             "five_hour": {"utilization": 1.0, "resetsAt": resets, "status": "rejected"}}}),
@@ -430,6 +434,7 @@ async fn the_accounts_usage_windows_name_the_reset() {
         Some(resets * 1000),
         "taken from the account's full window"
     );
+    lift(r.project.path(), resets * 1000);
     until("resumed", 40, || {
         automatic_messages(&r.core, &agent.id) == 1
             && r.core
@@ -445,7 +450,6 @@ async fn an_unknown_reset_is_probed_after_a_while() {
     let r = rig("unknown").await;
     config(
         r.project.path(),
-        Some(300),
         "Too many requests",
         serde_json::Value::Null,
     );
@@ -454,9 +458,11 @@ async fn an_unknown_reset_is_probed_after_a_while() {
     let a = r.core.agent(&agent.id).unwrap();
     assert_eq!(a.limit_resets_at, None, "no time to promise");
     assert!(a.limit_resume.unwrap().probe_at.is_some());
-    // 15 minutes / 1000 later it tries anyway, and the limit is gone by then.
+    // 15 minutes / 1000 later it tries anyway, and the limit is gone by then (on a slow machine a
+    // probe can land first and be refused: then the retry after it works).
+    lift(r.project.path(), now_ms());
     until("probe resumed it", 30, || {
-        automatic_messages(&r.core, &agent.id) == 1
+        automatic_messages(&r.core, &agent.id) >= 1
             && r.core
                 .agent(&agent.id)
                 .is_ok_and(|a| a.status == AgentStatus::Idle)
@@ -472,7 +478,6 @@ async fn a_wait_survives_a_restart_and_resumes_at_startup() {
     let project = Dir::new("restart-project");
     config(
         project.path(),
-        Some(1500),
         "usage limit reached, resets in 2 seconds",
         serde_json::Value::Null,
     );
@@ -480,6 +485,10 @@ async fn a_wait_survives_a_restart_and_resumes_at_startup() {
     core.startup().await;
     let agent = new_agent(&core, project.path(), "Restarted").await;
     until("waiting", 20, || waiting(&core, &agent.id)).await;
+    lift(
+        project.path(),
+        core.agent(&agent.id).unwrap().limit_resets_at.unwrap(),
+    );
     core.shutdown().await;
     drop(core);
 
@@ -510,7 +519,6 @@ async fn with_the_setting_off_at_startup_an_old_wait_is_left_alone() {
     let project = Dir::new("offstart-project");
     config(
         project.path(),
-        Some(1000),
         "usage limit reached, resets in 1 seconds",
         serde_json::Value::Null,
     );

@@ -171,7 +171,6 @@ pub struct Facts {
     pub archived: bool,
     pub budget_hold: bool,
     pub pending_permissions: i64,
-    pub queued: bool,
 }
 
 impl Facts {
@@ -182,22 +181,21 @@ impl Facts {
             archived: a.archived,
             budget_hold: a.budget_hold.is_some(),
             pending_permissions: a.pending_permissions,
-            queued: a.queued_prompts > 0 || !a.queue.is_empty(),
         }
     }
 }
 
 /// Only an agent stopped by the limit mid-work and not touched since: its last turn failed on the
 /// limit (`rate_limited`, status error, which any new turn, stop or switch of account clears), it
-/// has no turn in flight (its status is still the error) and isn't archived or held at a spending limit or waiting on an approval, and nothing of
-/// the user's is queued behind it.
+/// has no turn in flight (its status is still the error) and isn't archived, held at a spending
+/// limit or waiting on an approval. Messages the user queued before the limit are not in the way:
+/// the resume is a new message, so the queue runs after it.
 pub fn eligible(f: &Facts) -> bool {
     f.rate_limited
         && f.status == AgentStatus::Error
         && !f.archived
         && !f.budget_hold
         && f.pending_permissions == 0
-        && !f.queued
 }
 
 fn fnv(parts: &[&[u8]]) -> u64 {
@@ -245,6 +243,12 @@ pub struct ClockWatch {
 }
 
 impl ClockWatch {
+    /// Nothing is resumed before `t` (unix ms): just after the app starts the network may not be
+    /// up yet (a login launch), and the rest of startup should settle first.
+    pub fn hold_until(&mut self, t: i64) {
+        self.quiet_until = self.quiet_until.max(t);
+    }
+
     /// Call once per tick (every `period_ms`) with the wall clock. Returns false while nothing
     /// should be resumed: just after waking (the network may not be back) or after the clock
     /// moved. Some systems' monotonic clocks keep counting through sleep, so a tick that comes
@@ -326,7 +330,6 @@ mod tests {
             archived: false,
             budget_hold: false,
             pending_permissions: 0,
-            queued: false,
         }
     }
 
@@ -364,10 +367,6 @@ mod tests {
             },
             Facts {
                 pending_permissions: 1,
-                ..facts()
-            },
-            Facts {
-                queued: true,
                 ..facts()
             },
         ] {
@@ -537,6 +536,14 @@ mod tests {
             w.ready(1_005_000 + 3_600_000 + 25_000, t0 + s(35), 5_000),
             "grace over"
         );
+        // A hold from the start.
+        let mut w = ClockWatch::default();
+        w.hold_until(1_000_000 + 20_000);
+        assert!(!w.ready(1_000_000, t0, 5_000));
+        assert!(!w.ready(1_015_000, t0 + s(15), 5_000));
+        assert!(w.ready(1_020_000, t0 + s(20), 5_000));
+        let mut w = ClockWatch::default();
+        assert!(w.ready(1_000_000, t0, 5_000));
         // The clock was set back.
         assert!(!w.ready(1_000_000, t0 + s(40), 5_000));
         // Set forward by a minute.
