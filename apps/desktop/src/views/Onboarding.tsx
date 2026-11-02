@@ -223,7 +223,7 @@ function Welcome({ onNext }: { onNext: () => void }) {
       </h1>
       <p className="mt-3 max-w-[460px] text-[14px] leading-relaxed text-muted">
         Run Claude, Codex and Grok agents side by side, across every account you own. Approve, review and ship from one
-        gunmetal command deck.
+        command deck.
       </p>
       <div className="mt-7 flex items-center gap-2.5">
         {PROVIDER_ORDER.map((p, i) => (
@@ -308,7 +308,7 @@ function AccountsStep() {
     <>
       <StepHeader
         title="Sign in once, switch in one click"
-        description="Kvistcode found the logins your CLIs already use. Add more accounts (a second Claude Max, a work ChatGPT…) and run agents on all of them at once."
+        description="Kvistcode found the logins your CLIs already use. Add more accounts (a second Claude Max, a work ChatGPT) and run agents on all of them at once."
       />
       <div className="overflow-hidden rounded-xl border border-line bg-card edge">
         <div className="flex items-center justify-between border-b border-line px-4 py-2.5">

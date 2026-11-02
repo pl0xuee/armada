@@ -150,8 +150,8 @@ export function AllAgentsPane({
       <EmptyState
         className="my-auto"
         icon={<Radar />}
-        title="All quiet on this channel"
-        description="No agents match this filter right now."
+        title="No agents match this filter"
+        description="Try another filter, or show every agent."
         action={
           <Button variant="secondary" onClick={onClearFilter}>
             Show all agents

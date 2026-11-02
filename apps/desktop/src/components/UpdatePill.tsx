@@ -38,7 +38,7 @@ export function UpdatePill() {
                   : "Updating…"
                 : `Update ${update.version}: Kvistcode ${update.version} is available`
             }
-            className="relative flex h-[24px] items-center gap-1.5 overflow-hidden rounded-full border border-accent/40 bg-accent/10 pl-2 pr-2.5 text-[11.5px] font-medium text-accent transition-colors hover:bg-accent/15"
+            className="relative flex h-[24px] shrink-0 items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-full border border-accent/40 bg-accent/10 pl-2 pr-2.5 text-[11.5px] font-medium text-accent transition-colors hover:bg-accent/15"
           >
             {installing ? (
               <>

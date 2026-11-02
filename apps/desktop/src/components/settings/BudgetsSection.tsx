@@ -30,6 +30,7 @@ const ACTIONS: { value: BudgetAction; label: string; description: string }[] = [
 
 type Unit = "usd" | "tokens" | "turns";
 
+const PLACEHOLDER = { usd: "No cost limit", tokens: "No token limit", turns: "No turn limit" } as const;
 const PARSE = { usd: parseCap, tokens: parseTokenCap, turns: parseTurnCap } as const;
 const SHOW = { usd: capText, tokens: tokenCapText, turns: turnCapText } as const;
 
@@ -87,7 +88,7 @@ function CapField({
           aria-label={label}
           aria-invalid={error ? true : undefined}
           inputMode={unit === "usd" ? "decimal" : unit === "turns" ? "numeric" : "text"}
-          placeholder="No limit"
+          placeholder={PLACEHOLDER[unit]}
           className={`h-8 tabular ${unit === "usd" ? "pl-6" : ""}`}
           style={{ width }}
           value={text}
@@ -223,7 +224,7 @@ export function BudgetsSection({ settings }: { settings: Settings }) {
           />
         </SettingRow>
       </SettingGroup>
-      <div className="space-y-1.5 px-0.5 text-[12px] leading-relaxed text-muted">
+      <div className="space-y-1.5 text-[12px] leading-relaxed text-muted">
         <p>
           {off
             ? "No limit is set, so nothing is watched. "

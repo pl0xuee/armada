@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Button, type ButtonVariant } from "./ui/button";
 import { Tooltip } from "./ui/tooltip";
@@ -71,9 +71,22 @@ export function HeaderAction({
   /** Extra text after the label, e.g. a shortcut hint (wide panes only). */
   hint?: ReactNode;
 }) {
+  // The tooltip only helps while the label is folded away; beside the visible words it just repeats them.
+  const ref = useRef<HTMLButtonElement>(null);
+  const [iconOnly, setIconOnly] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setIconOnly(el.offsetWidth <= 36);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return (
-    <Tooltip content={label}>
+    <Tooltip content={label} disabled={!iconOnly}>
       <Button
+        ref={ref}
         variant={variant}
         size="sm"
         onClick={onClick}

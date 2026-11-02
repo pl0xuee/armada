@@ -83,7 +83,7 @@ export function McpSection({ servers, project }: { servers: McpServer[]; project
   const projectName = project ? basename(project) || project : "";
   const group = (scope: string, list: McpServer[], title: string, hint: string) => (
     <section aria-label={title} className="mb-6">
-      <div className="mb-2 flex flex-wrap items-end justify-between gap-x-3 gap-y-2 px-0.5">
+      <div className="mb-2 flex flex-wrap items-end justify-between gap-x-3 gap-y-2">
         <div className="min-w-0">
           <h3 className="text-[13px] font-semibold leading-[18px] tracking-tight text-fg">{title}</h3>
           <p className="text-[12px] leading-[18px] text-muted">{hint}</p>
@@ -152,7 +152,7 @@ export function McpSection({ servers, project }: { servers: McpServer[]; project
       {group("", scoped.global, "All projects", "Every agent gets these, wherever it runs.")}
 
       {scoped.elsewhere > 0 && (
-        <p className="-mt-2 mb-4 px-0.5 text-[12px] leading-[18px] text-steel">
+        <p className="-mt-2 mb-4 text-[12px] leading-[18px] text-steel">
           {scoped.elsewhere} more {scoped.elsewhere === 1 ? "server belongs" : "servers belong"} to other projects.
         </p>
       )}

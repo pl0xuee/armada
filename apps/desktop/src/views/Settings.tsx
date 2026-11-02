@@ -1000,6 +1000,7 @@ const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: [modKey, "J"], label: "Needs you" },
   { keys: [modKey, "⇧", "M"], label: "Mission Control: All agents" },
   { keys: [modKey, ","], label: "Settings" },
+  { keys: [modKey, "/"], label: "All shortcuts" },
   { keys: ["Esc"], label: "Close / cancel turn" },
 ];
 

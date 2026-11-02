@@ -85,7 +85,7 @@ export function ToolsSection({ settings }: { settings: Settings }) {
             <ToolCard key={p.provider} info={p} />
           ))}
       </div>
-      <p className="mt-4 px-0.5 text-[12px] text-steel">
+      <p className="mt-4 text-[12px] text-steel">
         Updates come from the official npm registry. Kvistcode was tested with the versions shown as Tested and can go back
         to them at any time.
       </p>

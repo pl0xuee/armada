@@ -44,7 +44,7 @@ export function selectNextTriage(queue: TriageEntry[]) {
 
 export const REASON_LABEL: Record<NeedsReason, string> = {
   permission: "Needs approval",
-  budget: "Spending limit",
+  budget: "Budget limit",
   rate_limited: "Usage limit",
   error: "Error",
   done: "Done · unread",
