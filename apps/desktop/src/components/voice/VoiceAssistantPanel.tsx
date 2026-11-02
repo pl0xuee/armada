@@ -2,6 +2,7 @@ import { ArrowUpRight, Mic, MicOff, Square, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
+import { AssistantBilling } from "@/components/usage/BillingSummary";
 import { formatCost, formatElapsed, isLive, PHASE_LABEL } from "@/lib/voiceAssistant";
 import { cn, isEditableTarget, modKey } from "@/lib/utils";
 import {
@@ -137,6 +138,7 @@ function PanelBody() {
         )}
       </div>
 
+      {live && <AssistantBilling signal={Math.round(cost * 100)} className="border-t border-line px-4 py-2.5" />}
       {notice && live && (
         <p role="status" className="border-t border-line px-4 py-2 text-[12px] text-warn">
           {notice}

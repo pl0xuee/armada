@@ -1,0 +1,44 @@
+import { describe, expect, it } from "vitest";
+import { billingOf, budgetLeft, windowsLeft } from "./billing";
+
+describe("billingOf", () => {
+  it("tells API keys, subscriptions and local models apart", () => {
+    expect(billingOf({ authKind: "api_key" }, "claude").mode).toBe("api");
+    expect(billingOf({ authKind: "oauth" }, "claude").mode).toBe("subscription");
+    expect(billingOf({ authKind: "default" }, "codex").mode).toBe("subscription");
+    expect(billingOf(null, "grok").mode).toBe("subscription");
+    expect(billingOf({ authKind: "api_key" }, "local").mode).toBe("local");
+  });
+});
+
+describe("windowsLeft", () => {
+  it("reports what is left of each window", () => {
+    const w = windowsLeft({
+      primary: { usedPercent: 12.4, windowMins: 300, resetsAt: 5 },
+      secondary: { usedPercent: 99.6, windowMins: 10080, resetsAt: null },
+      plan: null,
+      updatedAt: 0,
+    });
+    expect(w).toEqual([
+      { name: "5-hour", usedPercent: 12, leftPercent: 88, resetsAt: 5 },
+      { name: "Weekly", usedPercent: 100, leftPercent: 0, resetsAt: null },
+    ]);
+    expect(windowsLeft(null)).toEqual([]);
+  });
+});
+
+describe("budgetLeft", () => {
+  it("counts what is left of the daily limit", () => {
+    expect(budgetLeft({ todayUsd: 7.5, dailyBudgetUsd: 20 })).toEqual({
+      spentUsd: 7.5,
+      budgetUsd: 20,
+      leftUsd: 12.5,
+      usedPercent: 38,
+    });
+  });
+  it("never goes below zero, and says nothing is left to count without a limit", () => {
+    expect(budgetLeft({ todayUsd: 30, dailyBudgetUsd: 20 })).toMatchObject({ leftUsd: 0, usedPercent: 100 });
+    expect(budgetLeft({ todayUsd: 3, dailyBudgetUsd: null })).toMatchObject({ budgetUsd: null, leftUsd: null });
+    expect(budgetLeft(null)).toBeNull();
+  });
+});

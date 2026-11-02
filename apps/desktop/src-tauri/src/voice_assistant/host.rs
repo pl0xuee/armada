@@ -171,6 +171,28 @@ fn ago(now: i64, then: i64) -> String {
     }
 }
 
+/// How an account is paid for: "subscription", "api" (billed per token on a key) or "local" (free).
+fn billing_mode(a: &kvistcode_core::Account) -> &'static str {
+    if a.provider == kvistcode_core::Provider::Local {
+        "local"
+    } else if a.auth_kind == kvistcode_core::AuthKind::ApiKey {
+        "api"
+    } else {
+        "subscription"
+    }
+}
+
+/// Today's spend against the daily cost limit; `leftUsd` is null when no limit is set.
+fn daily_budget(s: &kvistcode_core::budget::BudgetStatus) -> Value {
+    let cents = |v: f64| (v * 100.0).round() / 100.0;
+    let limit = s.daily_budget_usd.filter(|b| *b > 0.0);
+    json!({
+        "spentTodayUsd": cents(s.today_usd),
+        "limitUsd": limit.map(cents),
+        "leftUsd": limit.map(|b| cents((b - s.today_usd).max(0.0))),
+    })
+}
+
 /// "in 2 h" for a reset time (or "now" when it has passed).
 fn ago_until(now: i64, at: i64) -> String {
     let s = ((at - now) / 1000).max(0);
@@ -621,6 +643,7 @@ impl KvistcodeTools {
                 json!({
                     "account": a.name,
                     "provider": a.provider.as_str(),
+                    "billing": billing_mode(a),
                     "plan": a.usage.as_ref().and_then(|u| u.plan.clone()),
                     "shortWindow": a.usage.as_ref().and_then(|u| window(&u.primary)),
                     "longWindow": a.usage.as_ref().and_then(|u| window(&u.secondary)),
@@ -641,7 +664,9 @@ impl KvistcodeTools {
             "accounts": rows,
             "agentsCostUsd": (cost * 100.0).round() / 100.0,
             "mostExpensive": top,
-            "note": "Cost is the API-equivalent estimate; subscriptions are limited by the percent used, not by cost.",
+            "dailyBudget": daily_budget(&self.core.budget_status()),
+            "note": "Cost is the API-equivalent estimate; subscriptions are limited by the percent used, not by cost. \
+                     The remaining prepaid credit on an API key can't be read, so for API billing report the daily budget left, and say so.",
         }))
     }
 
@@ -789,6 +814,31 @@ mod tests {
                 parent_tool_call_id: None,
             },
         }
+    }
+
+    fn status(spent: f64, limit: Option<f64>) -> kvistcode_core::budget::BudgetStatus {
+        kvistcode_core::budget::BudgetStatus {
+            day: "2026-11-01".into(),
+            today_usd: spent,
+            daily_budget_usd: limit,
+            today_tokens: 0,
+            daily_budget_tokens: None,
+            today_turns: 0,
+            daily_budget_turns: None,
+            level: kvistcode_core::budget::level(spent, limit),
+        }
+    }
+
+    #[test]
+    fn the_daily_budget_left_never_goes_below_zero_and_is_null_without_a_limit() {
+        let b = daily_budget(&status(3.456, Some(10.0)));
+        assert_eq!(b["spentTodayUsd"], 3.46);
+        assert_eq!(b["limitUsd"], 10.0);
+        assert_eq!(b["leftUsd"], 6.54);
+        assert_eq!(daily_budget(&status(12.0, Some(10.0)))["leftUsd"], 0.0);
+        let none = daily_budget(&status(2.0, None));
+        assert!(none["limitUsd"].is_null() && none["leftUsd"].is_null());
+        assert!(daily_budget(&status(2.0, Some(0.0)))["leftUsd"].is_null());
     }
 
     #[test]

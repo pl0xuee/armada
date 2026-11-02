@@ -28,7 +28,7 @@ import { usePr } from "@/store/pr";
 import { AccountAvatar } from "../AccountAvatar";
 import { ContextRing } from "../ContextRing";
 import { RelTime } from "../RelTime";
-import { UsageMeters } from "../UsageMeter";
+import { BillingSummary } from "../usage/BillingSummary";
 import { CopyButton } from "../CopyButton";
 import { PlanChecklist } from "../timeline/items";
 import { PrChip } from "./PrChip";
@@ -116,7 +116,7 @@ export const Inspector = memo(function Inspector({
         {canCompact(agent) && agent.running && agent.contextSize ? <CompactRow agent={agent} /> : null}
       </Section>
 
-      {account && agent.provider !== "custom" && <AccountSection account={account} />}
+      {account && agent.provider !== "custom" && <AccountSection account={account} agent={agent} />}
 
       {(subagents > 0 || agent.queue.length > 0) && (
         <Section title="Activity" icon={<Workflow />}>
@@ -283,7 +283,7 @@ const FileRow = memo(function FileRow({ file: f, cwd }: { file: AgentDerived["fi
 });
 
 /** Which account runs this agent, its plan and how much of each usage window is spent. */
-function AccountSection({ account }: { account: Account }) {
+function AccountSection({ account, agent }: { account: Account; agent: Agent }) {
   const usage = account.usage;
   const plan = account.status?.label ?? (usage?.plan ? usage.plan.charAt(0).toUpperCase() + usage.plan.slice(1) : null);
   return (
@@ -293,7 +293,7 @@ function AccountSection({ account }: { account: Account }) {
         <span className="min-w-0 truncate text-fg">{account.name}</span>
         {plan && <span className="ml-auto shrink-0 text-steel">{plan}</span>}
       </div>
-      <UsageMeters usage={usage} compact className="mt-2.5" />
+      <BillingSummary account={account} provider={agent.provider} signal={agent.costUsd} className="mt-2.5" />
     </Section>
   );
 }
