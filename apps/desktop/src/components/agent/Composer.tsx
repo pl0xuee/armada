@@ -516,9 +516,10 @@ function ComposerImpl({
       attach.attachments.length === 0 &&
       agent.queue.length > 0
     ) {
-      // Like Claude Code: Up on an empty prompt takes your newest queued message back to edit it.
+      // Like Claude Code: Up on an empty prompt takes your newest queued message back to edit it. (A held key
+      // repeats before the first answer is back: the same message would be taken twice, and "already ran" shown.)
       e.preventDefault();
-      void recallQueued();
+      if (!e.repeat) void recallQueued();
     } else if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void send(e.metaKey || e.ctrlKey ? "modEnter" : "enter");
