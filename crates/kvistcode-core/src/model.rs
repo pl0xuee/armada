@@ -1154,7 +1154,8 @@ pub struct Settings {
     /// Claude agents summarize their conversation once it reaches this many tokens, instead of
     /// at Claude Code's own (much later, on 1M-context models) threshold. Every step an agent
     /// takes re-reads its whole context, so a shorter one is the biggest token saver
-    /// (None = leave Claude Code's default). See `token_saver`.
+    /// (None = leave Claude Code's default; the default is `token_saver::DEFAULT_COMPACT_WINDOW`).
+    /// See `token_saver`.
     pub auto_compact_window: Option<u32>,
 }
 
@@ -1598,7 +1599,9 @@ impl Default for Settings {
             agent_budget_turns: None,
             project_budgets: Default::default(),
             alert_targets: Vec::new(),
-            auto_compact_window: None,
+            // On by default: measured as the biggest saver (see docs/TOKEN-SAVING.md). Anyone who
+            // chooses "Claude's default" in Settings saves an explicit null, which stays off.
+            auto_compact_window: Some(crate::token_saver::PRESET_COMPACT_WINDOW),
         }
     }
 }

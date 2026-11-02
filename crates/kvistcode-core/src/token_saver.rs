@@ -82,10 +82,15 @@ mod tests {
 
     #[test]
     fn env_only_for_claude_and_only_when_chosen() {
+        // On by default; "Claude's default" in Settings saves an explicit None, which is off.
         let mut s = Settings::default();
         let mut env = Vec::new();
         extend_env(&mut env, Provider::Claude, &s);
-        assert!(env.is_empty(), "off by default");
+        assert_eq!(env.len(), 1, "on by default");
+        env.clear();
+        s.auto_compact_window = None;
+        extend_env(&mut env, Provider::Claude, &s);
+        assert!(env.is_empty(), "off when the user chose Claude's default");
 
         s.auto_compact_window = Some(250_000);
         extend_env(&mut env, Provider::Codex, &s);
@@ -136,6 +141,7 @@ mod tests {
     fn preset_applies_the_cheap_defaults_and_reports_them() {
         let mut s = Settings {
             response_style: ResponseStyle::Detailed,
+            auto_compact_window: None,
             ..Default::default()
         };
         let changed = apply_preset(&mut s);
