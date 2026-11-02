@@ -48,7 +48,9 @@ export function BudgetHoldPanel({ agent }: { agent: Agent }) {
           <CirclePause className="h-4 w-4" />
         </span>
         <div className="min-w-0">
-          <p className="text-[13.5px] font-semibold">Paused at a spending limit</p>
+          <p className="text-[13.5px] font-semibold">
+            Paused at {hold.metric === "cost" ? "a spending" : hold.metric === "tokens" ? "a token" : "a turn"} limit
+          </p>
           <p className="selectable mt-0.5 break-words text-[12.5px] leading-relaxed text-muted">
             {holdText(hold, equivalent)} It finished its turn first, so nothing was cut off.
             {agent.queuedPrompts > 0 &&

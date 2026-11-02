@@ -36,6 +36,9 @@ const KIND_ICON: Partial<Record<TimelineKind, ReactNode>> = {
   turn_summary: <FilePen />,
 };
 
+/** Replies are Markdown; a one-line snippet reads better without the emphasis and code markers. */
+const unmark = (s: string) => s.replace(/\*\*|__|`/g, "");
+
 /** A snippet with the matched words marked. */
 export function Snippet({ text }: { text: string }) {
   return (
@@ -43,10 +46,10 @@ export function Snippet({ text }: { text: string }) {
       {splitSnippet(text).map((p, i) =>
         p.hit ? (
           <mark key={i} className="rounded-[3px] bg-accent/25 px-px text-fg">
-            {p.text}
+            {unmark(p.text)}
           </mark>
         ) : (
-          <span key={i}>{p.text}</span>
+          <span key={i}>{unmark(p.text)}</span>
         ),
       )}
     </>

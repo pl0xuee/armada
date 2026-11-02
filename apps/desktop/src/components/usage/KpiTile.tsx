@@ -22,7 +22,11 @@ export function KpiTile({
         <span className="truncate">{label}</span>
       </div>
       <div className="mt-2 text-[24px] font-semibold leading-none tracking-tight text-fg tabular">{value}</div>
-      {sub && <div className="mt-1.5 truncate text-[11.5px] text-muted">{sub}</div>}
+      {sub && (
+        <div className="mt-1.5 truncate text-[11.5px] text-muted" title={typeof sub === "string" ? sub : undefined}>
+          {sub}
+        </div>
+      )}
     </div>
   );
 }

@@ -183,7 +183,7 @@ export function AgentsSection({ agents }: { agents: CustomAgent[] }) {
               />
             ))}
           </ul>
-          <p className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 px-0.5 text-[12px] text-steel">
+          <p className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12px] text-steel">
             Enabled agents appear as providers in New agent, Compare and Schedules.
             <a
               href={ACP_AGENTS_URL}

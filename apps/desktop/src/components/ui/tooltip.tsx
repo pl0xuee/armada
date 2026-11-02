@@ -19,6 +19,7 @@ export function Tooltip({
   children,
   className,
   delay,
+  disabled,
 }: {
   content: ReactNode;
   shortcut?: string[];
@@ -27,6 +28,8 @@ export function Tooltip({
   children: ReactNode;
   className?: string;
   delay?: number;
+  /** Keep the tooltip closed, e.g. when the control already shows the same words. */
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   // The previous tooltip leaves without its exit animation so it can't overlap the next one's entrance.
@@ -54,8 +57,13 @@ export function Tooltip({
   );
   const onOpenChange = (next: boolean) => {
     clearTimeout(timer.current);
+    if (disabled) return;
     if (!next) hide();
-    else if (triggerRef.current?.matches(":focus-visible")) timer.current = setTimeout(show, KEYBOARD_DELAY_MS);
+    else if (triggerRef.current?.matches(":focus-visible"))
+      // Focus can leave in the meantime (into a dialog, say): then there is nothing left to describe.
+      timer.current = setTimeout(() => {
+        if (triggerRef.current?.matches(":focus-visible")) show();
+      }, KEYBOARD_DELAY_MS);
     else show();
   };
 

@@ -237,7 +237,7 @@ export function UsageView() {
               value={formatCost(split.equivalent)}
               sub={
                 split.equivalent > 0
-                  ? "Subscription usage, not billed per token"
+                  ? "Subscriptions, not billed"
                   : priciest
                     ? `Most on ${identity(priciest.key).short}`
                     : undefined

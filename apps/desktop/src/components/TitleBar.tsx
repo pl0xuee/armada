@@ -43,6 +43,8 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
   const compact = useMediaQuery(COMPACT_TITLEBAR_QUERY);
   const narrow = useMediaQuery(NARROW_TITLEBAR_QUERY);
   const connectionLost = useApp((s) => s.connectionLost);
+  // With an update pill on top of the sub-agents chip and accounts, the right side crowds out the breadcrumb.
+  const crowded = useApp((s) => s.update !== null && !s.updateDismissed);
 
   return (
     <>
@@ -62,10 +64,16 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
           </span>
           {!minimal && (
             <>
-              <span data-tauri-drag-region className="text-line-strong max-[999px]:hidden">
+              <span
+                data-tauri-drag-region
+                className={cn("text-line-strong max-[999px]:hidden", crowded && "max-[1119px]:hidden")}
+              >
                 /
               </span>
-              <span data-tauri-drag-region className="truncate text-[12.5px] text-muted max-[999px]:hidden">
+              <span
+                data-tauri-drag-region
+                className={cn("truncate text-[12.5px] text-muted max-[999px]:hidden", crowded && "max-[1119px]:hidden")}
+              >
                 {VIEW_LABEL[view]}
               </span>
             </>
@@ -79,7 +87,7 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
                 type="button"
                 onClick={() => setPaletteOpen(true)}
                 aria-label="Open command palette"
-                className="flex h-7 w-7 items-center justify-center rounded-lg border border-line bg-base/60 text-steel transition-colors hover:border-line-strong hover:text-fg"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-line bg-base/60 text-steel transition-colors hover:border-line-strong hover:text-fg"
               >
                 <Search className="h-3.5 w-3.5" />
               </button>

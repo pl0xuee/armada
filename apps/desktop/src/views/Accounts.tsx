@@ -51,10 +51,14 @@ export function AccountsView() {
         icon={<Users />}
         title="Accounts"
         subtitle={
-          <>
-            <span className="tabular text-fg">{signedIn}</span> of <span className="tabular">{accounts.length}</span>{" "}
-            accounts signed in · every account runs in its own isolated profile
-          </>
+          accounts.length === 0 ? (
+            "No accounts yet · every account runs in its own isolated profile"
+          ) : (
+            <>
+              <span className="tabular text-fg">{signedIn}</span> of <span className="tabular">{accounts.length}</span>{" "}
+              accounts signed in · every account runs in its own isolated profile
+            </>
+          )
         }
         right={
           <>

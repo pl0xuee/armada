@@ -55,7 +55,7 @@ export function SettingGroup({
   return (
     <section className={cn("space-y-2.5", className)}>
       {(title || right) && (
-        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 px-0.5">
+        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
           <div className="min-w-0">
             {title && <h3 className="text-[13px] font-semibold tracking-tight text-fg">{title}</h3>}
             {description && <p className="mt-0.5 text-[12px] text-muted">{description}</p>}

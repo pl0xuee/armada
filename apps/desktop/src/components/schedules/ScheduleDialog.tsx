@@ -217,7 +217,7 @@ function ScheduleForm({
         </div>
 
         <div>
-          <Label>Agent</Label>
+          <Label>Provider</Label>
           <div className="-mx-1 overflow-x-auto px-1 pb-0.5">
             <Segmented
               aria-label="Agent runtime"
