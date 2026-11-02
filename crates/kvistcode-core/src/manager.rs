@@ -1255,7 +1255,12 @@ impl Core {
             (program, args, acct_env, acct_env_remove)
         };
         let mut env = env;
-        crate::token_saver::extend_env(&mut env, agent.provider, &self.inner.settings.lock());
+        crate::token_saver::extend_env(
+            &mut env,
+            agent.provider,
+            &self.inner.settings.lock(),
+            &self.inner.data_dir,
+        );
         let children_file = self.inner.data_dir.join("children.json");
         let attachments_dir = self.attachments_dir();
         let mcp_servers = crate::mcp::servers_for_project(
@@ -1284,6 +1289,13 @@ impl Core {
                 ))
             })
             .flatten();
+        // Token saving: the output-filter hook, output limit and no next-prompt prediction.
+        let session_meta = crate::token_saver::extend_session_meta(
+            session_meta,
+            agent.provider,
+            &self.inner.settings.lock(),
+            std::env::current_exe().ok().as_deref(),
+        );
         let response_style = self.inner.settings.lock().response_style;
         let guidance = crate::guidance::guidance(response_style);
         let guide_tag = crate::guidance::tag(response_style);

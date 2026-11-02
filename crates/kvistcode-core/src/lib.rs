@@ -7,6 +7,7 @@ pub mod checkpoints;
 pub mod childenv;
 pub mod local;
 pub mod model;
+pub mod output_filter;
 pub mod project_config;
 pub mod providers;
 pub mod questions;

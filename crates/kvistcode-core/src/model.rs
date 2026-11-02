@@ -1156,6 +1156,8 @@ pub struct Settings {
     /// takes re-reads its whole context, so a shorter one is the biggest token saver
     /// (None = leave Claude Code's default). See `token_saver`.
     pub auto_compact_window: Option<u32>,
+    /// The other "Save tokens" options (output tidying, command output limit, helper model).
+    pub token_saver: crate::token_saver::TokenSaverOptions,
 }
 
 /// The voice assistant: talk to Kvistcode through OpenAI's Realtime API. Off by default;
@@ -1449,6 +1451,9 @@ impl Settings {
                 return Err("The auto-compact size must be between 100,000 and 1,000,000 tokens (or empty for Claude's default)".into());
             }
         }
+        if let Some(problem) = self.token_saver.problem() {
+            return Err(problem);
+        }
         Ok(())
     }
 
@@ -1526,6 +1531,7 @@ impl Settings {
             self.auto_compact_window = None;
             reset.push("autoCompactWindow");
         }
+        reset.extend(self.token_saver.sanitize());
         let hd = &mut self.helper_defaults;
         for (field, name) in [
             (&mut hd.account_id, "helperDefaults.accountId"),
@@ -1599,6 +1605,7 @@ impl Default for Settings {
             project_budgets: Default::default(),
             alert_targets: Vec::new(),
             auto_compact_window: None,
+            token_saver: Default::default(),
         }
     }
 }
