@@ -389,7 +389,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn stdio_handshake() {
-        let dir = std::env::temp_dir().join(format!("kvistcode-mcp-test-{}", std::process::id()));
+        let dir = crate::testutil::scratch("mcp-test");
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("server.py");
         std::fs::write(
@@ -478,7 +478,7 @@ for line in sys.stdin:
     #[cfg(unix)]
     #[test]
     fn project_match_resolves_links() {
-        let dir = std::env::temp_dir().join(format!("kvistcode-mcp-scope-{}", std::process::id()));
+        let dir = crate::testutil::scratch("mcp-scope");
         let real = dir.join("real");
         std::fs::create_dir_all(&real).unwrap();
         let link = dir.join("link");

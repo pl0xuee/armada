@@ -60,6 +60,27 @@ impl std::error::Error for RpcError {}
 /// Code used for "the agent process went away" (our own, not the agent's).
 pub const CODE_EXITED: i64 = -32099;
 
+/// A request that could not be delivered or answered because the process is gone
+/// (as opposed to the agent answering with an error).
+#[derive(Debug)]
+pub struct ProcessGone(String);
+
+impl std::fmt::Display for ProcessGone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ProcessGone {}
+
+/// Whether `err` says the agent process is gone (exited, killed, or its pipe broke).
+pub fn process_gone(err: &anyhow::Error) -> bool {
+    error_code(err) == Some(CODE_EXITED)
+        || err
+            .chain()
+            .any(|e| e.downcast_ref::<ProcessGone>().is_some())
+}
+
 type Pending = HashMap<String, oneshot::Sender<Result<Value, RpcError>>>;
 
 /// Shared "the connection is over" bookkeeping, done exactly once.
@@ -329,11 +350,16 @@ impl Peer {
         let mut line = serde_json::to_vec(msg)?;
         line.push(b'\n');
         let mut guard = self.stdin.lock().await;
-        let stdin = guard
-            .as_mut()
-            .ok_or_else(|| anyhow!("the agent process has been stopped"))?;
-        stdin.write_all(&line).await.context("writing to agent")?;
-        stdin.flush().await?;
+        let stdin = guard.as_mut().ok_or_else(|| {
+            anyhow::Error::new(ProcessGone("the agent process has been stopped".into()))
+        })?;
+        // A write that fails means the process closed its end: it is gone.
+        let sent = async {
+            stdin.write_all(&line).await?;
+            stdin.flush().await
+        }
+        .await;
+        sent.map_err(|e| anyhow::Error::new(ProcessGone(format!("writing to agent: {e}"))))?;
         Ok(())
     }
 
@@ -353,7 +379,9 @@ impl Peer {
         // The reader may have drained `pending` just before we inserted.
         if self.is_closed() {
             self.closer.pending.lock().remove(&id_key(&id));
-            return Err(anyhow!("{method}: the agent process exited"));
+            return Err(anyhow::Error::new(ProcessGone(format!(
+                "{method}: the agent process exited"
+            ))));
         }
         let msg = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
         if let Err(e) = self.write(&msg).await {
@@ -373,7 +401,9 @@ impl Peer {
         match result {
             Ok(Ok(v)) => Ok(v),
             Ok(Err(e)) => Err(anyhow::Error::new(e).context(format!("{method} failed"))),
-            Err(_) => Err(anyhow!("{method}: connection closed")),
+            Err(_) => Err(anyhow::Error::new(ProcessGone(format!(
+                "{method}: connection closed"
+            )))),
         }
     }
 
@@ -391,7 +421,9 @@ impl Peer {
         self.closer.pending.lock().insert(id_key(&id), tx);
         if self.is_closed() {
             self.closer.pending.lock().remove(&id_key(&id));
-            return Err(anyhow!("{method}: the agent process exited"));
+            return Err(anyhow::Error::new(ProcessGone(format!(
+                "{method}: the agent process exited"
+            ))));
         }
         let msg = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
         if let Err(e) = self.write(&msg).await {
@@ -403,7 +435,9 @@ impl Peer {
             match rx.await {
                 Ok(Ok(v)) => Ok(v),
                 Ok(Err(e)) => Err(anyhow::Error::new(e).context(format!("{method} failed"))),
-                Err(_) => Err(anyhow!("{method}: connection closed")),
+                Err(_) => Err(anyhow::Error::new(ProcessGone(format!(
+                    "{method}: connection closed"
+                )))),
             }
         })
     }
@@ -457,7 +491,9 @@ impl Peer {
             .map(|(_, l)| l.as_str())
             .collect();
         let skip = fresh.len().saturating_sub(lines);
-        fresh[skip..].join("\n")
+        // Quoted in error notices (stored with the conversation, shown on the phone):
+        // an agent that prints a key or token on its way down must not leak it there.
+        crate::redact::redact_secrets(&fresh[skip..].join("\n")).into_owned()
     }
 
     /// Remembers where stderr is now, as the start of the current turn.
@@ -871,6 +907,44 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    /// What the agent wrote to stderr is quoted in error notices: secrets in it are not.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stderr_quoted_in_errors_is_redacted() {
+        let key = ["sk-ant-api03-", "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"].concat();
+        let args = [
+            "-c".to_string(),
+            format!("echo 'auth failed with {key} for you' >&2; echo plain line >&2"),
+        ];
+        let (peer, mut rx) = Peer::spawn(SpawnOptions {
+            program: Path::new("sh"),
+            args: &args,
+            cwd: &std::env::temp_dir(),
+            env: &[],
+            env_remove: &[],
+            label: "test",
+            children_file: None,
+        })
+        .unwrap();
+        // The process exits; stderr is read to its end shortly after stdout closes.
+        while let Some(msg) = rx.recv().await {
+            if matches!(msg, Incoming::Closed) {
+                break;
+            }
+        }
+        let mut tail = String::new();
+        for _ in 0..100 {
+            tail = peer.stderr_tail(8);
+            if tail.contains("plain line") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(tail.contains("plain line"), "{tail:?}");
+        assert!(!tail.contains("AbCdEfGhIjKl"), "{tail:?}");
+        assert!(tail.contains("auth failed"), "{tail:?}");
     }
 
     #[cfg(unix)]

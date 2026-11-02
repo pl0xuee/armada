@@ -770,10 +770,7 @@ mod tests {
     use crate::model::McpTransport;
 
     fn temp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "kvistcode-db-{name}-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let dir = crate::testutil::scratch(&format!("db-{name}"));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }

@@ -711,8 +711,7 @@ mod tests {
 
     #[tokio::test]
     async fn worktree_creation_skips_post_checkout_hook() {
-        let base =
-            std::env::temp_dir().join(format!("kvistcode-git-{}", uuid::Uuid::new_v4().simple()));
+        let base = crate::testutil::scratch("git");
         let repo_dir = base.join("repo");
         std::fs::create_dir_all(&repo_dir).unwrap();
         sh_git(&repo_dir, &["init", "-q", "-b", "main"]);
@@ -743,8 +742,7 @@ mod tests {
 
     #[tokio::test]
     async fn refuses_to_lose_work_unless_forced() {
-        let base =
-            std::env::temp_dir().join(format!("kvistcode-git-{}", uuid::Uuid::new_v4().simple()));
+        let base = crate::testutil::scratch("git");
         let repo_dir = base.join("repo");
         std::fs::create_dir_all(&repo_dir).unwrap();
         sh_git(&repo_dir, &["init", "-q", "-b", "main"]);
@@ -989,8 +987,7 @@ mod tests {
 
     #[tokio::test]
     async fn repo_config_commands_never_run() {
-        let base =
-            std::env::temp_dir().join(format!("kvistcode-git-{}", uuid::Uuid::new_v4().simple()));
+        let base = crate::testutil::scratch("git");
         std::fs::create_dir_all(&base).unwrap();
         let (repo, marker) = booby_trapped_repo(&base);
         git(&repo, &["status", "--porcelain"]).await.unwrap();
@@ -1024,8 +1021,7 @@ mod tests {
 
     #[tokio::test]
     async fn global_filters_still_apply() {
-        let base =
-            std::env::temp_dir().join(format!("kvistcode-git-{}", uuid::Uuid::new_v4().simple()));
+        let base = crate::testutil::scratch("git");
         std::fs::create_dir_all(&base).unwrap();
         let repo = base.join("r");
         std::fs::create_dir_all(&repo).unwrap();
@@ -1048,8 +1044,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn forced_removal_only_deletes_managed_worktrees() {
-        let base =
-            std::env::temp_dir().join(format!("kvistcode-git-{}", uuid::Uuid::new_v4().simple()));
+        let base = crate::testutil::scratch("git");
         let repo_dir = base.join("repo");
         std::fs::create_dir_all(&repo_dir).unwrap();
         sh_git(&repo_dir, &["init", "-q", "-b", "main"]);

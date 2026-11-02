@@ -925,4 +925,76 @@ mod tests {
             "AccountKey=[REDACTED]"
         );
     }
+
+    /// Log lines are arbitrary text (any bytes the agent printed): redaction must
+    /// never panic, however the fragments it looks for are cut by multi-byte
+    /// characters. Seeded, so a failure reproduces.
+    #[test]
+    fn redaction_never_panics_on_odd_text() {
+        const PIECES: &[&str] = &[
+            "sk-",
+            "sk-ant-",
+            "ghp_",
+            "AKIA",
+            "xox",
+            "Bearer ",
+            "bearer",
+            "Authorization: ",
+            "-----BEGIN ",
+            "PRIVATE KEY",
+            "-----END ",
+            "-----",
+            "://",
+            "@",
+            "user:pw@h",
+            "--token",
+            "--password=",
+            "--api-key ",
+            "-u ",
+            "curl ",
+            "password=",
+            "token: ",
+            "SECRET",
+            "=",
+            ":",
+            " ",
+            "\n",
+            "\t",
+            "é",
+            "日",
+            "✓",
+            "🎉",
+            "\u{200b}",
+            "\u{301}",
+            "abcdefghijklmnopqrstuvwxyz0123456789",
+            "A1b2",
+            "\"",
+            "'",
+            "{",
+            "$",
+            "<",
+            "%",
+            "[REDACTED]",
+            "eyJhbGciOiJIUzI1NiJ9",
+            ".",
+            "-",
+            "_",
+        ];
+        let mut seed: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for _ in 0..4000 {
+            let n = (next() % 14) as usize;
+            let text: String = (0..n)
+                .map(|_| PIECES[(next() % PIECES.len() as u64) as usize])
+                .collect();
+            // Only that it returns (a panic fails the test); and a redacted result
+            // never grows without bound.
+            assert!(r(&text).len() <= text.len() * 4 + 64, "{text:?}");
+        }
+    }
 }
