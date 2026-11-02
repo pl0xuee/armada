@@ -1,5 +1,5 @@
 import type { SearchHit } from "./types";
-import { useApp } from "@/store/app";
+import { PAGE_SIZE, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 
 /** Wraps each matched word in a snippet (the backend's `MARK_START` / `MARK_END`). */
@@ -44,8 +44,10 @@ export function searchTerm(query: string): string {
   return (q.startsWith("?") ? q.slice(1) : q).trim();
 }
 
-/** Most pages of history loaded to reach a hit (a page is a few hundred items). */
+/** Most requests made to reach a hit. */
 const MAX_PAGES = 60;
+/** Largest page a jump asks for (the backend serves at most this many items per request). */
+const JUMP_PAGE = 2000;
 
 /** Waits for an agent's timeline to be in memory (up to ~2 s). */
 async function timelineLoaded(agentId: string) {
@@ -65,7 +67,8 @@ export async function openSearchHit(hit: Pick<SearchHit, "agentId" | "itemId" | 
     const st = useApp.getState();
     const first = st.items[hit.agentId]?.[0]?.seq;
     if (first === undefined || first <= hit.seq || !st.hasOlder[hit.agentId]) break;
-    await st.loadOlder(hit.agentId);
+    // Seqs are dense, so `first - hit.seq` items reach the hit: one big page instead of one render per 300.
+    await st.loadOlder(hit.agentId, Math.min(JUMP_PAGE, first - hit.seq + PAGE_SIZE));
   }
   useUi.getState().revealItem(hit.agentId, hit.itemId);
 }
