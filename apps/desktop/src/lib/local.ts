@@ -19,24 +19,6 @@ export const INSTALL_URL: Partial<Record<LocalKind, string>> = {
 export const SMALL_MODEL_NOTE =
   "Small local models can struggle with tool use and long tasks. Expect to guide them more than a hosted model.";
 
-/** Ollama models that support tool calling, with rough download and memory needs. */
-export interface RecommendedModel {
-  name: string;
-  title: string;
-  blurb: string;
-  /** Approximate download size in GB. */
-  sizeGb: number;
-  /** Approximate RAM / VRAM to run it comfortably, in GB. */
-  ramGb: number;
-}
-
-export const RECOMMENDED_MODELS: RecommendedModel[] = [
-  { name: "qwen3:8b", title: "Qwen3 8B", blurb: "Small and quick; fits most laptops", sizeGb: 5.2, ramGb: 8 },
-  { name: "gpt-oss:20b", title: "gpt-oss 20B", blurb: "OpenAI's open model; good all-rounder", sizeGb: 14, ramGb: 16 },
-  { name: "devstral:24b", title: "Devstral 24B", blurb: "Built for coding agents", sizeGb: 14, ramGb: 24 },
-  { name: "qwen3-coder:30b", title: "Qwen3-Coder 30B", blurb: "Strongest coding model here", sizeGb: 19, ramGb: 24 },
-];
-
 export function formatBytes(bytes: number): string {
   if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(bytes >= 1e11 ? 0 : 1)} GB`;
   if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;

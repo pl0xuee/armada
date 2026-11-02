@@ -32,6 +32,10 @@ import type {
   LocalProbe,
   McpServer,
   PullProgress,
+  Hardware,
+  LocalHealth,
+  LocalPrefs,
+  SpeedResult,
   Provider,
   ProjectScript,
   ProviderInfo,
@@ -321,6 +325,21 @@ const tauriApi = {
     return invoke<void>("pull_local_model", { baseUrl, model, pullId, onProgress: channel });
   },
   cancelLocalPull: (pullId: string) => invoke<void>("cancel_local_pull", { pullId }),
+  /** RAM, GPU and free disk space on this computer. */
+  localHardware: () => invoke<Hardware>("local_hardware"),
+  /** Version, loaded models, and problems with fixes, for a local account's server. */
+  localHealth: (accountId: string) => invoke<LocalHealth>("local_health_account", { accountId }),
+  /** Generates a few tokens to measure speed. */
+  localSpeedTest: (accountId: string, model: string) =>
+    invoke<SpeedResult>("local_speed_test", { accountId, model }),
+  /** Frees a loaded model's memory. */
+  localUnloadModel: (accountId: string, model: string) =>
+    invoke<void>("local_unload_model", { accountId, model }),
+  /** Deletes an Ollama model from disk. */
+  localDeleteModel: (accountId: string, model: string) =>
+    invoke<void>("local_delete_model", { accountId, model }),
+  getLocalPrefs: () => invoke<LocalPrefs>("get_local_prefs"),
+  setLocalPrefs: (prefs: LocalPrefs) => invoke<void>("set_local_prefs", { prefs }),
 
   // providers
   detectProviders: () => invoke<ProviderInfo[]>("detect_providers"),
