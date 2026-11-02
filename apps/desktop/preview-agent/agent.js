@@ -15,7 +15,11 @@ import { toJpeg, toPng } from "html-to-image";
 
   var VERSION = 1;
   var OVERLAY_ID = "__kvistcode_preview_overlay__";
-  var token = null; // handed over by the app after the hello handshake; never baked into this file
+  // The proxy swaps this placeholder for the pane's session secret when it serves the script (the secret
+  // never appears in the file in the app). A page that merely frames the proxy (any website can) does not
+  // know it, so it can neither adopt the "app" role nor read the page through screenshots.
+  var KEY = "__KVISTCODE_PREVIEW_KEY__";
+  var token = null; // adopted from the app's first message, which must carry KEY
   var parentOrigin = null;
   var queue = []; // events produced before the app answered
   var MAX_QUEUE = 100;
@@ -31,7 +35,7 @@ import { toJpeg, toPng } from "html-to-image";
     if (token === null || parentOrigin === null) {
       if (msg.type !== "hello" && queue.length < MAX_QUEUE) queue.push(msg);
       if (msg.type !== "hello") return;
-      // The handshake carries no secret, so it may go to any embedder.
+      // The handshake carries no secret and nothing about the page, so it may go to any embedder.
       try {
         W.parent.postMessage(msg, "*");
       } catch (_) {}
@@ -480,6 +484,7 @@ import { toJpeg, toPng } from "html-to-image";
   W.addEventListener("message", function (e) {
     var d = e.data;
     if (e.source !== W.parent || !d || d.kvistcode !== "preview-parent" || typeof d.token !== "string") return;
+    if (d.token !== KEY) return;
     if (token === null) {
       token = d.token;
       parentOrigin = e.origin;
@@ -519,7 +524,7 @@ import { toJpeg, toPng } from "html-to-image";
   });
 
   function hello() {
-    if (token === null) post({ type: "hello", url: location.href });
+    if (token === null) post({ type: "hello" });
   }
   hello();
   document.addEventListener("DOMContentLoaded", hello);
