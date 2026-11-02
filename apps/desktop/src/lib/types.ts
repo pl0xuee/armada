@@ -105,6 +105,17 @@ export interface ConfigOption {
   options: ConfigOptionChoice[];
 }
 
+/** An agent waiting out a usage limit; mirrors the core's `limit_resume::LimitResume`. */
+export interface LimitResume {
+  /** "waiting": Kvistcode will resume it. "cancelled": the user opted this one out. "gave_up": the tries ran out. */
+  state: "waiting" | "cancelled" | "gave_up";
+  /** Automatic resumes already sent in this episode (of 3). */
+  attempts: number;
+  hitAt: number;
+  lastAttemptAt?: number | null;
+  probeAt?: number | null;
+}
+
 export interface Agent {
   id: string;
   title: string;
@@ -137,6 +148,10 @@ export interface Agent {
   availableCommands: SlashCommand[];
   /** Last turn failed on a usage/rate limit. */
   rateLimited: boolean;
+  /** When Kvistcode will try to continue it (unix ms): the limit's reset time, or the next retry. Null: unknown or not waiting. */
+  limitResetsAt?: number | null;
+  /** Present while Kvistcode waits to resume this agent after a usage limit (see lib/limitResume.ts). */
+  limitResume?: LimitResume | null;
   /** Set when the agent was started by a schedule. */
   scheduleId: string | null;
   /** Set when provider === "custom". */
@@ -313,7 +328,7 @@ interface ItemBase {
 
 export type TimelineItem = ItemBase &
   (
-    | { kind: "user_message"; text: string; attachments?: Attachment[]; midTurn?: boolean }
+    | { kind: "user_message"; text: string; attachments?: Attachment[]; midTurn?: boolean; automatic?: boolean }
     | {
         kind: "agent_message";
         text: string;
@@ -507,6 +522,8 @@ export interface Settings {
   quietHours: QuietHours;
   closeToTray: boolean;
   autoResume: boolean; // resume interrupted agents on launch
+  /** Continue agents by themselves when the usage limit that stopped them resets. */
+  resumeAfterLimit: boolean;
   /** Install new releases of the agent tools in the background (checked every few hours). */
   autoUpdateTools: boolean;
   defaultWorktree: boolean;

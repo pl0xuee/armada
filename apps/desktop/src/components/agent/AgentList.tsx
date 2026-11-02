@@ -42,6 +42,7 @@ import { ProviderGlyph } from "../ProviderGlyph";
 import { useRunningSubagentCount } from "./useSubagents";
 import { useAfterPaint } from "@/hooks/useAfterPaint";
 import { CiIcon } from "./PrChip";
+import { ResumesAt } from "./ResumesAt";
 import { StatusDot } from "../StatusDot";
 import { Button } from "../ui/button";
 import {
@@ -710,8 +711,11 @@ const AgentRow = memo(function AgentRow({
                 </span>
                 {agent.rateLimited && (
                   <Tooltip content="Hit its usage limit" side="right">
-                    <span className="flex items-center text-warn" aria-label="Usage limit reached">
-                      <Gauge className="h-3 w-3" />
+                    <span className="flex min-w-0 items-center gap-1 text-warn" aria-label="Usage limit reached">
+                      <Gauge className="h-3 w-3 shrink-0" />
+                      <span className="truncate text-[10.5px]">
+                        <ResumesAt agent={agent} />
+                      </span>
                     </span>
                   </Tooltip>
                 )}

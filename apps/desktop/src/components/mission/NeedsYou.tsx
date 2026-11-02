@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { NeedsYouDetail } from "@/components/mission/NeedsYouDetail";
+import { ResumesAt } from "@/components/agent/ResumesAt";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { RelTime } from "@/components/RelTime";
 import {
@@ -280,7 +281,11 @@ const QueueRow = memo(function QueueRow({
           <span className="block truncate text-[12.5px] font-medium text-fg">{agent.title}</span>
           <span className="mt-1 flex items-center gap-1.5">
             <span className={cn("rounded-full border px-1.5 text-[10.5px] font-medium", REASON_TONE[reason])}>
-              {reasonLabel(reason, asking, backgroundRunning)}
+              {reason === "rate_limited" ? (
+                <ResumesAt agent={agent} fallback={reasonLabel(reason, asking, backgroundRunning)} />
+              ) : (
+                reasonLabel(reason, asking, backgroundRunning)
+              )}
             </span>
             <span className="text-[11px] text-steel">
               <RelTime ts={agent.lastActivityAt} side="right" />

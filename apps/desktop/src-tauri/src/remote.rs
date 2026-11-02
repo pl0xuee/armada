@@ -139,6 +139,8 @@ const VIEWER_FIELDS: &[&str] = &[
     "lastMessage",
     "pendingPermissions",
     "rateLimited",
+    // When Kvistcode will resume it ("Resumes 6:00 PM"); a time, nothing private.
+    "limitResetsAt",
 ];
 
 /// A read-only link to one agent. Only the token's hash is stored.

@@ -14,6 +14,7 @@ import { useNow } from "@/lib/hooks";
 import { agentIdentity, safeColor, statusMeta } from "@/lib/meta";
 import { navigate } from "@/lib/router";
 import { accountOf, filterAgents, isUsageLimited, pendingKindOf, permissionIndex, USAGE_LIMIT_LABEL, useAgentPending, useTriage } from "@/lib/selectors";
+import { resumesLabel } from "@/lib/resumes";
 import { storage } from "@/lib/storage";
 import { groupByProject, needsYouLabel, projectSummary, type NeedsReason, type ProjectGroup, type TriageEntry } from "@/lib/triage";
 import { useStore } from "@/lib/store";
@@ -321,7 +322,7 @@ const AgentRow = memo(function AgentRow({ agent, now, reason }: { agent: Agent; 
         </span>
         <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[13px] leading-snug">
           {limited ? (
-            <span className="shrink-0 font-medium text-warn">{USAGE_LIMIT_LABEL}</span>
+            <span className="min-w-0 shrink truncate font-medium text-warn">{resumesLabel(agent, now) ?? USAGE_LIMIT_LABEL}</span>
           ) : agent.budgetHold ? (
             <span className="shrink-0 font-medium text-warn">{holdLabel(agent.budgetHold)}</span>
           ) : (
