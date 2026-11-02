@@ -126,6 +126,12 @@ export function lastAction(items: TimelineItem[] | undefined): string | null {
   return null;
 }
 
+/**
+ * A message that starts a turn. One typed into a running turn (`midTurn`: "Send now", read at the agent's next
+ * step) belongs to the turn already going: it must not reset what is counted from the turn's start.
+ */
+export const startsTurn = (it: TimelineItem): boolean => it.kind === "user_message" && !it.midTurn;
+
 export function isBusy(a: Agent) {
   return a.status === "working" || a.status === "starting" || a.status === "needs_permission";
 }
@@ -137,7 +143,7 @@ export function liveTail(items: TimelineItem[] | undefined): string | null {
   if (!items) return null;
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i];
-    if (it.kind === "user_message") return null;
+    if (startsTurn(it)) return null;
     if (it.kind === "tool_call" && (it.status === "in_progress" || it.status === "pending")) {
       // Prefer the newest child of a running sub-agent.
       return it.subagent?.description ? `${it.subagent.kind ?? "Sub-agent"}: ${it.subagent.description}` : it.title;
@@ -214,7 +220,7 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, c
   if (!items) return [];
   let turnStartIdx = 0;
   for (let i = items.length - 1; i >= 0; i--) {
-    if (items[i].kind === "user_message") {
+    if (startsTurn(items[i])) {
       turnStartIdx = i;
       break;
     }
