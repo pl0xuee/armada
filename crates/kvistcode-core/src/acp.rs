@@ -402,10 +402,11 @@ impl AcpDriver {
                 me.ctx.checkpoint_before_turn().await;
                 // Cancelled while the checkpoint ran: the prompt is never sent.
                 if me.ctx.cancel_was_requested() && me.ctx.is_current(me.generation) {
-                    match me
-                        .ctx
-                        .turn_finished_by(me.generation, TurnOutcome::Cancelled)
-                    {
+                    match me.ctx.turn_finished_for(
+                        me.generation,
+                        prompt.token,
+                        TurnOutcome::Cancelled,
+                    ) {
                         Some(next) => {
                             prompt = next;
                             continue;
@@ -432,6 +433,7 @@ impl AcpDriver {
                         }),
                     )
                     .await;
+                let mut gone = false;
                 let outcome = match res {
                     Ok(v) => me.reply_outcome(&v),
                     // Some agents answer a cancelled prompt with an error.
@@ -441,6 +443,7 @@ impl AcpDriver {
                             // The briefing never reached the agent; send it next time.
                             me.ctx.restore_preamble(pre);
                         }
+                        gone = crate::jsonrpc::process_gone(&e);
                         TurnOutcome::Failed(format!(
                             "{:#}",
                             auth_hint(me.peer.with_stderr(e, mark))
@@ -456,7 +459,19 @@ impl AcpDriver {
                     // Stopped meanwhile; the stop already settled the turn.
                     break;
                 }
-                match me.ctx.turn_finished_by(me.generation, outcome) {
+                let finished = match outcome {
+                    // The process died under the turn: like its exit handler, keep the
+                    // message if the agent may never have got it.
+                    TurnOutcome::Failed(msg) if gone => {
+                        me.ctx
+                            .turn_lost_with_process(me.generation, Some(prompt.token), msg, true);
+                        None
+                    }
+                    outcome => me
+                        .ctx
+                        .turn_finished_for(me.generation, prompt.token, outcome),
+                };
+                match finished {
                     Some(next) => {
                         // Approvals from the finished turn can't be answered anymore.
                         me.perms.lock().clear();

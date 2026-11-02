@@ -23,11 +23,10 @@ impl EventSink for Sink {
 
 type Rx = mpsc::UnboundedReceiver<KvistcodeEvent>;
 
+mod common;
+
 fn temp_dir(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("kvistcode-turns-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+    common::scratch(&format!("turns-{name}"))
 }
 
 async fn wait_for(

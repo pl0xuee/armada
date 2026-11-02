@@ -1392,6 +1392,7 @@ impl Core {
             .lock()
             .insert(agent_id.to_string(), driver.clone());
         let ctx = self.ctx(agent_id);
+        ctx.mark_up(driver.generation());
         ctx.update_agent_settled(|a, active| {
             a.session_id = Some(session_id);
             a.running = true;
@@ -2898,16 +2899,7 @@ impl Core {
         let is_json = path
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("json"));
-        let content = if is_json {
-            serde_json::to_string_pretty(&serde_json::json!({
-                "exportedBy": format!("Kvistcode {VERSION}"),
-                "exportedAt": now_ms(),
-                "agent": agent,
-                "items": items,
-            }))?
-        } else {
-            transcript_markdown(&agent, &items)
-        };
+        let content = export_content(&agent, &items, is_json)?;
         std::fs::write(path, content).with_context(|| format!("writing {}", path.display()))?;
         Ok(())
     }
@@ -3164,6 +3156,37 @@ fn schedule_due(s: &Schedule, now: chrono::DateTime<Local>) -> bool {
                 && s.last_run_at.is_none_or(|last| last < at)
                 && s.updated_at <= at
         })
+}
+
+/// The exported conversation. Exports are shared, so commands, tool output and
+/// messages go through the secret redactor first.
+fn export_content(agent: &Agent, items: &[TimelineItem], is_json: bool) -> Result<String> {
+    if is_json {
+        let mut doc = serde_json::json!({
+            "exportedBy": format!("Kvistcode {VERSION}"),
+            "exportedAt": now_ms(),
+            "agent": agent,
+            "items": items,
+        });
+        redact_strings(&mut doc);
+        Ok(serde_json::to_string_pretty(&doc)?)
+    } else {
+        Ok(crate::redact::redact_secrets(&transcript_markdown(agent, items)).into_owned())
+    }
+}
+
+/// Redacts every string value (not keys) in `v`, so the JSON stays valid.
+fn redact_strings(v: &mut serde_json::Value) {
+    match v {
+        serde_json::Value::String(s) => {
+            if let std::borrow::Cow::Owned(r) = crate::redact::redact_secrets(s) {
+                *s = r;
+            }
+        }
+        serde_json::Value::Array(a) => a.iter_mut().for_each(redact_strings),
+        serde_json::Value::Object(o) => o.values_mut().for_each(redact_strings),
+        _ => {}
+    }
 }
 
 fn transcript_markdown(agent: &Agent, items: &[TimelineItem]) -> String {
@@ -3497,6 +3520,47 @@ mod tests {
         assert!(m.primary.is_none(), "stale 90% must not linger");
         assert_eq!(m.secondary.unwrap().used_percent, 40.0);
         assert_eq!(m.plan.as_deref(), Some("pro"));
+    }
+
+    #[test]
+    fn exports_do_not_carry_secrets() {
+        let key = ["sk-ant-api03-", "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"].concat();
+        let agent: Agent = serde_json::from_value(serde_json::json!({
+            "id": "a", "title": "t", "provider": "claude", "accountId": "x",
+            "projectPath": "/p", "cwd": "/p", "worktree": false, "status": "idle",
+            "running": false, "branch": null, "baseBranch": null, "baseCommit": null,
+            "sessionId": null, "groupId": null, "createdAt": 0, "updatedAt": 0,
+            "lastActivityAt": 0, "costUsd": 0.0, "tokensUsed": 0, "contextUsed": null,
+            "contextSize": null, "unread": false, "archived": false, "lastMessage": null,
+            "pendingPermissions": 0
+        }))
+        .unwrap_or_else(|e| panic!("{e}"));
+        let call = TimelineItem {
+            id: "i".into(),
+            agent_id: "a".into(),
+            seq: 1,
+            ts: 1,
+            body: ItemBody::ToolCall {
+                tool_call_id: "t1".into(),
+                title: "Run".into(),
+                tool_kind: ToolKind::Execute,
+                status: ToolStatus::Completed,
+                locations: vec![],
+                diffs: vec![],
+                output: format!("ANTHROPIC_API_KEY={key}"),
+                command: Some(format!("curl -H 'x-api-key: {key}' https://x")),
+                images: vec![],
+                subagent: None,
+                parent_tool_call_id: None,
+            },
+        };
+        for json in [false, true] {
+            let out = export_content(&agent, std::slice::from_ref(&call), json).unwrap();
+            assert!(!out.contains("AbCdEfGhIjKl"), "json={json}: {out}");
+            if json {
+                serde_json::from_str::<serde_json::Value>(&out).expect("still valid JSON");
+            }
+        }
     }
 
     #[test]

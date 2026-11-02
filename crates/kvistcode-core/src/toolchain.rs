@@ -981,7 +981,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn real_install_and_failed_update_roll_back() {
-        let data = std::env::temp_dir().join(format!("kvistcode-real-{}", std::process::id()));
+        let data = crate::testutil::scratch("real");
         let _ = std::fs::remove_dir_all(&data);
         providers::set_data_dir(&data);
         let log: Log = std::sync::Arc::new(|l| println!("  {l}"));
@@ -1050,7 +1050,7 @@ mod tests {
     /// Rolling back a release makes automatic updates skip exactly that release.
     #[test]
     fn a_rolled_back_release_is_not_installed_again_automatically() {
-        let data = std::env::temp_dir().join(format!("kvistcode-holds-{}", std::process::id()));
+        let data = crate::testutil::scratch("holds");
         let _ = std::fs::remove_dir_all(&data);
         std::fs::create_dir_all(&data).unwrap();
         let set_latest = |v: &str| {
@@ -1075,7 +1075,7 @@ mod tests {
 
     #[test]
     fn managed_copies_are_installed_or_kept() {
-        let data = std::env::temp_dir().join(format!("kvistcode-managed-{}", std::process::id()));
+        let data = crate::testutil::scratch("managed");
         let _ = std::fs::remove_dir_all(&data);
         let pkg_dir = tools_dir(&data)
             .join("node_modules")
@@ -1139,7 +1139,7 @@ mod tests {
 
     #[test]
     fn replace_dir_swaps_and_sweeps() {
-        let data = std::env::temp_dir().join(format!("kvistcode-tc-{}", short_id()));
+        let data = crate::testutil::scratch("tc");
         let runtime = runtime_dir(&data);
         let log: Log = Arc::new(|_| {});
         let home = managed_node_home(&data);
