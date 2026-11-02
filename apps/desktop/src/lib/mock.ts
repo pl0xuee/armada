@@ -60,6 +60,11 @@ import type {
   LocalKind,
   LocalModel,
   LocalProbe,
+  LocalHealth,
+  LoadedModel,
+  Hardware,
+  LocalPrefs,
+  HealthIssue,
   AttentionReason,
   FileDiff,
   PermissionOption,
@@ -1152,6 +1157,108 @@ function mockProbe(kind: LocalKind, baseUrl: string): LocalProbe {
         ? "LM Studio's server isn't running. Open LM Studio and start the local server (https://lmstudio.ai)"
         : "Couldn't reach the server. Check the address and that it's running",
     remote: !loopback,
+  };
+}
+
+const GB = 1_000_000_000;
+const GIB = 1 << 30;
+
+/** Browser preview: `?hw=16gb|mac|cpu` pretends to be another computer (default: a 24 GB NVIDIA card). */
+function mockHardware(): Hardware {
+  const hw = params?.get("hw");
+  const base = { modelsDir: "/home/sam/.ollama/models", diskFreeBytes: 212 * GB };
+  if (hw === "mac")
+    return {
+      ...base,
+      os: "macos",
+      ramBytes: 36 * GIB,
+      gpus: [{ name: "Apple M3 Pro GPU", vendor: "apple", vramBytes: null }],
+      unifiedMemory: true,
+      accel: "unified",
+      modelMemoryBytes: Math.floor((36 * GIB) / 10) * 7,
+    };
+  if (hw === "cpu")
+    return {
+      ...base,
+      os: "linux",
+      ramBytes: 16 * GIB,
+      gpus: [],
+      unifiedMemory: false,
+      accel: "cpu",
+      modelMemoryBytes: Math.floor((16 * GIB) / 10) * 6,
+    };
+  const vram = (hw === "16gb" ? 16 : 24) * GIB;
+  return {
+    ...base,
+    os: "linux",
+    ramBytes: 64 * GIB,
+    gpus: [{ name: hw === "16gb" ? "NVIDIA GeForce RTX 4060 Ti" : "NVIDIA GeForce RTX 4090", vendor: "nvidia", vramBytes: vram }],
+    unifiedMemory: false,
+    accel: "gpu",
+    modelMemoryBytes: vram,
+  };
+}
+
+/** Models the preview's Ollama has in memory right now. */
+let mockLoaded: LoadedModel[] = [
+  {
+    id: "qwen3-coder:30b",
+    sizeBytes: 18_556_701_776,
+    vramBytes: 14_900_000_000,
+    contextLength: 4096,
+    expiresAt: new Date(Date.now() + 4 * 60_000).toISOString(),
+  },
+];
+let mockLocalPrefs: LocalPrefs = { contextTokens: null };
+
+function mockHealth(kind: LocalKind, baseUrl: string): LocalHealth {
+  const probe = mockProbe(kind, baseUrl);
+  const loaded = kind === "ollama" && probe.running ? mockLoaded.map((m) => ({ ...m })) : [];
+  const issues: HealthIssue[] = [];
+  if (!probe.running) {
+    issues.push({
+      severity: "error",
+      code: "not_running",
+      message: probe.error ?? "The server didn't answer.",
+      fix:
+        kind === "lmstudio"
+          ? 'In LM Studio open the Developer tab and turn the server on. For another machine, also turn on "Serve on local network".'
+          : "Check the address (it should end in /v1) and that the server is running. A server on another machine must listen on 0.0.0.0, not only on 127.0.0.1.",
+    });
+  }
+  for (const m of loaded) {
+    if (m.contextLength && m.contextLength < 32768)
+      issues.push({
+        severity: "warn",
+        code: "small_context",
+        message: `${m.id} is loaded with a ${Math.round(m.contextLength / 1024)}k-token window. Agents lose earlier instructions and files when the window is that small.`,
+        fix: "Kvistcode starts its agents on a larger-window copy automatically. For other tools, start Ollama with OLLAMA_CONTEXT_LENGTH=65536.",
+      });
+    if (m.sizeBytes && m.vramBytes && m.vramBytes < (m.sizeBytes / 100) * 95)
+      issues.push({
+        severity: "warn",
+        code: "cpu_offload",
+        message: `${m.id} is only ${Math.floor((m.vramBytes * 100) / m.sizeBytes)}% in GPU memory; the rest runs on the CPU, which is several times slower.`,
+        fix: "Use a smaller model or quantization, or a shorter context window. Closing other GPU-heavy apps also helps.",
+      });
+  }
+  if (probe.remote && probe.running)
+    issues.push({
+      severity: "info",
+      code: "remote",
+      message: "This server is on another machine: prompts and code are sent to it over the network.",
+      fix: "Over the internet use Tailscale (tailscale serve) or another encrypted tunnel rather than opening a port.",
+    });
+  return {
+    kind,
+    baseUrl,
+    running: probe.running,
+    remote: probe.remote,
+    version: probe.running && kind === "ollama" ? "0.13.4" : null,
+    flavor: kind === "ollama" ? "Ollama" : kind === "lmstudio" ? "LM Studio" : "llama.cpp",
+    loaded,
+    models: probe.models,
+    issues,
   };
 }
 
@@ -2362,6 +2469,51 @@ export const mockApi: KvistcodeApi = {
 
   async cancelLocalPull(pullId) {
     if (mockPulls.has(pullId)) mockPulls.set(pullId, true);
+  },
+
+  async localHardware() {
+    await sleep(300);
+    return mockHardware();
+  },
+
+  async localHealth(accountId) {
+    const acc = db.accounts.find((a) => a.id === accountId);
+    if (!acc?.local) throw new Error("This isn't a local model account");
+    await sleep(350);
+    return mockHealth(acc.local.kind, acc.local.baseUrl);
+  },
+
+  async localSpeedTest(_accountId, model) {
+    await sleep(1600);
+    const big = /30b|120b|24b/.test(model);
+    return {
+      model,
+      tokensPerSecond: big ? 38.4 : 71.2,
+      completionTokens: 96,
+      promptTokens: 14,
+      loadMs: mockLoaded.some((m) => m.id === model) ? 90 : 4200,
+      totalMs: 2500,
+    };
+  },
+
+  async localUnloadModel(_accountId, model) {
+    await sleep(300);
+    mockLoaded = mockLoaded.filter((m) => m.id !== model);
+  },
+
+  async localDeleteModel(_accountId, model) {
+    await sleep(400);
+    const i = mockOllamaModels.findIndex((m) => m.id === model);
+    if (i >= 0) mockOllamaModels.splice(i, 1);
+    mockLoaded = mockLoaded.filter((m) => m.id !== model);
+  },
+
+  async getLocalPrefs() {
+    return { ...mockLocalPrefs };
+  },
+
+  async setLocalPrefs(prefs) {
+    mockLocalPrefs = { ...prefs };
   },
 
   async loginAccount(accountId) {

@@ -22,6 +22,8 @@ pub const LMSTUDIO_URL: &str = "http://127.0.0.1:1234";
 pub const PROVIDER_ID: &str = "kvistcode_local";
 /// Environment variable carrying an optional bearer token to the server.
 pub const KEY_ENV: &str = "KVISTCODE_LOCAL_API_KEY";
+/// How long Codex waits for a local model to say something (it defaults to 5 minutes).
+const LOCAL_STREAM_IDLE_MS: u64 = 900_000;
 
 const PROBE_CONNECT: Duration = Duration::from_millis(1200);
 const PROBE_READ: Duration = Duration::from_secs(4);
@@ -206,7 +208,7 @@ pub fn openai_base(server: &LocalServer) -> String {
 }
 
 /// The server root without a trailing `/v1` (Ollama / LM Studio native APIs).
-fn root(server: &LocalServer) -> &str {
+pub(crate) fn root(server: &LocalServer) -> &str {
     let base = server.base_url.trim_end_matches('/');
     base.strip_suffix("/v1").unwrap_or(base)
 }
@@ -232,6 +234,10 @@ pub fn codex_override_args(
         q(server.kind.label()),
         q(&openai_base(server))
     );
+    // A big prompt on a slow local model can take minutes before the first token.
+    table.push_str(&format!(
+        ", stream_idle_timeout_ms = {LOCAL_STREAM_IDLE_MS}"
+    ));
     if has_api_key {
         table.push_str(&format!(", env_key = {}", q(KEY_ENV)));
     }
@@ -246,7 +252,7 @@ pub fn codex_override_args(
 /// A pull that sends nothing for this long is treated as stalled.
 const PULL_IDLE: Duration = Duration::from_secs(300);
 
-fn agent(read: Duration) -> ureq::Agent {
+pub(crate) fn agent(read: Duration) -> ureq::Agent {
     ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
             // Local and LAN servers are reached directly, never through a proxy.
@@ -262,7 +268,7 @@ fn agent(read: Duration) -> ureq::Agent {
     )
 }
 
-fn get_json(url: &str, key: Option<&str>) -> anyhow::Result<Value> {
+pub(crate) fn get_json(url: &str, key: Option<&str>) -> anyhow::Result<Value> {
     check_target(url, false)?;
     let mut req = agent(PROBE_READ).get(url);
     if let Some(k) = key {
@@ -295,6 +301,10 @@ pub fn parse_ollama_tags(v: &Value) -> Vec<LocalModel> {
         .iter()
         .filter_map(|m| {
             let id = non_empty(m["model"].as_str().or_else(|| m["name"].as_str()))?;
+            // Copies Kvistcode made with a larger context are not separate choices.
+            if crate::local_ctx::is_derived(&id) {
+                return None;
+            }
             Some(LocalModel {
                 id,
                 size_bytes: m["size"].as_u64(),
@@ -760,7 +770,7 @@ mod tests {
                 "-c",
                 "model_provider=\"kvistcode_local\"",
                 "-c",
-                "model_providers.kvistcode_local={ name = \"Ollama\", base_url = \"http://127.0.0.1:11434/v1\", wire_api = \"responses\" }",
+                "model_providers.kvistcode_local={ name = \"Ollama\", base_url = \"http://127.0.0.1:11434/v1\", wire_api = \"responses\", stream_idle_timeout_ms = 900000 }",
                 "-c",
                 "model=\"qwen3-coder:30b\"",
             ]

@@ -1219,6 +1219,40 @@ impl Core {
         } else {
             None
         };
+        // Local agents: check the model can use tools and give it a real context window.
+        let mut local_args: Vec<String> = Vec::new();
+        let mut local_warnings: Vec<String> = Vec::new();
+        if agent.provider == Provider::Local {
+            let server = account
+                .local
+                .clone()
+                .ok_or_else(|| anyhow!("This account has no model server configured"))?;
+            let account_id = account.id.clone();
+            let models = local_models.clone().unwrap_or_default();
+            let chosen = local_model.clone();
+            let requested = crate::local_prefs::load(&self.inner.data_dir).context_tokens;
+            let prepared = tokio::task::spawn_blocking(move || {
+                let key = accounts::get_api_key(&account_id);
+                let hw = crate::hardware::detect();
+                crate::local_ctx::prepare(
+                    &server,
+                    key.as_deref(),
+                    chosen.as_deref(),
+                    &models,
+                    requested,
+                    &hw,
+                )
+            })
+            .await
+            .map_err(|e| anyhow!("{e}"))??;
+            if prepared.model.is_some() {
+                local_model = prepared.model.clone();
+            }
+            if let Some(c) = prepared.context {
+                local_args = crate::local_ctx::codex_args(c);
+            }
+            local_warnings = prepared.warnings;
+        }
         let (program, args, env, env_remove) = if agent.provider == Provider::Custom {
             let def = self.custom_agent_def(agent.custom_agent_id.as_deref())?;
             let (program, args) = custom_launch(&def)?;
@@ -1251,6 +1285,7 @@ impl Core {
                     local_model.as_deref(),
                     has_key,
                 ));
+                args.extend(local_args.iter().cloned());
             }
             (program, args, acct_env, acct_env_remove)
         };
@@ -1261,6 +1296,9 @@ impl Core {
             &agent.project_path,
         );
         let ctx = self.ctx(agent_id);
+        for w in &local_warnings {
+            ctx.notice(NoticeLevel::Warn, w.clone());
+        }
         let label = format!(
             "{}:{}",
             agent.provider.as_str(),

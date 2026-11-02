@@ -13,7 +13,8 @@ import {
   rememberLocalModel,
   SMALL_MODEL_NOTE,
 } from "@/lib/local";
-import type { Account, LocalProbe } from "@/lib/types";
+import { contextVerdict, kvBytesFor, pickContext } from "@/lib/localFit";
+import type { Account, Hardware, LocalPrefs, LocalProbe } from "@/lib/types";
 import { PullModelDialog } from "./PullModelDialog";
 
 /**
@@ -64,6 +65,25 @@ export function LocalModelPicker({
     rememberLocalModel(account.id, m);
   };
   const selected = probe?.models.find((m) => m.id === value);
+  // The window the agent will get here (the Rust side makes the real decision at launch).
+  const [hw, setHw] = useState<Hardware | null>(null);
+  const [prefs, setPrefs] = useState<LocalPrefs | null>(null);
+  useEffect(() => {
+    api.localHardware().then(setHw, () => setHw(null));
+    api.getLocalPrefs().then(setPrefs, () => setPrefs(null));
+  }, []);
+  const plan =
+    selected && account.local?.kind === "ollama" && !probe?.remote
+      ? contextVerdict(
+          pickContext(
+            selected.contextLength,
+            hw?.modelMemoryBytes ?? null,
+            selected.sizeBytes,
+            kvBytesFor(selected),
+            prefs?.contextTokens ?? null,
+          ),
+        )
+      : null;
   const ollama = account.local?.kind === "ollama";
 
   return (
@@ -115,12 +135,30 @@ export function LocalModelPicker({
           {selected && (
             <p className="text-[11.5px] text-muted tabular">
               {selected.contextLength
-                ? `Context length ${formatContext(selected.contextLength)} tokens`
+                ? `Supports up to ${formatContext(selected.contextLength)} tokens of context`
                 : "Context length not reported"}
-              {selected.tools === false && (
-                <span className="text-warn"> · the server says this model has no tool support</span>
-              )}
+              {plan && <span className={plan.ok ? "text-ok" : "text-warn"}> · the agent will use a {plan.text}</span>}
             </p>
+          )}
+          {selected?.tools === false && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-lg border border-err/30 bg-err/[0.06] px-3 py-2 text-[12px] leading-snug text-err"
+            >
+              <CircleAlert className="mt-px h-3.5 w-3.5 shrink-0" />
+              <span>
+                This model can't use tools, so it can't read or edit files as an agent.{" "}
+                {probe.models.some((m) => m.tools === true)
+                  ? "Choose one that can: " +
+                    probe.models
+                      .filter((m) => m.tools === true)
+                      .slice(0, 3)
+                      .map((m) => m.id)
+                      .join(", ") +
+                    "."
+                  : "Download one that supports tools."}
+              </span>
+            </div>
           )}
           {probe.remote && (
             <p className="text-[11.5px] text-warn">Runs on another machine: your prompts and code are sent to it.</p>
@@ -129,12 +167,11 @@ export function LocalModelPicker({
       )}
       <p className="text-[11.5px] leading-snug text-steel">{SMALL_MODEL_NOTE}</p>
       {ollama && (
-        // Ollama reports the model's maximum, but runs with its own (small) default window,
-        // which the agent's instructions alone can fill.
+        // Ollama reports the model's maximum but runs it with its own default window (4k tokens
+        // on most graphics cards). Kvistcode starts the agent on a copy with a real window.
         <p className="text-[11.5px] leading-snug text-steel">
-          Ollama runs models with a small context window by default. Start it with{" "}
-          <code className="font-mono text-[11px] text-fg/85">OLLAMA_CONTEXT_LENGTH=32768</code> (or more, if your memory
-          allows) so the agent has room to work.
+          Ollama's own default window is only 4k tokens, which silently cuts off an agent's instructions. Kvistcode
+          starts the agent with a larger one that fits your memory. You can change that in the account's settings.
         </p>
       )}
       {ollama && account.local && (
