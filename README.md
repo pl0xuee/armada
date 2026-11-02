@@ -4,7 +4,7 @@
 
 # Kvistcode
 
-**Command your fleet of AI coding agents.**
+**Every coding agent, one calm place.**
 
 One desktop app to run Claude Code, OpenAI Codex, xAI Grok, local models and any ACP agent side by side,<br />
 across all your accounts, with every project isolated in its own git worktree.

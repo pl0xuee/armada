@@ -219,7 +219,7 @@ try {
   await goRail("Settings");
   const sections = [
     "Appearance", "Sounds", "Notifications", "Behavior", "Budgets", "Templates", "Projects", "Tools & instructions",
-    "Providers", "Agent tools", "Agents", "Voice", "Voice assistant", "Remote & mobile", "About",
+    "Providers", "Agent tools", "Custom agents", "Voice", "Voice assistant", "Remote & mobile", "About",
   ];
   for (const name of sections) {
     log(`settings: ${name}`);

@@ -83,7 +83,7 @@ const SECTIONS: { id: SettingsSection; label: string; icon: ComponentType<{ clas
   { id: "toolkit", label: "Tools & instructions", icon: Plug },
   { id: "providers", label: "Providers", icon: Package },
   { id: "tools", label: "Agent tools", icon: Wrench },
-  { id: "agents", label: "Agents", icon: Bot },
+  { id: "agents", label: "Custom agents", icon: Bot },
   { id: "voice", label: "Voice", icon: Mic },
   { id: "assistant", label: "Voice assistant", icon: AudioLines },
   { id: "remote", label: "Remote & mobile", icon: Smartphone },
@@ -1036,7 +1036,7 @@ function About() {
           </div>
           <div className="min-w-0">
             <h2 className="text-[22px] font-semibold tracking-[-0.025em]">Kvistcode</h2>
-            <p className="text-[13px] text-muted">Command your fleet.</p>
+            <p className="text-[13px] text-muted">Every coding agent, one calm place.</p>
             <p className="mt-1 text-[12px] text-steel tabular">
               Version {version || "dev"} ·{" "}
               {platform === "macos" ? "macOS" : platform === "windows" ? "Windows" : "Linux"} · MIT licensed
