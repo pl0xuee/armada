@@ -10,7 +10,7 @@
  * so the two mechanisms don't fight.
  */
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { scrollByProgrammatic } from "@/lib/scroll";
+import { noteUserLayoutChange, scrollByProgrammatic, scrollToProgrammatic } from "@/lib/scroll";
 import { prefixSums, visibleRange } from "@/lib/virtual";
 
 const OVERSCAN = 600;
@@ -24,8 +24,13 @@ export function VirtualList<T>({
   estimate,
   render,
   onReachTop,
+  focusKey,
+  onFocused,
 }: {
   items: T[];
+  /** Scroll this row to the top of the screen and mark it for a moment (a search hit); `onFocused` follows. */
+  focusKey?: string | null;
+  onFocused?: () => void;
   /** The first rows are on screen (load older items). */
   onReachTop?: () => void;
   getKey: (item: T) => string;
@@ -155,6 +160,74 @@ export function VirtualList<T>({
       applyTransform();
     } else scrollByProgrammatic(added);
   }, [keys, offsets]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A search hit: scroll to its row. Rows that are not measured yet only have estimated heights, so the first
+  // passes aim at the estimated position (the older messages that were just loaded are still being shifted
+  // into place); once the row is mounted, a few frames of corrections on its measured position settle it.
+  const focused = useRef<string | null>(null);
+  const stopFocus = useRef<(() => void) | null>(null);
+  const offsetsRef = useRef(offsets);
+  offsetsRef.current = offsets;
+  const keysRef = useRef(keys);
+  keysRef.current = keys;
+  const focusDone = useRef(onFocused);
+  focusDone.current = onFocused;
+  const hasFocusRow = !!focusKey && keys.includes(focusKey);
+  useLayoutEffect(() => {
+    if (!focusKey) focused.current = null;
+    if (!focusKey || !hasFocusRow || focused.current === focusKey) return;
+    focused.current = focusKey;
+    const el = container.current;
+    if (!el) return;
+    let passes = 0;
+    let steady = 0;
+    let raf = 0;
+    let marked = false;
+    let announced = false;
+    let touched = false;
+    const touch = () => (touched = true);
+    const events = ["touchstart", "wheel", "keydown", "mousedown"] as const;
+    for (const ev of events) window.addEventListener(ev, touch, { passive: true, once: true });
+    const settle = () => {
+      const gap = (document.querySelector("header")?.getBoundingClientRect().bottom ?? 0) + 12;
+      const row = el.querySelector<HTMLElement>(`[data-vkey="${CSS.escape(focusKey)}"]`);
+      if (row && passes >= 3) {
+        const delta = row.getBoundingClientRect().top - gap;
+        if (Math.abs(delta) > 2) {
+          steady = 0;
+          scrollByProgrammatic(delta);
+        } else steady++;
+        if (!marked) {
+          marked = true;
+          row.setAttribute("data-found", "");
+          setTimeout(() => row.removeAttribute("data-found"), 2200);
+        }
+      } else {
+        const index = keysRef.current.indexOf(focusKey);
+        const want = el.getBoundingClientRect().top + window.scrollY + (offsetsRef.current[index] ?? 0) - gap;
+        if (Math.abs(want - window.scrollY) > 2) scrollToProgrammatic(want);
+      }
+      noteUserLayoutChange();
+      // The row has stayed put for a few frames: the screen may go back to normal. Rows above it that are
+      // measured late (markdown, images) still push it down, so keep it in place for about a second more,
+      // unless the reader has started scrolling.
+      if (steady >= 4 && !announced) {
+        announced = true;
+        focusDone.current?.();
+      }
+      if (!touched && ++passes < 70) raf = requestAnimationFrame(settle);
+      else if (!announced) focusDone.current?.();
+    };
+    raf = requestAnimationFrame(settle);
+    // This keeps going after the caller drops `focusKey` (that is the point of "announced"): it ends by itself,
+    // or with the list.
+    stopFocus.current?.();
+    stopFocus.current = () => {
+      cancelAnimationFrame(raf);
+      for (const ev of events) window.removeEventListener(ev, touch);
+    };
+  }, [focusKey, hasFocusRow]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => stopFocus.current?.(), []);
 
   useEffect(() => {
     let raf = 0;

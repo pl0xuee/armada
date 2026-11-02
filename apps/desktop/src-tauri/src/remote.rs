@@ -1474,6 +1474,7 @@ impl Remote {
             .route("/api/agents/{id}/image", get(image))
             .route("/api/agents/{id}/budget", post(phone::budget_resolve))
             .route("/api/agents/{id}/pr", get(phone::pr))
+            .route("/api/background", get(phone::background))
             .route("/api/search", get(phone::search))
             .route("/api/response-style", post(phone::set_response_style))
             .route("/api/permissions", get(permissions))
@@ -2156,6 +2157,8 @@ async fn state(
                     "name": a.name,
                     "provider": a.provider,
                     "color": a.color,
+                    // Lets the phone say a subscription's cost is API-equivalent, not a bill.
+                    "authKind": a.auth_kind,
                     "label": a.status.as_ref().and_then(|s| s.label.clone()),
                     "loggedIn": a.status.as_ref().map(|s| s.logged_in),
                     "error": a.status.and_then(|s| s.error),

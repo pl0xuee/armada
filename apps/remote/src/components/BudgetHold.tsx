@@ -1,9 +1,10 @@
 import { Icon } from "@/components/Icon";
 import { Button } from "@/components/ui";
-import { holdReach, holdText, holdTitle, raiseLabel, raiseSteps, type HoldChoice, type HoldLike } from "@/lib/budgetHold";
+import { holdReach, holdText, holdTitle, raiseLabel, raiseSteps, SUBSCRIPTION_HOLD_HINT, type HoldChoice, type HoldLike } from "@/lib/budgetHold";
 import { confirmAction } from "@/lib/confirm";
 import { plural } from "@/lib/format";
 import { resolveBudgetHold } from "@/lib/phoneActions";
+import { useCostIsEquivalent } from "@/lib/selectors";
 import { useStore } from "@/lib/store";
 import type { Agent } from "@/lib/types";
 
@@ -17,6 +18,7 @@ export function HoldBody({ agent, hold, compact, onContinued }: { agent: Agent; 
   const queued = agent.queuedPrompts ?? 0;
   const [first, second] = raiseSteps(hold);
   const reach = holdReach(hold, agent.projectPath);
+  const equivalent = useCostIsEquivalent(agent);
 
   const choose = async (choice: HoldChoice) => {
     if (choice.action === "stop" && queued > 0) {
@@ -42,9 +44,10 @@ export function HoldBody({ agent, hold, compact, onContinued }: { agent: Agent; 
         <div className="min-w-0 flex-1">
           <p className="text-[14.5px] leading-snug font-semibold text-fg">{holdTitle(hold)}</p>
           <p className="mt-0.5 text-[13px] leading-snug break-words text-muted">
-            {holdText(hold)} It finished its turn first, so nothing was cut off.
+            {holdText(hold, equivalent)} It finished its turn first, so nothing was cut off.
             {queued > 0 && ` ${plural(queued, "queued message")} ${queued === 1 ? "is" : "are"} waiting.`}
           </p>
+          {hold.metric === "cost" && equivalent && <p className="mt-1 text-[12.5px] leading-snug text-steel">{SUBSCRIPTION_HOLD_HINT}</p>}
           {reach && <p className="mt-1 text-[12.5px] leading-snug text-steel">{reach}</p>}
         </div>
       </div>

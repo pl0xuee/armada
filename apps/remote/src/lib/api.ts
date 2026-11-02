@@ -324,6 +324,8 @@ export const api = {
   /** PR and CI status of the agent's branch. GitHub is asked through `gh`, so allow it some time. */
   pr: (b: Backend, agentId: string) =>
     b.request("GET", agentPath(agentId, "/pr"), undefined, { timeoutMs: PR_TIMEOUT_MS }) as Promise<PrSnapshot>,
+  /** Workflow runs still going for agents whose turn ended: counts by agent id. Older servers: 404. */
+  background: (b: Backend) => b.request("GET", "/api/background") as Promise<unknown>,
   /** Full-text search over every conversation, grouped by agent. */
   search: (b: Backend, query: string) =>
     b.request("GET", `/api/search?q=${encodeURIComponent(query)}`) as Promise<SearchResults>,

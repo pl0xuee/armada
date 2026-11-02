@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 import { useStore, type State } from "./store";
+import { backgroundActive, backgroundOf, NO_BACKGROUND, type BackgroundWork } from "./background";
+import { costIsEquivalent } from "./cost";
 import { dockNeed } from "./dock";
 import { triageQueue, type NeedsReason, type TriageEntry } from "./triage";
 import type { Agent, PendingItem, RemoteAccount } from "./types";
@@ -235,13 +237,14 @@ export interface TriageData {
   count: number;
 }
 
-let triageMemo: { agents: State["agents"]; permissions: State["permissions"]; status: State["permissionsStatus"]; resolving: State["resolving"]; data: TriageData } | null = null;
+let triageMemo: { agents: State["agents"]; background: State["background"]; permissions: State["permissions"]; status: State["permissionsStatus"]; resolving: State["resolving"]; data: TriageData } | null = null;
 
 /** The queue, memoised on the slices it reads so every subscriber shares one computation. */
 export function selectTriage(s: State): TriageData {
   if (
     triageMemo &&
     triageMemo.agents === s.agents &&
+    triageMemo.background === s.background &&
     triageMemo.permissions === s.permissions &&
     triageMemo.status === s.permissionsStatus &&
     triageMemo.resolving === s.resolving
@@ -250,15 +253,30 @@ export function selectTriage(s: State): TriageData {
   }
   const index = permissionIndex(s.permissions);
   const loaded = s.permissionsStatus === "ready";
-  const queue = triageQueue(Object.values(s.agents), (a) => pendingCount(a, index.get(a.id), loaded, s.resolving));
+  const queue = triageQueue(
+    Object.values(s.agents),
+    (a) => pendingCount(a, index.get(a.id), loaded, s.resolving),
+    (a) => backgroundActive(backgroundOf(a, s.background[a.id])),
+  );
   const reasons = new Map(queue.map((e) => [e.agent.id, e.reason] as const));
   const data = { queue, reasons, count: queue.length };
-  triageMemo = { agents: s.agents, permissions: s.permissions, status: s.permissionsStatus, resolving: s.resolving, data };
+  triageMemo = { agents: s.agents, background: s.background, permissions: s.permissions, status: s.permissionsStatus, resolving: s.resolving, data };
   return data;
 }
 
 export function useTriage(): TriageData {
   return useStore(selectTriage);
+}
+
+/** The agent's cost is an API-equivalent figure (a subscription), not a bill (see lib/cost). */
+export function useCostIsEquivalent(agent: Pick<Agent, "accountId" | "provider"> | null | undefined): boolean {
+  return useStore((s) => !!agent && costIsEquivalent(agent, accountOf(s.accounts, agent)));
+}
+
+/** Workflow runs still going behind this agent's finished turn (NO_BACKGROUND when none; stable while unchanged). */
+export function useBackground(agent: Pick<Agent, "id" | "status" | "archived"> | null | undefined): BackgroundWork {
+  const known = useStore((s) => (agent ? s.background[agent.id] : undefined));
+  return agent ? backgroundOf(agent, known) : NO_BACKGROUND;
 }
 
 /** Just the number of agents that need you (a primitive: streamed text never re-renders its subscribers). */

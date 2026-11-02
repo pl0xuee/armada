@@ -116,12 +116,13 @@ export function StatusDot({ status, size = 8, className }: { status: AgentStatus
   );
 }
 
-export function StatusText({ status, className }: { status: AgentStatus; className?: string }) {
+/** `label` overrides the status's own wording (an idle agent with a workflow still running). */
+export function StatusText({ status, label, className }: { status: AgentStatus; label?: string; className?: string }) {
   const meta = statusMeta(status);
   const quiet = status === "idle" || status === "stopped";
   return (
     <span className={cn("font-medium", className)} style={{ color: quiet ? "var(--text-2)" : meta.color }}>
-      {meta.label}
+      {label ?? meta.label}
     </span>
   );
 }

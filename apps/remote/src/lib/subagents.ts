@@ -283,6 +283,23 @@ export function useHeld<T>(value: T, empty: T, ms: number): T {
 }
 
 /**
+ * How many background sub-agents of an idle agent may still be running (workflow runs are counted by
+ * the desktop app, not here). A number, so streamed text re-renders nothing.
+ */
+export function useBackgroundSubagentCount(agentId: string | null | undefined): number {
+  const expiry = useStore((s) => (agentId ? clockExpiry(s.timelines[agentId]?.items) : 0));
+  const live = useStore((s) => (agentId && s.agents[agentId]?.status === "idle" ? true : false));
+  const now = useSubagentNow(live, expiry);
+  return useStore((s) => {
+    const items = agentId ? s.timelines[agentId]?.items : undefined;
+    if (!agentId || !live || !items) return 0;
+    const workflows = new Set<string>();
+    for (const it of items) if (it.kind === "tool_call" && it.subagent?.workflow) workflows.add(it.toolCallId);
+    return subagentRuns(items, false, { now, live }).filter((r) => r.state === "running" && r.background && !workflows.has(r.toolCallId)).length;
+  });
+}
+
+/**
  * The running sub-agents for the dock chip. Subscribes to a string key of what the chip shows, so streamed
  * text (which changes the items every frame) re-renders nothing while the list stays the same.
  */

@@ -88,6 +88,8 @@ export function composerPlaceholders(
   name: string,
   /** The agent is waiting on a question: typing queues a message, it doesn't answer it. */
   asking = false,
+  /** The turn ended but work it launched still runs: "workflow" or "agents" (see lib/background). */
+  background: "workflow" | "agents" | null = null,
 ): string[] {
   if (asking) return ["Answer above, or queue a message to run after this turn…", "Answer above, or queue a message…", "Answer above, or queue…", "Answer above…"];
   if (agent.status === "needs_permission") {
@@ -100,6 +102,10 @@ export function composerPlaceholders(
   if (agent.status === "working" || agent.status === "starting") {
     return [`${name} is working. Queue a follow-up message…`, `${name} is working. Queue a message…`, "Queue a message…"];
   }
+  if (agent.status === "idle" && background) {
+    const note = background === "workflow" ? "A workflow is still running" : "Background agents may still be running";
+    return [`Turn finished. ${note}. Reply, or start something new…`, `Turn finished. ${note}…`, "Turn finished. Reply…", "Reply…"];
+  }
   if (agent.status === "idle" && agent.unread) return ["Done. Reply, or start something new…", "Done. Reply…"];
   return (agent.availableCommands?.length ?? 0) > 0 ? [`Message ${name}…  / for commands`, `Message ${name}…`] : [`Message ${name}…`];
 }
@@ -107,4 +113,13 @@ export function composerPlaceholders(
 /** The longest candidate that fits on one line (the shortest if none does). */
 export function pickPlaceholder(candidates: string[], fits: (text: string) => boolean): string {
   return candidates.find(fits) ?? candidates[candidates.length - 1];
+}
+
+/**
+ * "Resume queue" beside a paused queue. Not while the agent is held at a spending or turn limit: the hold card
+ * is the one way on ("Continue once" runs the queue, "Raise" lifts the limit), and resuming from here would run
+ * the head of the queue past the limit without saying so.
+ */
+export function showResumeQueue(agent: Pick<Agent, "queuePaused" | "budgetHold">): boolean {
+  return agent.queuePaused === true && !agent.budgetHold;
 }
