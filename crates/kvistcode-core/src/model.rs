@@ -1157,6 +1157,8 @@ pub struct Settings {
     /// (None = leave Claude Code's default; the default is `token_saver::DEFAULT_COMPACT_WINDOW`).
     /// See `token_saver`.
     pub auto_compact_window: Option<u32>,
+    /// The other "Save tokens" options (output tidying, command output limit, helper model).
+    pub token_saver: crate::token_saver::TokenSaverOptions,
 }
 
 /// The voice assistant: talk to Kvistcode through OpenAI's Realtime API. Off by default;
@@ -1450,6 +1452,9 @@ impl Settings {
                 return Err("The auto-compact size must be between 100,000 and 1,000,000 tokens (or empty for Claude's default)".into());
             }
         }
+        if let Some(problem) = self.token_saver.problem() {
+            return Err(problem);
+        }
         Ok(())
     }
 
@@ -1527,6 +1532,7 @@ impl Settings {
             self.auto_compact_window = None;
             reset.push("autoCompactWindow");
         }
+        reset.extend(self.token_saver.sanitize());
         let hd = &mut self.helper_defaults;
         for (field, name) in [
             (&mut hd.account_id, "helperDefaults.accountId"),
@@ -1602,6 +1608,7 @@ impl Default for Settings {
             // On by default: measured as the biggest saver (see docs/TOKEN-SAVING.md). Anyone who
             // chooses "Claude's default" in Settings saves an explicit null, which stays off.
             auto_compact_window: Some(crate::token_saver::PRESET_COMPACT_WINDOW),
+            token_saver: Default::default(),
         }
     }
 }
