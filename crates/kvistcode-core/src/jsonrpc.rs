@@ -491,7 +491,9 @@ impl Peer {
             .map(|(_, l)| l.as_str())
             .collect();
         let skip = fresh.len().saturating_sub(lines);
-        fresh[skip..].join("\n")
+        // Quoted in error notices (stored with the conversation, shown on the phone):
+        // an agent that prints a key or token on its way down must not leak it there.
+        crate::redact::redact_secrets(&fresh[skip..].join("\n")).into_owned()
     }
 
     /// Remembers where stderr is now, as the start of the current turn.
@@ -905,6 +907,44 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    /// What the agent wrote to stderr is quoted in error notices: secrets in it are not.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stderr_quoted_in_errors_is_redacted() {
+        let key = ["sk-ant-api03-", "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"].concat();
+        let args = [
+            "-c".to_string(),
+            format!("echo 'auth failed with {key} for you' >&2; echo plain line >&2"),
+        ];
+        let (peer, mut rx) = Peer::spawn(SpawnOptions {
+            program: Path::new("sh"),
+            args: &args,
+            cwd: &std::env::temp_dir(),
+            env: &[],
+            env_remove: &[],
+            label: "test",
+            children_file: None,
+        })
+        .unwrap();
+        // The process exits; stderr is read to its end shortly after stdout closes.
+        while let Some(msg) = rx.recv().await {
+            if matches!(msg, Incoming::Closed) {
+                break;
+            }
+        }
+        let mut tail = String::new();
+        for _ in 0..100 {
+            tail = peer.stderr_tail(8);
+            if tail.contains("plain line") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(tail.contains("plain line"), "{tail:?}");
+        assert!(!tail.contains("AbCdEfGhIjKl"), "{tail:?}");
+        assert!(tail.contains("auth failed"), "{tail:?}");
     }
 
     #[cfg(unix)]

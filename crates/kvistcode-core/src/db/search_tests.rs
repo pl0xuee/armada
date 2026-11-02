@@ -3,10 +3,7 @@ use crate::model::{FileDiff, PlanEntry, PlanStatus, ToolKind, ToolStatus};
 use std::path::PathBuf;
 
 fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "kvistcode-search-{name}-{}",
-        uuid::Uuid::new_v4().simple()
-    ));
+    let dir = crate::testutil::scratch(&format!("search-{name}"));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }

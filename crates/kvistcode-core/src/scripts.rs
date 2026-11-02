@@ -216,7 +216,7 @@ mod tests {
     use super::*;
 
     fn tmp() -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("kvistcode-scripts-{}", uuid::Uuid::new_v4()));
+        let d = crate::testutil::scratch("scripts");
         std::fs::create_dir_all(&d).unwrap();
         d
     }

@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn discovers_repos() {
-        let home = std::env::temp_dir().join(format!("kvistcode-discover-{}", std::process::id()));
+        let home = crate::testutil::scratch("discover");
         let _ = std::fs::remove_dir_all(&home);
         for d in [
             "Projects/app/.git",
@@ -515,8 +515,7 @@ mod tests {
 
     #[test]
     fn lists_git_files_sorted() {
-        let dir =
-            std::env::temp_dir().join(format!("kvistcode-files-{}", uuid::Uuid::new_v4().simple()));
+        let dir = crate::testutil::scratch("files");
         std::fs::create_dir_all(dir.join("src")).unwrap();
         for f in ["b.txt", "a.txt", "src/c.rs"] {
             std::fs::write(dir.join(f), "x").unwrap();
