@@ -134,14 +134,22 @@ try {
   }
   await assertHealthy("after onboarding");
 
+  // The first-run tour is a modal that would block scripted clicks, so the app deliberately
+  // never opens it by itself when navigator.webdriver is set (src/lib/tour.ts). Assert that, so a
+  // tour that starts covering this run fails loudly here instead of as "element not clickable".
+  // The tour itself is exercised from Settings -> About below.
+  await sleep(1500); // longer than the tour's settle delay
+  check(!(await text()).includes("Many agents, one deck"), "the first-run tour opened by itself under WebDriver");
+
   // ---- main views -----------------------------------------------------------------
   // [rail aria-label prefix, expected <h1> or null]
   const views = [
     ["Mission Control", "Mission Control"],
+    ["Compare", "Compare"],
     ["Schedules", "Schedules"],
     ["Usage", "Usage"],
     ["Accounts", "Accounts"],
-    ["Projects", null],
+    ["Projects", null], // the agent list's rail label (it was "Agents" before 0.2)
   ];
   const goRail = async (label) => {
     const btn = await browser.$(`nav[aria-label="Primary"] button[aria-label^="${label}"]`);
@@ -195,12 +203,24 @@ try {
   await browser.$('button[aria-label="Open command palette"]').click();
   const input = await browser.$("[cmdk-input]");
   await input.waitForExist({ timeout: 10_000, timeoutMsg: "command palette did not open" });
+  // "?" switches the palette to searching every conversation (Ctrl/Cmd+Shift+F opens it there).
+  await browser.keys("?");
+  await browser.waitUntil(async () => (await input.getAttribute("aria-label")) === "Search every conversation", {
+    timeout: 5_000,
+    timeoutMsg: 'typing "?" in the palette did not switch to conversation search',
+  });
+  await browser.keys("x");
+  await sleep(600); // debounce + the search call itself
+  await assertHealthy("conversation search");
   await browser.keys("Escape");
   await assertHealthy("command palette");
 
   // ---- settings sections (each one loads its own backend data) -----------------------
   await goRail("Settings");
-  const sections = ["Appearance", "Sounds", "Notifications", "Behavior", "Templates", "Providers", "Agents", "Voice", "Voice assistant", "Remote & mobile", "About"];
+  const sections = [
+    "Appearance", "Sounds", "Notifications", "Behavior", "Budgets", "Templates", "Projects", "Tools & instructions",
+    "Providers", "Agent tools", "Agents", "Voice", "Voice assistant", "Remote & mobile", "About",
+  ];
   for (const name of sections) {
     log(`settings: ${name}`);
     const btn = await browser.$(`//nav[@aria-label="Settings sections"]//button[.//span[normalize-space(.)="${name}"]]`);
@@ -213,11 +233,41 @@ try {
       // The model list only renders once voice_status resolves.
       await waitText(/\((English|multilingual)\)/, "dictation model list (voice_status result)");
       check(!/Couldn.t read the dictation models/i.test(await text()), "Voice: dictation status failed to load");
+    } else if (name === "Tools & instructions") {
+      // CLAUDE.md / AGENTS.md, MCP servers and skills: walk the page's tabs.
+      await waitText(/What your agents know and can use/, "the Tools & instructions page");
+      for (const tab of ["MCP", "Skills"]) {
+        const radio = await browser.$(
+          `//*[@role="radiogroup"][@aria-label="Tools and instructions"]//*[@role="radio"][contains(normalize-space(.),"${tab}")]`,
+        );
+        await radio.waitForExist({ timeout: 10_000, timeoutMsg: `Tools & instructions tab "${tab}" missing` });
+        await radio.click();
+        await sleep(500);
+        await assertHealthy(`settings/Tools & instructions/${tab}`);
+      }
     } else {
       await sleep(400);
     }
     await assertHealthy(`settings/${name}`);
   }
+
+  // ---- first-run tour, opened by hand (Settings -> About -> Show the tour) -----------
+  // About is the last section above. The tour's code loads lazily, so this also catches a
+  // broken chunk.
+  log("welcome tour");
+  await browser.$("button*=Show the tour").click();
+  await waitText(/Many agents, one deck/, "the tour's first step");
+  await browser.$("button*=Next").click();
+  await waitText(/What needs you stays in view/, "the tour's second step");
+  await browser.$("button*=Next").click();
+  await waitText(/Find anything, spend on your terms/, "the tour's last step");
+  await assertHealthy("tour");
+  await browser.$("button*=Got it").click();
+  await browser.waitUntil(async () => !/Find anything, spend on your terms/.test(await text()), {
+    timeout: 5_000,
+    timeoutMsg: "the tour did not close",
+  });
+  await assertHealthy("after the tour");
 
   const consoleErrors = await browser.execute(() => window.__e2e?.consoleErrors ?? []);
   if (consoleErrors.length) log(`console.error output (informational):\n  ${consoleErrors.join("\n  ")}`);

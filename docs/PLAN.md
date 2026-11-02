@@ -2,7 +2,7 @@
 
 > **Command your fleet.** One sleek, gunmetal command deck for running Claude, ChatGPT (Codex) and Grok agents side by side, across as many accounts as you own, on Windows, macOS and Linux.
 
-> **Status (v0.1.2): this is the original design document.** What shipped differs in places:
+> **Status (v0.3.1): this is the original design document, written when the app was called Armada (renamed Kvistcode in v0.3.0).** The sections below are the original design and are not kept in sync; the list that follows says where reality differs, and the [`CHANGELOG`](../CHANGELOG.md) is the record of what shipped when. What shipped differs in places:
 > - **One process, no daemon.** Agents run inside the app's own core (`crates/kvistcode-core`). The tray keeps the app (and the agents) alive when the window closes, and agents resume after restarts and crashes. There is no separate `kvistcoded` or local socket.
 > - **Crates.** `kvistcode-core` (supervisor, ACP and Codex clients, storage, accounts, installer) plus the Tauri shell (`apps/desktop/src-tauri`). Storage is `rusqlite`.
 > - **UI stack.** React, zustand, Radix, cmdk, motion, xterm, react-markdown and @tanstack/react-virtual; npm, not pnpm. Sounds live in `apps/desktop/src-tauri/sounds`.
@@ -14,8 +14,10 @@
 >   - sub-agent cards and turn summaries;
 >   - MCP paste and test;
 >   - file and hunk revert.
-> - **Answered open questions:** permissions default to Auto (Ask per agent or in Settings); failover is off, ask or auto; phone push goes through ntfy.
-> - **Not yet built:** custom themes, auto-compact controls beyond the agent's own `/compact`, push targets other than ntfy, the plugin API, team mode, package-manager distribution (winget/Homebrew/AUR/Flatpak), and Playwright end-to-end tests.
+> - **Also shipped since v0.1.2:** many agents per project in a grid, local models (Ollama, LM Studio, OpenAI-compatible servers), search across every conversation, spending and turn limits, pull-request merge and GitHub issues, checkpoints, the Tools & instructions page (CLAUDE.md, AGENTS.md, MCP servers, skills), alerts to Slack, Discord and any webhook, voice dictation and an optional voice assistant, and a short first-run tour.
+> - **Answered open questions:** permissions default to Auto (Ask per agent or in Settings); failover is off, ask or auto; phone push goes through ntfy, and alerts can also go to Slack, Discord or any webhook.
+> - **Not yet built:** custom themes (three built-in themes: Gunmetal, Carbon, Titanium), auto-compact controls beyond the agent's own `/compact`, the plugin API, team mode, and package-manager distribution (winget/Homebrew/AUR/Flatpak). Real-app end-to-end tests exist, but as a WebDriver smoke test (`apps/desktop/e2e`), not Playwright.
+> - **Identifiers that kept the old name** (data folder, database file, some `armada.*` storage keys, the updater key files) are listed in [`RELEASING.md`](RELEASING.md#names-that-still-say-armada).
 
 ---
 
