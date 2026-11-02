@@ -116,7 +116,8 @@ export const PinnedDock = memo(function PinnedDock({
         <div className="pb-2">
           <section
             role="region"
-            aria-label="Pinned: what needs you, and progress"
+            // The title tells the docks of side-by-side agents apart.
+            aria-label={`Pinned for ${agent.title}: what needs you, and progress`}
             className={cn(
               "overflow-hidden rounded-2xl border bg-card/90 transition-colors duration-200 edge",
               urgent

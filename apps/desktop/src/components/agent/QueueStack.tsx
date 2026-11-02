@@ -148,7 +148,7 @@ export function QueueStack({
                 <span className="tabular text-fg">{queue.length}</span> queued
                 <span className="text-steel"> · {busy ? "runs after the current turn" : "runs next"}</span>
                 {!expanded && queue[0].text && (
-                  <span className="text-steel/80"> · “{queue[0].text.replace(/\s+/g, " ").trim()}”</span>
+                  <span className="text-steel"> · “{queue[0].text.replace(/\s+/g, " ").trim()}”</span>
                 )}
               </>
             )}

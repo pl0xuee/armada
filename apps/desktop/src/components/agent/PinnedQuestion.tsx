@@ -71,12 +71,19 @@ export function QuestionSection({
     return () => useQuestionUi.getState().setDocked(requestId, false);
   }, [requestId, quick, formVisible]);
 
+  // A ref as well as the state: the number-key handler below keeps the `send` of an earlier render,
+  // whose `busy` is stale, so two quick presses would otherwise both answer.
+  const sending = useRef(false);
   const send = async (answers: QuestionAnswers | null, key: string) => {
-    if (busy) return;
+    if (busy || sending.current) return;
+    sending.current = true;
     setBusy(key);
     const ok = await answerQuestion(agent.id, item, answers);
     if (ok) useQuestionUi.getState().clear(requestId);
-    else setBusy(null);
+    else {
+      sending.current = false;
+      setBusy(null);
+    }
   };
 
   const group = shape.mode === "stepper" ? null : shape.group;

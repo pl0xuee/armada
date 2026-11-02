@@ -468,7 +468,7 @@ export function FieldBlock({
           aria-label={field.title ?? field.description ?? field.id}
           onChange={(e) => onText(field.id, e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+            if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) {
               e.preventDefault();
               onEnter(e.ctrlKey || e.metaKey);
             }
@@ -487,7 +487,7 @@ export function FieldBlock({
             aria-label={field.title ?? field.description ?? field.id}
             onChange={(e) => onText(field.id, e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) {
                 e.preventDefault();
                 onEnter(e.ctrlKey || e.metaKey);
               }

@@ -109,7 +109,7 @@ export function WorkflowAgentList({ agents, compact }: { agents: readonly Workfl
             <div
               className={cn(
                 "min-w-0 truncate text-[11.5px] leading-4",
-                working ? "text-steel" : "text-steel/80",
+                working ? "text-steel" : "text-steel",
                 compact ? "pl-4" : "flex-1",
                 a.status === "failed" && "text-err",
               )}
@@ -121,7 +121,7 @@ export function WorkflowAgentList({ agents, compact }: { agents: readonly Workfl
               <>
                 <span className="w-[52px] shrink-0 text-right text-[11.5px] leading-4 text-steel tabular">{calls}</span>
                 <span
-                  className="w-[52px] shrink-0 text-right text-[11.5px] leading-4 text-steel/80 tabular"
+                  className="w-[52px] shrink-0 text-right text-[11.5px] leading-4 text-steel tabular"
                   title={a.idleSecs !== null ? `Last activity ${formatElapsed(a.idleSecs * 1000)} ago` : undefined}
                 >
                   {idle ?? ""}

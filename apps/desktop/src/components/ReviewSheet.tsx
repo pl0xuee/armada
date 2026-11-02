@@ -40,6 +40,7 @@ import { fileSignature, useAgentViewed, useViewedFiles } from "./review/viewedSt
 import { ProviderGlyph } from "./ProviderGlyph";
 import { GithubGlyph } from "./settings/GithubGlyph";
 import { ConfirmDialog } from "./ui/alert-dialog";
+import { useReturnFocus } from "./ui/returnFocus";
 import { Button } from "./ui/button";
 import { Input, Label, Textarea } from "./ui/input";
 import { Spinner } from "./ui/misc";
@@ -53,6 +54,20 @@ export function ReviewSheet() {
   const reviewId = useUi((s) => s.reviewAgentId);
   const setReviewAgent = useUi((s) => s.setReviewAgent);
   const agent = useApp((s) => (reviewId ? s.agents[reviewId] : undefined));
+  // Opened from a pill, a chip or a shortcut (no Radix trigger): focus goes back to where it was on close.
+  const focus = useReturnFocus({
+    // Start in the file list (or the first diff on narrow windows), not on the Refresh button.
+    onOpenAutoFocus: (e) => {
+      e.preventDefault();
+      const root = e.currentTarget as HTMLElement | null;
+      requestAnimationFrame(() => {
+        const target =
+          root?.querySelector<HTMLElement>("[data-file-row]:not([hidden])") ??
+          root?.querySelector<HTMLElement>("[data-review-content]");
+        (target ?? root)?.focus();
+      });
+    },
+  });
 
   return (
     <D.Root open={!!agent} onOpenChange={(o) => !o && setReviewAgent(null)}>
@@ -60,17 +75,8 @@ export function ReviewSheet() {
         <D.Overlay className="anim-fade fixed inset-0 z-50 bg-[var(--scrim)] backdrop-blur-[2px]" />
         <D.Content
           aria-describedby={undefined}
-          // Start in the file list (or the first diff on narrow windows), not on the Refresh button.
-          onOpenAutoFocus={(e) => {
-            e.preventDefault();
-            const root = e.currentTarget as HTMLElement | null;
-            requestAnimationFrame(() => {
-              const target =
-                root?.querySelector<HTMLElement>("[data-file-row]:not([hidden])") ??
-                root?.querySelector<HTMLElement>("[data-review-content]");
-              (target ?? root)?.focus();
-            });
-          }}
+          onOpenAutoFocus={focus.onOpenAutoFocus}
+          onCloseAutoFocus={focus.onCloseAutoFocus}
           // Esc inside a line-comment editor cancels that editor only (Radix listens in the capture phase).
           onEscapeKeyDown={(e) => {
             if (document.activeElement?.closest("[data-comment-editor]")) e.preventDefault();

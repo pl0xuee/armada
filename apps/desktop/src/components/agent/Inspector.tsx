@@ -215,18 +215,20 @@ export const Inspector = memo(function Inspector({
           )}
           <div>
             <dt className="mb-1 text-steel">Working directory</dt>
-            <dd className="selectable break-all rounded-lg border border-line bg-base/50 px-2 py-1.5 font-mono text-[11px] text-muted">
-              {prettyPath(agent.cwd)}
+            <dd>
+              <div className="selectable break-all rounded-lg border border-line bg-base/50 px-2 py-1.5 font-mono text-[11px] text-muted">
+                {prettyPath(agent.cwd)}
+              </div>
+              <Button
+                size="xs"
+                variant="ghost"
+                className="mt-1.5 -ml-1"
+                onClick={() => void attempt("Couldn't open the folder", () => api.openPath(agent.cwd))}
+              >
+                <FolderOpen className="!h-3.5 !w-3.5" />
+                Open folder
+              </Button>
             </dd>
-            <Button
-              size="xs"
-              variant="ghost"
-              className="mt-1.5 -ml-1"
-              onClick={() => void attempt("Couldn't open the folder", () => api.openPath(agent.cwd))}
-            >
-              <FolderOpen className="!h-3.5 !w-3.5" />
-              Open folder
-            </Button>
           </div>
         </dl>
       </Section>
