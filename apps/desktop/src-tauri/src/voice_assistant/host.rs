@@ -247,7 +247,25 @@ impl KvistcodeTools {
         .with_kind(name)
     }
 
+    /// The agent open on screen, as last reported by the UI.
+    fn screen_agent(&self) -> Option<String> {
+        let s = self.screen.lock();
+        s.agent_id.clone().or_else(|| s.review_agent_id.clone())
+    }
+
+    /// An empty query means "this agent": the one open on screen.
     fn resolve(&self, query: &str) -> Result<Agent, Box<ToolOutcome>> {
+        let on_screen;
+        let query = if query.trim().is_empty() {
+            on_screen = self.screen_agent().ok_or_else(|| {
+                Box::new(fail(
+                    "No agent is open on screen. Ask the user which agent they mean.",
+                ))
+            })?;
+            on_screen.as_str()
+        } else {
+            query
+        };
         let agents = self
             .core
             .agents()
@@ -598,6 +616,12 @@ impl KvistcodeTools {
     }
 
     fn open(&self, view: OpenView, agent: Option<&str>, section: Option<String>) -> ToolOutcome {
+        // The diff review is always of an agent: without one named, the one on screen.
+        let agent = if view == OpenView::Review && agent.is_none() {
+            Some("")
+        } else {
+            agent
+        };
         let agent = match agent {
             Some(q) => match self.resolve(q) {
                 Ok(a) => Some(a),
