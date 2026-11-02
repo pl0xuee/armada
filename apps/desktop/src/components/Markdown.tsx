@@ -87,7 +87,7 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
               }}
             />
           )}
-          <CopyButton text={shown} className="opacity-70 group-hover/code:opacity-100" />
+          <CopyButton text={shown} />
         </div>
       </div>
       {hidden && (
