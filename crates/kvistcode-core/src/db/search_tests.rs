@@ -33,6 +33,7 @@ fn user(agent: &str, seq: i64, text: &str) -> TimelineItem {
             text: text.into(),
             attachments: vec![],
             mid_turn: false,
+            automatic: false,
         },
     )
 }

@@ -34,6 +34,7 @@ import { backgroundActive, backgroundDetail, backgroundShort } from "@/lib/backg
 import { useBackground } from "@/store/background";
 import { REASON_TONE, reasonLabel, type TriageEntry } from "@/components/triage/useTriage";
 import { CodeText } from "@/components/CodeText";
+import { ResumeLine } from "@/components/agent/ResumesAt";
 import { BudgetHoldPanel } from "./BudgetHoldPanel";
 
 type Permission = Extract<TimelineItem, { kind: "permission" }>;
@@ -143,6 +144,7 @@ export function NeedsYouDetail({
             icon={<Gauge className="h-4 w-4" />}
             title="This account hit its usage limit"
             text={lastOf(items, "notice")?.text ?? `${identity.short} paused until the limit resets.`}
+            note={<ResumeLine agent={agent} className="mt-1.5" />}
             actions={
               <>
                 <Button size="sm" variant="warn" onClick={() => useUi.getState().setMoveAgent(agent)}>
@@ -334,12 +336,15 @@ function RecoveryPanel({
   icon,
   title,
   text,
+  note,
   actions,
 }: {
   tone: "warn" | "err";
   icon: React.ReactNode;
   title: string;
   text: string;
+  /** Under the text (the automatic resume line). */
+  note?: React.ReactNode;
   actions: React.ReactNode;
 }) {
   return (
@@ -361,6 +366,7 @@ function RecoveryPanel({
         <div className="min-w-0">
           <p className="text-[13.5px] font-semibold">{title}</p>
           <p className="selectable mt-0.5 break-words text-[12.5px] leading-relaxed text-muted">{text}</p>
+          {note}
         </div>
       </div>
       <div className="mt-3 flex flex-wrap gap-2 pl-[38px]">{actions}</div>

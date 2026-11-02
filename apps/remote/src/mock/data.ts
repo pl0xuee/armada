@@ -244,6 +244,8 @@ export function buildAgents(now: number): Agent[] {
     agent(now, "a6", "Upgrade to React 19", "claude", "acc-work", "error", {
       agoMin: 34,
       rateLimited: true,
+      // Kvistcode on the desktop will continue it when the limit resets.
+      limitResetsAt: now + 3 * 3_600_000,
       costUsd: 3.6,
       tokensUsed: 402_000,
       lastMessage: "Usage limit reached for this account.",

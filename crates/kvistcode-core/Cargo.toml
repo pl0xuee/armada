@@ -24,6 +24,9 @@ flate2 = "1"
 tar = "0.4"
 sha2 = "0.11"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# Time zones for the "resets 6pm (America/Los_Angeles)" in usage-limit messages; the database is
+# bundled so it also works where the system has none (Windows, minimal Linux).
+jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-bundle-always"] }
 zip = { version = "9.1.3", default-features = false, features = ["deflate-flate2"] }
 base64 = "0.23"
 

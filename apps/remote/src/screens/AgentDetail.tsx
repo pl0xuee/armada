@@ -19,6 +19,7 @@ import { basename, formatCost, formatTokens, plainPreview, relativeTimeLong } fr
 import { useNow } from "@/lib/hooks";
 import { agentIdentity, isBusy, isResumable, safeColor, statusMeta } from "@/lib/meta";
 import { useDelayed } from "@/lib/hooks";
+import { resumesLabel } from "@/lib/resumes";
 import { goBack, navigate } from "@/lib/router";
 import { isProgrammaticScroll, isUserLayoutChange } from "@/lib/scroll";
 import { accountOf, useOtherPendingCount } from "@/lib/selectors";
@@ -469,10 +470,13 @@ function StatusBanner({
     text = "This agent was stopped. Resume to continue the session.";
   } else if (agent.status === "error") {
     tone = "err";
+    const resumes = resumesLabel(agent);
     text = agent.rateLimited
-      ? canSwitch
-        ? "Usage limit reached on this account. Switch accounts to keep going."
-        : "Usage limit reached on this account. Try again later."
+      ? resumes
+        ? `Usage limit reached. ${resumes} automatically${canSwitch ? ", or switch accounts to keep going now." : "."}`
+        : canSwitch
+          ? "Usage limit reached on this account. Switch accounts to keep going."
+          : "Usage limit reached on this account. Try again later."
       : "The last turn failed. Send a message to try again.";
   } else if (agent.rateLimited && canSwitch) {
     tone = "err";

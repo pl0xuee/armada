@@ -118,6 +118,10 @@ struct CtxState {
     /// The running turn's prompt and the timeline `seq` right after its user message:
     /// while `seq` is unchanged the agent has produced nothing for it.
     turn_prompt: Option<(Prompt, i64)>,
+    /// The next prompt to be recorded is Kvistcode's own "continue" after a usage limit, and
+    /// whether the running turn's prompt was.
+    next_automatic: bool,
+    turn_automatic: bool,
     /// The queue doesn't advance until the user acts (after cancel/stop/failure).
     queue_paused: bool,
     /// When the current turn started, and the agent's cost/tokens at that point.
@@ -211,6 +215,8 @@ impl AgentCtx {
                 queue: VecDeque::new(),
                 last_user_item: None,
                 turn_prompt: None,
+                next_automatic: false,
+                turn_automatic: false,
                 queue_paused: false,
                 turn_started_at: 0,
                 turn_tree: None,
@@ -1059,6 +1065,21 @@ impl AgentCtx {
     /// Records the user's prompt. Returns the prompt to send now, or None if a turn
     /// is already running (the prompt is queued and sent when the turn ends).
     pub fn submit_prompt(&self, text: &str, attachments: Vec<Attachment>) -> Option<Prompt> {
+        self.submit_prompt_as(text, attachments, false)
+    }
+
+    /// `submit_prompt` for Kvistcode's own "continue" after a usage limit reset: shown in the
+    /// timeline as automatic, and never queued (None when a turn is running, so it is dropped).
+    pub fn submit_automatic_prompt(&self, text: &str) -> Option<Prompt> {
+        self.submit_prompt_as(text, Vec::new(), true)
+    }
+
+    fn submit_prompt_as(
+        &self,
+        text: &str,
+        attachments: Vec<Attachment>,
+        automatic: bool,
+    ) -> Option<Prompt> {
         let mut prompt = Prompt {
             text: text.to_string(),
             attachments,
@@ -1066,6 +1087,9 @@ impl AgentCtx {
         };
         {
             let mut st = self.st.lock();
+            if st.turn_active && automatic {
+                return None;
+            }
             if st.turn_active {
                 // Shown above the composer until it runs, not in the timeline yet.
                 st.queue
@@ -1078,6 +1102,7 @@ impl AgentCtx {
             prompt.token = Self::next_token_locked(&mut st);
             // Sending a new message resumes a paused queue (it runs after this).
             st.queue_paused = false;
+            st.next_automatic = automatic;
             self.record_prompt_locked(&mut st, &prompt);
         }
         self.publish_queue();
@@ -1087,12 +1112,15 @@ impl AgentCtx {
     /// Adds the prompt to the timeline (when it actually starts running).
     fn record_prompt_locked(&self, st: &mut CtxState, prompt: &Prompt) {
         self.end_stream_locked(st);
+        let automatic = std::mem::take(&mut st.next_automatic);
+        st.turn_automatic = automatic;
         let id = self.push_locked(
             st,
             ItemBody::UserMessage {
                 text: prompt.text.clone(),
                 attachments: prompt.attachments.clone(),
                 mid_turn: false,
+                automatic,
             },
         );
         st.last_user_item = Some(id);
@@ -1304,6 +1332,7 @@ impl AgentCtx {
                 text: prompt.text.clone(),
                 attachments: prompt.attachments.clone(),
                 mid_turn: true,
+                automatic: false,
             },
         );
     }
@@ -1416,6 +1445,7 @@ impl AgentCtx {
             a.status = AgentStatus::Working;
             a.running = true;
             a.rate_limited = false;
+            a.limit_resets_at = None;
             // Starting a turn is the answer to a spending-limit hold.
             a.budget_hold = None;
             a.last_activity_at = now_ms();
@@ -1457,11 +1487,13 @@ impl AgentCtx {
         let launches: Vec<(WorkflowLaunch, bool)>;
         let finish_epoch: u64;
         let turn_tree: Option<String>;
+        let was_automatic;
         {
             let mut st = self.st.lock();
             if !st.turn_active || generation.is_some_and(|g| g != st.generation) {
                 return None;
             }
+            was_automatic = st.turn_automatic;
             // A turn that ended because we stopped the process wasn't a failure.
             if st.exit_intent != ExitIntent::None
                 && matches!(outcome, TurnOutcome::Failed(_) | TurnOutcome::Cancelled)
@@ -1593,6 +1625,13 @@ impl AgentCtx {
             let id = self.agent_id.clone();
             rt.spawn(async move { core.on_turn_idle(&id).await });
         }
+        // Any end but a usage limit closes the wait for one (a failed resume that hits the limit
+        // again is handled below, as part of the same episode).
+        if !matches!(&outcome, TurnOutcome::Failed(m) if is_rate_limit(m)) {
+            if let Some(core) = self.core.upgrade() {
+                core.limit_wait_ended(&self.agent_id);
+            }
+        }
         match &outcome {
             TurnOutcome::Completed | TurnOutcome::CompletedWithNote(_) => {
                 let agent = self.update_agent_settled(|a, active| {
@@ -1643,6 +1682,7 @@ impl AgentCtx {
                 });
                 if limited {
                     if let Some(core) = self.core.upgrade() {
+                        core.limit_hit(&self.agent_id, msg, was_automatic);
                         let id = self.agent_id.clone();
                         tokio::spawn(async move { core.on_rate_limited(&id).await });
                     }

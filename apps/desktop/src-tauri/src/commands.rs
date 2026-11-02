@@ -251,6 +251,12 @@ pub async fn answer_question(
         .map_err(err)
 }
 
+/// "Don't auto-resume this one": the agent stays stopped at its usage limit for the user.
+#[tauri::command]
+pub fn cancel_limit_resume(core: State<'_, Core>, agent_id: String) -> CmdResult<Agent> {
+    core.cancel_limit_resume(&agent_id).map_err(err)
+}
+
 #[tauri::command]
 pub async fn resume_agent(
     core: State<'_, Core>,

@@ -254,6 +254,7 @@ export function seedSettings(onboarded: boolean): Settings {
     quietHours: { enabled: false, start: "22:00", end: "08:00" },
     closeToTray: true,
     autoResume: false,
+    resumeAfterLimit: true,
     autoUpdateTools: true,
     defaultWorktree: true,
     launchAtLogin: false,

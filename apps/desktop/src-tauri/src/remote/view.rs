@@ -65,10 +65,16 @@ pub fn viewer_title(title: &str, roots: &[String]) -> String {
 /// The viewer's version of a timeline item, or None when viewers don't get it.
 pub fn project_item(item: &TimelineItem, roots: &[String]) -> Option<TimelineItem> {
     let body = match &item.body {
-        ItemBody::UserMessage { text, mid_turn, .. } => ItemBody::UserMessage {
+        ItemBody::UserMessage {
+            text,
+            mid_turn,
+            automatic,
+            ..
+        } => ItemBody::UserMessage {
             text: redact_secrets(text).into_owned(),
             attachments: Vec::new(),
             mid_turn: *mid_turn,
+            automatic: *automatic,
         },
         // A reply that is only a picture: nothing for a viewer to see.
         ItemBody::AgentMessage { text, images } if text.is_empty() && !images.is_empty() => {
@@ -271,6 +277,7 @@ mod tests {
             text: "hello".into(),
             attachments: vec![],
             mid_turn: false,
+            automatic: false,
         });
         assert!(project_item(&user, &r).is_some());
     }
