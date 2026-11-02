@@ -655,6 +655,20 @@ async fn first_permission(env: &mut Env) -> String {
     let ItemBody::Permission { request_id, .. } = item.body else {
         unreachable!()
     };
+    // The item is shown before the agent's status follows (they are two updates):
+    // wait for the status so callers see the settled state.
+    for _ in 0..100 {
+        let waiting = env
+            .core
+            .agents()
+            .unwrap()
+            .iter()
+            .any(|a| a.status == AgentStatus::NeedsPermission);
+        if waiting {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     request_id
 }
 
