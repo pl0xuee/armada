@@ -44,10 +44,12 @@ export const PrChip = memo(function PrChip({ agent }: { agent: Agent }) {
   const body = (
     <>
       <Icon name="branch" size={14} className="shrink-0 text-steel" />
+      <span className="sr-only">Pull request </span>
       <span className="font-semibold text-fg tabular">{chip.number}</span>
       <span className="text-muted">{chip.state}</span>
       {chip.checks && <span className={cn("font-medium", TONE[chip.checksTone])}>{chip.checks}</span>}
       {chip.review && <span className={cn("font-medium", TONE[chip.reviewTone])}>{chip.review}</span>}
+      {chip.url && <span className="sr-only">, opens on GitHub</span>}
       {chip.url && <Icon name="arrowUpRight" size={14} className="shrink-0 text-steel" />}
     </>
   );
@@ -56,7 +58,7 @@ export const PrChip = memo(function PrChip({ agent }: { agent: Agent }) {
     <div className="scroll-x border-t border-line/60 [@media(orientation:landscape)_and_(max-height:500px)]:hidden">
       <div className="mx-auto flex w-max min-w-full items-center px-safe py-1.5 md:w-full md:max-w-[860px]">
         {chip.url ? (
-          <a href={chip.url} target="_blank" rel="noopener noreferrer" aria-label={`${chip.label}. Open on GitHub`} className={cn("press hit relative", cls)}>
+          <a href={chip.url} target="_blank" rel="noopener noreferrer" className={cn("press hit relative", cls)}>
             {body}
           </a>
         ) : (

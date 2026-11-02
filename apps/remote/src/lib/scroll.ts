@@ -28,3 +28,9 @@ export function scrollByProgrammatic(dy: number) {
 export function isProgrammaticScroll() {
   return performance.now() < programmaticUntil;
 }
+
+/** Scrolls the page to `top` as a correction of the timeline's own (not the reader leaving the bottom). */
+export function scrollToProgrammatic(top: number) {
+  programmaticUntil = performance.now() + 200;
+  window.scrollTo({ top, behavior: "instant" });
+}

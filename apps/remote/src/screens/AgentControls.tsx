@@ -72,7 +72,7 @@ export const SettingsChips = memo(function SettingsChips({ agent, onPick }: { ag
               key={o.id}
               type="button"
               onClick={() => onPick(o.id)}
-              aria-label={`${o.name}: ${choiceName(o)}. Change`}
+              aria-haspopup="dialog"
               className="press hit relative inline-flex h-8 shrink-0 items-center gap-1 rounded-full border border-line-strong bg-card pr-2 pl-3 text-[12.5px]"
             >
               <span className="text-steel">{o.name}</span>

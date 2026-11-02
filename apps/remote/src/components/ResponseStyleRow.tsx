@@ -26,7 +26,7 @@ export function ResponseStyleRow() {
             aria-checked={o.value === style}
             onClick={() => void setResponseStyle(o.value)}
             className={cn(
-              "press h-10 min-w-0 truncate rounded-lg px-2 text-[13.5px] font-medium",
+              "press h-11 min-w-0 truncate rounded-lg px-2 text-[13.5px] font-medium",
               o.value === style ? "bg-raised text-fg shadow-[inset_0_0_0_1px_var(--border-strong)]" : "text-muted",
             )}
           >

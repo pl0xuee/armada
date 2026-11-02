@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import type { BackgroundWork } from "./background";
 import type { Agent, Attachment, AttentionReason, PendingItem, PermissionMode, PrSnapshot, PromptTemplate, RemoteAccount, RemoteCustomAgent, ResponseStyle, Session, TimelineItem } from "./types";
 
 export type Phase =
@@ -97,6 +98,8 @@ export interface State {
   responseStyle: ResponseStyle | null;
   /** The last PR/CI status the server gave for each agent's branch. */
   prs: Record<string, PrSnapshot>;
+  /** Workflow runs still going behind an agent's finished turn, by agent id (see lib/backgroundWork). */
+  background: Record<string, BackgroundWork>;
   timelines: Record<string, Timeline>;
 
   connection: Connection;
@@ -136,6 +139,7 @@ export const initialState: State = {
   defaultPermissionMode: null,
   responseStyle: null,
   prs: {},
+  background: {},
   timelines: {},
   connection: "connecting",
   connectionNote: null,
