@@ -15,6 +15,7 @@ mod github_work;
 mod hotkey;
 mod local;
 mod log_writer;
+mod login_item;
 mod notify;
 mod pr_status;
 mod preview_proxy;
@@ -341,6 +342,8 @@ fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()>
             let _ = hotkey::apply(&app, &hotkey);
         });
     }
+    // The login item from before the rename (Armada) would keep starting the old app.
+    tauri::async_runtime::spawn_blocking(login_item::remove_legacy);
     apply_autostart(app, settings.launch_at_login);
     {
         let remote_settings = settings.remote.clone();

@@ -27,12 +27,64 @@ pub fn create_main(app: &AppHandle) -> tauri::Result<()> {
         .find(|w| w.label == MAIN)
         .cloned()
         .ok_or_else(|| tauri::Error::WindowNotFound)?;
-    tauri::WebviewWindowBuilder::from_config(app, &config)?
+    let mut builder = tauri::WebviewWindowBuilder::from_config(app, &config)?
         // Login launches start in the tray; building hidden avoids a visible flash.
         .visible(!crate::autostart_launch())
-        .on_new_window(|_url, _features| tauri::webview::NewWindowResponse::Deny)
-        .build()?;
+        .on_new_window(|_url, _features| tauri::webview::NewWindowResponse::Deny);
+    // The configured 1440x900 is more than a 1280x720 work area (a 1080p laptop at 150%
+    // scaling): with no title bar, the window controls would sit past the screen edge.
+    if let Some((w, h, min_w, min_h)) = work_area_logical(app).map(|(area_w, area_h)| {
+        fit_to_work_area(
+            (config.width, config.height),
+            (
+                config.min_width.unwrap_or(0.0),
+                config.min_height.unwrap_or(0.0),
+            ),
+            (
+                area_w,
+                area_h - if config.decorations { TITLE_BAR } else { 0.0 },
+            ),
+        )
+    }) {
+        builder = builder.inner_size(w, h).min_inner_size(min_w, min_h);
+    }
+    builder.build()?;
     Ok(())
+}
+
+/// Room the OS title bar takes from the work area when the window has one (macOS).
+const TITLE_BAR: f64 = 40.0;
+
+/// The primary monitor's usable area (without taskbar/dock/menu bar) in logical pixels.
+fn work_area_logical(app: &AppHandle) -> Option<(f64, f64)> {
+    let monitor = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| app.available_monitors().ok()?.into_iter().next())?;
+    let scale = monitor.scale_factor();
+    let size = monitor.work_area().size;
+    if !(scale.is_finite() && scale > 0.0) || size.width == 0 || size.height == 0 {
+        return None;
+    }
+    Some((
+        f64::from(size.width) / scale,
+        f64::from(size.height) / scale,
+    ))
+}
+
+/// `(width, height, min_width, min_height)` for a window that wants `want` (never below
+/// `min`) on a work area of `area`: the size is cut down to the area, and so is the
+/// minimum, which would otherwise keep the window from fitting.
+fn fit_to_work_area(want: (f64, f64), min: (f64, f64), area: (f64, f64)) -> (f64, f64, f64, f64) {
+    let min_w = min.0.min(area.0);
+    let min_h = min.1.min(area.1);
+    (
+        want.0.min(area.0).max(min_w),
+        want.1.min(area.1).max(min_h),
+        min_w,
+        min_h,
+    )
 }
 
 pub fn main_window(app: &AppHandle) -> Option<WebviewWindow> {
@@ -102,5 +154,29 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
             // Otherwise the window closes and RunEvent::ExitRequested shuts the core down.
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit_to_work_area;
+
+    #[test]
+    fn window_fits_the_work_area() {
+        // Roomy screen: the configured size and minimum are kept.
+        assert_eq!(
+            fit_to_work_area((1440.0, 900.0), (1000.0, 640.0), (2560.0, 1400.0)),
+            (1440.0, 900.0, 1000.0, 640.0)
+        );
+        // 1080p at 150% scaling (1280x680 usable): cut down, minimum still fits.
+        assert_eq!(
+            fit_to_work_area((1440.0, 900.0), (1000.0, 640.0), (1280.0, 680.0)),
+            (1280.0, 680.0, 1000.0, 640.0)
+        );
+        // A screen smaller than the minimum: the minimum shrinks with it.
+        assert_eq!(
+            fit_to_work_area((1440.0, 900.0), (1000.0, 640.0), (800.0, 560.0)),
+            (800.0, 560.0, 800.0, 560.0)
+        );
     }
 }

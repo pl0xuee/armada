@@ -67,6 +67,12 @@
           "libayatana-appindicator3-1",
           "libasound2t64 | libasound2",
           "libdbus-1-3"
+        ],
+        "conflicts": [
+          "armada"
+        ],
+        "replaces": [
+          "armada"
         ]
       },
       "rpm": {
@@ -75,12 +81,19 @@
           "libappindicator-gtk3",
           "alsa-lib",
           "dbus-libs"
+        ],
+        "conflicts": [
+          "armada"
+        ],
+        "obsoletes": [
+          "armada"
         ]
       }
     },
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "./windows/hooks.nsh"
       }
     },
     "macOS": {

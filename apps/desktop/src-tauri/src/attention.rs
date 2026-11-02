@@ -48,7 +48,11 @@ impl Attention {
             audio: AudioPlayer::new(),
             icon,
             focused_agent: Mutex::new(None),
-            window_focused: AtomicBool::new(true),
+            // A login launch builds the window hidden and never focuses it: no focus event
+            // would ever correct a `true` here, and the hidden app would hold back phone
+            // pushes, the taskbar flash and (with smart mute) sounds for the agent the UI
+            // had selected.
+            window_focused: AtomicBool::new(!crate::autostart_launch()),
             pending: Mutex::new(HashMap::new()),
             webhooks: webhooks::Hub::default(),
         }
