@@ -695,10 +695,11 @@ const AgentRow = memo(function AgentRow({
                   </Tooltip>
                 </span>
               </div>
-              <div className="mt-0.5 flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[11.5px] text-steel">
+              <div className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[11.5px] text-steel">
                 <StatusDot status={view.dot} size={6} done={done} />
+                {/* May shrink (and end in …) when the label is long, e.g. "1 background agent may be running". */}
                 <span
-                  className="shrink-0"
+                  className="min-w-0 truncate"
                   title={view.detail ?? undefined}
                   style={{
                     color:
