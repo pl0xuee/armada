@@ -5,6 +5,20 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.4.0 — 2026-11-02
+
+The assistant now follows you around the app, understands “agent 2” and “project 3”, and lives in a panel you can move.
+
+### New
+- **Say a number.** The assistant numbers your agents (the same numbers as the ⌘1–9 shortcuts) and your projects, so “open agent 2”, “stop #3” or “start an agent in project 1” works without saying names.
+- **It notices when you switch.** Move to another screen, agent, settings section, Mission Control tab, diff review or project and the assistant is quietly told, so you never have to explain where you are.
+- **Go anywhere by voice.** It can open a project (its most urgent agent) and a comparison group, on top of every screen, settings section and Mission Control tab.
+- **Move the assistant.** Drag the panel by its handle to put it anywhere; Kvistcode remembers the spot. Double-click the header to put it back, or use the arrow keys on the handle.
+- **A better-looking assistant.** Conversation bubbles, clearer actions, and a Confirm card you can't miss.
+
+### Fixed
+- **Billing no longer shows a misleading number.** The assistant panel used to show the total the whole fleet counts toward the daily budget (subscription agents included, at API prices) as if it were spent on your key. API accounts now show what was used on that key, the daily budget is labelled as such, and the assistant panel shows its own OpenAI cost this month.
+
 ## v0.3.3 — 2026-11-01
 
 Sub-agents show up reliably, long messages stop jumping around, and the voice assistant can do much more.
