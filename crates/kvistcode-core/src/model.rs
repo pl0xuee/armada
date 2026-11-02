@@ -1151,6 +1151,11 @@ pub struct Settings {
     pub project_budgets: std::collections::BTreeMap<String, crate::budget::BudgetCap>,
     /// Slack, Discord and generic webhook targets for alerts (ntfy has its own field).
     pub alert_targets: Vec<AlertTarget>,
+    /// Claude agents summarize their conversation once it reaches this many tokens, instead of
+    /// at Claude Code's own (much later, on 1M-context models) threshold. Every step an agent
+    /// takes re-reads its whole context, so a shorter one is the biggest token saver
+    /// (None = leave Claude Code's default). See `token_saver`.
+    pub auto_compact_window: Option<u32>,
 }
 
 /// The voice assistant: talk to Kvistcode through OpenAI's Realtime API. Off by default;
@@ -1439,6 +1444,11 @@ impl Settings {
             }
         }
         crate::voice::validate_voice(&self.voice.model, &self.voice.language)?;
+        if let Some(w) = self.auto_compact_window {
+            if !crate::token_saver::COMPACT_WINDOW_RANGE.contains(&w) {
+                return Err("The auto-compact size must be between 100,000 and 1,000,000 tokens (or empty for Claude's default)".into());
+            }
+        }
         Ok(())
     }
 
@@ -1508,6 +1518,13 @@ impl Settings {
         if crate::voice::validate_voice(&self.voice.model, &self.voice.language).is_err() {
             self.voice.language = defaults.voice.language;
             reset.push("voice.language");
+        }
+        if self
+            .auto_compact_window
+            .is_some_and(|w| !crate::token_saver::COMPACT_WINDOW_RANGE.contains(&w))
+        {
+            self.auto_compact_window = None;
+            reset.push("autoCompactWindow");
         }
         let hd = &mut self.helper_defaults;
         for (field, name) in [
@@ -1581,6 +1598,7 @@ impl Default for Settings {
             agent_budget_turns: None,
             project_budgets: Default::default(),
             alert_targets: Vec::new(),
+            auto_compact_window: None,
         }
     }
 }

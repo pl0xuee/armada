@@ -547,6 +547,8 @@ export interface Settings {
   projectBudgets: Record<string, BudgetCap>;
   /** Slack, Discord and webhook targets for alerts (ntfy has its own field above). */
   alertTargets: AlertTarget[];
+  /** Claude agents summarize their conversation at this many tokens (100k..1M); null = Claude Code's default. */
+  autoCompactWindow: number | null;
 }
 
 export type BudgetAction = "notify" | "pause";

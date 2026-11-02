@@ -2579,6 +2579,13 @@ export const mockApi: KvistcodeApi = {
     if (/fail/.test(url)) throw new Error("https://example.com/…: the server answered 500");
   },
 
+  async applyTokenSaver() {
+    db.settings = { ...db.settings, autoCompactWindow: 250_000, responseStyle: "concise" };
+    const claude = (configDefaultsDb.claude ??= {});
+    if (claude.effort !== "low" && claude.effort !== "medium") claude.effort = "medium";
+    return delay(clone(db.settings), 200);
+  },
+
   async updateSettings(settings: Settings) {
     const invalid = validateSettings(settings);
     if (invalid) {
@@ -3334,6 +3341,8 @@ function validateSettings(s: Settings): string | null {
   if (!["deliver", "queue", "helper"].includes(s.busySend)) return `Unknown busy-send setting “${s.busySend}”`;
   if (!["concise", "balanced", "detailed"].includes(s.responseStyle))
     return `Unknown response style “${s.responseStyle}”`;
+  if (s.autoCompactWindow != null && (s.autoCompactWindow < 100_000 || s.autoCompactWindow > 1_000_000))
+    return "The auto-compact size must be between 100,000 and 1,000,000 tokens (or empty for Claude's default)";
   if (!["off", "ask", "auto"].includes(s.failover)) return `Unknown failover setting “${s.failover}”`;
   if (!["auto", "ask"].includes(s.defaultPermissionMode)) return `Unknown permission mode “${s.defaultPermissionMode}”`;
   if (!Number.isInteger(s.remote.port) || s.remote.port < 1 || s.remote.port > 65535) {
