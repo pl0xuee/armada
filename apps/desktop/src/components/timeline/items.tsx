@@ -20,6 +20,7 @@ import {
   Settings2,
   ShieldX,
   SquareTerminal,
+  Timer,
   Trash2,
   TriangleAlert,
   Wrench,
@@ -79,6 +80,18 @@ export const UserBubble = memo(function UserBubble({
   const long = userMessageFolds(item.text);
   const [open, setOpen] = useState(false);
   const folded = long && !open;
+  // Kvistcode's own "continue" after a usage limit reset: a quiet line, not a bubble the user wrote.
+  if (item.automatic) {
+    return (
+      <div className="flex justify-end" title={item.text} data-testid="auto-resume-note">
+        <div className="flex max-w-[80%] items-center gap-1.5 rounded-full border border-line/70 bg-raised/40 px-3 py-1 text-[12px] text-muted">
+          <Timer className="h-3 w-3 shrink-0 text-warn" aria-hidden />
+          <span className="truncate">Resumed automatically after the usage limit reset</span>
+          <RelTime ts={item.ts} className="shrink-0 text-[11px] text-steel" />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="group flex justify-end">
       <div className="relative max-w-[80%]">

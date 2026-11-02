@@ -13,6 +13,7 @@ import type { QuestionItem } from "@/lib/question";
 import { useStatusView } from "@/store/background";
 import type { Account, Agent, PermissionOption, TimelineItem } from "@/lib/types";
 import { basename, cn } from "@/lib/utils";
+import { ResumesAt } from "../agent/ResumesAt";
 import type { TileSummary } from "./useTileSummaries";
 
 type PermissionItem = Extract<TimelineItem, { kind: "permission" }>;
@@ -101,7 +102,12 @@ export const AgentRowCompact = memo(function AgentRowCompact({
           {agent.unread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-label="Unread" />}
           {agent.rateLimited && (
             <Tooltip content="Hit its usage limit">
-              <Gauge className="h-3.5 w-3.5 shrink-0 text-warn" aria-label="Usage limit" />
+              <span className="flex min-w-0 shrink-[2] items-center gap-1 text-warn" aria-label="Usage limit">
+                <Gauge className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate text-[11px]">
+                  <ResumesAt agent={agent} />
+                </span>
+              </span>
             </Tooltip>
           )}
           {summary.subagents > 0 && (

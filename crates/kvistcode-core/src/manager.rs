@@ -19,6 +19,7 @@ use crate::{accounts, git, local, providers, EventSink, Result};
 
 mod budgets;
 mod helper_sync;
+mod limit_wait;
 
 /// Starts an agent as a helper of `parent_id`, from `commit` (a snapshot of the
 /// main agent's files). `preamble` is shown to the helper's model, not the user.
@@ -163,6 +164,8 @@ struct Inner {
     cancel_watchdog_ms: AtomicU64,
     /// Spending-cap bookkeeping (see `budgets.rs`).
     budget: Mutex<budgets::BudgetState>,
+    /// Agents waiting out a usage limit (see `limit_wait.rs`).
+    limit_wait: Mutex<limit_wait::State>,
 }
 
 /// Marks a schedule as starting; released on drop.
@@ -311,6 +314,7 @@ impl Core {
                 shutting_down: AtomicBool::new(false),
                 cancel_watchdog_ms: AtomicU64::new(CANCEL_WATCHDOG_MS),
                 budget: Mutex::new(budgets::BudgetState::load(&budget_dir)),
+                limit_wait: Mutex::default(),
             }),
         };
         core.restore_queues();
@@ -464,6 +468,7 @@ impl Core {
     /// Resumes interrupted agents when `settings.auto_resume` is on.
     pub async fn startup(&self) {
         self.spawn_scheduler();
+        self.spawn_limit_watch();
         // A merge that was running when the app closed is simply pending again.
         let stuck: Vec<String> = self
             .inner
@@ -1877,6 +1882,8 @@ impl Core {
             available_commands: Vec::new(),
             steerable: false,
             rate_limited: false,
+            limit_resets_at: None,
+            limit_resume: None,
             schedule_id,
             custom_agent_id,
             model: if req.provider == Provider::Local {
@@ -2358,6 +2365,8 @@ impl Core {
     }
 
     pub async fn stop_agent(&self, agent_id: &str) -> Result<()> {
+        // Stopping an agent that waits out a usage limit takes it out of the automatic resume.
+        self.limit_wait_ended(agent_id);
         let ctx = self.ctx(agent_id);
         // A start in progress is abandoned and its process killed right away (a
         // hung handshake would otherwise linger until its timeout).
@@ -2875,6 +2884,8 @@ impl Core {
             a.needs_briefing = true;
             a.running = false;
             a.rate_limited = false;
+            a.limit_resets_at = None;
+            a.limit_resume = None;
             if matches!(a.status, AgentStatus::Error | AgentStatus::Interrupted) {
                 a.status = AgentStatus::Idle;
             }

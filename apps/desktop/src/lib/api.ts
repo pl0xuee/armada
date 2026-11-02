@@ -166,6 +166,8 @@ const tauriApi = {
     invoke<void>("respond_permission", { agentId, requestId, optionId }),
   resumeAgent: (agentId: string, autoContinue: boolean) => invoke<void>("resume_agent", { agentId, autoContinue }),
   stopAgent: (agentId: string) => invoke<void>("stop_agent", { agentId }),
+  /** "Don't auto-resume this one": the agent keeps waiting at its usage limit for you. */
+  cancelLimitResume: (agentId: string) => invoke<Agent>("cancel_limit_resume", { agentId }),
   /**
    * With removeWorktree and no force, fails with "Unsaved work: …" when the worktree has
    * uncommitted changes or unmerged commits; retry with force to discard them.

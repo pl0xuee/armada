@@ -877,6 +877,7 @@ mod tests {
                 text: format!("m{seq}"),
                 attachments: Vec::new(),
                 mid_turn,
+                automatic: false,
             },
         };
         for (seq, mid) in [(1, false), (2, true), (3, false), (4, false)] {

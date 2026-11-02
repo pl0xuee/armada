@@ -2,6 +2,7 @@ import { ArrowRightLeft, ChevronDown, Gauge, Play, RotateCcw, Settings2, UserPlu
 import { useMemo, useState } from "react";
 import { attempt, switchAccount } from "@/lib/actions";
 import { api } from "@/lib/api";
+import { waitingToResume } from "@/lib/limitResume";
 import { resetClause, withoutReset } from "@/lib/pinned";
 import { PROVIDERS } from "@/lib/providers";
 import type { Account, Agent } from "@/lib/types";
@@ -10,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { useUi } from "@/store/ui";
 import { AccountAvatar } from "../AccountAvatar";
 import { ProviderGlyph } from "../ProviderGlyph";
+import { ResumeLine } from "./ResumesAt";
 import { Button } from "../ui/button";
 import {
   DropdownMenu,
@@ -48,7 +50,11 @@ export function RateLimitBanner({ agent, embedded = false }: { agent: Agent; emb
     }
     return null;
   });
-  const lastPrompt = useApp((s) => s.items[agent.id]?.findLast((i) => i.kind === "user_message"));
+  // What to re-send: the user's own last message, not our automatic "continue".
+  const lastPrompt = useApp((s) => s.items[agent.id]?.findLast((i) => i.kind === "user_message" && !i.automatic));
+  const resumeOn = useApp((s) => s.settings?.resumeAfterLimit ?? true);
+  // With the resume line below there is no need for the provider's own "resets at" badge.
+  const waiting = waitingToResume(agent, resumeOn);
   const retry = async () => {
     if (lastPrompt?.kind !== "user_message") return;
     setBusy(true);
@@ -100,12 +106,13 @@ export function RateLimitBanner({ agent, embedded = false }: { agent: Agent; emb
         <div className="min-w-[200px] flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <span className="text-[13px] font-semibold">Usage limit reached</span>
-            {reset && (
+            {reset && !waiting && (
               <span className="rounded-md border border-warn/30 bg-warn/10 px-1.5 py-px text-[11.5px] font-medium text-warn">
                 {reset}
               </span>
             )}
           </div>
+          <ResumeLine agent={agent} className="mt-0.5" />
           <div className="line-clamp-2 text-[12px] leading-snug text-muted [@media(max-height:700px)]:line-clamp-1">
             {current ? `${provider} · ${current.name}. ` : `${provider}. `}
             {!reset && detail ? `${detail} ` : ""}
