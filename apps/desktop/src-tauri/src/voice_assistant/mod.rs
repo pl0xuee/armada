@@ -29,9 +29,23 @@ use session::{ApiKey, Control, EndReason, SessionConfig, VaEvent, VaSink, VaStat
 
 pub const EVENT: &str = "va-event";
 
+/// What the window is showing, pushed by the UI while the assistant runs so the user
+/// needn't say it ("this agent", "the highlighted text"). Read by the `get_screen` tool.
+#[derive(Debug, Default, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ScreenContext {
+    pub view: String,
+    pub agent_id: Option<String>,
+    pub settings_section: Option<String>,
+    pub mission_tab: Option<String>,
+    pub review_agent_id: Option<String>,
+    pub selected_text: Option<String>,
+}
+
 #[derive(Default)]
 pub struct VoiceAssistant {
     control: Mutex<Option<UnboundedSender<Control>>>,
+    screen: Arc<Mutex<ScreenContext>>,
 }
 
 impl VoiceAssistant {
@@ -184,6 +198,7 @@ pub async fn va_start(
     va.claim(&ctl_tx)?;
 
     let core = (*core).clone();
+    let screen = va.screen.clone();
     let sink: Arc<dyn VaSink> = Arc::new(TauriSink {
         app: app.clone(),
         ledger: Mutex::new(cost::SessionLedger::new(core.data_dir())),
@@ -194,7 +209,12 @@ pub async fn va_start(
         sink: sink.clone(),
         finished: false,
     };
-    let host = Arc::new(host::KvistcodeTools::new(app.clone(), core, sink.clone()));
+    let host = Arc::new(host::KvistcodeTools::new(
+        app.clone(),
+        core,
+        sink.clone(),
+        screen,
+    ));
     tauri::async_runtime::spawn(async move {
         let devices = Box::new(audio::SystemAudio { input_device });
         let end = session::run(cfg, sink.clone(), host, devices, ctl_rx).await;
@@ -232,6 +252,12 @@ pub fn va_set_muted(va: State<'_, VoiceAssistant>, muted: bool) {
     } else {
         Control::Resume
     });
+}
+
+/// The UI reports what is on screen (view, open agent, highlighted text).
+#[tauri::command]
+pub fn va_set_screen(va: State<'_, VoiceAssistant>, screen: ScreenContext) {
+    *va.screen.lock() = screen;
 }
 
 /// The user's answer to a confirmation card.

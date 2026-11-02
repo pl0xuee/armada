@@ -33,7 +33,7 @@ export type VaEvent =
   | ({ type: "caption" } & VaCaption)
   | ({ type: "action" } & VaAction)
   | { type: "usage"; elapsedSecs: number; costUsd: number }
-  | { type: "navigate"; view: string; agentId: string | null }
+  | { type: "navigate"; view: string; agentId: string | null; section?: string | null }
   | ({ type: "confirm_action" } & VaConfirm)
   | { type: "confirm_done"; id: string; status: "confirmed" | "cancelled" | "expired" }
   | { type: "notice"; message: string | null }

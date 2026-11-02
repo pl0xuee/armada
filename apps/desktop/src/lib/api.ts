@@ -72,6 +72,7 @@ import type {
 } from "./projectConfig";
 import type { InstructionSave, SkillDoc, SkillInfo, SkillScope, SkillToggles, SwitchScope } from "./toolkit";
 import { onVoiceBus } from "./voiceBus";
+import type { ScreenContext } from "./screenContext";
 import type { VaEvent } from "./voiceAssistant";
 
 export const EVENT_CHANNEL = "kvistcode://event";
@@ -447,6 +448,7 @@ const tauriApi = {
   vaStart: () => invoke<void>("va_start"),
   vaStop: () => invoke<void>("va_stop"),
   vaSetMuted: (muted: boolean) => invoke<void>("va_set_muted", { muted }),
+  vaSetScreen: (screen: ScreenContext) => invoke<void>("va_set_screen", { screen }),
   vaConfirm: (id: string, accept: boolean) => invoke<void>("va_confirm", { id, accept }),
   vaActive: () => invoke<boolean>("va_active"),
   vaUsage: () => invoke<VoiceAssistantUsage>("va_usage"),

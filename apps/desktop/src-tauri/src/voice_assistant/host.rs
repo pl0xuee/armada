@@ -19,6 +19,9 @@ use super::tools::{self, basename, clean, AgentRef, OpenView, Resolved, ToolCall
 
 /// A voice-started agent with the same project and prompt inside this window is the
 /// same request retried (a tool timeout makes the model ask again), not a new one.
+/// Highlighted text handed to the model is cut to this many characters.
+const MAX_SELECTION_CHARS: usize = 500;
+
 const DUPLICATE_WINDOW: Duration = Duration::from_secs(120);
 
 #[derive(Clone)]
@@ -26,16 +29,24 @@ pub struct KvistcodeTools {
     app: AppHandle,
     core: Core,
     sink: Arc<dyn VaSink>,
+    /// What the window shows, as last reported by the UI.
+    screen: Arc<Mutex<super::ScreenContext>>,
     /// (project path + prompt, when, agent id) of agents this session started.
     recent: Arc<Mutex<Vec<(String, Instant, String)>>>,
 }
 
 impl KvistcodeTools {
-    pub fn new(app: AppHandle, core: Core, sink: Arc<dyn VaSink>) -> Self {
+    pub fn new(
+        app: AppHandle,
+        core: Core,
+        sink: Arc<dyn VaSink>,
+        screen: Arc<Mutex<super::ScreenContext>>,
+    ) -> Self {
         KvistcodeTools {
             app,
             core,
             sink,
+            screen,
             recent: Arc::default(),
         }
     }
@@ -220,7 +231,12 @@ impl KvistcodeTools {
             }
             ToolCall::SendMessage { agent, text } => self.send_message(&agent, &text).await,
             ToolCall::StopAgent { agent } => self.stop_agent(&agent).await,
-            ToolCall::Open { view, agent } => self.open(view, agent.as_deref()),
+            ToolCall::Open {
+                view,
+                agent,
+                section,
+            } => self.open(view, agent.as_deref(), section),
+            ToolCall::GetScreen => self.get_screen(),
             ToolCall::RequestApprovalReview { agent } => self.request_approval(&agent),
             ToolCall::ListProjects => self.list_projects().await,
             ToolCall::GetUsage => self.get_usage(),
@@ -581,7 +597,7 @@ impl KvistcodeTools {
         }
     }
 
-    fn open(&self, view: OpenView, agent: Option<&str>) -> ToolOutcome {
+    fn open(&self, view: OpenView, agent: Option<&str>, section: Option<String>) -> ToolOutcome {
         let agent = match agent {
             Some(q) => match self.resolve(q) {
                 Ok(a) => Some(a),
@@ -603,17 +619,59 @@ impl KvistcodeTools {
         self.sink.emit(VaEvent::Navigate {
             view: view.as_str().into(),
             agent_id: agent.as_ref().map(|a| a.id.clone()),
+            section: section.clone(),
         });
+        let label = match &section {
+            Some(sec) => format!("{label} ({sec})"),
+            None => label.to_string(),
+        };
         let summary = match &agent {
             Some(a) => format!("Opened {label} for '{}'", a.title),
             None => format!("Opened {label}"),
         };
         done(
-            json!({ "opened": view.as_str() }),
+            json!({ "opened": view.as_str(), "section": section }),
             "open",
             summary,
             agent.map(|a| a.id),
         )
+    }
+
+    fn get_screen(&self) -> ToolOutcome {
+        let s = self.screen.lock().clone();
+        if s.view.is_empty() {
+            return ok(
+                json!({ "known": false, "note": "The window hasn't reported what it shows." }),
+            );
+        }
+        let agents = self.core.agents().unwrap_or_default();
+        let describe = |id: &Option<String>| {
+            id.as_ref()
+                .and_then(|id| agents.iter().find(|a| &a.id == id))
+                .map(|a| {
+                    json!({
+                        "id": a.id,
+                        "title": a.title,
+                        "provider": a.provider.as_str(),
+                        "status": serde_json::to_value(a.status).unwrap_or(Value::Null),
+                        "project": basename(&a.project_path),
+                    })
+                })
+        };
+        let selected = s
+            .selected_text
+            .as_deref()
+            .map(|t| clean(t, MAX_SELECTION_CHARS))
+            .filter(|t| !t.trim().is_empty());
+        ok(json!({
+            "known": true,
+            "screen": s.view,
+            "agent": describe(&s.agent_id),
+            "settingsSection": s.settings_section,
+            "missionControlTab": s.mission_tab,
+            "diffReviewOf": describe(&s.review_agent_id),
+            "highlightedText": selected,
+        }))
     }
 
     async fn list_projects(&self) -> ToolOutcome {
@@ -765,6 +823,7 @@ impl KvistcodeTools {
         self.sink.emit(VaEvent::Navigate {
             view: "agents".into(),
             agent_id: Some(agent.id.clone()),
+            section: None,
         });
         done(
             json!({ "pending": true, "requests": pending,

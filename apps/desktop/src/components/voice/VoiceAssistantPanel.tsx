@@ -1,4 +1,4 @@
-import { ArrowUpRight, Mic, MicOff, Square, X } from "lucide-react";
+import { ArrowUpRight, Check, Mic, MicOff, Square, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -79,7 +79,9 @@ function PanelBody() {
     <section
       role="region"
       aria-label="Voice assistant"
-      className="view-enter texture edge fixed bottom-[var(--composer-clear,1rem)] right-4 z-40 flex w-[340px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-line-strong bg-panel shadow-[0_18px_50px_-12px_rgba(0,0,0,0.6)]"
+      className={cn("view-enter texture edge fixed bottom-[var(--composer-clear,1rem)] right-4 z-40 flex w-[340px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border bg-panel shadow-[0_18px_50px_-12px_rgba(0,0,0,0.6)]",
+        live && confirms.length > 0 ? "border-accent/60" : "border-line-strong",
+      )}
     >
       <div className="flex items-center gap-3.5 px-4 pb-3 pt-4">
         <VoiceOrb phase={phase} level={level} />
@@ -89,7 +91,7 @@ function PanelBody() {
             role="status"
             aria-live="polite"
           >
-            {phase === "off" ? "Ended" : PHASE_LABEL[phase]}
+            {live && confirms.length > 0 ? "Needs your OK" : phase === "off" ? "Ended" : PHASE_LABEL[phase]}
           </div>
           <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-steel">
             {paused ? (
@@ -138,31 +140,34 @@ function PanelBody() {
         )}
       </div>
 
-      {live && <AssistantBilling signal={Math.round(cost * 100)} className="border-t border-line px-4 py-2.5" />}
-      {notice && live && (
-        <p role="status" className="border-t border-line px-4 py-2 text-[12px] text-warn">
-          {notice}
-        </p>
-      )}
       {live && confirms.length > 0 && (
-        <div className="space-y-2 border-t border-line px-4 py-3" role="group" aria-label="Confirm action">
+        <div className="space-y-2.5 border-t border-accent/40 bg-accent/5 px-4 py-3" role="group" aria-label="Confirm action">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-accent">
+            Waiting for your OK{confirms.length > 1 ? ` (${confirms.length})` : ""}
+          </div>
           {confirms.map((c, i) => (
-            <div key={c.id} className="rounded-lg border border-accent/40 bg-accent/5 p-2.5">
-              <p className="max-h-[120px] overflow-y-auto whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-fg">
+            <div key={c.id} className="rounded-lg border border-accent/40 bg-panel p-3">
+              <p className="max-h-[120px] overflow-y-auto whitespace-pre-wrap break-words text-[13px] leading-relaxed text-fg">
                 {c.summary}
               </p>
-              <div className="mt-2 flex items-center justify-end gap-2">
-                <Button variant="ghost" size="sm" onClick={() => answerVaConfirm(c.id, false)}>
+              <div className="mt-3 flex items-center gap-2">
+                <Button variant="ghost" size="lg" className="flex-1" onClick={() => answerVaConfirm(c.id, false)}>
                   Cancel{i === 0 && <span className="ml-1 text-[10.5px] text-steel">Esc</span>}
                 </Button>
-                <Button size="sm" onClick={() => answerVaConfirm(c.id, true)}>
-                  Confirm{i === 0 && <span className="ml-1 text-[10.5px] opacity-70">Enter</span>}
+                <Button variant="primary" size="lg" className="flex-[1.4]" onClick={() => answerVaConfirm(c.id, true)}>
+                  <Check /> Confirm{i === 0 && <span className="ml-1 text-[10.5px] opacity-70">Enter</span>}
                 </Button>
               </div>
             </div>
           ))}
         </div>
       )}
+      {notice && live && (
+        <p role="status" className="border-t border-line px-4 py-2 text-[12px] text-warn">
+          {notice}
+        </p>
+      )}
+      {live && <AssistantBilling signal={Math.round(cost * 100)} className="border-t border-line px-4 py-2.5" />}
       {(captions.length > 0 || actions.length > 0) && (
         <div ref={logRef} className="max-h-[220px] space-y-2 overflow-y-auto border-t border-line px-4 py-3">
           {captions.map((c) => (

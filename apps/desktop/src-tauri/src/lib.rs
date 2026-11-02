@@ -73,6 +73,7 @@ macro_rules! handler {
             voice_assistant::va_stop,
             voice_assistant::va_confirm,
             voice_assistant::va_set_muted,
+            voice_assistant::va_set_screen,
             voice_assistant::va_active,
             voice_assistant::va_usage,
             voice_assistant::va_voices,

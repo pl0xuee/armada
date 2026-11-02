@@ -112,6 +112,8 @@ pub enum VaEvent {
     Navigate {
         view: String,
         agent_id: Option<String>,
+        /// A settings section or Mission Control tab.
+        section: Option<String>,
     },
     /// A side effect the model wants; runs only if the user confirms (`va_confirm`).
     ConfirmAction {

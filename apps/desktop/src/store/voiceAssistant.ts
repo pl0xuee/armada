@@ -4,7 +4,8 @@ import { api, onVaEvent } from "@/lib/api";
 import { beginVa, initialVa, isLive, reduceVa, type VaEvent, type VaState } from "@/lib/voiceAssistant";
 import { errorMessage } from "@/lib/utils";
 import { useApp } from "./app";
-import { useUi, type View } from "./ui";
+import { screenContextOf } from "@/lib/screenContext";
+import { useUi, type MissionTab, type SettingsSection, type View } from "./ui";
 
 interface VaStore extends VaState {
   /** Panel is showing (live session, or an error/summary that hasn't been dismissed). */
@@ -21,9 +22,18 @@ export const useVa = create<VaStore>((set) => ({
 /** Screens the assistant can open by name (the tool's names match the window's). */
 const SCREENS: ReadonlySet<string> = new Set(["usage", "schedules", "accounts", "settings", "compare"]);
 
-export function applyNavigation(view: string, agentId: string | null) {
+const SETTINGS_SECTIONS: ReadonlySet<string> = new Set([
+  "appearance", "sounds", "notifications", "behavior", "budgets", "templates", "projects", "toolkit",
+  "providers", "tools", "agents", "remote", "voice", "assistant", "about",
+]); // prettier-ignore
+
+export function applyNavigation(view: string, agentId: string | null, section: string | null = null) {
   const ui = useUi.getState();
-  if (view === "mission_control") ui.setView("mission");
+  if (view === "mission_control") {
+    if (section === "needs" || section === "all") ui.openMission(section as MissionTab);
+    else ui.setView("mission");
+  } else if (view === "settings")
+    ui.openSettings(section && SETTINGS_SECTIONS.has(section) ? (section as SettingsSection) : undefined);
   else if (SCREENS.has(view)) ui.setView(view as View);
   else if (view === "inbox")
     ui.openMission("needs"); // the tool's name for Needs you
@@ -38,8 +48,9 @@ export function applyNavigation(view: string, agentId: string | null) {
 export function connectVoiceAssistant(): () => void {
   let unlisten: (() => void) | null = null;
   let disposed = false;
+  const stopReporting = reportScreen();
   void onVaEvent((e: VaEvent) => {
-    if (e.type === "navigate") applyNavigation(e.view, e.agentId);
+    if (e.type === "navigate") applyNavigation(e.view, e.agentId, e.section ?? null);
     useVa.setState((s) => {
       const next = reduceVa(s, e);
       // A clean end closes the panel; an error stays up until dismissed.
@@ -53,6 +64,41 @@ export function connectVoiceAssistant(): () => void {
   return () => {
     disposed = true;
     unlisten?.();
+    stopReporting();
+  };
+}
+
+/** While a session is live, tell the backend what the window shows (screen, open agent, highlighted text). */
+function reportScreen(): () => void {
+  let last = "";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const push = () => {
+    if (!isLive(useVa.getState())) {
+      last = "";
+      return;
+    }
+    const ctx = screenContextOf(useUi.getState(), window.getSelection()?.toString());
+    const key = JSON.stringify(ctx);
+    if (key === last) return;
+    last = key;
+    api.vaSetScreen(ctx).catch(() => {});
+  };
+  // A drag-select fires many events: send once it settles.
+  const soon = () => {
+    clearTimeout(timer);
+    timer = setTimeout(push, 250);
+  };
+  const offUi = useUi.subscribe(soon);
+  const offVa = useVa.subscribe((s, prev) => {
+    if (isLive(s) !== isLive(prev)) push();
+  });
+  document.addEventListener("selectionchange", soon);
+  push();
+  return () => {
+    clearTimeout(timer);
+    offUi();
+    offVa();
+    document.removeEventListener("selectionchange", soon);
   };
 }
 

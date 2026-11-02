@@ -2,6 +2,7 @@
 // It mirrors the command surface of ./api.ts and emits the same KvistcodeEvents,
 // including simulated streaming, permissions, login terminals and installs.
 
+import type { ScreenContext } from "./screenContext";
 import type { KvistcodeApi } from "./api";
 import { emitVoiceBus } from "./voiceBus";
 import { budgetLevel } from "./budget";
@@ -3217,6 +3218,10 @@ export const mockApi: KvistcodeApi = {
   },
 
   // Mute is the same state as "pause listening" / "go to sleep": paused until unmuted.
+  async vaSetScreen(screen: ScreenContext) {
+    mockVa.screen = screen;
+  },
+
   async vaSetMuted(muted: boolean) {
     if (mockVa.timers.length === 0) return;
     mockVa.phase = muted ? "paused" : "listening";
@@ -3598,7 +3603,11 @@ const MOCK_VOICE_LANGUAGES: [string, string][] = [
   ["es", "Spanish"],
   ["ja", "Japanese"],
 ];
-const mockVa = { timers: [] as ReturnType<typeof setTimeout>[], phase: "listening" };
+const mockVa = {
+  timers: [] as ReturnType<typeof setTimeout>[],
+  phase: "listening",
+  screen: null as ScreenContext | null,
+};
 const mockVoice = {
   installed: new Set<string>(),
   downloading: null as string | null,
