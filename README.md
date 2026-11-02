@@ -232,8 +232,11 @@ cd apps/desktop
 npm ci
 npm run tauri dev      # run the app with hot reload
 npm run dev            # UI only, in a browser, with a realistic mock backend
-npm run tauri build    # produce installers for your OS (the binary is named kvistcode)
+npm run tauri build -- --no-bundle   # just the binary: target/release/kvistcode
+npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'   # installers for your OS
 ```
+
+Release builds use link-time optimisation, so the first one takes a while (7 to 15 minutes in our test, most of it compiling). A plain `npm run tauri build` compiles and bundles, then fails at the very end with "A public key has been found, but no private key", because the project signs its update bundles. Only the maintainer's CI has that key: use one of the two commands above (the second turns update signing off for your local build).
 
 `npm run dev` is how the screenshots above were made: a browser build backed by an in-memory mock with fictional data. The phone companion has the same (`cd apps/remote && npm run dev`).
 
