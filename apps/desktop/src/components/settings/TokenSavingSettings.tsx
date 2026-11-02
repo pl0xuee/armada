@@ -29,7 +29,7 @@ export async function applyTokenSaver(): Promise<boolean> {
 export function TokenSavingSettings({ settings }: { settings: Settings }) {
   const value = settings.autoCompactWindow;
   const options = [
-    { value: "auto", label: "Claude's default" },
+    { value: "auto", label: "Claude's default (off)" },
     ...[...new Set([...SIZES, ...(value && !SIZES.includes(value) ? [value] : [])])]
       .sort((a, b) => a - b)
       .map((n) => ({ value: String(n), label: `${Math.round(n / 1000)}k tokens` })),
