@@ -97,7 +97,7 @@ Each agent has a workspace panel (`` Ctrl/Cmd+` ``) in its own folder:
 
 ### Voice dictation
 
-Press the mic in the message box (Ctrl/Cmd+Shift+D) and speak. Speech is transcribed on your computer with Whisper; audio never leaves it. The speech model is downloaded once, when you choose to (about 142 MB by default).
+Press the mic in the message box (Ctrl/Cmd+Shift+D) and speak. Speech is transcribed on your computer with Whisper; audio never leaves it. The speech model is downloaded once, when you choose to (about 148 MB by default).
 
 ### Voice assistant
 
@@ -189,6 +189,7 @@ Kvistcode is fully usable from the keyboard. Press `Ctrl/Cmd+/` (or `?`) in the 
 | `Ctrl/Cmd+J` | Mission Control: Needs you (again for the next one) |
 | `Ctrl/Cmd+I` | Mission Control: Needs you (same as J) |
 | `Ctrl/Cmd+Shift+M` | Mission Control: All agents |
+| `Ctrl/Cmd+Shift+A` | Voice assistant: start or end (when turned on) |
 | `Ctrl/Cmd+Shift+F` | Search every conversation (or type `?` in the palette) |
 | `Ctrl/Cmd+B` | Show or hide the agent list |
 | `Ctrl/Cmd+1` to `9` | Jump to an agent |
@@ -196,12 +197,15 @@ Kvistcode is fully usable from the keyboard. Press `Ctrl/Cmd+/` (or `?`) in the 
 | `Ctrl/Cmd++` / `-` / `0` | Zoom in / out / reset |
 | `Ctrl/Cmd+/` | Shortcut cheat sheet (also `?`) |
 | `Esc` | Close the open dialog or menu |
-| `Enter` / `Shift+Enter` | Send (queues if busy) / new line |
+| `Enter` / `Shift+Enter` | Send (while the agent works: into the running turn, or queue / helper, per Settings) / new line |
+| `Ctrl/Cmd+Enter` | While the agent works: start a helper agent with this message |
 | `Ctrl/Cmd+Shift+D` | Dictate: start or stop |
 | `/` / `@` | Slash commands / mention a file (in the message box) |
 | `Esc` | Stop this turn (press twice from an empty composer) |
 | `` Ctrl/Cmd+` `` | Show or hide the workspace panel |
+| `Ctrl/Cmd+Shift+P` | Show or hide the web preview beside the conversation |
 | `F2` | Rename the focused agent in the list |
+| `A` / `Y`, `D` / `N` | Allow once / deny a pending approval (`Shift+A` always allow, press twice) |
 | `J` / `K` / `Enter` / `E` / `Shift+E` | In Needs you: next / previous / open / done / archive |
 | `Up` / `Down` (or `j` / `k`), `Enter`, `Ctrl/Cmd+Enter` | In a diff: move between lines, comment on the line, save the comment |
 
@@ -228,8 +232,11 @@ cd apps/desktop
 npm ci
 npm run tauri dev      # run the app with hot reload
 npm run dev            # UI only, in a browser, with a realistic mock backend
-npm run tauri build    # produce installers for your OS (the binary is named kvistcode)
+npm run tauri build -- --no-bundle   # just the binary: target/release/kvistcode
+npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'   # installers for your OS
 ```
+
+Release builds use link-time optimisation, so the first one takes a while (7 to 15 minutes in our test, most of it compiling). A plain `npm run tauri build` compiles and bundles, then fails at the very end with "A public key has been found, but no private key", because the project signs its update bundles. Only the maintainer's CI has that key: use one of the two commands above (the second turns update signing off for your local build).
 
 `npm run dev` is how the screenshots above were made: a browser build backed by an in-memory mock with fictional data. The phone companion has the same (`cd apps/remote && npm run dev`).
 
@@ -256,7 +263,7 @@ apps/desktop/src-tauri/    Tauri shell: commands, tray, sounds, notifications, t
 apps/desktop/src/          React UI
 apps/remote/               phone companion (single-file web app served by the desktop app)
 docs/                      plan, release process and screenshots
-scripts/                   release notes tooling; gen_sounds.py synthesizes the notification sounds
+scripts/                   release notes and CI checks; gen_sounds.py synthesizes the notification sounds
 ```
 
 ## Contributing
@@ -269,7 +276,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 (cd apps/desktop && npx tsc --noEmit && npm test)
 (cd apps/remote && npm test)
+python3 scripts/check_contract.py
+python3 scripts/check_unix_tests.py
 ```
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the details, and [`SECURITY.md`](SECURITY.md) to report a vulnerability privately.
 
 Add a user-facing entry under `## Unreleased` in [`CHANGELOG.md`](CHANGELOG.md) for anything people using the app will notice, written for them rather than as a commit subject.
 

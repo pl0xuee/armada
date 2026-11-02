@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/pl0xuee/kvistcode/security/advisories/new
+    about: Please don't file security problems as public issues.
+  - name: Kvistcode website
+    url: https://kvistcode.com/
+    about: Downloads, guides and the FAQ.
