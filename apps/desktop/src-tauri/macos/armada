@@ -1,0 +1,5 @@
+#!/bin/sh
+# The pre-0.3.0 app (Armada) restarts itself after an in-place update by running its old
+# executable path, which no longer exists once the bundle holds Kvistcode. Without this
+# file the app would just quit after updating. Kvistcode never runs it itself.
+exec "$(dirname "$0")/kvistcode" "$@"

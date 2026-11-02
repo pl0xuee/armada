@@ -133,7 +133,13 @@ pub async fn check(app: &AppHandle) -> anyhow::Result<Option<UpdateInfo>> {
         .map_err(|e| anyhow!("{e}"))?;
 
     if can_self_update() {
-        match app.updater()?.check().await {
+        // No timeout of its own: a connection that stalls would otherwise hang the
+        // "Check for updates" button, and the background loop for good.
+        let checked = match tokio::time::timeout(CHECK_TIMEOUT, app.updater()?.check()).await {
+            Ok(result) => result.map_err(|e| e.to_string()),
+            Err(_) => Err("timed out".to_string()),
+        };
+        match checked {
             Ok(Some(update)) => {
                 let gh = github.as_ref().ok();
                 return Ok(Some(UpdateInfo {
@@ -180,6 +186,8 @@ pub async fn check(app: &AppHandle) -> anyhow::Result<Option<UpdateInfo>> {
 /// exit halfway through replacing itself.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(60);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+/// Least time between two download progress events.
+const PROGRESS_EVERY: Duration = Duration::from_millis(100);
 
 pub async fn install(app: &AppHandle) -> anyhow::Result<()> {
     if !can_self_update() {
@@ -205,13 +213,20 @@ pub async fn install(app: &AppHandle) -> anyhow::Result<()> {
     info!(version = %update.version, "downloading update");
     let progress_core = app.state::<Core>().inner().clone();
     let mut downloaded: u64 = 0;
+    let mut last_emit: Option<std::time::Instant> = None;
     // A stalled download must not leave "already being installed" forever.
     let bytes = tokio::time::timeout(
         DOWNLOAD_TIMEOUT,
         update.download(
             move |chunk, total| {
                 downloaded += chunk as u64;
-                progress_core.emit(KvistcodeEvent::UpdateProgress { downloaded, total });
+                // One call per network chunk (thousands a second on a fast link): the
+                // window and the phone only need a few updates a second.
+                let finished = total.is_some_and(|t| downloaded >= t);
+                if finished || last_emit.is_none_or(|t| t.elapsed() >= PROGRESS_EVERY) {
+                    last_emit = Some(std::time::Instant::now());
+                    progress_core.emit(KvistcodeEvent::UpdateProgress { downloaded, total });
+                }
             },
             || info!("update downloaded"),
         ),
