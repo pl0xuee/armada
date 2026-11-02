@@ -4,6 +4,9 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
+use kvistcode_core::hardware::{self, Hardware};
+use kvistcode_core::local_health::{self, LocalHealth, SpeedResult};
+use kvistcode_core::local_prefs::{self, LocalPrefs};
 use kvistcode_core::{accounts, local, Core, LocalKind, LocalProbe, LocalServer, PullProgress};
 use tauri::ipc::Channel;
 use tauri::State;
@@ -97,4 +100,89 @@ pub fn cancel_local_pull(pull_id: String) {
     {
         flag.store(true, Ordering::SeqCst);
     }
+}
+
+/// The server and API key of a local account.
+fn account_server(core: &Core, account_id: &str) -> CmdResult<(LocalServer, Option<String>)> {
+    let account = core.account(account_id).map_err(|e| format!("{e:#}"))?;
+    let server = account
+        .local
+        .ok_or_else(|| "This isn't a local model account".to_string())?;
+    Ok((server, accounts::get_api_key(account_id)))
+}
+
+/// RAM, GPU and free disk space on this computer.
+#[tauri::command]
+pub async fn local_hardware() -> CmdResult<Hardware> {
+    tauri::async_runtime::spawn_blocking(hardware::detect)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Health, loaded models and fix instructions for a local account's server.
+#[tauri::command]
+pub async fn local_health_account(
+    core: State<'_, Core>,
+    account_id: String,
+) -> CmdResult<LocalHealth> {
+    let (server, key) = account_server(&core, &account_id)?;
+    tauri::async_runtime::spawn_blocking(move || local_health::health(&server, key.as_deref()))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Generates a few tokens to measure how fast a model runs.
+#[tauri::command]
+pub async fn local_speed_test(
+    core: State<'_, Core>,
+    account_id: String,
+    model: String,
+) -> CmdResult<SpeedResult> {
+    let (server, key) = account_server(&core, &account_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        local_health::speed_test(&server, key.as_deref(), &model)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("{e:#}"))
+}
+
+/// Frees the memory of a loaded model.
+#[tauri::command]
+pub async fn local_unload_model(
+    core: State<'_, Core>,
+    account_id: String,
+    model: String,
+) -> CmdResult<()> {
+    let (server, key) = account_server(&core, &account_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        local_health::unload(&server, key.as_deref(), &model)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("{e:#}"))
+}
+
+/// Deletes an Ollama model (and the larger-window copies Kvistcode made of it).
+#[tauri::command]
+pub async fn local_delete_model(
+    core: State<'_, Core>,
+    account_id: String,
+    model: String,
+) -> CmdResult<()> {
+    let (server, _) = account_server(&core, &account_id)?;
+    tauri::async_runtime::spawn_blocking(move || local_health::delete_model(&server, &model))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+pub fn get_local_prefs(core: State<'_, Core>) -> LocalPrefs {
+    local_prefs::load(core.data_dir())
+}
+
+#[tauri::command]
+pub fn set_local_prefs(core: State<'_, Core>, prefs: LocalPrefs) -> CmdResult<()> {
+    local_prefs::save(core.data_dir(), &prefs).map_err(|e| format!("{e:#}"))
 }

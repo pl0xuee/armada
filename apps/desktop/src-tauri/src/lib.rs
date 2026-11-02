@@ -149,6 +149,13 @@ macro_rules! handler {
             local::probe_local_account,
             local::pull_local_model,
             local::cancel_local_pull,
+            local::local_hardware,
+            local::local_health_account,
+            local::local_speed_test,
+            local::local_unload_model,
+            local::local_delete_model,
+            local::get_local_prefs,
+            local::set_local_prefs,
             commands::login_account,
             commands::detect_providers,
             commands::install_provider,
@@ -754,6 +761,13 @@ mod ipc_smoke {
         // Writes a file to Downloads and reveals it.
         "save_diagnostics",
         "detect_local_servers",
+        // Local model servers and hardware probes: network and system tools.
+        "local_hardware",
+        "local_health_account",
+        "local_speed_test",
+        "local_unload_model",
+        "local_delete_model",
+        "set_local_prefs",
     ];
 
     fn src(name: &str) -> String {

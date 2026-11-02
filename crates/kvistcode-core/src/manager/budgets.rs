@@ -122,6 +122,14 @@ impl Core {
     }
 
     /// Cost shown for this agent is an API-equivalent figure, not a bill.
+    fn is_local_agent(&self, agent_id: &str) -> bool {
+        self.inner
+            .agents
+            .lock()
+            .get(agent_id)
+            .is_some_and(|r| r.agent.provider == Provider::Local)
+    }
+
     fn budget_equivalent(&self, agent: &Agent) -> bool {
         self.inner
             .accounts
@@ -133,6 +141,11 @@ impl Core {
     /// An agent's spend went up by `usd` and `tokens` (already stored on the agent):
     /// counts it toward the day, and raises the notices for limits that crossed.
     pub(crate) fn budget_observe(&self, agent_id: &str, usd: f64, tokens: f64) {
+        // Local models cost nothing and use no subscription: they never count against
+        // the daily limits.
+        if self.is_local_agent(agent_id) {
+            return;
+        }
         let today = Local::now().date_naive();
         self.inner
             .budget
@@ -151,11 +164,13 @@ impl Core {
         else {
             return;
         };
-        self.inner
-            .budget
-            .lock()
-            .tracker
-            .add_turns(Local::now().date_naive(), 1);
+        if !self.is_local_agent(agent_id) {
+            self.inner
+                .budget
+                .lock()
+                .tracker
+                .add_turns(Local::now().date_naive(), 1);
+        }
         self.budget_check(agent_id, false);
     }
 
