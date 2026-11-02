@@ -2252,7 +2252,7 @@ pub async fn push_base_branch(agent: &Agent) -> anyhow::Result<BaseBranchStatus>
     let pushed = run_opts(
         "git",
         project,
-        &["push", &remote, &refspec],
+        &["push", "--", &remote, &refspec],
         Opts {
             timeout: Some(PUSH_TIMEOUT),
             ..Opts::default()
@@ -2340,7 +2340,7 @@ pub async fn create_pr(
     run_opts(
         "git",
         cwd,
-        &["push", "-u", &remote, branch],
+        &["push", "-u", "--", &remote, branch],
         Opts {
             timeout: Some(PUSH_TIMEOUT),
             ..Opts::default()
@@ -2438,7 +2438,8 @@ pub(crate) async fn push_remote(cwd: &Path, branch: &str) -> anyhow::Result<Stri
         .to_string();
     // "." means a local upstream, which can't host a pull request.
     if !configured.is_empty() && configured != "." {
-        return Ok(configured);
+        // The repository controls this value: never let it be read as a `git push` option.
+        return crate::github::checked_remote(&configured).map(str::to_string);
     }
     let remotes = git(cwd, &["remote"]).await?;
     if remotes.lines().any(|r| r.trim() == "origin") {
@@ -3994,5 +3995,24 @@ mod tests {
             );
         }
         let _ = std::fs::remove_dir_all(scratch);
+    }
+    /// The repository (or the agent in it) controls `branch.<b>.remote`: a value that looks like a
+    /// `git push` option must never be returned as the remote to push to.
+    #[tokio::test]
+    async fn push_remote_refuses_a_remote_that_looks_like_an_option() {
+        let repo = Repo::new();
+        repo.git(&["checkout", "-q", "-b", "feature"]);
+        repo.git(&[
+            "config",
+            "branch.feature.remote",
+            "--receive-pack=touch pwned",
+        ]);
+        let err = push_remote(&repo.dir, "feature")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("isn't a valid remote name"), "{err}");
+        repo.git(&["config", "branch.feature.remote", "origin"]);
+        assert_eq!(push_remote(&repo.dir, "feature").await.unwrap(), "origin");
     }
 }
