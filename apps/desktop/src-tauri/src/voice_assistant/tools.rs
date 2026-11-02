@@ -8,6 +8,8 @@
 //! (agents, projects, usage, search), go to any main screen, see which one the user is on and what they highlighted, and two small
 //! reversible edits (rename, mark done); the rename waits for a confirmation card.
 
+use std::time::{Duration, Instant};
+
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -63,8 +65,17 @@ screen unless they name another), worded as the user said it, for example \"Comm
 the dev branch.\" Do not add steps they did not ask for. The user sees the exact message on the \
 confirmation card and presses Confirm, then the agent does the work; say so in a few words and stop. \
 If no agent is open and none is named, ask which one. Report the result only when the user asks.\n\
-- open goes to any screen, and optionally to a settings section or Mission Control's all/needs tab. \
-It never asks for confirmation; do it as soon as the user names a place.\n\
+- Kvistcode tells you, as a short system note, when the user moves to another screen, agent or \
+project. Take it as context only: do not mention it unless it matters to what they ask, and call \
+get_screen when you need the details. Your sense of \"this\" follows where they are now.\n\
+- open goes to any screen, and optionally to a settings section, Mission Control's all/needs tab, an \
+agent, or a project (its most urgent agent). It never asks for confirmation; do it as soon as the user names a place.\n\
+- list_agents and list_projects number their items 1, 2, 3 and so on, and the user may say \"agent 2\" or \
+\"project 3\". Pass that number as the agent or project argument (\"2\"). A number means the item in \
+your most recent list_agents / list_projects result; agents follow the order of the sidebar, so the first nine \
+also match the Ctrl/Cmd+number shortcuts. If a tool says a number is out of range or the list changed, call \
+the list again and use its numbers: never guess. get_screen gives the number of the agent and project on \
+screen. Use numbers when you read a list aloud; say the title only when it helps.\n\
 - If a tool says candidates are ambiguous, ask the user which one they mean.\n\
 - You cannot approve or deny permission requests, delete or archive agents, commit, merge, push, \
 or change settings. For approvals, use request_approval_review and tell the user to confirm on \
@@ -83,7 +94,7 @@ pub fn tool_schemas() -> Value {
         {
             "type": "function",
             "name": "list_agents",
-            "description": "List the user's agents with id, title, provider, project, status, whether they need the user, running sub-agents and last activity.",
+            "description": "List the user's agents with a number (1, 2, 3, as the user can say \"agent 2\"), id, title, provider, project, status, whether they need the user, running sub-agents and last activity.",
             "parameters": { "type": "object", "properties": {}, "additionalProperties": false }
         },
         {
@@ -92,7 +103,7 @@ pub fn tool_schemas() -> Value {
             "description": "Details of one agent: status, summary of its latest turn, files changed, commands run, pull request / CI state.",
             "parameters": {
                 "type": "object",
-                "properties": { "agent": { "type": "string", "description": "Agent id or part of its title. Leave out for the agent open on screen." } },
+                "properties": { "agent": { "type": "string", "description": "Agent number from list_agents (\"2\"), id, or part of its title. Leave out for the agent open on screen." } },
                 "required": []
             }
         },
@@ -104,7 +115,7 @@ pub fn tool_schemas() -> Value {
                 "type": "object",
                 "properties": {
                     "provider": { "type": "string", "enum": ["claude", "codex", "grok"], "description": "Defaults to claude" },
-                    "project": { "type": "string", "description": "Name of a known project (folder name)" },
+                    "project": { "type": "string", "description": "Number from list_projects (\"3\") or name (folder name) of a known project" },
                     "prompt": { "type": "string", "description": "The task for the agent" },
                     "account": { "type": "string", "description": "Optional account name" }
                 },
@@ -118,7 +129,7 @@ pub fn tool_schemas() -> Value {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "agent": { "type": "string", "description": "Agent id or part of its title. Leave out for the agent open on screen." },
+                    "agent": { "type": "string", "description": "Agent number from list_agents (\"2\"), id, or part of its title. Leave out for the agent open on screen." },
                     "text": { "type": "string" }
                 },
                 "required": ["text"]
@@ -130,14 +141,14 @@ pub fn tool_schemas() -> Value {
             "description": "Cancel the agent's current turn. The agent is kept.",
             "parameters": {
                 "type": "object",
-                "properties": { "agent": { "type": "string", "description": "Agent id or part of its title. Leave out for the agent open on screen." } },
+                "properties": { "agent": { "type": "string", "description": "Agent number from list_agents (\"2\"), id, or part of its title. Leave out for the agent open on screen." } },
                 "required": []
             }
         },
         {
             "type": "function",
             "name": "list_projects",
-            "description": "List the projects Kvistcode knows (folder names), most recent first.",
+            "description": "List the projects Kvistcode knows (folder names) with a number (1, 2, 3, as the user can say \"project 3\"), most recent first, and how many agents each has.",
             "parameters": { "type": "object", "properties": {}, "additionalProperties": false }
         },
         {
@@ -163,7 +174,7 @@ pub fn tool_schemas() -> Value {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "agent": { "type": "string", "description": "Agent id or part of its title. Leave out for the agent open on screen." },
+                    "agent": { "type": "string", "description": "Agent number from list_agents (\"2\"), id, or part of its title. Leave out for the agent open on screen." },
                     "title": { "type": "string", "description": "The new title, a few words" }
                 },
                 "required": ["title"]
@@ -175,7 +186,7 @@ pub fn tool_schemas() -> Value {
             "description": "Dismiss an agent from the needs-you list (triage Done). It comes back if the agent does something new.",
             "parameters": {
                 "type": "object",
-                "properties": { "agent": { "type": "string", "description": "Agent id or part of its title. Leave out for the agent open on screen." } },
+                "properties": { "agent": { "type": "string", "description": "Agent number from list_agents (\"2\"), id, or part of its title. Leave out for the agent open on screen." } },
                 "required": []
             }
         },
@@ -187,7 +198,8 @@ pub fn tool_schemas() -> Value {
                 "type": "object",
                 "properties": {
                     "view": { "type": "string", "enum": ["agents", "mission_control", "inbox", "review", "usage", "schedules", "accounts", "settings", "compare"] },
-                    "agent": { "type": "string", "description": "Agent id or title. For review, leave out to use the agent open on screen." },
+                    "agent": { "type": "string", "description": "Agent number, id or title. For review, leave out to use the agent open on screen. For compare, an agent of the comparison to show." },
+                    "project": { "type": "string", "description": "Project number or name: opens that project's most urgent agent (agents, review or compare). Not together with agent." },
                     "section": { "type": "string", "description": "For settings: appearance, sounds, notifications, behavior, budgets, templates, projects, toolkit, providers, tools, agents, remote, voice, assistant or about. For mission_control: needs or all." }
                 },
                 "required": ["view"]
@@ -196,7 +208,7 @@ pub fn tool_schemas() -> Value {
         {
             "type": "function",
             "name": "get_screen",
-            "description": "What the user is looking at right now: the open screen, the agent on it (id, title, status), the settings section or Mission Control tab, and any text they have highlighted.",
+            "description": "What the user is looking at right now: the open screen, the agent on it (number, id, title, status), its project (number, name), the settings section or Mission Control tab, the comparison, and any text they have highlighted.",
             "parameters": { "type": "object", "properties": {}, "additionalProperties": false }
         },
         {
@@ -205,7 +217,7 @@ pub fn tool_schemas() -> Value {
             "description": "Open the agent's pending permission request on screen. You cannot approve it; tell the user to confirm on screen.",
             "parameters": {
                 "type": "object",
-                "properties": { "agent": { "type": "string", "description": "Agent id or part of its title. Leave out for the agent open on screen." } },
+                "properties": { "agent": { "type": "string", "description": "Agent number from list_agents (\"2\"), id, or part of its title. Leave out for the agent open on screen." } },
                 "required": []
             }
         },
@@ -242,6 +254,7 @@ pub enum ToolCall {
     Open {
         view: OpenView,
         agent: Option<String>,
+        project: Option<String>,
         section: Option<String>,
     },
     GetScreen,
@@ -412,9 +425,25 @@ pub fn parse_call(name: &str, arguments: &str) -> Result<ToolCall, String> {
                     });
                 }
             }
+            let project = a
+                .project
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            if project.is_some() {
+                if agent.is_some() {
+                    return Err("give either agent or project, not both".into());
+                }
+                if !matches!(
+                    view,
+                    OpenView::Agents | OpenView::Review | OpenView::Compare
+                ) {
+                    return Err("project only applies to agents, review and compare".into());
+                }
+            }
             Ok(ToolCall::Open {
                 view,
                 agent,
+                project,
                 section,
             })
         }
@@ -446,6 +475,186 @@ pub fn parse_call(name: &str, arguments: &str) -> Result<ToolCall, String> {
         }),
         other => Err(format!("unknown tool \"{other}\"")),
     }
+}
+
+// ---- numbers -------------------------------------------------------------------------
+
+/// How long a list's numbers stay valid: after that the model must list again.
+pub const NUMBERS_TTL: Duration = Duration::from_secs(30 * 60);
+/// Longest numbers the assistant resolves (agents shown by `list_agents`, projects by `list_projects`).
+pub const MAX_LISTED_AGENTS: usize = 25;
+pub const MAX_LISTED_PROJECTS: usize = 40;
+
+/// "2", "#2", "number 2", "no. 2", "agent 2" or "agent number 2" (`noun` is "agent" or
+/// "project"): the 1-based position the user or model means. 0 is returned as 0 so it is
+/// reported as out of range; more than three digits is not a number (it may be an id).
+pub fn parse_number(query: &str, noun: &str) -> Option<usize> {
+    let toks = tokens(query);
+    let toks: Vec<&str> = toks.iter().map(String::as_str).collect();
+    let digits = match toks.as_slice() {
+        [n] | ["number" | "no", n] => n,
+        [w, n] | [w, "number" | "no", n] if *w == noun => n,
+        _ => return None,
+    };
+    if digits.is_empty() || digits.len() > 3 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+#[derive(Debug, PartialEq)]
+pub enum NumberError {
+    /// No list has been made yet.
+    NoList,
+    /// The list is older than [`NUMBERS_TTL`].
+    Expired,
+    /// The list had this many items.
+    OutOfRange(usize),
+}
+
+/// The ids (agents) or paths (projects) of the last list shown, in order. Numbers are only
+/// ever turned back into these host-side values.
+#[derive(Default)]
+pub struct Listing {
+    items: Vec<String>,
+    at: Option<Instant>,
+}
+
+impl Listing {
+    pub fn set(&mut self, items: Vec<String>, now: Instant) {
+        self.items = items;
+        self.at = Some(now);
+    }
+
+    pub fn is_set(&self) -> bool {
+        self.at.is_some()
+    }
+
+    /// The item with 1-based number `n`.
+    pub fn get(&self, n: usize, now: Instant) -> Result<&str, NumberError> {
+        let at = self.at.ok_or(NumberError::NoList)?;
+        if now.saturating_duration_since(at) > NUMBERS_TTL {
+            return Err(NumberError::Expired);
+        }
+        n.checked_sub(1)
+            .and_then(|i| self.items.get(i))
+            .map(String::as_str)
+            .ok_or(NumberError::OutOfRange(self.items.len()))
+    }
+
+    /// The number of `item` in the last list, if it is in it and the list is fresh.
+    pub fn number_of(&self, item: &str, now: Instant) -> Option<usize> {
+        self.number_where(now, |x| x == item)
+    }
+
+    /// The number of the first item `same` accepts, if the list is fresh.
+    pub fn number_where(&self, now: Instant, same: impl Fn(&str) -> bool) -> Option<usize> {
+        let at = self.at?;
+        if now.saturating_duration_since(at) > NUMBERS_TTL {
+            return None;
+        }
+        self.items.iter().position(|x| same(x)).map(|i| i + 1)
+    }
+}
+
+/// The numbers of the last `list_agents` and `list_projects`.
+#[derive(Default)]
+pub struct Numbering {
+    pub agents: Listing,
+    pub projects: Listing,
+}
+
+/// What the model is told when a number can't be used. Never a guess.
+pub fn number_error(noun: &str, n: usize, e: &NumberError) -> String {
+    let list = format!("list_{noun}s");
+    match e {
+        NumberError::NoList => format!("Call {list} first, then use its numbers."),
+        NumberError::Expired => format!("The {noun} numbers are old. Call {list} again and use its numbers."),
+        NumberError::OutOfRange(len) => format!(
+            "There is no {noun} number {n}: the last list had {len}. Call {list} again and use its numbers."
+        ),
+    }
+}
+
+/// The message for a numbered item that is no longer there (archived, or the folder is gone).
+pub fn number_gone(noun: &str, n: usize) -> String {
+    format!(
+        "{} number {n} is no longer there: the list changed. Call list_{noun}s again and use its numbers.",
+        if noun == "agent" { "Agent" } else { "Project" }
+    )
+}
+
+/// An agent as far as ordering is concerned.
+pub struct OrderKey {
+    pub id: String,
+    pub project: String,
+    /// 0..=4 need the user (most urgent first), 5 is working, 6 the rest.
+    pub rank: u8,
+    pub last_activity: i64,
+}
+
+/// A project folder without a trailing slash, so `/a/b` and `/a/b/` are one project.
+pub fn project_key(path: &str) -> &str {
+    let t = path.trim().trim_end_matches(['/', '\\']);
+    if t.is_empty() {
+        path
+    } else {
+        t
+    }
+}
+
+/// The sidebar's order, project by project: projects with agents that need the user first,
+/// then the most recently active; inside a project the agents that need the user, then the
+/// working ones, then the most recently active. The window reports its own order; this is the
+/// same order for when it hasn't.
+pub fn sidebar_order(keys: Vec<OrderKey>) -> Vec<String> {
+    let mut by_project: Vec<(String, Vec<OrderKey>)> = Vec::new();
+    for k in keys {
+        let p = project_key(&k.project).to_string();
+        match by_project.iter_mut().find(|(x, _)| *x == p) {
+            Some((_, list)) => list.push(k),
+            None => by_project.push((p, vec![k])),
+        }
+    }
+    for (_, list) in &mut by_project {
+        list.sort_by(|a, b| {
+            a.rank
+                .cmp(&b.rank)
+                .then(b.last_activity.cmp(&a.last_activity))
+                .then(a.id.cmp(&b.id))
+        });
+    }
+    let needs = |l: &[OrderKey]| l.iter().any(|k| k.rank < 5);
+    let latest = |l: &[OrderKey]| l.iter().map(|k| k.last_activity).max().unwrap_or(0);
+    by_project.sort_by(|(pa, a), (pb, b)| {
+        needs(b)
+            .cmp(&needs(a))
+            .then(latest(b).cmp(&latest(a)))
+            .then(basename(pa).cmp(&basename(pb)))
+            .then(pa.cmp(pb))
+    });
+    by_project
+        .into_iter()
+        .flat_map(|(_, l)| l.into_iter().map(|k| k.id))
+        .collect()
+}
+
+/// The order the window reported, limited to agents that still exist, then any the window
+/// did not know about in `fallback` order. Ids from the window are only ever used to pick
+/// among `fallback`'s.
+pub fn merge_order(reported: &[String], fallback: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(fallback.len());
+    for id in reported {
+        if fallback.contains(id) && !out.contains(id) {
+            out.push(id.clone());
+        }
+    }
+    for id in fallback {
+        if !out.contains(&id) {
+            out.push(id);
+        }
+    }
+    out
 }
 
 // ---- fuzzy matching ------------------------------------------------------------------
@@ -810,6 +1019,7 @@ mod tests {
                 ToolCall::Open {
                     view,
                     agent: None,
+                    project: None,
                     section: None
                 }
             );
@@ -859,6 +1069,7 @@ mod tests {
             ToolCall::Open {
                 view: OpenView::Settings,
                 agent: None,
+                project: None,
                 section: Some("budgets".into())
             }
         );
@@ -867,12 +1078,141 @@ mod tests {
             ToolCall::Open {
                 view: OpenView::MissionControl,
                 agent: None,
+                project: None,
                 section: Some("all".into())
             }
         );
         assert!(parse_call("open", r#"{"view":"settings","section":"nope"}"#).is_err());
         assert!(parse_call("open", r#"{"view":"usage","section":"all"}"#).is_err());
         assert!(parse_call("open", r#"{"view":"settings","section":" "}"#).is_ok());
+    }
+
+    #[test]
+    fn numbers_are_read_in_every_spoken_form() {
+        for q in [
+            "2",
+            " 2 ",
+            "#2",
+            "number 2",
+            "No. 2",
+            "agent 2",
+            "Agent #2",
+            "agent number 2",
+        ] {
+            assert_eq!(parse_number(q, "agent"), Some(2), "{q}");
+        }
+        for q in ["2", "#3", "project 3", "Project number 3"] {
+            assert!(parse_number(q, "project").is_some(), "{q}");
+        }
+        // The wrong noun, titles, ids and long digit runs are not numbers.
+        assert_eq!(parse_number("project 2", "agent"), None);
+        assert_eq!(parse_number("agent 2", "project"), None);
+        assert_eq!(parse_number("billing 2", "agent"), None);
+        assert_eq!(parse_number("agent 2 refactor", "agent"), None);
+        assert_eq!(parse_number("1234", "agent"), None);
+        assert_eq!(parse_number("a1b2c3d4", "agent"), None);
+        assert_eq!(parse_number("", "agent"), None);
+        assert_eq!(parse_number("agent", "agent"), None);
+        assert_eq!(parse_number("0", "agent"), Some(0));
+    }
+
+    #[test]
+    fn a_listing_resolves_numbers_only_against_its_own_fresh_list() {
+        let t0 = Instant::now();
+        let mut l = Listing::default();
+        assert!(!l.is_set());
+        assert_eq!(l.get(1, t0), Err(NumberError::NoList));
+        l.set(vec!["a".into(), "b".into(), "c".into()], t0);
+        assert_eq!(l.get(1, t0), Ok("a"));
+        assert_eq!(l.get(3, t0), Ok("c"));
+        assert_eq!(l.get(0, t0), Err(NumberError::OutOfRange(3)));
+        assert_eq!(l.get(4, t0), Err(NumberError::OutOfRange(3)));
+        assert_eq!(l.number_of("b", t0), Some(2));
+        assert_eq!(l.number_of("zzz", t0), None);
+        assert_eq!(l.number_where(t0, |x| x.starts_with('c')), Some(3));
+        let old = t0 + NUMBERS_TTL + Duration::from_secs(1);
+        assert_eq!(l.get(1, old), Err(NumberError::Expired));
+        assert_eq!(l.number_of("b", old), None);
+        // A new list replaces the old numbers entirely.
+        l.set(vec!["c".into()], old);
+        assert_eq!(l.get(1, old), Ok("c"));
+        assert_eq!(l.get(2, old), Err(NumberError::OutOfRange(1)));
+    }
+
+    #[test]
+    fn number_errors_tell_the_model_to_list_again() {
+        let e = number_error("agent", 7, &NumberError::OutOfRange(3));
+        assert!(
+            e.contains("number 7") && e.contains("had 3") && e.contains("list_agents again"),
+            "{e}"
+        );
+        assert!(number_error("project", 1, &NumberError::Expired).contains("list_projects again"));
+        assert!(number_error("agent", 1, &NumberError::NoList).contains("list_agents"));
+        assert!(number_gone("project", 2).contains("list_projects again"));
+    }
+
+    fn key(id: &str, project: &str, rank: u8, at: i64) -> OrderKey {
+        OrderKey {
+            id: id.into(),
+            project: project.into(),
+            rank,
+            last_activity: at,
+        }
+    }
+
+    #[test]
+    fn the_fallback_order_groups_by_project_like_the_sidebar() {
+        let order = sidebar_order(vec![
+            key("quiet-old", "/p/old", 6, 10),
+            key("work-new", "/p/new/", 5, 90),
+            key("rest-new", "/p/new", 6, 100),
+            key("needs-old", "/p/old", 3, 5),
+            key("lone", "/p/lone", 6, 50),
+        ]);
+        // /p/old has an agent that needs the user, so it leads; inside a project need, then working, then recent.
+        assert_eq!(
+            order,
+            ["needs-old", "quiet-old", "work-new", "rest-new", "lone"].map(String::from)
+        );
+        assert!(sidebar_order(vec![]).is_empty());
+    }
+
+    #[test]
+    fn the_windows_order_wins_but_only_over_agents_that_exist() {
+        let fallback = vec!["a".to_string(), "b".into(), "c".into()];
+        let reported = vec!["c".to_string(), "ghost".into(), "a".into(), "c".into()];
+        assert_eq!(merge_order(&reported, fallback.clone()), ["c", "a", "b"]);
+        assert_eq!(merge_order(&[], fallback.clone()), fallback);
+    }
+
+    #[test]
+    fn open_takes_a_project_only_where_it_makes_sense() {
+        assert_eq!(
+            parse_call("open", r#"{"view":"agents","project":" 3 "}"#).unwrap(),
+            ToolCall::Open {
+                view: OpenView::Agents,
+                agent: None,
+                project: Some("3".into()),
+                section: None
+            }
+        );
+        assert!(parse_call("open", r#"{"view":"review","project":"x"}"#).is_ok());
+        assert!(
+            parse_call("open", r#"{"view":"agents","project":"x","agent":"y"}"#)
+                .unwrap_err()
+                .contains("not both")
+        );
+        assert!(parse_call("open", r#"{"view":"usage","project":"x"}"#).is_err());
+        assert!(parse_call("open", r#"{"view":"agents","project":" "}"#).is_ok());
+    }
+
+    #[test]
+    fn the_model_is_told_about_numbers() {
+        let i = instructions();
+        assert!(i.contains("agent 2") && i.contains("project 3") && i.contains("never guess"));
+        let schemas = tool_schemas().to_string();
+        assert!(schemas.contains("Agent number from list_agents"));
+        assert!(schemas.contains("Number from list_projects"));
     }
 
     #[test]

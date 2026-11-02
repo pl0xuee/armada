@@ -33,3 +33,29 @@ describe("assistant navigation to a section", () => {
     expect(useUi.getState().missionTab).toBe("needs");
   });
 });
+
+describe("assistant navigation to an agent's comparison", () => {
+  it("opens the comparison the agent belongs to, or the Compare screen when it has none", async () => {
+    const { useApp } = await import("./app");
+    const base = useApp.getState().agents;
+    useApp.setState({
+      agents: {
+        ...base,
+        c1: { groupId: "grp-1" } as never,
+        c2: { groupId: null } as never,
+      },
+    });
+    applyNavigation("compare", "c1");
+    expect(useUi.getState().view).toBe("compare");
+    expect(useUi.getState().compareGroupId).toBe("grp-1");
+    applyNavigation("compare", "c2");
+    expect(useUi.getState().view).toBe("compare");
+    useApp.setState({ agents: base });
+  });
+  it("opens a named agent on the Agents screen (also what opening a project does)", () => {
+    applyNavigation("usage", null);
+    applyNavigation("agents", "a9");
+    expect(useUi.getState().view).toBe("agents");
+    expect(useUi.getState().selectedAgentId).toBe("a9");
+  });
+});

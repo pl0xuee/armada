@@ -206,6 +206,8 @@ pub enum Control {
     /// the microphone released until [`Control::Resume`].
     Pause,
     Resume,
+    /// The user moved to another screen, agent or project: a silent note for the model.
+    Screen(String),
     /// The user answered a `ConfirmAction` card.
     Confirm {
         id: String,
@@ -616,6 +618,8 @@ async fn connection_inner(
                     return ConnEnd::Paused;
                 }
                 Some(Control::Resume) => {}
+                // Context only: no reply is asked for, so nothing is said aloud.
+                Some(Control::Screen(note)) => { send!(p::system_note(&note)); }
                 Some(Control::Confirm { id, accept }) => {
                     if let Some(entry) = pending.remove(&id) {
                         ui.emit(VaEvent::ConfirmDone { id, status: if accept { "confirmed" } else { "cancelled" } });

@@ -9,6 +9,7 @@ mod audio;
 mod cost;
 mod host;
 mod protocol;
+mod screen;
 mod session;
 #[cfg(test)]
 mod tests;
@@ -25,22 +26,12 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tracing::warn;
 
 use crate::commands::CmdResult;
+pub use screen::ScreenContext;
 use session::{ApiKey, Control, EndReason, SessionConfig, VaEvent, VaSink, VaState};
 
 pub const EVENT: &str = "va-event";
-
-/// What the window is showing, pushed by the UI while the assistant runs so the user
-/// needn't say it ("this agent", "the highlighted text"). Read by the `get_screen` tool.
-#[derive(Debug, Default, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct ScreenContext {
-    pub view: String,
-    pub agent_id: Option<String>,
-    pub settings_section: Option<String>,
-    pub mission_tab: Option<String>,
-    pub review_agent_id: Option<String>,
-    pub selected_text: Option<String>,
-}
+/// Most agents of the window's order that are kept (more than a person has open).
+const MAX_REPORTED_AGENTS: usize = 200;
 
 #[derive(Default)]
 pub struct VoiceAssistant {
@@ -196,6 +187,8 @@ pub async fn va_start(
     let input_device = core.settings().ok().and_then(|s| s.voice.input_device);
     let (ctl_tx, ctl_rx) = unbounded_channel();
     va.claim(&ctl_tx)?;
+    // A new session starts from what the window shows now, not from where the last one ended.
+    *va.screen.lock() = ScreenContext::default();
 
     let core = (*core).clone();
     let screen = va.screen.clone();
@@ -254,10 +247,36 @@ pub fn va_set_muted(va: State<'_, VoiceAssistant>, muted: bool) {
     });
 }
 
-/// The UI reports what is on screen (view, open agent, highlighted text).
+/// The UI reports what is on screen (view, open agent, highlighted text). When the user has
+/// moved (another screen, agent or project) the model is told quietly, so it needn't be asked.
 #[tauri::command]
-pub fn va_set_screen(va: State<'_, VoiceAssistant>, screen: ScreenContext) {
-    *va.screen.lock() = screen;
+pub fn va_set_screen(
+    va: State<'_, VoiceAssistant>,
+    core: State<'_, Core>,
+    mut screen: ScreenContext,
+) {
+    screen.agent_order.truncate(MAX_REPORTED_AGENTS);
+    // The folder of the agent in focus; kept while the user is on a screen without one, so
+    // coming back to a different project counts as switching.
+    let focus = screen
+        .agent_id
+        .clone()
+        .or_else(|| screen.review_agent_id.clone());
+    let project = focus.and_then(|id| {
+        core.agents()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|a| a.id == id)
+            .map(|a| a.project_path)
+    });
+    let prev = {
+        let mut cur = va.screen.lock();
+        screen.project = project.or_else(|| cur.project.clone());
+        std::mem::replace(&mut *cur, screen.clone())
+    };
+    if let Some(note) = screen::screen_change_note(&prev, &screen) {
+        va.send(Control::Screen(note));
+    }
 }
 
 /// The user's answer to a confirmation card.

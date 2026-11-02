@@ -15,7 +15,9 @@ use tauri::Manager;
 use super::session::{
     ActionLog, PendingAction, ToolFuture, ToolHost, ToolOutcome, VaEvent, VaSink,
 };
-use super::tools::{self, basename, clean, AgentRef, OpenView, Resolved, ToolCall};
+use super::tools::{
+    self, basename, clean, project_key, AgentRef, Numbering, OpenView, OrderKey, Resolved, ToolCall,
+};
 
 /// A voice-started agent with the same project and prompt inside this window is the
 /// same request retried (a tool timeout makes the model ask again), not a new one.
@@ -33,6 +35,8 @@ pub struct KvistcodeTools {
     screen: Arc<Mutex<super::ScreenContext>>,
     /// (project path + prompt, when, agent id) of agents this session started.
     recent: Arc<Mutex<Vec<(String, Instant, String)>>>,
+    /// What "agent 2" and "project 3" mean: the last lists given to the model.
+    numbers: Arc<Mutex<Numbering>>,
 }
 
 impl KvistcodeTools {
@@ -48,6 +52,7 @@ impl KvistcodeTools {
             sink,
             screen,
             recent: Arc::default(),
+            numbers: Arc::default(),
         }
     }
 }
@@ -154,6 +159,39 @@ pub fn needs_you(a: &Agent) -> Option<String> {
     None
 }
 
+/// Where an agent sorts in the sidebar: 0..=4 it needs the user (most urgent first), 5 working,
+/// 6 the rest. Mirrors the window's own `needsAttention`.
+fn order_rank(a: &Agent) -> u8 {
+    if a.pending_permissions > 0 || a.status == AgentStatus::NeedsPermission {
+        return 0;
+    }
+    if a.budget_hold.is_some() {
+        return 1;
+    }
+    let dismissed = a.acknowledged_at.is_some_and(|t| t >= a.last_activity_at);
+    if !dismissed {
+        if a.rate_limited {
+            return 2;
+        }
+        if a.status == AgentStatus::Error {
+            return 3;
+        }
+        if a.unread
+            && matches!(
+                a.status,
+                AgentStatus::Idle | AgentStatus::Stopped | AgentStatus::Interrupted
+            )
+        {
+            return 4;
+        }
+    }
+    if matches!(a.status, AgentStatus::Working | AgentStatus::Starting) {
+        5
+    } else {
+        6
+    }
+}
+
 /// Sub-agents still working: in-flight calls, plus background ones while the turn runs.
 pub fn running_subagents(items: &[TimelineItem], agent_running: bool) -> usize {
     items
@@ -204,6 +242,12 @@ fn daily_budget(s: &kvistcode_core::budget::BudgetStatus) -> Value {
     })
 }
 
+/// Said with the usage numbers so the model doesn't mistake the daily budget for a bill.
+const USAGE_NOTE: &str = "Cost is the API-equivalent estimate; subscriptions are limited by the \
+percent used, not by cost. dailyBudget counts every agent's usage at API prices, subscription agents \
+included, so it is not what any key is billed; the assistant's own OpenAI spend is the month ledger \
+(shown in the assistant panel). The remaining prepaid credit on an API key can't be read.";
+
 /// "in 2 h" for a reset time (or "now" when it has passed).
 fn ago_until(now: i64, at: i64) -> String {
     let s = ((at - now) / 1000).max(0);
@@ -234,9 +278,13 @@ impl KvistcodeTools {
             ToolCall::Open {
                 view,
                 agent,
+                project,
                 section,
-            } => self.open(view, agent.as_deref(), section),
-            ToolCall::GetScreen => self.get_screen(),
+            } => {
+                self.open(view, agent.as_deref(), project.as_deref(), section)
+                    .await
+            }
+            ToolCall::GetScreen => self.get_screen().await,
             ToolCall::RequestApprovalReview { agent } => self.request_approval(&agent),
             ToolCall::ListProjects => self.list_projects().await,
             ToolCall::GetUsage => self.get_usage(),
@@ -266,6 +314,9 @@ impl KvistcodeTools {
         } else {
             query
         };
+        if let Some(n) = tools::parse_number(query, "agent") {
+            return self.agent_by_number(n);
+        }
         let agents = self
             .core
             .agents()
@@ -298,18 +349,82 @@ impl KvistcodeTools {
         }
     }
 
-    fn list_agents(&self) -> ToolOutcome {
-        let mut agents = match self.core.agents() {
-            Ok(a) => a,
-            Err(e) => return fail(&format!("{e:#}")),
-        };
+    /// The agents that are not archived, in the order the user sees them: the window's own
+    /// order when it has reported one, the same rules otherwise.
+    fn ordered_agents(&self) -> Result<Vec<Agent>, String> {
+        let mut agents = self.core.agents().map_err(|e| format!("{e:#}"))?;
         agents.retain(|a| !a.archived);
-        agents.sort_by_key(|a| std::cmp::Reverse(a.last_activity_at));
+        let fallback = tools::sidebar_order(
+            agents
+                .iter()
+                .map(|a| OrderKey {
+                    id: a.id.clone(),
+                    project: a.project_path.clone(),
+                    rank: order_rank(a),
+                    last_activity: a.last_activity_at,
+                })
+                .collect(),
+        );
+        let order = tools::merge_order(&self.screen.lock().agent_order, fallback);
+        let mut by_id: std::collections::HashMap<String, Agent> =
+            agents.into_iter().map(|a| (a.id.clone(), a)).collect();
+        Ok(order.iter().filter_map(|id| by_id.remove(id)).collect())
+    }
+
+    /// Makes `ordered` the numbered list the model knows.
+    fn number_agents(&self, ordered: &[Agent]) {
+        let ids = ordered
+            .iter()
+            .take(tools::MAX_LISTED_AGENTS)
+            .map(|a| a.id.clone())
+            .collect();
+        self.numbers.lock().agents.set(ids, Instant::now());
+    }
+
+    /// "Agent 2": the agent that had that number in the last list. With no list yet it is the
+    /// same order the user sees. Never a guess: a number that is out of range, old, or whose
+    /// agent is gone is an error that says to list again.
+    fn agent_by_number(&self, n: usize) -> Result<Agent, Box<ToolOutcome>> {
+        let ordered = self.ordered_agents().map_err(|e| Box::new(fail(&e)))?;
+        let now = Instant::now();
+        let id = {
+            let mut nums = self.numbers.lock();
+            if !nums.agents.is_set() {
+                let ids = ordered
+                    .iter()
+                    .take(tools::MAX_LISTED_AGENTS)
+                    .map(|a| a.id.clone())
+                    .collect();
+                nums.agents.set(ids, now);
+            }
+            nums.agents
+                .get(n, now)
+                .map(str::to_string)
+                .map_err(|e| Box::new(fail(&tools::number_error("agent", n, &e))))?
+        };
+        ordered
+            .into_iter()
+            .find(|a| a.id == id)
+            .ok_or_else(|| Box::new(fail(&tools::number_gone("agent", n))))
+    }
+
+    /// The number of an agent in the list the model has, if it is in it.
+    fn agent_number(&self, id: &str) -> Option<usize> {
+        self.numbers.lock().agents.number_of(id, Instant::now())
+    }
+
+    fn list_agents(&self) -> ToolOutcome {
+        let agents = match self.ordered_agents() {
+            Ok(a) => a,
+            Err(e) => return fail(&e),
+        };
+        self.number_agents(&agents);
         let now = kvistcode_core::now_ms();
         let rows: Vec<Value> = agents
             .iter()
-            .take(25)
-            .map(|a| {
+            .take(tools::MAX_LISTED_AGENTS)
+            .enumerate()
+            .map(|(i, a)| {
                 let subs = if a.running {
                     self.core
                         .items(&a.id)
@@ -319,6 +434,7 @@ impl KvistcodeTools {
                     0
                 };
                 json!({
+                    "number": i + 1,
                     "id": a.id,
                     "title": a.title,
                     "provider": a.provider.as_str(),
@@ -399,6 +515,7 @@ impl KvistcodeTools {
             _ => None,
         };
         ok(json!({
+            "number": self.agent_number(&agent.id),
             "id": agent.id,
             "title": agent.title,
             "provider": agent.provider.as_str(),
@@ -433,6 +550,41 @@ impl KvistcodeTools {
         out
     }
 
+    /// A project by number (from the last `list_projects`) or by name. Only ever a path in
+    /// `known`: a number is looked up host-side and checked against the folders still known.
+    fn project_by_query(&self, known: &[String], q: &str) -> Result<String, Box<ToolOutcome>> {
+        if let Some(n) = tools::parse_number(q, "project") {
+            let now = Instant::now();
+            let path = {
+                let mut nums = self.numbers.lock();
+                if !nums.projects.is_set() {
+                    let shown = known.iter().take(tools::MAX_LISTED_PROJECTS).cloned();
+                    nums.projects.set(shown.collect(), now);
+                }
+                nums.projects
+                    .get(n, now)
+                    .map(str::to_string)
+                    .map_err(|e| Box::new(fail(&tools::number_error("project", n, &e))))?
+            };
+            return if known.contains(&path) {
+                Ok(path)
+            } else {
+                Err(Box::new(fail(&tools::number_gone("project", n))))
+            };
+        }
+        match tools::resolve_project(known, q) {
+            Resolved::One(p) => Ok(p),
+            Resolved::Ambiguous(c) => Err(Box::new(ToolOutcome {
+                output: tools::wrap_ambiguous("projects", &c),
+                action: None,
+                pending: None,
+            })),
+            Resolved::None => Err(Box::new(fail(
+                "That isn't a project Kvistcode knows. Use list_projects to see them, or open it once in the New Agent dialog first.",
+            ))),
+        }
+    }
+
     async fn start_agent(
         &self,
         provider: &str,
@@ -446,18 +598,9 @@ impl KvistcodeTools {
             _ => Provider::Claude,
         };
         let known = self.known_projects().await;
-        let path = match tools::resolve_project(&known, project) {
-            Resolved::One(p) => p,
-            Resolved::Ambiguous(c) => {
-                return ToolOutcome {
-                    output: tools::wrap_ambiguous("projects", &c),
-                    action: None,
-                    pending: None,
-                }
-            }
-            Resolved::None => return fail(
-                "That isn't a project Kvistcode knows. Open it once in the New Agent dialog first.",
-            ),
+        let path = match self.project_by_query(&known, project) {
+            Ok(p) => p,
+            Err(o) => return *o,
         };
         let accounts = match self.core.accounts() {
             Ok(a) => a,
@@ -615,20 +758,59 @@ impl KvistcodeTools {
         }
     }
 
-    fn open(&self, view: OpenView, agent: Option<&str>, section: Option<String>) -> ToolOutcome {
+    async fn open(
+        &self,
+        view: OpenView,
+        agent: Option<&str>,
+        project: Option<&str>,
+        section: Option<String>,
+    ) -> ToolOutcome {
+        // A project opens its most urgent agent (the first of it in the sidebar).
+        let from_project =
+            match project {
+                Some(q) => {
+                    let known = self.known_projects().await;
+                    let path = match self.project_by_query(&known, q) {
+                        Ok(p) => p,
+                        Err(o) => return *o,
+                    };
+                    let key = project_key(&path).to_string();
+                    let found = match self.ordered_agents() {
+                        Ok(list) => list
+                            .into_iter()
+                            .find(|a| project_key(&a.project_path) == key),
+                        Err(e) => return fail(&e),
+                    };
+                    match found {
+                        Some(a) => Some(a),
+                        None => return fail(
+                            "That project has no agents yet. Use start_agent to begin one there.",
+                        ),
+                    }
+                }
+                None => None,
+            };
         // The diff review is always of an agent: without one named, the one on screen.
-        let agent = if view == OpenView::Review && agent.is_none() {
+        let agent = if view == OpenView::Review && agent.is_none() && from_project.is_none() {
             Some("")
         } else {
             agent
         };
-        let agent = match agent {
-            Some(q) => match self.resolve(q) {
+        let agent = match (from_project, agent) {
+            (Some(a), _) => Some(a),
+            (None, Some(q)) => match self.resolve(q) {
                 Ok(a) => Some(a),
                 Err(o) => return *o,
             },
-            None => None,
+            (None, None) => None,
         };
+        if view == OpenView::Compare {
+            if let Some(a) = &agent {
+                if a.group_id.is_none() {
+                    return fail("That agent isn't part of a comparison.");
+                }
+            }
+        }
         let label = match view {
             OpenView::Agents => "agents",
             OpenView::MissionControl => "Mission Control",
@@ -653,35 +835,71 @@ impl KvistcodeTools {
             Some(a) => format!("Opened {label} for '{}'", a.title),
             None => format!("Opened {label}"),
         };
+        let agent_number = agent.as_ref().and_then(|a| self.agent_number(&a.id));
         done(
-            json!({ "opened": view.as_str(), "section": section }),
+            json!({ "opened": view.as_str(), "section": section, "agentNumber": agent_number }),
             "open",
             summary,
             agent.map(|a| a.id),
         )
     }
 
-    fn get_screen(&self) -> ToolOutcome {
+    async fn get_screen(&self) -> ToolOutcome {
         let s = self.screen.lock().clone();
         if s.view.is_empty() {
             return ok(
                 json!({ "known": false, "note": "The window hasn't reported what it shows." }),
             );
         }
-        let agents = self.core.agents().unwrap_or_default();
+        let ordered = match self.ordered_agents() {
+            Ok(a) => a,
+            Err(e) => return fail(&e),
+        };
+        let focus = s.agent_id.clone().or_else(|| s.review_agent_id.clone());
+        let focus_path = focus
+            .as_ref()
+            .and_then(|id| ordered.iter().find(|a| &a.id == id))
+            .map(|a| a.project_path.clone());
+        // Numbers come from the lists the model already has; with none yet, from the order
+        // the user sees now.
+        if !self.numbers.lock().agents.is_set() {
+            self.number_agents(&ordered);
+        }
+        if focus_path.is_some() && !self.numbers.lock().projects.is_set() {
+            self.number_projects(&self.known_projects().await);
+        }
+        let project_number = |path: &str| {
+            let key = project_key(path);
+            let nums = self.numbers.lock();
+            nums.projects
+                .number_where(Instant::now(), |p| project_key(p) == key)
+        };
         let describe = |id: &Option<String>| {
             id.as_ref()
-                .and_then(|id| agents.iter().find(|a| &a.id == id))
+                .and_then(|id| ordered.iter().find(|a| &a.id == id))
                 .map(|a| {
                     json!({
+                        "number": self.agent_number(&a.id),
                         "id": a.id,
                         "title": a.title,
                         "provider": a.provider.as_str(),
                         "status": serde_json::to_value(a.status).unwrap_or(Value::Null),
                         "project": basename(&a.project_path),
+                        "projectNumber": project_number(&a.project_path),
                     })
                 })
         };
+        let comparison: Option<Vec<Value>> = s.compare_group_id.as_ref().map(|g| {
+            ordered
+                .iter()
+                .filter(|a| a.group_id.as_ref() == Some(g))
+                .take(8)
+                .map(|a| {
+                    json!({ "number": self.agent_number(&a.id), "id": a.id, "title": a.title,
+                            "status": serde_json::to_value(a.status).unwrap_or(Value::Null) })
+                })
+                .collect()
+        });
         let selected = s
             .selected_text
             .as_deref()
@@ -691,17 +909,45 @@ impl KvistcodeTools {
             "known": true,
             "screen": s.view,
             "agent": describe(&s.agent_id),
+            "project": focus_path.as_deref().map(|p| json!({
+                "name": basename(p),
+                "number": project_number(p),
+            })),
             "settingsSection": s.settings_section,
             "missionControlTab": s.mission_tab,
             "diffReviewOf": describe(&s.review_agent_id),
+            "comparison": comparison,
             "highlightedText": selected,
+            "numbersNote": "A null number means it is not in your last list: call list_agents or list_projects to number it.",
         }))
+    }
+
+    fn number_projects(&self, known: &[String]) {
+        let shown = known.iter().take(tools::MAX_LISTED_PROJECTS).cloned();
+        self.numbers
+            .lock()
+            .projects
+            .set(shown.collect(), Instant::now());
     }
 
     async fn list_projects(&self) -> ToolOutcome {
         let known = self.known_projects().await;
-        let names: Vec<String> = known.iter().take(40).map(|p| basename(p)).collect();
-        ok(json!({ "count": known.len(), "projects": names }))
+        self.number_projects(&known);
+        let agents = self.core.agents().unwrap_or_default();
+        let rows: Vec<Value> = known
+            .iter()
+            .take(tools::MAX_LISTED_PROJECTS)
+            .enumerate()
+            .map(|(i, p)| {
+                let key = project_key(p);
+                let count = agents
+                    .iter()
+                    .filter(|a| !a.archived && project_key(&a.project_path) == key)
+                    .count();
+                json!({ "number": i + 1, "name": basename(p), "agents": count })
+            })
+            .collect();
+        ok(json!({ "count": known.len(), "projects": rows }))
     }
 
     fn get_usage(&self) -> ToolOutcome {
@@ -747,8 +993,7 @@ impl KvistcodeTools {
             "agentsCostUsd": (cost * 100.0).round() / 100.0,
             "mostExpensive": top,
             "dailyBudget": daily_budget(&self.core.budget_status()),
-            "note": "Cost is the API-equivalent estimate; subscriptions are limited by the percent used, not by cost. \
-                     The remaining prepaid credit on an API key can't be read, so for API billing report the daily budget left, and say so.",
+            "note": USAGE_NOTE,
         }))
     }
 
@@ -922,6 +1167,53 @@ mod tests {
         let none = daily_budget(&status(2.0, None));
         assert!(none["limitUsd"].is_null() && none["leftUsd"].is_null());
         assert!(daily_budget(&status(2.0, Some(0.0)))["leftUsd"].is_null());
+    }
+
+    #[test]
+    fn the_usage_note_says_the_daily_budget_is_not_a_bill() {
+        for must in [
+            "dailyBudget counts every agent's usage at API prices",
+            "subscription agents included",
+            "not what any key is billed",
+            "month ledger",
+        ] {
+            assert!(USAGE_NOTE.contains(must), "{must}");
+        }
+        // The old advice to report the daily budget as the API balance is gone.
+        assert!(!USAGE_NOTE.contains("report the daily budget"));
+    }
+
+    fn agent_with(status: AgentStatus) -> Agent {
+        serde_json::from_value(json!({
+            "id": "a", "title": "t", "provider": "claude", "accountId": "acc",
+            "projectPath": "/p", "cwd": "/p", "worktree": false, "status": status,
+            "running": false, "createdAt": 0, "updatedAt": 0, "lastActivityAt": 0,
+            "costUsd": 0.0, "tokensUsed": 0, "unread": false, "archived": false,
+            "pendingPermissions": 0
+        }))
+        .expect("a minimal agent")
+    }
+
+    #[test]
+    fn the_order_rank_follows_what_needs_the_user() {
+        let mut waiting = agent_with(AgentStatus::Working);
+        waiting.pending_permissions = 1;
+        assert_eq!(order_rank(&waiting), 0);
+        assert_eq!(order_rank(&agent_with(AgentStatus::NeedsPermission)), 0);
+        assert_eq!(order_rank(&agent_with(AgentStatus::Error)), 3);
+        let mut limited = agent_with(AgentStatus::Idle);
+        limited.rate_limited = true;
+        assert_eq!(order_rank(&limited), 2);
+        let mut unread = agent_with(AgentStatus::Idle);
+        unread.unread = true;
+        assert_eq!(order_rank(&unread), 4);
+        // "Done" in triage dismisses it until the agent does something new.
+        unread.acknowledged_at = Some(10);
+        unread.last_activity_at = 10;
+        assert_eq!(order_rank(&unread), 6);
+        assert_eq!(order_rank(&agent_with(AgentStatus::Working)), 5);
+        assert_eq!(order_rank(&agent_with(AgentStatus::Starting)), 5);
+        assert_eq!(order_rank(&agent_with(AgentStatus::Idle)), 6);
     }
 
     #[test]

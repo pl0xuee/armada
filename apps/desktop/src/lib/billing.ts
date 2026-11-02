@@ -5,7 +5,11 @@
 // an API-key account is billed per token, and Kvistcode adds up what its agents cost today. What is
 // NOT known: the prepaid credit balance, which neither Anthropic nor OpenAI lets a plain API key read.
 // So for API billing "left" means left of the daily budget the user set, and the UI says so.
-import type { Account, AccountUsage, BudgetStatus, Provider, UsageWindow } from "./types";
+//
+// The daily figure (BudgetStatus.todayUsd) adds up EVERY agent's cost on every cloud account, subscription
+// agents included, priced at API rates. It is what the daily budget limits, not what any one key was billed,
+// so it must never be shown as "spent on your API key".
+import type { Account, AccountUsage, Agent, BudgetStatus, Provider, UsageWindow } from "./types";
 
 export type BillingMode = "subscription" | "api" | "local";
 
@@ -74,4 +78,11 @@ export function budgetLeft(status: Pick<BudgetStatus, "todayUsd" | "dailyBudgetU
     leftUsd: budget === null ? null : Math.max(0, budget - spent),
     usedPercent: budget === null ? 0 : Math.min(100, Math.round((spent / budget) * 100)),
   };
+}
+
+/** What the agents on one account have used so far (their own cost, not the fleet's). */
+export function accountSpend(agents: Pick<Agent, "accountId" | "costUsd" | "archived">[], accountId: string): number {
+  let usd = 0;
+  for (const a of agents) if (a.accountId === accountId) usd += Math.max(0, a.costUsd || 0);
+  return usd;
 }

@@ -8,7 +8,11 @@ export interface ScreenContext {
   settingsSection: string | null;
   missionTab: string | null;
   reviewAgentId: string | null;
+  /** The Compare screen's open group. */
+  compareGroupId: string | null;
   selectedText: string | null;
+  /** The ids of the agents that are not archived, in the sidebar's order: how the assistant numbers them. */
+  agentOrder: string[];
 }
 
 /** Highlighted text is cut here, and only what the assistant asks for is sent on to OpenAI. */
@@ -20,9 +24,17 @@ interface UiLike {
   settingsSection: string;
   missionTab: string | null;
   reviewAgentId: string | null;
+  compareGroupId?: string | null;
 }
 
-export function screenContextOf(ui: UiLike, selection: string | null | undefined): ScreenContext {
+/** Most ids sent (more agents than a person keeps open); the backend caps it too. */
+export const MAX_ORDER = 200;
+
+export function screenContextOf(
+  ui: UiLike,
+  selection: string | null | undefined,
+  agentOrder: readonly string[] = [],
+): ScreenContext {
   const text = (selection ?? "").replace(/\s+/g, " ").trim();
   return {
     view: ui.view,
@@ -31,6 +43,8 @@ export function screenContextOf(ui: UiLike, selection: string | null | undefined
     settingsSection: ui.view === "settings" ? ui.settingsSection : null,
     missionTab: ui.view === "mission" ? ui.missionTab : null,
     reviewAgentId: ui.reviewAgentId,
+    compareGroupId: ui.view === "compare" ? (ui.compareGroupId ?? null) : null,
     selectedText: text ? text.slice(0, MAX_SELECTION) : null,
+    agentOrder: agentOrder.slice(0, MAX_ORDER),
   };
 }

@@ -1030,3 +1030,90 @@ fn the_pause_tool_is_described_for_every_phrase() {
     }
     assert!(d.contains("No confirmation"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_screen_change_reaches_the_model_silently() {
+    let ran = Arc::new(AtomicUsize::new(0));
+    gated_session(
+        Duration::from_secs(30),
+        ran,
+        move |mut ws| async move {
+            let note = next_json(&mut ws).await;
+            assert_eq!(note["type"], "conversation.item.create");
+            assert_eq!(note["item"]["role"], "system");
+            let text = note["item"]["content"][0]["text"].as_str().unwrap();
+            assert!(text.contains("switched to Usage"), "{text}");
+            // Context only: no reply is requested, so nothing is said aloud.
+            let more = tokio::time::timeout(Duration::from_millis(500), ws.next()).await;
+            assert!(more.is_err(), "the model was asked to answer");
+            // Stay connected until the session is stopped.
+            while let Some(Ok(m)) = ws.next().await {
+                if matches!(m, Message::Close(_)) {
+                    break;
+                }
+            }
+        },
+        |events, ctl| async move {
+            wait_for(|| {
+                events.0.lock().iter().any(|e| {
+                    matches!(
+                        e,
+                        VaEvent::State {
+                            state: VaState::Listening,
+                            ..
+                        }
+                    )
+                })
+            })
+            .await;
+            ctl.send(Control::Screen(
+                "Kvistcode: the user just switched to Usage.".into(),
+            ))
+            .unwrap();
+            tokio::time::sleep(Duration::from_millis(900)).await;
+        },
+    )
+    .await;
+}
+
+/// Every tool argument that names an agent or a project says it takes a number, so the
+/// model passes "2" for "agent 2" instead of guessing a title.
+#[test]
+fn every_agent_and_project_argument_takes_a_number() {
+    let schemas = tools::tool_schemas();
+    let mut seen = 0;
+    for t in schemas.as_array().unwrap() {
+        let name = t["name"].as_str().unwrap();
+        for (arg, spec) in t["parameters"]["properties"]
+            .as_object()
+            .into_iter()
+            .flatten()
+        {
+            let d = spec["description"]
+                .as_str()
+                .unwrap_or_default()
+                .to_lowercase();
+            if arg == "agent" || arg == "project" {
+                seen += 1;
+                assert!(d.contains("number"), "{name}.{arg}: {d}");
+            }
+        }
+    }
+    // get_agent, start_agent, send_message, stop_agent, rename_agent, mark_done,
+    // request_approval_review, and open's agent and project.
+    assert_eq!(seen, 9);
+    // The lists carry the numbers the arguments take.
+    let d = |name: &str| {
+        schemas
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == name)
+            .unwrap()["description"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert!(d("list_agents").contains("number") && d("list_projects").contains("number"));
+    assert!(d("get_screen").contains("number"));
+}

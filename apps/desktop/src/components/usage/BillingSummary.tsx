@@ -1,8 +1,11 @@
+import { useEffect, useState } from "react";
 import { useBudgetStatus } from "@/hooks/useBudgetStatus";
-import { billingOf, budgetLeft, windowsLeft, type BillingMode } from "@/lib/billing";
+import { api } from "@/lib/api";
+import { accountSpend, billingOf, budgetLeft, windowsLeft, type BillingMode } from "@/lib/billing";
 import { formatCost } from "@/lib/format";
-import type { Account, Provider } from "@/lib/types";
+import type { Account, Provider, VoiceAssistantUsage } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { resetLabel } from "../UsageMeter";
 
@@ -34,8 +37,23 @@ function LeftBar({ usedPercent, label }: { usedPercent: number; label: string })
   );
 }
 
-/** What is left of today's daily budget, for an account billed per token. */
-function ApiLeft({ signal }: { signal: number }) {
+/** What the agents on this API key have used so far: the part that is really billed to it. */
+function KeySpend({ accountId }: { accountId: string }) {
+  const agents = useApp((s) => s.agents);
+  const usd = accountSpend(Object.values(agents), accountId);
+  return (
+    <div className="mt-2 flex items-baseline justify-between gap-2 text-[11.5px]">
+      <span className="text-steel">Used on this key</span>
+      <span className="font-medium tabular text-fg">{formatCost(usd)}</span>
+    </div>
+  );
+}
+
+/**
+ * The daily budget, which counts every agent's usage at API prices (subscription work too). It is the
+ * limit Kvistcode enforces, not a bill, so it is labelled as that.
+ */
+function DailyBudget({ signal }: { signal: number }) {
   const status = useBudgetStatus(signal);
   const setView = useUi((s) => s.setView);
   const b = budgetLeft(status);
@@ -45,7 +63,7 @@ function ApiLeft({ signal }: { signal: number }) {
       {b.budgetUsd !== null && b.leftUsd !== null ? (
         <>
           <div className="flex items-baseline justify-between gap-2">
-            <span className="text-steel">Left today</span>
+            <span className="text-steel">Daily budget left</span>
             <span className={cn("font-medium tabular", b.usedPercent >= 90 ? "text-err" : "text-fg")}>
               {formatCost(b.leftUsd)} <span className="font-normal text-steel">of {formatCost(b.budgetUsd)}</span>
             </span>
@@ -54,12 +72,12 @@ function ApiLeft({ signal }: { signal: number }) {
         </>
       ) : (
         <div className="flex items-baseline justify-between gap-2">
-          <span className="text-steel">Spent today</span>
+          <span className="text-steel">Counted toward today&rsquo;s budget</span>
           <span className="font-medium tabular text-fg">{formatCost(b.spentUsd)}</span>
         </div>
       )}
       <p className="mt-1.5 leading-snug text-steel">
-        A prepaid balance can&rsquo;t be read with an API key, so this counts down your daily budget.
+        Counts every agent at API prices, subscription work included, so it can be far more than you are billed.
         {b.budgetUsd === null && (
           <>
             {" "}
@@ -117,20 +135,44 @@ export function BillingSummary({
           <LeftBar usedPercent={w.usedPercent} label={`${w.name} usage left`} />
         </div>
       ))}
-      {billing.mode === "api" && <ApiLeft signal={signal} />}
+      {billing.mode === "api" && account && <KeySpend accountId={account.id} />}
+      {billing.mode === "api" && <DailyBudget signal={signal} />}
     </div>
   );
 }
 
-/** The voice assistant always runs on an OpenAI API key, so it is API billing; shows the day's budget left. */
-export function AssistantBilling({ signal, className }: { signal: number; className?: string }) {
+/** The voice assistant runs on an OpenAI API key: what it has cost this month is the real charge (an estimate). */
+export function AssistantBilling({ className }: { className?: string }) {
+  const [month, setMonth] = useState<VoiceAssistantUsage | null>(null);
+  useEffect(() => {
+    let live = true;
+    api
+      .vaUsage()
+      .then((u) => live && setMonth(u))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
   return (
     <div className={className} data-billing="api">
       <div className="flex items-center gap-2">
-        <span className={cn("shrink-0 whitespace-nowrap rounded-full border px-2 py-px text-[10.5px] font-medium", PILL.api)}>API billing</span>
+        <span className={cn("shrink-0 whitespace-nowrap rounded-full border px-2 py-px text-[10.5px] font-medium", PILL.api)}>
+          API billing
+        </span>
         <span className="min-w-0 truncate text-[11.5px] text-steel">Billed per token on your OpenAI key.</span>
       </div>
-      <ApiLeft signal={signal} />
+      {month && (
+        <div className="mt-2 flex items-baseline justify-between gap-2 text-[11.5px]">
+          <span className="text-steel">
+            Assistant this month · {month.sessions} {month.sessions === 1 ? "session" : "sessions"}
+          </span>
+          <span className="font-medium tabular text-fg">~{formatCost(month.costUsd)} est.</span>
+        </div>
+      )}
+      <p className="mt-1.5 text-[11.5px] leading-snug text-steel">
+        Your OpenAI balance can&rsquo;t be read with an API key. Check it at platform.openai.com.
+      </p>
     </div>
   );
 }

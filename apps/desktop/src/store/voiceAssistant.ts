@@ -4,6 +4,7 @@ import { api, onVaEvent } from "@/lib/api";
 import { beginVa, initialVa, isLive, reduceVa, type VaEvent, type VaState } from "@/lib/voiceAssistant";
 import { errorMessage } from "@/lib/utils";
 import { useApp } from "./app";
+import { orderedAgents } from "@/lib/agents";
 import { screenContextOf } from "@/lib/screenContext";
 import { useUi, type MissionTab, type SettingsSection, type View } from "./ui";
 
@@ -34,7 +35,12 @@ export function applyNavigation(view: string, agentId: string | null, section: s
     else ui.setView("mission");
   } else if (view === "settings")
     ui.openSettings(section && SETTINGS_SECTIONS.has(section) ? (section as SettingsSection) : undefined);
-  else if (SCREENS.has(view)) ui.setView(view as View);
+  else if (view === "compare" && agentId) {
+    // A comparison is shown by its group: the one the named agent belongs to.
+    const groupId = useApp.getState().agents[agentId]?.groupId ?? null;
+    if (groupId) ui.openCompare(groupId);
+    else ui.setView("compare");
+  } else if (SCREENS.has(view)) ui.setView(view as View);
   else if (view === "inbox")
     ui.openMission("needs"); // the tool's name for Needs you
   else if (view === "review" && agentId) {
@@ -77,7 +83,8 @@ function reportScreen(): () => void {
       last = "";
       return;
     }
-    const ctx = screenContextOf(useUi.getState(), window.getSelection()?.toString());
+    const order = orderedAgents(Object.values(useApp.getState().agents)).map((a) => a.id);
+    const ctx = screenContextOf(useUi.getState(), window.getSelection()?.toString(), order);
     const key = JSON.stringify(ctx);
     if (key === last) return;
     last = key;
@@ -89,6 +96,16 @@ function reportScreen(): () => void {
     timer = setTimeout(push, 250);
   };
   const offUi = useUi.subscribe(soon);
+  // The sidebar's order moves as agents work. Check it at most once a second (a steady stream of updates
+  // must not postpone it for ever), and send only when it changed.
+  let agentsTimer: ReturnType<typeof setTimeout> | undefined;
+  const offApp = useApp.subscribe((s, prev) => {
+    if (s.agents === prev.agents || agentsTimer !== undefined || !isLive(useVa.getState())) return;
+    agentsTimer = setTimeout(() => {
+      agentsTimer = undefined;
+      push();
+    }, 1000);
+  });
   const offVa = useVa.subscribe((s, prev) => {
     if (isLive(s) !== isLive(prev)) push();
   });
@@ -96,6 +113,8 @@ function reportScreen(): () => void {
   push();
   return () => {
     clearTimeout(timer);
+    clearTimeout(agentsTimer);
+    offApp();
     offUi();
     offVa();
     document.removeEventListener("selectionchange", soon);

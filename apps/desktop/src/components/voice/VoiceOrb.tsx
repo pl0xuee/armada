@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 import type { VaPhase } from "@/lib/voiceAssistant";
 
-const TONE: Record<VaPhase, string> = {
+export const TONE: Record<VaPhase, string> = {
   off: "var(--steel)",
   connecting: "var(--steel)",
   listening: "var(--accent)",

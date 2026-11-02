@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SELECTION, screenContextOf } from "./screenContext";
+import { MAX_ORDER, MAX_SELECTION, screenContextOf } from "./screenContext";
 
 const ui = {
   view: "agents" as const,
@@ -27,5 +27,19 @@ describe("screenContextOf", () => {
     expect(screenContextOf(ui, "   ").selectedText).toBeNull();
     expect(screenContextOf(ui, undefined).selectedText).toBeNull();
     expect(screenContextOf(ui, "x".repeat(MAX_SELECTION + 50)).selectedText).toHaveLength(MAX_SELECTION);
+  });
+});
+
+describe("screenContextOf: comparison and agent order", () => {
+  it("reports the open comparison only on the Compare screen", () => {
+    expect(screenContextOf({ ...ui, view: "compare", compareGroupId: "g1" }, null).compareGroupId).toBe("g1");
+    expect(screenContextOf({ ...ui, compareGroupId: "g1" }, null).compareGroupId).toBeNull();
+    expect(screenContextOf({ ...ui, view: "compare" }, null).compareGroupId).toBeNull();
+  });
+  it("passes on the sidebar's order, capped", () => {
+    expect(screenContextOf(ui, null).agentOrder).toEqual([]);
+    expect(screenContextOf(ui, null, ["b", "a"]).agentOrder).toEqual(["b", "a"]);
+    const many = Array.from({ length: MAX_ORDER + 20 }, (_, i) => `a${i}`);
+    expect(screenContextOf(ui, null, many).agentOrder).toHaveLength(MAX_ORDER);
   });
 });

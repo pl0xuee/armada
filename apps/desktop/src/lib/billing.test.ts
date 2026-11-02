@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { billingOf, budgetLeft, windowsLeft } from "./billing";
+import { accountSpend, billingOf, budgetLeft, windowsLeft } from "./billing";
 
 describe("billingOf", () => {
   it("tells API keys, subscriptions and local models apart", () => {
@@ -40,5 +40,17 @@ describe("budgetLeft", () => {
     expect(budgetLeft({ todayUsd: 30, dailyBudgetUsd: 20 })).toMatchObject({ leftUsd: 0, usedPercent: 100 });
     expect(budgetLeft({ todayUsd: 3, dailyBudgetUsd: null })).toMatchObject({ budgetUsd: null, leftUsd: null });
     expect(budgetLeft(null)).toBeNull();
+  });
+});
+
+describe("accountSpend", () => {
+  it("adds up only the agents on that account", () => {
+    const agents = [
+      { accountId: "a", costUsd: 1.5, archived: false },
+      { accountId: "a", costUsd: 2, archived: true },
+      { accountId: "b", costUsd: 700, archived: false },
+    ];
+    expect(accountSpend(agents, "a")).toBe(3.5);
+    expect(accountSpend(agents, "none")).toBe(0);
   });
 });
