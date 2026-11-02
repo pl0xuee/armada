@@ -4,6 +4,7 @@ import { AppMark, Icon } from "@/components/Icon";
 import { Sheet } from "@/components/Sheet";
 import { ConnectionPill, TopBar } from "@/components/TopBar";
 import { Button, IconButton } from "@/components/ui";
+import { backgroundActive, backgroundOf, statusWith } from "@/lib/background";
 import { holdLabel } from "@/lib/budgetHold";
 import { cn } from "@/lib/cn";
 import { retryState, stopAgent, unpair } from "@/lib/controller";
@@ -13,7 +14,7 @@ import { plainPreview, plural, relativeTime, relativeTimeLong } from "@/lib/form
 import { useNow } from "@/lib/hooks";
 import { agentIdentity, safeColor, statusMeta } from "@/lib/meta";
 import { navigate } from "@/lib/router";
-import { accountOf, filterAgents, isUsageLimited, pendingKindOf, permissionIndex, USAGE_LIMIT_LABEL, useAgentPending, useTriage } from "@/lib/selectors";
+import { accountOf, filterAgents, isUsageLimited, pendingKindOf, permissionIndex, USAGE_LIMIT_LABEL, useAgentPending, useBackground, useTriage } from "@/lib/selectors";
 import { storage } from "@/lib/storage";
 import { groupByProject, needsYouLabel, projectSummary, type NeedsReason, type ProjectGroup, type TriageEntry } from "@/lib/triage";
 import { useStore } from "@/lib/store";
@@ -48,8 +49,16 @@ export function Fleet() {
   const list = useMemo(() => Object.values(agents), [agents]);
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => filterAgents(list, query), [list, query]);
-  const { projects, archived } = useMemo(() => groupByProject(filtered, "", (a) => triage.reasons.get(a.id) ?? null), [filtered, triage.reasons]);
-  const working = useMemo(() => list.filter((a) => !a.archived && (a.status === "working" || a.status === "starting")).length, [list]);
+  const background = useStore((s) => s.background);
+  const { projects, archived } = useMemo(
+    () => groupByProject(filtered, "", (a) => triage.reasons.get(a.id) ?? null, (a) => backgroundActive(backgroundOf(a, background[a.id]))),
+    [filtered, triage.reasons, background],
+  );
+  // A workflow still running behind a finished turn counts as working, as on the desktop.
+  const working = useMemo(
+    () => list.filter((a) => !a.archived && (a.status === "working" || a.status === "starting" || backgroundActive(backgroundOf(a, background[a.id])))).length,
+    [list, background],
+  );
   const active = list.filter((a) => !a.archived).length;
 
   useLayoutEffect(() => {
@@ -296,6 +305,7 @@ const AgentRow = memo(function AgentRow({ agent, now, reason }: { agent: Agent; 
   const id = agentIdentity(agent, customAgents);
   const preview = agent.lastMessage ? plainPreview(agent.lastMessage) : null;
   const limited = isUsageLimited(agent);
+  const shown = statusWith(agent, useBackground(agent));
   // One definition of "needs you" (lib/triage), the same as the badge and the queue.
   const needs = reason !== null && reason !== "done";
   const pendingIcon = pendingKind === "question" ? "sparkle" : "shield";
@@ -304,11 +314,11 @@ const AgentRow = memo(function AgentRow({ agent, now, reason }: { agent: Agent; 
     <button
       type="button"
       onClick={() => navigate({ name: "agent", agentId: agent.id })}
-      aria-label={`${agent.title}, ${limited ? USAGE_LIMIT_LABEL : agent.budgetHold ? holdLabel(agent.budgetHold) : statusMeta(agent.status).label}${pending ? `, ${pending} waiting for approval` : ""}`}
+      aria-label={`${agent.title}, ${limited ? USAGE_LIMIT_LABEL : agent.budgetHold ? holdLabel(agent.budgetHold) : (shown.label ?? statusMeta(agent.status).label)}${pending ? `, ${pending} waiting for approval` : ""}`}
       className={cn("press-row relative flex w-full items-start gap-3 px-3.5 py-3 text-left", needs && "bg-warn/[0.035]")}
     >
       {needs && <span className="absolute inset-y-3 left-0 w-[3px] rounded-r-full bg-warn" aria-hidden />}
-      <ProviderBadge agent={agent} size={42} status={limited ? "needs_permission" : agent.status} className="mt-0.5" />
+      <ProviderBadge agent={agent} size={42} status={limited ? "needs_permission" : shown.status} className="mt-0.5" />
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
           <span className={cn("min-w-0 flex-1 truncate text-[15.5px] leading-snug", agent.unread ? "font-semibold text-fg" : "font-medium text-fg/95")}>
@@ -325,7 +335,7 @@ const AgentRow = memo(function AgentRow({ agent, now, reason }: { agent: Agent; 
           ) : agent.budgetHold ? (
             <span className="shrink-0 font-medium text-warn">{holdLabel(agent.budgetHold)}</span>
           ) : (
-            <StatusText status={agent.status} className="shrink-0" />
+            <StatusText status={shown.status} label={shown.label ?? undefined} className="shrink-0" />
           )}
           <span className="text-line-strong" aria-hidden>
             ·

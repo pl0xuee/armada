@@ -12,6 +12,7 @@ import { Sheet } from "@/components/Sheet";
 import { Timeline } from "@/components/timeline/Timeline";
 import { TopBar } from "@/components/TopBar";
 import { Button, IconButton } from "@/components/ui";
+import { backgroundActive, backgroundDetail, backgroundPill, backgroundShort, withSubagents } from "@/lib/background";
 import { holdLabel } from "@/lib/budgetHold";
 import { loadTimeline, markRead, resumeAgent, unpair } from "@/lib/controller";
 import { devParam } from "@/lib/dev";
@@ -21,7 +22,8 @@ import { agentIdentity, isBusy, isResumable, safeColor, statusMeta } from "@/lib
 import { useDelayed } from "@/lib/hooks";
 import { goBack, navigate } from "@/lib/router";
 import { isProgrammaticScroll, isUserLayoutChange } from "@/lib/scroll";
-import { accountOf, useOtherPendingCount } from "@/lib/selectors";
+import { accountOf, useBackground, useOtherPendingCount } from "@/lib/selectors";
+import { useBackgroundSubagentCount } from "@/lib/subagents";
 import { useStore, type PendingPrompt, type Timeline as TimelineState } from "@/lib/store";
 import type { Agent, TimelineItem } from "@/lib/types";
 import { AccountSheet, AgentActions, OptionSheet, SettingsChips, switchableAccounts } from "./AgentControls";
@@ -85,6 +87,9 @@ const DetailHeader = memo(function DetailHeader({
   const account = agent ? accountOf(accounts, agent) : undefined;
   const id = agent ? agentIdentity(agent, customAgents) : null;
   const meta = agent ? statusMeta(agent.status) : null;
+  // The turn ended but a workflow (or a background agent) it launched still runs: say so instead of "Idle".
+  const bg = withSubagents(useBackground(agent), useBackgroundSubagentCount(agent?.id));
+  const running = backgroundActive(bg);
 
   return (
     <TopBar
@@ -105,16 +110,26 @@ const DetailHeader = memo(function DetailHeader({
           <div className="min-w-0">
             <h1 className="truncate text-[15.5px] leading-tight font-semibold text-fg">{agent.title}</h1>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12.5px] leading-tight text-muted">
-              <StatusDot status={agent.status} size={7} />
+              <StatusDot status={running && !agent.budgetHold ? "working" : agent.status} size={7} />
               {agent.budgetHold ? (
                 <span className="shrink-0 text-warn">{holdLabel(agent.budgetHold)}</span>
+              ) : running ? (
+                // The account is in Details: the room goes to what is still running ("Turn finished · " drops out on the narrowest phones).
+                <span className="min-w-0 truncate text-accent" title={backgroundDetail(bg)} aria-label={backgroundPill(bg)}>
+                  <span className="hidden min-[440px]:inline">Turn finished · </span>
+                  {backgroundShort(bg)}
+                </span>
               ) : (
                 <span className="shrink-0" style={{ color: agent.status === "idle" || agent.status === "stopped" ? undefined : meta.color }}>
                   {meta.label}
                 </span>
               )}
-              <span className="text-line-strong">·</span>
-              <span className="truncate">{account ? account.name : id.short}</span>
+              {!running && (
+                <>
+                  <span className="text-line-strong">·</span>
+                  <span className="truncate">{account ? account.name : id.short}</span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -588,6 +603,8 @@ function AgentDetailsSheet({
   const modelOpt = agent.configOptions?.find((o) => o.category === "model");
   const model = modelOpt ? (modelOpt.options.find((o) => o.value === modelOpt.currentValue)?.name ?? modelOpt.currentValue) : null;
   const ctx = agent.contextUsed != null && agent.contextSize ? agent.contextUsed / agent.contextSize : null;
+  const bg = withSubagents(useBackground(agent), useBackgroundSubagentCount(agent.id));
+  const running = backgroundActive(bg);
 
   return (
     <Sheet open={open} onClose={onClose} title={agent.title} description={`${id.name}${model ? ` · ${model}` : ""}`}>
@@ -596,8 +613,8 @@ function AgentDetailsSheet({
       <dl className="divide-y divide-line/70">
         <DetailRow label="Status">
           <span className="inline-flex items-center gap-1.5">
-            <StatusDot status={agent.status} size={7} />
-            {statusMeta(agent.status).label}
+            <StatusDot status={running ? "working" : agent.status} size={7} />
+            {running ? backgroundPill(bg) : statusMeta(agent.status).label}
           </span>
         </DetailRow>
         {account && (

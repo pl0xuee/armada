@@ -25,6 +25,8 @@ export interface Scenario {
   /** Stress test: items in agent s1's timeline (0 = off) and deltas per second. */
   stressItems: number;
   stressRate: number;
+  /** `&wf=<seconds>`: agent a5 (idle) has a Workflow running behind its finished turn for this long (0 = none). */
+  workflowSecs: number;
   /** Optional extra agents for newer features (see ./scenarios). */
   extras: Set<string>;
 }
@@ -43,6 +45,7 @@ export function scenarioFromParams(p: URLSearchParams): Scenario {
     pair: pair === "revoked" ? "revoked" : pair ? "plain" : null,
     stressItems: p.get("stress") === "1" ? Math.max(10, Number(p.get("items") ?? 3000) || 3000) : 0,
     stressRate: Math.max(1, Number(p.get("rate") ?? 60) || 60),
+    workflowSecs: Math.max(0, Number(p.get("wf") ?? 0) || 0),
     extras: new Set(["quick", "plan", "group", "md", "dock", "hold"].filter((k) => p.get(k) === "1")),
   };
 }
@@ -93,6 +96,7 @@ export class MockBackend implements Backend {
   private secretCheckFailed = false;
   private streamItemId: string | null = null;
   private createSeq = 0;
+  private readonly createdAt = Date.now();
   private responseStyle: ResponseStyle = "concise";
 
   constructor(scenario: Scenario) {
@@ -230,6 +234,12 @@ export class MockBackend implements Backend {
         for (const i of list) if ((i.kind === "permission" || i.kind === "question") && i.resolution === null) out.push(structuredClone(i));
       }
       return out;
+    }
+    if (path === "/api/background") {
+      // Like the server: counts only, for agents whose turn ended (here a5, for `&wf=<seconds>`).
+      const a5 = this.agents.get("a5");
+      const running = this.s.workflowSecs > 0 && Date.now() < this.createdAt + this.s.workflowSecs * 1000 && a5?.status === "idle";
+      return { agents: running && this.s.scope === "owner" ? { a5: { workflows: 1, working: 3, total: 5 } } : {} };
     }
     if (path.startsWith("/api/search")) {
       if (this.s.scope !== "owner") throw new ApiError(403, "This is a read-only link.");

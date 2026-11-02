@@ -10,7 +10,11 @@ use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use kvistcode_core::budget::BudgetChoice;
-use kvistcode_core::{KvistcodeEvent, ResponseStyle, SearchResults};
+use kvistcode_core::workflow::{WorkflowAgentStatus, WorkflowProgress, WorkflowState};
+use kvistcode_core::{
+    now_ms, AgentStatus, ItemBody, KvistcodeEvent, ResponseStyle, SearchResults, SubAgent,
+    TimelineItem,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -93,6 +97,98 @@ fn pr_view(status: &PrStatus) -> Value {
         "pr": pr,
         "fetchedAt": status.fetched_at,
     })
+}
+
+/// Workflow runs older than this are not looked at (their run is long over): the desktop's
+/// `WORKFLOW_WATCH_MAX_AGE_MS`.
+const WORKFLOW_MAX_AGE_MS: i64 = 12 * 3_600_000;
+/// The newest this many runs of an agent are counted (the desktop's `WORKFLOW_WATCH_MAX`).
+const WORKFLOW_MAX_RUNS: usize = 3;
+/// How many of an agent's newest timeline items are searched for workflow launches.
+const WORKFLOW_TAIL_ITEMS: usize = 80;
+
+/// Background work still running for agents whose own turn has ended: Workflow runs they
+/// launched. Counts only (no agent names, steps or paths), so owners and share-link viewers
+/// (for the one agent they can see) both get it. Keyed by agent id; agents with nothing
+/// running are left out.
+pub(super) async fn background(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    let scope = c.auth(&peer, &headers)?;
+    let core = c.remote.core();
+    let agents = tokio::task::spawn_blocking(move || {
+        let now = now_ms();
+        let mut out = serde_json::Map::new();
+        for agent in core.agents()? {
+            // Only a finished turn can be "done, but": a working agent is simply working.
+            if !scope.can_see(&agent.id)
+                || agent.archived
+                || agent.status != AgentStatus::Idle
+                || now - agent.last_activity_at > WORKFLOW_MAX_AGE_MS
+            {
+                continue;
+            }
+            let tail = core.items_page(&agent.id, None, WORKFLOW_TAIL_ITEMS)?;
+            let calls = recent_workflow_calls(&tail, now);
+            if calls.is_empty() {
+                continue;
+            }
+            let runs: Vec<WorkflowProgress> = calls
+                .iter()
+                .filter_map(|id| core.workflow_progress(&agent.id, id).ok())
+                .collect();
+            if let Some(b) = background_summary(&runs) {
+                out.insert(agent.id, b);
+            }
+        }
+        anyhow::Ok(out)
+    })
+    .await
+    .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))??;
+    Ok(Json(json!({ "agents": agents })))
+}
+
+/// Tool-call ids of the agent's newest workflow launches (newest first) among `items`.
+fn recent_workflow_calls(items: &[TimelineItem], now: i64) -> Vec<String> {
+    items
+        .iter()
+        .rev()
+        .filter(|it| now - it.ts < WORKFLOW_MAX_AGE_MS)
+        .filter_map(|it| match &it.body {
+            ItemBody::ToolCall {
+                tool_call_id,
+                subagent:
+                    Some(SubAgent {
+                        workflow: Some(_), ..
+                    }),
+                ..
+            } => Some(tool_call_id.clone()),
+            _ => None,
+        })
+        .take(WORKFLOW_MAX_RUNS)
+        .collect()
+}
+
+/// `{ workflows, working, total }` over the runs that are still going; None when none is.
+/// Same rule as the desktop's `computeBackground`: only a report that says "running" counts
+/// (quiet or unreadable runs are not claimed).
+fn background_summary(runs: &[WorkflowProgress]) -> Option<Value> {
+    let running: Vec<&WorkflowProgress> = runs
+        .iter()
+        .filter(|p| p.state == WorkflowState::Running)
+        .collect();
+    if running.is_empty() {
+        return None;
+    }
+    let total: usize = running.iter().map(|p| p.agents.len()).sum();
+    let working: usize = running
+        .iter()
+        .flat_map(|p| &p.agents)
+        .filter(|a| a.status == WorkflowAgentStatus::Working)
+        .count();
+    Some(json!({ "workflows": running.len(), "working": working, "total": total }))
 }
 
 #[derive(Deserialize)]
@@ -695,5 +791,102 @@ mod tests {
         let state: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(state["responseStyle"], "detailed");
         rig.finish().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn background_work_needs_a_token_and_is_empty_without_workflows() {
+        let rig = rig().await;
+        let owner = rig.owner.clone();
+        assert_eq!(rig.call("GET", "/api/background", None, None).await.0, 401);
+        let held = rig.held_agent("COST one").await;
+        let viewer = rig.viewer(&held.id);
+        for token in [&owner, &viewer] {
+            let (code, body) = rig.call("GET", "/api/background", Some(token), None).await;
+            assert_eq!(code, 200, "{body}");
+            let v: Value = serde_json::from_str(&body).unwrap();
+            assert!(v["agents"].as_object().unwrap().is_empty(), "{body}");
+        }
+        rig.finish().await;
+    }
+
+    fn launch(id: &str, ts: i64, workflow: bool) -> TimelineItem {
+        TimelineItem {
+            id: format!("i-{id}"),
+            agent_id: "a".into(),
+            seq: ts,
+            ts,
+            body: ItemBody::ToolCall {
+                tool_call_id: id.into(),
+                title: "Workflow".into(),
+                tool_kind: kvistcode_core::ToolKind::Other,
+                status: kvistcode_core::ToolStatus::Completed,
+                locations: vec![],
+                diffs: vec![],
+                output: String::new(),
+                command: None,
+                images: vec![],
+                subagent: Some(SubAgent {
+                    workflow: workflow.then(Default::default),
+                    ..SubAgent::default()
+                }),
+                parent_tool_call_id: None,
+            },
+        }
+    }
+
+    fn run(state: WorkflowState, working: usize, finished: usize) -> WorkflowProgress {
+        let agent = |status| kvistcode_core::workflow::WorkflowAgent {
+            id: "w".into(),
+            label: "w".into(),
+            phase: None,
+            status,
+            tool_calls: 0,
+            latest: None,
+            idle_secs: None,
+        };
+        let mut agents = vec![agent(WorkflowAgentStatus::Working); working];
+        agents.extend(vec![agent(WorkflowAgentStatus::Finished); finished]);
+        WorkflowProgress {
+            run_id: None,
+            state,
+            agents,
+        }
+    }
+
+    #[test]
+    fn only_recent_workflow_launches_are_looked_at() {
+        let now = 100 * 3_600_000;
+        let items = [
+            launch("old", now - WORKFLOW_MAX_AGE_MS - 1, true),
+            launch("plain", now - 5, false),
+            launch("a", now - 4_000, true),
+            launch("b", now - 3_000, true),
+            launch("c", now - 2_000, true),
+            launch("d", now - 1_000, true),
+        ];
+        // Newest first, capped, and a sub-agent that is not a workflow is skipped.
+        assert_eq!(recent_workflow_calls(&items, now), ["d", "c", "b"]);
+        assert!(recent_workflow_calls(&items[..2], now).is_empty());
+    }
+
+    #[test]
+    fn the_background_summary_counts_only_runs_that_are_running() {
+        assert!(background_summary(&[]).is_none());
+        assert!(
+            background_summary(&[
+                run(WorkflowState::Finished, 0, 5),
+                run(WorkflowState::Unknown, 0, 2)
+            ])
+            .is_none(),
+            "finished and quiet runs are not claimed"
+        );
+        let v = background_summary(&[
+            run(WorkflowState::Running, 3, 2),
+            run(WorkflowState::Finished, 0, 4),
+            run(WorkflowState::Running, 0, 0),
+        ])
+        .unwrap();
+        assert_eq!(v, json!({ "workflows": 2, "working": 3, "total": 5 }));
     }
 }

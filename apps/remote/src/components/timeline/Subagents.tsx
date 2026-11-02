@@ -1,4 +1,5 @@
 import { memo, useState } from "react";
+import { backgroundOf } from "@/lib/background";
 import { cn } from "@/lib/cn";
 import { devParam } from "@/lib/dev";
 import { basename, formatCost, formatDuration, formatTokens, plural } from "@/lib/format";
@@ -204,6 +205,11 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, latest = fa
   const [allFiles, setAllFiles] = useState(false);
   // Only the owner can open a review; a share link shows the names only.
   const owner = useStore((st) => st.session?.scope === "owner");
+  // The turn ended, but a workflow it launched still runs (only the newest card says so).
+  const workflowRunning = useStore((st) => {
+    const a = latest ? st.agents[item.agentId] : undefined;
+    return !!a && backgroundOf(a, st.background[a.id]).workflows > 0;
+  });
   const files = item.files ?? [];
   const shownFiles = allFiles ? files : files.slice(0, FILES_SHOWN);
   const stats: { label: string; value: string }[] = [];
@@ -215,12 +221,18 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, latest = fa
 
   return (
     <section aria-label="Turn summary" className="overflow-hidden rounded-2xl border border-ok/25 bg-panel edge">
-      <div className="flex items-center gap-2.5 px-4 pt-3 pb-2">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-4 pt-3 pb-2">
         <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-ok/90 text-base">
           <Icon name="check" size={14} strokeWidth={3} />
         </span>
         <span className="text-[14.5px] font-semibold text-fg">Done</span>
-        {duration && <span className="text-[13px] text-steel tabular">in {duration}</span>}
+        {duration && <span className="text-[13px] whitespace-nowrap text-steel tabular">in {duration}</span>}
+        {workflowRunning && (
+          <span className="inline-flex h-6 items-center gap-1.5 rounded-md border border-accent/30 bg-accent/10 px-2 text-[12px] font-medium text-accent">
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent" />
+            Workflow still running
+          </span>
+        )}
       </div>
       {files.length > 0 && (
         <div className="px-4 pb-2">

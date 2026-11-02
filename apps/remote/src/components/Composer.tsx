@@ -11,7 +11,7 @@ import {
   type RefObject,
 } from "react";
 import { expandCommandShortcut } from "@shared/slashCommands";
-import { composerPlaceholders, filterCommands, insertCommand, pickPlaceholder, slashQuery } from "@/lib/composerLogic";
+import { composerPlaceholders, filterCommands, insertCommand, pickPlaceholder, showResumeQueue, slashQuery } from "@/lib/composerLogic";
 import { insertAtCaret } from "@/lib/templates";
 import { MAX_ATTACHMENTS, mergeAttachments } from "@/lib/attachments";
 import { cancelTurn, clearQueue, removeQueued, resumeQueue, sendPrompt, sendQueuedNow, toastError } from "@/lib/controller";
@@ -20,7 +20,9 @@ import { cn } from "@/lib/cn";
 import { agentIdentity, isBusy } from "@/lib/meta";
 import { busySendPlan, type BusySend } from "@/lib/sendOptions";
 import { draftKey } from "@/lib/drafts";
-import { useAgentAsking } from "@/lib/selectors";
+import { backgroundActive, withSubagents } from "@/lib/background";
+import { useAgentAsking, useBackground } from "@/lib/selectors";
+import { useBackgroundSubagentCount } from "@/lib/subagents";
 import { storage } from "@/lib/storage";
 import { useStore } from "@/lib/store";
 import type { Agent, Attachment, QueuedPrompt } from "@/lib/types";
@@ -95,7 +97,9 @@ export const Composer = memo(function Composer({
 
   // The longest placeholder that fits on one line (a wrapped one would make the empty box taller).
   const asking = useAgentAsking(agent.id);
-  const candidates = useMemo(() => composerPlaceholders(agent, name, asking), [agent.status, agent.unread, agent.availableCommands, agent.steerable, name, asking]);
+  const bg = withSubagents(useBackground(agent), useBackgroundSubagentCount(agent.id));
+  const bgKind = !backgroundActive(bg) ? null : bg.workflows > 0 ? "workflow" : "agents";
+  const candidates = useMemo(() => composerPlaceholders(agent, name, asking, bgKind), [agent.status, agent.unread, agent.availableCommands, agent.steerable, name, asking, bgKind]);
   const [placeholder, setPlaceholder] = useState(() => candidates[candidates.length - 1]);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -379,6 +383,9 @@ function QueueStack({ agent, onEdit }: { agent: Agent; onEdit: (q: QueuedPrompt)
   }, [count]);
   if (!count) return null;
   const open = expanded;
+  // Held at a spending / turn limit: the hold card above is the one way on ("Continue once" runs the queue,
+  // "Raise" lifts the limit). A second "Resume queue" beside it would run the head past the limit unannounced.
+  const held = !!agent.budgetHold;
   const clearAll = (
     <button
       type="button"
@@ -408,7 +415,7 @@ function QueueStack({ agent, onEdit }: { agent: Agent; onEdit: (q: QueuedPrompt)
           <Icon name="clock" size={15} className="shrink-0 text-steel" />
           <span className="shrink-0 font-semibold text-fg">{count} queued</span>
           {agent.queuePaused ? (
-            <span className="min-w-0 truncate font-medium text-warn">Queue paused</span>
+            <span className="min-w-0 truncate font-medium text-warn">{held ? "Held at the limit" : "Queue paused"}</span>
           ) : (
             <span className="min-w-0 truncate text-steel">
               {count === 1 || open ? "Runs after this turn" : queue[0].text.trim() || "Photos"}
@@ -417,7 +424,7 @@ function QueueStack({ agent, onEdit }: { agent: Agent; onEdit: (q: QueuedPrompt)
           <Icon name="chevronDown" size={16} className={cn("ml-auto shrink-0 text-steel transition-transform duration-150", open && "rotate-180")} />
         </button>
         {open && count >= 2 && !agent.queuePaused && clearAll}
-        {agent.queuePaused && (
+        {showResumeQueue(agent) && (
           <button
             type="button"
             onClick={() => void resumeQueue(agent.id)}
