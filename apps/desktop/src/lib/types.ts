@@ -60,6 +60,69 @@ export interface LocalProbe {
   remote: boolean;
 }
 
+export interface GpuInfo {
+  name: string;
+  vendor: "nvidia" | "amd" | "intel" | "apple" | "other";
+  vramBytes: number | null;
+}
+
+/** What this computer can run locally (mirrors kvistcode-core `hardware::Hardware`). */
+export interface Hardware {
+  os: "macos" | "windows" | "linux";
+  ramBytes: number | null;
+  gpus: GpuInfo[];
+  unifiedMemory: boolean;
+  accel: "gpu" | "unified" | "cpu";
+  /** Memory a model plus its context can use, when known. */
+  modelMemoryBytes: number | null;
+  modelsDir: string | null;
+  diskFreeBytes: number | null;
+}
+
+export interface LoadedModel {
+  id: string;
+  sizeBytes: number | null;
+  vramBytes: number | null;
+  contextLength: number | null;
+  expiresAt: string | null;
+}
+
+export interface HealthIssue {
+  severity: "error" | "warn" | "info";
+  code: string;
+  message: string;
+  fix: string | null;
+}
+
+export interface LocalHealth {
+  kind: LocalKind;
+  baseUrl: string;
+  running: boolean;
+  remote: boolean;
+  version: string | null;
+  flavor: string;
+  loaded: LoadedModel[];
+  models: LocalModel[];
+  issues: HealthIssue[];
+}
+
+export interface SpeedResult {
+  model: string;
+  tokensPerSecond: number | null;
+  completionTokens: number | null;
+  promptTokens: number | null;
+  loadMs: number | null;
+  totalMs: number;
+}
+
+export interface LocalPrefs {
+  /** Context window for local agents; null lets Kvistcode choose from memory. */
+  contextTokens: number | null;
+  /** The local account and model that do cheap side jobs (condensing handoff briefs); both null = off. */
+  assistAccountId: string | null;
+  assistModel: string | null;
+}
+
 export interface PullProgress {
   status: string;
   total: number | null;

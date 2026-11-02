@@ -1219,6 +1219,40 @@ impl Core {
         } else {
             None
         };
+        // Local agents: check the model can use tools and give it a real context window.
+        let mut local_args: Vec<String> = Vec::new();
+        let mut local_warnings: Vec<String> = Vec::new();
+        if agent.provider == Provider::Local {
+            let server = account
+                .local
+                .clone()
+                .ok_or_else(|| anyhow!("This account has no model server configured"))?;
+            let account_id = account.id.clone();
+            let models = local_models.clone().unwrap_or_default();
+            let chosen = local_model.clone();
+            let requested = crate::local_prefs::load(&self.inner.data_dir).context_tokens;
+            let prepared = tokio::task::spawn_blocking(move || {
+                let key = accounts::get_api_key(&account_id);
+                let hw = crate::hardware::detect();
+                crate::local_ctx::prepare(
+                    &server,
+                    key.as_deref(),
+                    chosen.as_deref(),
+                    &models,
+                    requested,
+                    &hw,
+                )
+            })
+            .await
+            .map_err(|e| anyhow!("{e}"))??;
+            if prepared.model.is_some() {
+                local_model = prepared.model.clone();
+            }
+            if let Some(c) = prepared.context {
+                local_args = crate::local_ctx::codex_args(c);
+            }
+            local_warnings = prepared.warnings;
+        }
         let (program, args, env, env_remove) = if agent.provider == Provider::Custom {
             let def = self.custom_agent_def(agent.custom_agent_id.as_deref())?;
             let (program, args) = custom_launch(&def)?;
@@ -1251,6 +1285,7 @@ impl Core {
                     local_model.as_deref(),
                     has_key,
                 ));
+                args.extend(local_args.iter().cloned());
             }
             (program, args, acct_env, acct_env_remove)
         };
@@ -1263,6 +1298,9 @@ impl Core {
             &agent.project_path,
         );
         let ctx = self.ctx(agent_id);
+        for w in &local_warnings {
+            ctx.notice(NoticeLevel::Warn, w.clone());
+        }
         let label = format!(
             "{}:{}",
             agent.provider.as_str(),
@@ -2590,6 +2628,24 @@ impl Core {
         Ok(())
     }
 
+    /// The transcript condensed by the local model the user picked for cheap jobs
+    /// (Local models settings), or `None` when that is off or fails: the caller then
+    /// sends the plain transcript.
+    async fn condense_handoff(&self, transcript: &str) -> Option<String> {
+        let prefs = crate::local_prefs::load(&self.inner.data_dir);
+        let (account_id, model) = (prefs.assist_account_id?, prefs.assist_model?);
+        let account = self.account(&account_id).ok()?;
+        let server = account.local?;
+        let transcript = transcript.to_string();
+        tokio::task::spawn_blocking(move || {
+            let key = accounts::get_api_key(&account_id);
+            crate::local_assist::condense(&server, key.as_deref(), &model, &transcript).ok()
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
     /// New agent on another provider/account, seeded with this agent's context.
     pub async fn handoff_agent(
         &self,
@@ -2621,8 +2677,21 @@ impl Core {
                 brief.push_str(&format!("- {f}\n"));
             }
         }
-        brief.push_str("\nTheir conversation so far follows (oldest first, may be abridged):\n\n");
-        brief.push_str(&self.transcript(agent_id, 10_000));
+        let transcript = self.transcript(agent_id, 10_000);
+        match self.condense_handoff(&transcript).await {
+            Some(summary) => {
+                brief.push_str(
+                    "\nA summary of their conversation so far (written by a local model):\n\n",
+                );
+                brief.push_str(&summary);
+            }
+            None => {
+                brief.push_str(
+                    "\nTheir conversation so far follows (oldest first, may be abridged):\n\n",
+                );
+                brief.push_str(&transcript);
+            }
+        }
         brief.push_str(&format!("\n\n---\n\nYour task: {instruction}"));
 
         let req = CreateAgentRequest {

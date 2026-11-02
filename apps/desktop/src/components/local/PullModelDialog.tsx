@@ -1,4 +1,4 @@
-import { Download, X } from "lucide-react";
+import { Download, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -7,14 +7,16 @@ import { Input, Label } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/misc";
 import { api } from "@/lib/api";
 import { openExternal } from "@/lib/external";
-import { pullPercent, pullText, RECOMMENDED_MODELS } from "@/lib/local";
-import type { PullProgress } from "@/lib/types";
-import { errorMessage, uuid } from "@/lib/utils";
+import { isLoopbackUrl, pullPercent, pullText } from "@/lib/local";
+import { describeHardware, diskAllows, QUALITY_NOTE, rankedCatalog } from "@/lib/localFit";
+import type { Hardware, PullProgress } from "@/lib/types";
+import { cn, errorMessage, uuid } from "@/lib/utils";
 
 /**
- * Downloads a model into Ollama: a short list of recommended coding models that
- * support tool calling, or any name from the Ollama library. One download at a time;
- * closing the dialog cancels it (Ollama keeps the partial download for next time).
+ * Downloads a model into Ollama: a short list of coding models that support tool
+ * calling, ranked by what this computer can run (memory, free disk), or any name
+ * from the Ollama library. One download at a time; closing the dialog cancels it
+ * (Ollama keeps the partial download for next time).
  */
 export function PullModelDialog({
   open,
@@ -32,6 +34,26 @@ export function PullModelDialog({
   const [active, setActive] = useState<{ model: string; progress: PullProgress | null } | null>(null);
   const [custom, setCustom] = useState("");
   const pullId = useRef<string | null>(null);
+  const [hw, setHw] = useState<Hardware | null>(null);
+  const [hwDone, setHwDone] = useState(false);
+
+  // This computer's memory and free disk decide which downloads make sense.
+  // They only describe an Ollama running here.
+  const here = isLoopbackUrl(baseUrl);
+  useEffect(() => {
+    if (!open || !here) return;
+    let alive = true;
+    setHwDone(false);
+    api
+      .localHardware()
+      .then((h) => alive && setHw(h))
+      .catch(() => alive && setHw(null))
+      .finally(() => alive && setHwDone(true));
+    return () => {
+      alive = false;
+    };
+  }, [open, here]);
+  const ranked = rankedCatalog(here ? hw : null);
 
   const cancel = () => {
     if (pullId.current) void api.cancelLocalPull(pullId.current);
@@ -68,25 +90,73 @@ export function PullModelDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         title="Get a model"
-        description="Models download into Ollama and run on this computer. These all support tool calling, which Kvistcode's agents need."
-        className="w-[min(540px,calc(100vw-32px))]"
+        description="Models download into Ollama. These all support tool calling, which Kvistcode's agents need."
+        className="w-[min(560px,calc(100vw-32px))]"
       >
         <DialogBody className="space-y-2">
-          {RECOMMENDED_MODELS.map((m) => {
+          <p className="text-[12px] leading-snug text-muted" aria-live="polite">
+            {!here ? (
+              "This Ollama runs on another machine, so its memory and disk can't be checked from here."
+            ) : hw ? (
+              <>
+                This computer: <span className="text-fg/90">{describeHardware(hw)}</span>
+                {hw.diskFreeBytes != null && <> · {Math.round(hw.diskFreeBytes / 1e9)} GB free for models</>}
+              </>
+            ) : hwDone ? (
+              "Couldn't read this computer's memory, so how well each model fits is unknown."
+            ) : (
+              <span className="flex items-center gap-1.5">
+                <Spinner className="h-3 w-3" /> Checking this computer…
+              </span>
+            )}
+          </p>
+          {ranked.map(({ model: m, fit, best }) => {
             const isActive = active?.model === m.name;
             const done = have.has(m.name);
             const pct = isActive && active.progress ? pullPercent(active.progress) : null;
+            const roomOnDisk = !here || diskAllows(hw, m.sizeGb);
             return (
-              <div key={m.name} className="rounded-xl border border-line bg-base/40 px-3 py-2.5">
+              <div
+                key={m.name}
+                className={cn(
+                  "rounded-xl border px-3 py-2.5",
+                  best ? "border-accent/50 bg-accent/[0.05]" : "border-line bg-base/40",
+                  fit.level === "no" && "opacity-70",
+                )}
+              >
                 <div className="flex items-center gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline gap-2">
+                    <div className="flex flex-wrap items-baseline gap-x-2">
                       <span className="text-[13px] font-medium text-fg">{m.title}</span>
                       <span className="font-mono text-[11px] text-steel">{m.name}</span>
+                      {best && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-accent">
+                          <Sparkles className="h-3 w-3" /> Best for this computer
+                        </span>
+                      )}
                     </div>
                     <p className="text-[11.5px] text-muted">
-                      {m.blurb} · approx. {m.sizeGb} GB download · approx. {m.ramGb} GB RAM
+                      {m.blurb} · {m.sizeGb} GB download
                     </p>
+                    {here && fit.level !== "unknown" && (
+                      <p
+                        className={cn(
+                          "text-[11.5px]",
+                          fit.level === "great" || fit.level === "ok"
+                            ? "text-ok"
+                            : fit.level === "no"
+                              ? "text-err"
+                              : "text-warn",
+                        )}
+                      >
+                        {fit.note}
+                      </p>
+                    )}
+                    {!roomOnDisk && (
+                      <p className="text-[11.5px] text-err">
+                        Not enough free disk space ({Math.round((hw?.diskFreeBytes ?? 0) / 1e9)} GB free).
+                      </p>
+                    )}
                   </div>
                   {isActive ? (
                     <Button size="sm" variant="ghost" onClick={cancel} aria-label={`Cancel download of ${m.name}`}>
@@ -95,7 +165,12 @@ export function PullModelDialog({
                   ) : done ? (
                     <span className="text-[12px] text-ok">Downloaded</span>
                   ) : (
-                    <Button size="sm" variant="secondary" disabled={!!active} onClick={() => void start(m.name)}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={!!active || !roomOnDisk}
+                      onClick={() => void start(m.name)}
+                    >
                       <Download /> Get
                     </Button>
                   )}
@@ -117,6 +192,7 @@ export function PullModelDialog({
               </div>
             );
           })}
+          <p className="text-[11.5px] leading-snug text-steel">{QUALITY_NOTE}</p>
 
           <div className="pt-2">
             <Label htmlFor="pull-custom">Or any model from the Ollama library</Label>

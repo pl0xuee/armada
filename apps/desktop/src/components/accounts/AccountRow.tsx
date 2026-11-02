@@ -16,6 +16,7 @@ import { relativeTimeLong } from "@/lib/format";
 import type { Account } from "@/lib/types";
 import { cn, errorMessage } from "@/lib/utils";
 import { useApp } from "@/store/app";
+import { LocalHealthPanel } from "../local/LocalHealthPanel";
 import { EditAccountPopover } from "./EditAccountPopover";
 import { ReplaceKeyDialog } from "./ReplaceKeyDialog";
 
@@ -178,6 +179,7 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
               </button>
             </p>
           )}
+          {local && account.local && <LocalHealthPanel account={account} />}
           {!loggedIn && st !== null && apiKey && !checkError && (
             <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11.5px] text-steel">
               The key was rejected.
