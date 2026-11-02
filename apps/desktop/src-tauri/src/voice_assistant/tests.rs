@@ -932,6 +932,14 @@ async fn pause_and_resume(by_tool: bool) -> PauseRun {
         tokio::time::sleep(Duration::from_millis(700)).await;
         ctl_tx.send(Control::Resume).unwrap();
         audio_rx.await.unwrap();
+        // Audio can reach the server before the session handles `session.updated`; stop only
+        // once the "Listening again" notice is out, or the assertions below race it.
+        wait_for(|| {
+            events.0.lock().iter().any(
+                |e| matches!(e, VaEvent::Notice { message: Some(m) } if m.starts_with("Listening again")),
+            )
+        })
+        .await;
         let _ = ctl_tx.send(Control::Stop);
         mic_closed
     });
