@@ -153,7 +153,7 @@ export function fitModel(m: CatalogModel, hw: Hardware | null): Fit {
   const context = pickContext(m.maxContext, mem, weights, m.kvBytesPerToken);
   if (hw.accel === "cpu") {
     return weights + OVERHEAD <= mem
-      ? { level: "slow", context, note: "No GPU found: runs on the CPU, several times slower" }
+      ? { level: "slow", context, note: "Runs slowly: no GPU found, so it runs on the CPU" }
       : { level: "no", context, note: "Too big for this computer's memory" };
   }
   if (weights + OVERHEAD > mem) {
@@ -162,13 +162,13 @@ export function fitModel(m: CatalogModel, hw: Hardware | null): Fit {
       ? {
           level: "slow",
           context: Math.min(context, MIN_GOOD_CONTEXT),
-          note: "Doesn't fit in GPU memory: spills to the CPU and runs slowly",
+          note: "Runs slowly: doesn't fit in GPU memory, so part of it runs on the CPU",
         }
-      : { level: "no", context, note: "Too big for this computer" };
+      : { level: "no", context, note: "Too big for this computer's memory" };
   }
-  if (context >= TARGET_CONTEXT) return { level: "great", context, note: `Fits with a ${kb(context)} window` };
-  if (context >= MIN_GOOD_CONTEXT) return { level: "ok", context, note: `Fits with a ${kb(context)} window` };
-  return { level: "tight", context, note: `Fits, but only with a ${kb(context)} window` };
+  if (context >= TARGET_CONTEXT) return { level: "great", context, note: `Runs well with a ${kb(context)} window` };
+  if (context >= MIN_GOOD_CONTEXT) return { level: "ok", context, note: `Runs well with a ${kb(context)} window` };
+  return { level: "tight", context, note: `Tight fit: only a ${kb(context)} window` };
 }
 
 export const FIT_LABEL: Record<FitLevel, string> = {

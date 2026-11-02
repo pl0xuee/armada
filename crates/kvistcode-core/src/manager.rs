@@ -2626,6 +2626,24 @@ impl Core {
         Ok(())
     }
 
+    /// The transcript condensed by the local model the user picked for cheap jobs
+    /// (Local models settings), or `None` when that is off or fails: the caller then
+    /// sends the plain transcript.
+    async fn condense_handoff(&self, transcript: &str) -> Option<String> {
+        let prefs = crate::local_prefs::load(&self.inner.data_dir);
+        let (account_id, model) = (prefs.assist_account_id?, prefs.assist_model?);
+        let account = self.account(&account_id).ok()?;
+        let server = account.local?;
+        let transcript = transcript.to_string();
+        tokio::task::spawn_blocking(move || {
+            let key = accounts::get_api_key(&account_id);
+            crate::local_assist::condense(&server, key.as_deref(), &model, &transcript).ok()
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
     /// New agent on another provider/account, seeded with this agent's context.
     pub async fn handoff_agent(
         &self,
@@ -2657,8 +2675,21 @@ impl Core {
                 brief.push_str(&format!("- {f}\n"));
             }
         }
-        brief.push_str("\nTheir conversation so far follows (oldest first, may be abridged):\n\n");
-        brief.push_str(&self.transcript(agent_id, 10_000));
+        let transcript = self.transcript(agent_id, 10_000);
+        match self.condense_handoff(&transcript).await {
+            Some(summary) => {
+                brief.push_str(
+                    "\nA summary of their conversation so far (written by a local model):\n\n",
+                );
+                brief.push_str(&summary);
+            }
+            None => {
+                brief.push_str(
+                    "\nTheir conversation so far follows (oldest first, may be abridged):\n\n",
+                );
+                brief.push_str(&transcript);
+            }
+        }
         brief.push_str(&format!("\n\n---\n\nYour task: {instruction}"));
 
         let req = CreateAgentRequest {

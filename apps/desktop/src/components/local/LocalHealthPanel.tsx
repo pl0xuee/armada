@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/misc";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { describeModel, formatBytes, formatContext } from "@/lib/local";
 import { CONTEXT_CHOICES, describeHardware } from "@/lib/localFit";
@@ -46,7 +47,7 @@ export function LocalHealthPanel({ account }: { account: Account }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [hw, setHw] = useState<Hardware | null>(null);
-  const [prefs, setPrefs] = useState<LocalPrefs>({ contextTokens: null });
+  const [prefs, setPrefs] = useState<LocalPrefs>({ contextTokens: null, assistAccountId: null, assistModel: null });
   const [busy, setBusy] = useState<string | null>(null);
   const [speed, setSpeed] = useState<Record<string, SpeedResult>>({});
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -84,6 +85,11 @@ export function LocalHealthPanel({ account }: { account: Account }) {
   const ollama = account.local?.kind === "ollama";
   const loadedIds = new Set(health?.loaded.map((m) => m.id));
   const remote = health?.remote ?? false;
+  const assistOn = prefs.assistAccountId === account.id && !!prefs.assistModel;
+  const savePrefs = (next: LocalPrefs) => {
+    setPrefs(next);
+    api.setLocalPrefs(next).catch((e) => toast.error("Couldn't save", { description: errorMessage(e) }));
+  };
   const choice = prefs.contextTokens == null ? "auto" : String(prefs.contextTokens);
 
   return (
@@ -285,11 +291,7 @@ export function LocalHealthPanel({ account }: { account: Account }) {
                       aria-label="Context window for agents"
                       value={choice}
                       onValueChange={(v) => {
-                        const next: LocalPrefs = { contextTokens: v === "auto" ? null : Number(v) };
-                        setPrefs(next);
-                        api
-                          .setLocalPrefs(next)
-                          .catch((e) => toast.error("Couldn't save", { description: errorMessage(e) }));
+                        savePrefs({ ...prefs, contextTokens: v === "auto" ? null : Number(v) });
                       }}
                       options={CONTEXT_CHOICES.map((c) => ({
                         value: c.value == null ? "auto" : String(c.value),
@@ -301,6 +303,42 @@ export function LocalHealthPanel({ account }: { account: Account }) {
                     How much an agent can keep in mind. Automatic picks up to 64k from your memory
                     {hw ? ` (${describeHardware(hw)})` : ""}. Bigger windows use more memory; below 32k agents forget
                     files and instructions.
+                  </p>
+                </div>
+              )}
+              {health.running && health.models.length > 0 && (
+                <div>
+                  <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-steel">
+                    Save subscription usage
+                  </p>
+                  <label className="flex items-center gap-2.5 text-[12.5px] text-fg">
+                    <Switch
+                      aria-label="Use this server to condense handoff briefs"
+                      checked={assistOn}
+                      onCheckedChange={(on) =>
+                        savePrefs({
+                          ...prefs,
+                          assistAccountId: on ? account.id : null,
+                          assistModel: on ? (prefs.assistModel ?? health.models[0]?.id ?? null) : null,
+                        })
+                      }
+                    />
+                    Condense handoff briefs with a local model
+                  </label>
+                  {assistOn && (
+                    <div className="mt-1.5 max-w-[260px]">
+                      <Select
+                        aria-label="Model for condensing"
+                        value={prefs.assistModel ?? undefined}
+                        onValueChange={(m) => savePrefs({ ...prefs, assistModel: m })}
+                        options={health.models.map((m) => ({ value: m.id, label: m.id }))}
+                      />
+                    </div>
+                  )}
+                  <p className="mt-1 text-[11.5px] leading-snug text-steel">
+                    When you hand an agent's work to another agent, a long conversation is summarized here first, for
+                    free, so the next agent reads a short brief instead of the whole thing. Off by default; if the
+                    server is down the full conversation is sent.
                   </p>
                 </div>
               )}

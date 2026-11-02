@@ -11,6 +11,12 @@ pub struct LocalPrefs {
     /// Context window for local agents; `None` lets Kvistcode choose from memory.
     #[serde(default)]
     pub context_tokens: Option<i64>,
+    /// Use this local account and model for cheap side jobs (condensing handoff
+    /// briefs). Off unless both are set.
+    #[serde(default)]
+    pub assist_account_id: Option<String>,
+    #[serde(default)]
+    pub assist_model: Option<String>,
 }
 
 fn path(data_dir: &Path) -> PathBuf {
@@ -47,13 +53,15 @@ mod tests {
         assert_eq!(load(&dir), LocalPrefs::default());
         let p = LocalPrefs {
             context_tokens: Some(65_536),
+            ..LocalPrefs::default()
         };
         save(&dir, &p).unwrap();
         assert_eq!(load(&dir), p);
         assert!(save(
             &dir,
             &LocalPrefs {
-                context_tokens: Some(10)
+                context_tokens: Some(10),
+                ..LocalPrefs::default()
             }
         )
         .is_err());

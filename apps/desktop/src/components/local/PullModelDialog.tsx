@@ -8,7 +8,7 @@ import { Spinner } from "@/components/ui/misc";
 import { api } from "@/lib/api";
 import { openExternal } from "@/lib/external";
 import { isLoopbackUrl, pullPercent, pullText } from "@/lib/local";
-import { describeHardware, diskAllows, FIT_LABEL, QUALITY_NOTE, rankedCatalog } from "@/lib/localFit";
+import { describeHardware, diskAllows, QUALITY_NOTE, rankedCatalog } from "@/lib/localFit";
 import type { Hardware, PullProgress } from "@/lib/types";
 import { cn, errorMessage, uuid } from "@/lib/utils";
 
@@ -149,7 +149,7 @@ export function PullModelDialog({
                               : "text-warn",
                         )}
                       >
-                        {FIT_LABEL[fit.level]}: {fit.note}
+                        {fit.note}
                       </p>
                     )}
                     {!roomOnDisk && (
