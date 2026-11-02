@@ -7,7 +7,7 @@ Kvistcode (formerly Armada, renamed 2026-11-01) is a Tauri 2 desktop app that ru
 - `apps/desktop/src-tauri/`: Tauri shell. `commands.rs` (every command), `lib.rs` (handler list), `remote.rs` + `remote/` (phone server), `github.rs`, `git_review.rs`, `preview_proxy.rs`, tray/notify/sound.
 - `apps/desktop/src/`: React 19 + Zustand + Tailwind. `store/`, `components/{agent,timeline,mission,settings,...}`, `views/`, `lib/` (`api.ts` wraps commands, `mock.ts` + `mock-data.ts` are a full browser backend used by tests and screenshots).
 - `apps/remote/`: phone app (Preact, single-file build embedded into the desktop binary).
-- `docs/`: `RELEASING.md` (read before any release), `PLAN.md` (historical design), `TOKEN-SAVING.md`, `LOCAL-MODELS.md`.
+- `docs/`: `RELEASING.md` (read before any release), `PLAN.md` (historical design), `TOKEN-SAVING.md`.
 
 ## Checks (CI runs all of these; run them before you say you are done)
 - `cargo fmt --all --check`
