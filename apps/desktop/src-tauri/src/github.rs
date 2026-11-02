@@ -443,7 +443,7 @@ pub async fn push_agent(agent: &Agent) -> anyhow::Result<String> {
 /// A remote name read from the repository's config. It goes on a `git push` command line, and
 /// the repository (or the agent working in it) controls that config: a name that looks like an
 /// option (`--receive-pack=…` runs a program) is refused.
-fn checked_remote(remote: &str) -> anyhow::Result<&str> {
+pub(crate) fn checked_remote(remote: &str) -> anyhow::Result<&str> {
     if remote.is_empty() || remote.starts_with('-') || remote.chars().any(char::is_control) {
         bail!("The branch's remote in this repository's git config isn't a valid remote name, so Kvistcode won't push to it. Check `git config branch.<name>.remote`.");
     }
