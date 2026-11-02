@@ -24,6 +24,8 @@ const FAST_DIV: i64 = 1_000;
 /// Two automatic resumes of one agent are never closer than this (a start that failed quietly
 /// must not loop).
 const MIN_BETWEEN_ATTEMPTS_MS: i64 = 2 * 60_000;
+/// Nothing is resumed in the first moments after the app starts.
+const STARTUP_HOLD_MS: i64 = 20_000;
 /// How long a started agent may hold its "starting" slot.
 const START_SLOT_MAX: std::time::Duration = std::time::Duration::from_secs(90);
 
@@ -54,6 +56,10 @@ impl Core {
     /// Starts the ticker. Cheap while nothing waits: one pass over the agent list.
     pub(super) fn spawn_limit_watch(&self) {
         let weak = self.weak();
+        // Agents whose reset passed while the app was closed wait a moment: at a login launch the
+        // network is often not up yet, and a resume that cannot connect would end the wait.
+        let hold = now_ms() + STARTUP_HOLD_MS / self.limit_div();
+        self.inner.limit_wait.lock().clock.hold_until(hold);
         tokio::spawn(async move {
             loop {
                 let Some(core) = weak.upgrade() else {
