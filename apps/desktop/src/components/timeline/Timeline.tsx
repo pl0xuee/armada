@@ -8,6 +8,7 @@ import { useIdentity } from "@/hooks/useIdentity";
 import { useScrollFade } from "@/hooks/useScrollFade";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
+import { ErrorBoundary } from "../ui/ErrorBoundary";
 import { Spinner } from "../ui/misc";
 import { Skeleton } from "../ui/skeleton";
 import {
@@ -490,6 +491,7 @@ export function Timeline({
                     )}
                     style={{ transform: `translateY(${v.start}px)` }}
                   >
+                    <ErrorBoundary resetKey={group ?? it} fallback={() => <RowFailed />}>
                     {turnStart && <TurnHeader agent={stableAgent} ts={it.ts} />}
                     {group ? (
                       <ActivityGroup
@@ -518,6 +520,7 @@ export function Timeline({
                         reasonHandler,
                       })
                     )}
+                    </ErrorBoundary>
                   </div>
                 );
               })}
@@ -955,6 +958,15 @@ function renderItem(
     default:
       return null;
   }
+}
+
+/** Stands in for one row that could not be drawn (an item with unexpected contents); the rest of the conversation stays. */
+function RowFailed() {
+  return (
+    <div role="alert" className="rounded-lg border border-line px-3 py-2 text-[12px] text-steel">
+      This item couldn't be displayed.
+    </div>
+  );
 }
 
 /** Placeholder shaped like a conversation: a prompt bubble, a reply, a few tool rows, another reply. */

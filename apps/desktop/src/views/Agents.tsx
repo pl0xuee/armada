@@ -26,6 +26,7 @@ import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { PreviewTab } from "@/components/workspace/PreviewTab";
 import { CONVERSATION_MIN, WorkspacePanel, workspaceMaxHeight } from "@/components/workspace/WorkspacePanel";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { Button } from "@/components/ui/button";
 import { useReturnFocus } from "@/components/ui/returnFocus";
 import { Kbd } from "@/components/ui/kbd";
@@ -93,15 +94,30 @@ export function AgentsView() {
       {list.docked && list.open && <AgentList variant="docked" />}
       {agent ? (
         // Tiled: one pane for the whole group, so focusing another tile never remounts the others.
-        <AgentPane
-          key={familyKey ? familyKey.split(",")[0] : agent.id}
-          agentId={agent.id}
-          tileIds={familyKey ? familyKey.split(",") : undefined}
-        />
+        <ErrorBoundary resetKey={agent.id} fallback={(error, reset) => <PaneFailed error={error} onRetry={reset} />}>
+          <AgentPane
+            key={familyKey ? familyKey.split(",")[0] : agent.id}
+            agentId={agent.id}
+            tileIds={familyKey ? familyKey.split(",") : undefined}
+          />
+        </ErrorBoundary>
       ) : (
         <Welcome />
       )}
       {!list.docked && <AgentDrawer open={list.open} onClose={list.close} />}
+    </div>
+  );
+}
+
+/** Shown in place of an agent's pane when drawing it failed: the list and the rest of the app keep working. */
+function PaneFailed({ error, onRetry }: { error: string; onRetry: () => void }) {
+  return (
+    <div role="alert" className="flex min-w-0 flex-1 flex-col items-center justify-center gap-2 bg-base p-8 text-center">
+      <p className="text-[14px] font-semibold">This conversation couldn't be displayed</p>
+      <p className="selectable max-w-md break-words font-mono text-[11.5px] text-muted">{error}</p>
+      <Button size="sm" variant="secondary" className="mt-2" onClick={onRetry}>
+        Try again
+      </Button>
     </div>
   );
 }
