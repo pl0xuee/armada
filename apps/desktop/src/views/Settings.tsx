@@ -32,6 +32,7 @@ import { GithubGlyph } from "@/components/settings/GithubGlyph";
 import { InstallAllBanner } from "@/components/settings/InstallAllBanner";
 import { HelperSettings } from "@/components/settings/HelperSettings";
 import { ResponseStyleSettings } from "@/components/settings/ResponseStyleSettings";
+import { TokenSavingSettings } from "@/components/settings/TokenSavingSettings";
 import { RememberedChoicesRow } from "@/components/settings/RememberedChoicesRow";
 import { AgentsSection } from "@/components/settings/AgentsSection";
 import { AlertTargets } from "@/components/settings/AlertTargets";
@@ -922,6 +923,8 @@ function Behavior({ settings }: { settings: Settings }) {
         </SettingGroup>
 
         <ResponseStyleSettings settings={settings} />
+
+        <TokenSavingSettings settings={settings} />
 
         <HelperSettings settings={settings} />
 

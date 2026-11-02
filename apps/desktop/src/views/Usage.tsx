@@ -8,6 +8,7 @@ import { StatusDot } from "@/components/StatusDot";
 import { Segmented } from "@/components/ui/segmented";
 import { BarList, ShareBar, type BarDatum } from "@/components/usage/BarList";
 import { BudgetBar } from "@/components/usage/BudgetBar";
+import { TokenInsights } from "@/components/usage/TokenInsights";
 import { KpiTile } from "@/components/usage/KpiTile";
 import { UsageMeters } from "@/components/UsageMeter";
 import { useBudgetStatus } from "@/hooks/useBudgetStatus";
@@ -256,6 +257,8 @@ export function UsageView() {
               sub={`incl. archived · ${live} live · ${accountsInUse} ${accountsInUse === 1 ? "account" : "accounts"}`}
             />
           </div>
+
+          <TokenInsights agents={agents} />
 
           <Panel title="Provider share" icon={<Layers />}>
             <ShareBar
