@@ -115,7 +115,7 @@ async fn full_tool_call_roundtrip_and_barge_in() {
 
         let update = next_json(&mut ws).await;
         assert_eq!(update["type"], "session.update");
-        assert_eq!(update["session"]["tools"].as_array().unwrap().len(), 7);
+        assert_eq!(update["session"]["tools"].as_array().unwrap().len(), 12);
         seen.push(update);
         send(&mut ws, json!({"type":"session.created"})).await;
 

@@ -4,7 +4,7 @@ import { api, onVaEvent } from "@/lib/api";
 import { beginVa, initialVa, isLive, reduceVa, type VaEvent, type VaState } from "@/lib/voiceAssistant";
 import { errorMessage } from "@/lib/utils";
 import { useApp } from "./app";
-import { useUi } from "./ui";
+import { useUi, type View } from "./ui";
 
 interface VaStore extends VaState {
   /** Panel is showing (live session, or an error/summary that hasn't been dismissed). */
@@ -18,9 +18,13 @@ export const useVa = create<VaStore>((set) => ({
   dismiss: () => set({ ...initialVa, visible: false }),
 }));
 
-function applyNavigation(view: string, agentId: string | null) {
+/** Screens the assistant can open by name (the tool's names match the window's). */
+const SCREENS: ReadonlySet<string> = new Set(["usage", "schedules", "accounts", "settings", "compare"]);
+
+export function applyNavigation(view: string, agentId: string | null) {
   const ui = useUi.getState();
   if (view === "mission_control") ui.setView("mission");
+  else if (SCREENS.has(view)) ui.setView(view as View);
   else if (view === "inbox")
     ui.openMission("needs"); // the tool's name for Needs you
   else if (view === "review" && agentId) {

@@ -171,6 +171,17 @@ fn ago(now: i64, then: i64) -> String {
     }
 }
 
+/// "in 2 h" for a reset time (or "now" when it has passed).
+fn ago_until(now: i64, at: i64) -> String {
+    let s = ((at - now) / 1000).max(0);
+    match s {
+        0 => "now".into(),
+        1..=3599 => format!("in {} min", (s + 59) / 60),
+        3600..=86_399 => format!("in {} h", s / 3600),
+        _ => format!("in {} days", s / 86_400),
+    }
+}
+
 impl KvistcodeTools {
     async fn run(&self, name: &str, call: ToolCall) -> ToolOutcome {
         match call {
@@ -189,6 +200,11 @@ impl KvistcodeTools {
             ToolCall::StopAgent { agent } => self.stop_agent(&agent).await,
             ToolCall::Open { view, agent } => self.open(view, agent.as_deref()),
             ToolCall::RequestApprovalReview { agent } => self.request_approval(&agent),
+            ToolCall::ListProjects => self.list_projects().await,
+            ToolCall::GetUsage => self.get_usage(),
+            ToolCall::SearchHistory { query } => self.search_history(&query),
+            ToolCall::RenameAgent { agent, title } => self.rename_agent(&agent, &title),
+            ToolCall::MarkDone { agent } => self.mark_done(&agent),
         }
         .with_kind(name)
     }
@@ -556,6 +572,11 @@ impl KvistcodeTools {
             OpenView::MissionControl => "Mission Control",
             OpenView::Inbox => "the inbox",
             OpenView::Review => "the diff review",
+            OpenView::Usage => "usage",
+            OpenView::Schedules => "schedules",
+            OpenView::Accounts => "accounts",
+            OpenView::Settings => "settings",
+            OpenView::Compare => "compare",
         };
         self.sink.emit(VaEvent::Navigate {
             view: view.as_str().into(),
@@ -571,6 +592,127 @@ impl KvistcodeTools {
             summary,
             agent.map(|a| a.id),
         )
+    }
+
+    async fn list_projects(&self) -> ToolOutcome {
+        let known = self.known_projects().await;
+        let names: Vec<String> = known.iter().take(40).map(|p| basename(p)).collect();
+        ok(json!({ "count": known.len(), "projects": names }))
+    }
+
+    fn get_usage(&self) -> ToolOutcome {
+        let accounts = match self.core.accounts() {
+            Ok(a) => a,
+            Err(e) => return fail(&format!("{e:#}")),
+        };
+        let now = kvistcode_core::now_ms();
+        let window = |w: &Option<kvistcode_core::UsageWindow>| {
+            w.as_ref().map(|w| {
+                json!({
+                    "usedPercent": w.used_percent.round(),
+                    "windowHours": w.window_mins.map(|m| m / 60),
+                    "resetsIn": w.resets_at.map(|r| ago_until(now, r)),
+                })
+            })
+        };
+        let rows: Vec<Value> = accounts
+            .iter()
+            .map(|a| {
+                json!({
+                    "account": a.name,
+                    "provider": a.provider.as_str(),
+                    "plan": a.usage.as_ref().and_then(|u| u.plan.clone()),
+                    "shortWindow": a.usage.as_ref().and_then(|u| window(&u.primary)),
+                    "longWindow": a.usage.as_ref().and_then(|u| window(&u.secondary)),
+                })
+            })
+            .collect();
+        let agents = self.core.agents().unwrap_or_default();
+        let live: Vec<&Agent> = agents.iter().filter(|a| !a.archived).collect();
+        let cost: f64 = live.iter().map(|a| a.cost_usd).sum();
+        let mut top: Vec<&&Agent> = live.iter().collect();
+        top.sort_by(|a, b| b.cost_usd.total_cmp(&a.cost_usd));
+        let top: Vec<Value> = top
+            .iter()
+            .take(3)
+            .map(|a| json!({ "title": a.title, "costUsd": (a.cost_usd * 100.0).round() / 100.0 }))
+            .collect();
+        ok(json!({
+            "accounts": rows,
+            "agentsCostUsd": (cost * 100.0).round() / 100.0,
+            "mostExpensive": top,
+            "note": "Cost is the API-equivalent estimate; subscriptions are limited by the percent used, not by cost.",
+        }))
+    }
+
+    fn search_history(&self, query: &str) -> ToolOutcome {
+        let hits = match self.core.search(query) {
+            Ok(h) => h,
+            Err(e) => return fail(&format!("{e:#}")),
+        };
+        let agents = self.core.agents().unwrap_or_default();
+        let rows: Vec<Value> = hits
+            .iter()
+            .take(6)
+            .map(|h| {
+                let title = agents
+                    .iter()
+                    .find(|a| a.id == h.agent_id)
+                    .map(|a| a.title.clone());
+                let snippet: String = h
+                    .snippet
+                    .chars()
+                    .filter(|c| *c != '\u{1}' && *c != '\u{2}')
+                    .collect();
+                json!({ "agentId": h.agent_id, "agent": title, "kind": h.kind, "excerpt": snippet })
+            })
+            .collect();
+        ok(json!({ "matches": rows.len(), "results": rows }))
+    }
+
+    fn rename_agent(&self, query: &str, title: &str) -> ToolOutcome {
+        let agent = match self.resolve(query) {
+            Ok(a) => a,
+            Err(o) => return *o,
+        };
+        let title = clean(title, tools::MAX_TITLE_CHARS).replace('\n', " ");
+        let title = title.trim().to_string();
+        if title.is_empty() {
+            return fail("The new title is empty.");
+        }
+        let summary = format!("Rename '{}' to '{}'", clean(&agent.title, 80), title);
+        let core = self.core.clone();
+        propose(
+            "rename_agent",
+            summary,
+            Box::pin(async move {
+                match core.rename_agent(&agent.id, &title) {
+                    Ok(()) => done(
+                        json!({ "renamed": true, "title": title }),
+                        "rename_agent",
+                        format!("Renamed '{}' to '{}'", agent.title, title),
+                        Some(agent.id),
+                    ),
+                    Err(e) => fail(&format!("Couldn't rename it: {e:#}")),
+                }
+            }),
+        )
+    }
+
+    fn mark_done(&self, query: &str) -> ToolOutcome {
+        let agent = match self.resolve(query) {
+            Ok(a) => a,
+            Err(o) => return *o,
+        };
+        match self.core.acknowledge_agent(&agent.id) {
+            Ok(()) => done(
+                json!({ "markedDone": true, "agent": agent.title }),
+                "mark_done",
+                format!("Marked '{}' done", agent.title),
+                Some(agent.id),
+            ),
+            Err(e) => fail(&format!("Couldn't mark it done: {e:#}")),
+        }
     }
 
     fn request_approval(&self, query: &str) -> ToolOutcome {
