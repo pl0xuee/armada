@@ -35,7 +35,7 @@ import { basename, cn, modKey } from "@/lib/utils";
 import { useAgentListLayout } from "@/hooks/useAgentListLayout";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { INSPECTOR_DOCK_QUERY } from "@/lib/layout";
+import { headerTier, INSPECTOR_DOCK_QUERY } from "@/lib/layout";
 import { selectFromAgents } from "@/lib/memoSelector";
 import { useApp } from "@/store/app";
 import { hasNewServer, previewOf, togglePreview, usePreview } from "@/store/preview";
@@ -117,7 +117,7 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
   const list = useAgentListLayout();
   const [ref, width] = useElementWidth<HTMLElement>();
   // full: labelled buttons · icons: icon buttons · compact: secondary actions live in ⋯
-  const tier = tile ? "compact" : width === 0 || width >= 1000 ? "full" : width >= 600 ? "icons" : "compact";
+  const tier = headerTier(width, !!tile);
   // Live helpers (for a main agent): drives the "N helpers" chip and the tile toggle.
   const agentId = agent.id;
   const isHelper = !!agent.parentId;

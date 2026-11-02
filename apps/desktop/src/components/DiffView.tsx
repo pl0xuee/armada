@@ -302,10 +302,10 @@ function HunkRows({
           key={i}
           className={cn(l.type === "add" && "bg-[var(--diff-add)]", l.type === "del" && "bg-[var(--diff-del)]")}
         >
-          <td className="w-10 select-none border-r border-line/50 pr-2 text-right align-top text-[11px] text-steel/60 tabular">
+          <td className="w-10 select-none border-r border-line/50 pr-2 text-right align-top text-[11px] text-steel tabular">
             {l.oldNo ?? ""}
           </td>
-          <td className="w-10 select-none border-r border-line/50 pr-2 text-right align-top text-[11px] text-steel/60 tabular">
+          <td className="w-10 select-none border-r border-line/50 pr-2 text-right align-top text-[11px] text-steel tabular">
             {l.newNo ?? ""}
           </td>
           <td
@@ -525,7 +525,7 @@ const LazyChunk = memo(function LazyChunk({
                 l.type === "del" && "bg-[var(--diff-del)]",
               )}
             >
-              <td className="relative w-12 select-none border-r border-line/50 pl-5 pr-2 text-right align-top text-[11px] text-steel/60 tabular">
+              <td className="relative w-12 select-none border-r border-line/50 pl-5 pr-2 text-right align-top text-[11px] text-steel tabular">
                 {anchor && (
                   <button
                     type="button"
@@ -544,7 +544,7 @@ const LazyChunk = memo(function LazyChunk({
                 {l.oldNo ?? ""}
               </td>
               <td
-                className="w-10 cursor-pointer select-none border-r border-line/50 pr-2 text-right align-top text-[11px] text-steel/60 tabular hover:text-accent"
+                className="w-10 cursor-pointer select-none border-r border-line/50 pr-2 text-right align-top text-[11px] text-steel tabular hover:text-accent"
                 onClick={() => anchor && commenting.onLineComment(anchor)}
               >
                 {l.newNo ?? ""}

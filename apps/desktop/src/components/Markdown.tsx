@@ -69,7 +69,7 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
   const shown = hidden ? revealHidden(code) : code;
   const runFn = useRef<() => void>(() => {});
   return (
-    <div className="group/code my-3 overflow-hidden rounded-xl border border-line bg-code">
+    <div dir="ltr" className="group/code my-3 overflow-hidden rounded-xl border border-line bg-code">
       <div className="flex h-8 items-center justify-between border-b border-line/70 bg-panel/50 pl-3.5 pr-1.5">
         <span className="flex items-baseline gap-2">
           <span className="font-mono text-[11px] lowercase tracking-wide text-steel">{lang ?? "text"}</span>
@@ -87,7 +87,7 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
               }}
             />
           )}
-          <CopyButton text={shown} className="opacity-70 group-hover/code:opacity-100" />
+          <CopyButton text={shown} />
         </div>
       </div>
       {hidden && (
@@ -96,9 +96,10 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
         </div>
       )}
       <pre
+        // Focusable so the keyboard can scroll a wide block sideways (and run a command with Ctrl/⌘+Enter).
+        tabIndex={0}
         {...(command
           ? {
-              tabIndex: 0,
               onKeyDown: (e: React.KeyboardEvent) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
@@ -112,7 +113,8 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
           "selectable overflow-x-auto px-3.5 py-3 font-mono text-[12.5px] leading-[1.65] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/50",
           folded && "overflow-y-hidden fold-fade-code",
         )}
-        onFocusCapture={() => folded && setOpen(true)}
+        // Tabbing into a folded block opens it (the keyboard can't scroll a clipped one); clicking to select text doesn't.
+        onFocusCapture={(e) => folded && e.currentTarget.matches(":focus-visible") && setOpen(true)}
       >
         <code>
           {isDiff ? (
@@ -350,6 +352,16 @@ export function splitBlockRanges(text: string, from = 0): BlockRange[] {
   return out;
 }
 
+/**
+ * Link reference definitions (`[1]: https://…`) and footnotes (`[^1]: …`) are resolved across the whole
+ * document, so a text that has them can't be parsed block by block (`[docs][1]` would stay literal).
+ */
+const DEFINITION_RE = /^ {0,3}\[[^\]\n]+\]:[ \t]*\S/m;
+
+export function hasDefinitions(text: string): boolean {
+  return DEFINITION_RE.test(text);
+}
+
 /** Block texts (see splitBlockRanges). */
 export function splitBlocks(text: string): string[] {
   return splitBlockRanges(text).map((r) => text.slice(r.start, r.end).replace(/\n+$/, ""));
@@ -418,7 +430,9 @@ export const Markdown = memo(function Markdown({
   const ranges = useMemo(() => {
     const p = prev.current;
     let next: BlockRange[];
-    if (streaming && p && p.ranges.length > 0 && src.startsWith(p.text)) {
+    if (hasDefinitions(src)) {
+      next = [{ start: 0, end: src.length }];
+    } else if (streaming && p && p.ranges.length > 0 && src.startsWith(p.text)) {
       const last = p.ranges[p.ranges.length - 1];
       next = [...p.ranges.slice(0, -1), ...splitBlockRanges(src, last.start)];
     } else {
@@ -435,7 +449,8 @@ export const Markdown = memo(function Markdown({
         <div className={cn("prose-kvistcode selectable", streaming && "[&>*:last-child>*:last-child]:caret", className)}>
           {ranges.map((r, i) => (
             // Index keys are stable: blocks only ever append or grow at the end.
-            <div key={i} className="md-block contents">
+            // dir="auto": a block that starts in Arabic or Hebrew reads right to left (code stays left to right).
+            <div key={i} dir="auto" className="md-block contents">
               <Block text={src.slice(r.start, r.end).replace(/\n+$/, "")} comps={comps} />
             </div>
           ))}

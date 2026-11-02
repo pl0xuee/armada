@@ -516,9 +516,10 @@ function ComposerImpl({
       attach.attachments.length === 0 &&
       agent.queue.length > 0
     ) {
-      // Like Claude Code: Up on an empty prompt takes your newest queued message back to edit it.
+      // Like Claude Code: Up on an empty prompt takes your newest queued message back to edit it. (A held key
+      // repeats before the first answer is back: the same message would be taken twice, and "already ran" shown.)
       e.preventDefault();
-      void recallQueued();
+      if (!e.repeat) void recallQueued();
     } else if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void send(e.metaKey || e.ctrlKey ? "modEnter" : "enter");
@@ -625,8 +626,8 @@ function ComposerImpl({
                 value={text}
                 rows={1}
                 aria-label={`Message ${name}`}
+                dir="auto"
                 aria-autocomplete="list"
-                aria-expanded={slashOpen}
                 aria-controls={slashOpen ? "slash-menu" : undefined}
                 aria-activedescendant={slashOpen ? `suggest-${activeIndex}` : undefined}
                 placeholder={placeholder}
@@ -635,7 +636,11 @@ function ComposerImpl({
                 onPaste={attach.onPaste}
                 onKeyDown={onKeyDown}
                 onBlur={() => setSlashDismissed(true)}
-                onFocus={() => setSlashDismissed(false)}
+                onFocus={() => {
+                  setSlashDismissed(false);
+                  // Tabbing into another tile's composer makes that tile the focused one (a click already does).
+                  if (compact && !focused) useUi.getState().openAgent(agent.id);
+                }}
                 className="relative block max-h-[40vh] min-h-[52px] w-full resize-none field-sizing-content bg-transparent px-4 pb-1 pt-3.5 text-[13.5px] leading-relaxed text-fg placeholder:text-steel focus:outline-none"
               />
             </div>
