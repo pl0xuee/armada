@@ -214,7 +214,13 @@ fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'%' && i + 2 < b.len() {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+            // Bytes, not `&s[..]`: slicing a string there panics when a multi-byte
+            // character follows the `%` ("100%完了.png").
+            if let Some(v) = std::str::from_utf8(&b[i + 1..i + 3])
+                .ok()
+                .filter(|h| h.bytes().all(|c| c.is_ascii_hexdigit()))
+                .and_then(|h| u8::from_str_radix(h, 16).ok())
+            {
                 out.push(v);
                 i += 3;
                 continue;
@@ -289,6 +295,18 @@ mod tests {
         let p: Vec<_> = p.iter().map(|p| p.to_string_lossy().into_owned()).collect();
         assert_eq!(p, ["/tmp/a b.png", "/x.jpg", "/abs/z.gif"]);
         assert_eq!(parse_paths("copy\nfile:///a.png").len(), 1);
+    }
+
+    #[test]
+    fn percent_decoding_survives_multibyte_text() {
+        assert_eq!(percent_decode("/a%20b%C3%A9.png"), "/a bé.png");
+        // A lone or malformed `%` stays as it is, even before multi-byte characters.
+        assert_eq!(
+            percent_decode("/home/u/100%完了.png"),
+            "/home/u/100%完了.png"
+        );
+        assert_eq!(percent_decode("/x/5%aé.png"), "/x/5%aé.png");
+        assert_eq!(percent_decode("/x/%zz%4"), "/x/%zz%4");
     }
 
     fn scratch(tag: &str) -> std::path::PathBuf {

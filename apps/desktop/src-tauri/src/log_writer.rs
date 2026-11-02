@@ -10,6 +10,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const MAX_DAILY_BYTES: u64 = 20 * 1024 * 1024;
 const KEEP_FILES: usize = 7;
 const PREFIX: &str = "kvistcode.log";
+/// Log files from before the rename. Nothing writes them any more, so without this they
+/// would stay in the log folder for good (they can hold agent output).
+const LEGACY_PREFIX: &str = "armada.log";
 
 pub struct CappedLogWriter {
     dir: PathBuf,
@@ -84,8 +87,9 @@ impl CappedLogWriter {
         let mut names: Vec<_> = rd
             .flatten()
             .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|n| n.starts_with(PREFIX))
+            .filter(|n| n.starts_with(PREFIX) || n.starts_with(LEGACY_PREFIX))
             .collect();
+        // The old names sort first, so they are the first to go.
         names.sort();
         while names.len() > KEEP_FILES {
             let _ = std::fs::remove_file(self.dir.join(names.remove(0)));
@@ -132,6 +136,51 @@ mod tests {
     fn civil_dates() {
         assert_eq!(civil(0), (1970, 1, 1));
         assert_eq!(civil(19_723), (2024, 1, 1));
+    }
+
+    #[test]
+    fn prunes_files_from_before_the_rename_first() {
+        struct Scratch(PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let scratch = Scratch(
+            std::env::temp_dir().join(format!("kvistcode-logw-prune-{}", std::process::id())),
+        );
+        std::fs::create_dir_all(&scratch.0).unwrap();
+        for name in [
+            "armada.log.2020-01-01",
+            "armada.log.2020-01-02",
+            "kvistcode.log.2020-01-03",
+            "kvistcode.log.2020-01-04",
+            "kvistcode.log.2020-01-05",
+            "kvistcode.log.2020-01-06",
+            "kvistcode.log.2020-01-07",
+            "kvistcode.log.2020-01-08",
+            "notes.txt",
+        ] {
+            std::fs::write(scratch.0.join(name), "x").unwrap();
+        }
+        // Opening today's file makes 9 log files: the 2 old ones go.
+        let _w = CappedLogWriter::with_cap(scratch.0.clone(), 10).unwrap();
+        let left: Vec<String> = std::fs::read_dir(&scratch.0)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect();
+        assert!(
+            !left.iter().any(|n| n.starts_with("armada.log")),
+            "{left:?}"
+        );
+        assert!(left.contains(&"notes.txt".to_string()));
+        assert_eq!(
+            left.iter()
+                .filter(|n| n.starts_with("kvistcode.log"))
+                .count(),
+            7
+        );
     }
 
     #[test]
