@@ -104,8 +104,13 @@ export async function stopVoiceAssistant(): Promise<void> {
   }
 }
 
-/** Title-bar / composer / shortcut toggle: stops a session that is active, starts one otherwise. */
+/** Title-bar / composer / shortcut toggle: unmutes a paused session, stops one that is
+ * active, starts one otherwise. */
 export function toggleVoiceAssistant(): void {
+  if (useVa.getState().phase === "paused") {
+    setVaMuted(false);
+    return;
+  }
   void (async () => {
     if (isLive(useVa.getState()) || (await backendActive())) await stopVoiceAssistant();
     else await startVoiceAssistant();
@@ -124,7 +129,8 @@ export function answerVaConfirm(id: string, accept: boolean): void {
   void api.vaConfirm(id, accept).catch(() => {});
 }
 
+/** Mute (pause listening) or unmute. The backend closes the microphone and the connection
+ * and reports the new state with a `va-event`, so the panel only changes when that is true. */
 export function setVaMuted(muted: boolean): void {
-  useVa.setState({ muted });
   void api.vaSetMuted(muted).catch(() => {});
 }

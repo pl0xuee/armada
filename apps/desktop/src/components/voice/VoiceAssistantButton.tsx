@@ -8,12 +8,13 @@ import { toggleVoiceAssistant, useVa } from "@/store/voiceAssistant";
 export function VoiceAssistantButton() {
   const phase = useVa((s) => s.phase);
   const live = isLive({ phase });
+  const paused = phase === "paused";
   return (
-    <Tooltip content={live ? "End voice assistant" : "Voice assistant"} shortcut={[modKey, "⇧", "A"]} side="bottom">
+    <Tooltip content={paused ? "Unmute voice assistant" : live ? "End voice assistant" : "Voice assistant"} shortcut={[modKey, "⇧", "A"]} side="bottom">
       <button
         type="button"
         onClick={toggleVoiceAssistant}
-        aria-label={live ? "End voice assistant" : "Start voice assistant"}
+        aria-label={paused ? "Unmute voice assistant" : live ? "End voice assistant" : "Start voice assistant"}
         aria-pressed={live}
         className={cn(
           "relative flex h-6 w-6 items-center justify-center rounded-md transition-colors",

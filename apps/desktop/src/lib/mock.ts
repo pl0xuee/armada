@@ -3158,6 +3158,8 @@ export const mockApi: KvistcodeApi = {
     bus({ type: "state", state: "connecting", message: null });
     at(600, () => bus({ type: "state", state: "listening", message: null }));
     const tick = setInterval(() => {
+      // Paused: nothing is heard or counted.
+      if (mockVa.phase === "paused") return;
       const speaking = mockVa.phase === "speaking";
       bus({
         type: "level",
@@ -3172,6 +3174,7 @@ export const mockApi: KvistcodeApi = {
     }, 80);
     mockVa.timers.push(tick as unknown as ReturnType<typeof setTimeout>);
     const phase = (p: string) => {
+      if (mockVa.phase === "paused") return;
       mockVa.phase = p;
       bus({ type: "state", state: p, message: null });
     };
@@ -3212,7 +3215,12 @@ export const mockApi: KvistcodeApi = {
     emitVoiceBus("va-event", { type: "ended", reason: "ended", error: false });
   },
 
-  async vaSetMuted() {},
+  // Mute is the same state as "pause listening" / "go to sleep": paused until unmuted.
+  async vaSetMuted(muted: boolean) {
+    if (mockVa.timers.length === 0) return;
+    mockVa.phase = muted ? "paused" : "listening";
+    emitVoiceBus("va-event", { type: "state", state: mockVa.phase, message: null });
+  },
   async vaConfirm(id, accept) {
     const bus = (e: unknown) => emitVoiceBus("va-event", e);
     bus({ type: "confirm_done", id, status: accept ? "confirmed" : "cancelled" });

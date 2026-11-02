@@ -5,6 +5,7 @@ import { useApp } from "./app";
 import {
   answerVaConfirm,
   escapeVoiceAssistant,
+  setVaMuted,
   startVoiceAssistant,
   toggleVoiceAssistant,
   useVa,
@@ -91,6 +92,24 @@ describe("stopping", () => {
     await flush();
     expect(stop).toHaveBeenCalled();
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it("the toggle unmutes a paused session instead of ending it", async () => {
+    useVa.setState({ ...initialVa, phase: "paused", visible: true });
+    const stop = vi.spyOn(api, "vaStop").mockResolvedValue();
+    const mute = vi.spyOn(api, "vaSetMuted").mockResolvedValue();
+    toggleVoiceAssistant();
+    await flush();
+    expect(mute).toHaveBeenCalledWith(false);
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it("muting asks the backend and leaves the phase to its event", () => {
+    useVa.setState({ ...initialVa, phase: "listening", visible: true });
+    const mute = vi.spyOn(api, "vaSetMuted").mockResolvedValue();
+    setVaMuted(true);
+    expect(mute).toHaveBeenCalledWith(true);
+    expect(useVa.getState().phase).toBe("listening");
   });
 
   it("Esc stops an active session, and only dismisses when none is", async () => {

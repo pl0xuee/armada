@@ -30,7 +30,7 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
       { keys: [modKey, "J"], label: "Needs you (press again for the next one)" },
       { keys: [modKey, "I"], label: "Needs you (same as J)" },
       { keys: [modKey, "⇧", "M"], label: "Mission Control: All agents" },
-      { keys: [modKey, "⇧", "A"], label: "Voice assistant: start or end (Esc ends)" },
+      { keys: [modKey, "⇧", "A"], label: "Voice assistant: start, end or unmute (Esc ends)" },
       { keys: [modKey, "B"], label: "Show or hide the agent list" },
       { keys: [modKey, "1–9"], label: "Jump to an agent" },
       { keys: [modKey, ","], label: "Settings" },

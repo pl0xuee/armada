@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { formatCost, formatElapsed, isLive, PHASE_LABEL } from "@/lib/voiceAssistant";
-import { cn, isEditableTarget } from "@/lib/utils";
+import { cn, isEditableTarget, modKey } from "@/lib/utils";
 import {
   answerVaConfirm,
   connectVoiceAssistant,
@@ -33,12 +33,12 @@ function PanelBody() {
   const actions = useVa((s) => s.actions);
   const elapsed = useVa((s) => s.elapsedSecs);
   const cost = useVa((s) => s.costUsd);
-  const muted = useVa((s) => s.muted);
   const notice = useVa((s) => s.notice);
   const confirms = useVa((s) => s.confirms);
   const dismiss = useVa((s) => s.dismiss);
   const openAgent = useUi((s) => s.openAgent);
   const live = isLive({ phase });
+  const paused = phase === "paused";
   const level = phase === "speaking" ? outputLevel : inputLevel;
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -81,17 +81,19 @@ function PanelBody() {
       className="view-enter texture edge fixed bottom-[var(--composer-clear,1rem)] right-4 z-40 flex w-[340px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-line-strong bg-panel shadow-[0_18px_50px_-12px_rgba(0,0,0,0.6)]"
     >
       <div className="flex items-center gap-3.5 px-4 pb-3 pt-4">
-        <VoiceOrb phase={phase} level={level} muted={muted} />
+        <VoiceOrb phase={phase} level={level} />
         <div className="min-w-0 flex-1">
           <div
             className={cn("text-[13.5px] font-medium", phase === "error" ? "text-err" : "text-fg")}
             role="status"
             aria-live="polite"
           >
-            {phase === "off" ? "Ended" : muted && phase === "listening" ? "Muted" : PHASE_LABEL[phase]}
+            {phase === "off" ? "Ended" : PHASE_LABEL[phase]}
           </div>
           <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-steel">
-            {live ? (
+            {paused ? (
+              <span>Not listening. Nothing is sent.</span>
+            ) : live ? (
               <>
                 <span className="tabular">{formatElapsed(elapsed)}</span>
                 <span aria-hidden="true">·</span>
@@ -106,17 +108,17 @@ function PanelBody() {
         </div>
         {live ? (
           <div className="flex items-center gap-1">
-            <Tooltip content={muted ? "Unmute microphone" : "Mute microphone"} side="top">
-              <Button
-                variant={muted ? "warn" : "ghost"}
-                size="icon-sm"
-                aria-label={muted ? "Unmute microphone" : "Mute microphone"}
-                aria-pressed={muted}
-                onClick={() => setVaMuted(!muted)}
-              >
-                {muted ? <MicOff /> : <Mic />}
+            {paused ? (
+              <Button variant="warn" size="sm" onClick={() => setVaMuted(false)}>
+                <MicOff /> Unmute
               </Button>
-            </Tooltip>
+            ) : (
+              <Tooltip content="Mute (pause listening)" side="top">
+                <Button variant="ghost" size="icon-sm" aria-label="Mute microphone" onClick={() => setVaMuted(true)}>
+                  <Mic />
+                </Button>
+              </Tooltip>
+            )}
             <Tooltip content="End (Esc)" side="top">
               <Button
                 variant="danger"
@@ -199,6 +201,12 @@ function PanelBody() {
             </ul>
           )}
         </div>
+      )}
+      {paused && (
+        <p className="border-t border-line px-4 py-2.5 text-[12px] text-steel">
+          Press Unmute or {modKey}+Shift+A to listen again. Kvistcode can't hear you while paused, so waking by voice
+          isn't possible yet.
+        </p>
       )}
       {live && captions.length === 0 && phase === "listening" && (
         <p className="border-t border-line px-4 py-2.5 text-[12px] text-steel">

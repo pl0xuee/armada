@@ -115,7 +115,7 @@ async fn full_tool_call_roundtrip_and_barge_in() {
 
         let update = next_json(&mut ws).await;
         assert_eq!(update["type"], "session.update");
-        assert_eq!(update["session"]["tools"].as_array().unwrap().len(), 7);
+        assert_eq!(update["session"]["tools"].as_array().unwrap().len(), 8);
         seen.push(update);
         send(&mut ws, json!({"type":"session.created"})).await;
 
@@ -802,4 +802,223 @@ async fn unreachable_server_reports_a_network_error() {
     )
     .await;
     assert!(matches!(end.reason, EndReason::Error(m) if m.contains("Couldn't reach OpenAI")));
+}
+
+/// What a pause-and-resume run observed.
+struct PauseRun {
+    events: Arc<Events>,
+    /// Mic chunks that reached the server after the pause was requested.
+    appends_after_pause: usize,
+    saw_response_create: bool,
+    /// The mic channel refused chunks while paused (nobody was reading it).
+    mic_closed_while_paused: bool,
+    opens: usize,
+    confirms: usize,
+    host_ran: usize,
+}
+
+/// One session that is paused (by the model's tool or by the UI), stays quiet for a
+/// while, is resumed, and streams again on a fresh connection.
+async fn pause_and_resume(by_tool: bool) -> PauseRun {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}/", listener.local_addr().unwrap());
+    let devices = NullAudio::new();
+    let (live, opens, releases) = (
+        devices.live_mic.clone(),
+        devices.opens.clone(),
+        devices.releases.clone(),
+    );
+    // Set once a pause was requested; mic chunks that arrive after it are a leak.
+    let gate = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (closed_tx, closed_rx) = tokio::sync::oneshot::channel::<()>();
+    let (audio_tx, audio_rx) = tokio::sync::oneshot::channel::<()>();
+
+    let server_gate = gate.clone();
+    let server = tokio::spawn(async move {
+        let (s, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+        let update = next_json(&mut ws).await;
+        assert_eq!(update["type"], "session.update");
+        send(&mut ws, json!({"type":"session.created"})).await;
+        if by_tool {
+            send(&mut ws, json!({"type":"response.created"})).await;
+            send(
+                &mut ws,
+                json!({"type":"response.function_call_arguments.done",
+                "call_id":"call_p","name":tools::PAUSE_TOOL,"arguments":"{}"}),
+            )
+            .await;
+            send(
+                &mut ws,
+                json!({"type":"response.done","response":{"status":"completed"}}),
+            )
+            .await;
+        }
+        let (mut late, mut response_create) = (0usize, false);
+        while let Some(Ok(m)) = ws.next().await {
+            match m {
+                Message::Text(t) => {
+                    let v: Value = serde_json::from_str(t.as_str()).unwrap();
+                    match v["type"].as_str().unwrap_or_default() {
+                        "conversation.item.create" => {
+                            assert_eq!(v["item"]["call_id"], "call_p");
+                            server_gate.store(true, Ordering::SeqCst);
+                        }
+                        "input_audio_buffer.append" if server_gate.load(Ordering::SeqCst) => {
+                            late += 1
+                        }
+                        "response.create" => response_create = true,
+                        _ => {}
+                    }
+                }
+                Message::Close(_) => break,
+                _ => {}
+            }
+        }
+        let _ = closed_tx.send(());
+        // Paused means no connection at all, not an idle one.
+        let waited = tokio::time::timeout(Duration::from_millis(400), listener.accept()).await;
+        assert!(waited.is_err(), "reconnected while paused");
+        let (s, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+        assert_eq!(next_json(&mut ws).await["type"], "session.update");
+        send(&mut ws, json!({"type":"session.updated"})).await;
+        let mut audio_tx = Some(audio_tx);
+        while let Some(Ok(m)) = ws.next().await {
+            match m {
+                Message::Text(t) if t.as_str().contains("input_audio_buffer.append") => {
+                    if let Some(tx) = audio_tx.take() {
+                        let _ = tx.send(());
+                    }
+                }
+                Message::Close(_) => break,
+                _ => {}
+            }
+        }
+        (late, response_create)
+    });
+
+    let sink = Arc::new(Events::default());
+    let ran = Arc::new(AtomicUsize::new(0));
+    let (ctl_tx, ctl_rx) = unbounded_channel();
+    let (events, driver_gate) = (sink.clone(), gate.clone());
+    let driver = tokio::spawn(async move {
+        let has_state = |s: VaState| {
+            let events = events.clone();
+            move || {
+                events
+                    .0
+                    .lock()
+                    .iter()
+                    .any(|e| matches!(e, VaEvent::State { state, .. } if *state == s))
+            }
+        };
+        wait_for(has_state(VaState::Listening)).await;
+        if !by_tool {
+            ctl_tx.send(Control::Pause).unwrap();
+            driver_gate.store(true, Ordering::SeqCst);
+        }
+        wait_for(|| driver_gate.load(Ordering::SeqCst)).await;
+        for _ in 0..5 {
+            let _ = live.lock().send(vec![100i16; audio::CHUNK_SAMPLES]);
+        }
+        wait_for(has_state(VaState::Paused)).await;
+        closed_rx.await.unwrap();
+        wait_for(|| releases.load(Ordering::SeqCst) == 1).await;
+        let mic_closed = live
+            .lock()
+            .send(vec![100i16; audio::CHUNK_SAMPLES])
+            .is_err();
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        ctl_tx.send(Control::Resume).unwrap();
+        audio_rx.await.unwrap();
+        let _ = ctl_tx.send(Control::Stop);
+        mic_closed
+    });
+
+    let end = tokio::time::timeout(
+        Duration::from_secs(20),
+        run(
+            config(url),
+            sink.clone(),
+            Arc::new(GateHost { ran: ran.clone() }),
+            Box::new(devices),
+            ctl_rx,
+        ),
+    )
+    .await
+    .expect("session hung");
+    assert_eq!(end.reason, EndReason::UserStopped);
+    let mic_closed_while_paused = driver.await.unwrap();
+    let (appends_after_pause, saw_response_create) = server.await.unwrap();
+    PauseRun {
+        appends_after_pause,
+        saw_response_create,
+        mic_closed_while_paused,
+        opens: opens.load(Ordering::SeqCst),
+        confirms: confirm_ids(&sink).len(),
+        host_ran: ran.load(Ordering::SeqCst),
+        events: sink,
+    }
+}
+
+fn assert_paused_then_resumed(r: &PauseRun) {
+    // No mic audio left the machine after the pause, and the microphone was released.
+    assert_eq!(r.appends_after_pause, 0);
+    assert!(r.mic_closed_while_paused);
+    // Devices were opened once at the start and once on resume.
+    assert_eq!(r.opens, 2);
+    let ev = r.events.0.lock();
+    let paused = ev
+        .iter()
+        .position(|e| {
+            matches!(
+                e,
+                VaEvent::State {
+                    state: VaState::Paused,
+                    ..
+                }
+            )
+        })
+        .expect("paused state");
+    // Resuming reconnects and says that the earlier conversation is gone.
+    assert!(ev[paused..].iter().any(
+        |e| matches!(e, VaEvent::Notice { message: Some(m) } if m.starts_with("Listening again"))
+    ));
+    // A pause is not the end of the session.
+    assert!(!ev.iter().any(|e| matches!(e, VaEvent::Ended { .. })));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_pause_tool_needs_no_confirmation_and_stops_all_mic_audio() {
+    let r = pause_and_resume(true).await;
+    assert_paused_then_resumed(&r);
+    // Not routed through the host, so never a confirmation card, and no extra reply.
+    assert_eq!(r.confirms, 0);
+    assert_eq!(r.host_ran, 0);
+    assert!(!r.saw_response_create);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_mute_button_pauses_the_same_way() {
+    let r = pause_and_resume(false).await;
+    assert_paused_then_resumed(&r);
+}
+
+#[test]
+fn the_pause_tool_is_described_for_every_phrase() {
+    let schemas = tools::tool_schemas();
+    let t = schemas
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == tools::PAUSE_TOOL)
+        .expect("pause tool");
+    let d = t["description"].as_str().unwrap();
+    let instructions = tools::instructions();
+    for phrase in ["mute", "pause listening", "stop listening", "go to sleep"] {
+        assert!(d.contains(phrase), "{phrase}");
+        assert!(instructions.contains(phrase), "{phrase}");
+    }
+    assert!(d.contains("No confirmation"));
 }
