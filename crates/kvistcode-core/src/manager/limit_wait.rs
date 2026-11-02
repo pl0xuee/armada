@@ -1,8 +1,8 @@
-//! Agents waiting out a usage limit, and the clock that resumes them. The decisions are pure
+//! Agents waiting out a rate limit, and the clock that resumes them. The decisions are pure
 //! functions in `crate::limit_resume` (reset-time parsing is `crate::limit_reset`); this is the part
 //! that reads the agents, sends the prompts and tells the user.
 //!
-//! * `limit_hit` runs when a turn fails on a usage limit: it records when the limit lifts.
+//! * `limit_hit` runs when a turn fails on a rate limit: it records when the limit lifts.
 //! * A ticker (every 5 s, only doing work while someone waits) asks `limit_resume::decide` and starts
 //!   a *wave*: the due agents resume one every 3-5 s, at most 3 starting at once, then one
 //!   notification says how many.
@@ -223,7 +223,7 @@ impl Core {
                 title: if resumed.len() == 1 {
                     title.clone()
                 } else {
-                    "Usage limit reset".into()
+                    "Rate limit reset".into()
                 },
                 body: limit_resume::resumed_body(resumed.len(), &title),
                 request_id: None,
@@ -265,7 +265,7 @@ impl Core {
                 return None;
             }
             Err(e) => {
-                tracing::warn!("resuming {agent_id} after the usage limit: {e:#}");
+                tracing::warn!("resuming {agent_id} after the rate limit: {e:#}");
                 return None;
             }
         }
@@ -311,7 +311,7 @@ impl Core {
         Ok(true)
     }
 
-    /// A turn failed on a usage limit: records when it lifts (see the module comment).
+    /// A turn failed on a rate limit: records when it lifts (see the module comment).
     /// `was_automatic`: the turn was one of our own resumes, so this continues its episode.
     pub(crate) fn limit_hit(&self, agent_id: &str, message: &str, was_automatic: bool) {
         let Ok(agent) = self.agent(agent_id) else {
@@ -350,14 +350,14 @@ impl Core {
             ctx.notice(
                 NoticeLevel::Warn,
                 format!(
-                    "The usage limit was still on after {MAX_ATTEMPTS} automatic tries, so Kvistcode stopped trying. Continue this agent yourself when the limit is lifted, or switch accounts."
+                    "The rate limit was still on after {MAX_ATTEMPTS} automatic tries, so Kvistcode stopped trying. Continue this agent yourself when the limit is lifted, or switch accounts."
                 ),
             );
             self.emit(KvistcodeEvent::Attention {
                 agent_id: agent.id.clone(),
                 reason: AttentionReason::Error,
                 title: agent.title.clone(),
-                body: format!("Still at its usage limit after {MAX_ATTEMPTS} automatic tries"),
+                body: format!("Still at its rate limit after {MAX_ATTEMPTS} automatic tries"),
                 request_id: None,
             });
             return;
@@ -386,14 +386,14 @@ impl Core {
             .map(|r| limit_resume::describe_time(r, now, &Local));
         let text = match (attempts, when) {
             (0, Some(t)) => format!(
-                "Kvistcode will resume this agent automatically after the usage limit resets ({t})."
+                "Kvistcode will resume this agent automatically after the rate limit resets ({t})."
             ),
-            (0, None) => "Kvistcode will resume this agent automatically once the usage limit lifts. The provider did not say when.".into(),
+            (0, None) => "Kvistcode will resume this agent automatically once the rate limit lifts. The provider did not say when.".into(),
             (n, Some(t)) => format!(
-                "The usage limit is still on. Kvistcode will try again at {t} (automatic try {} of {MAX_ATTEMPTS}).",
+                "The rate limit is still on. Kvistcode will try again at {t} (automatic try {} of {MAX_ATTEMPTS}).",
                 n + 1
             ),
-            (n, None) => format!("The usage limit is still on. Kvistcode will try again (automatic try {} of {MAX_ATTEMPTS}).", n + 1),
+            (n, None) => format!("The rate limit is still on. Kvistcode will try again (automatic try {} of {MAX_ATTEMPTS}).", n + 1),
         };
         ctx.notice(NoticeLevel::Info, text);
     }

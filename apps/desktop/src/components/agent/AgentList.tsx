@@ -710,8 +710,8 @@ const AgentRow = memo(function AgentRow({
                   {status.label}
                 </span>
                 {agent.rateLimited && (
-                  <Tooltip content="Hit its usage limit" side="right">
-                    <span className="flex min-w-0 items-center gap-1 text-warn" aria-label="Usage limit reached">
+                  <Tooltip content="Hit its rate limit" side="right">
+                    <span className="flex min-w-0 items-center gap-1 text-warn" aria-label="Rate limit reached">
                       <Gauge className="h-3 w-3 shrink-0" />
                       <span className="truncate text-[10.5px]">
                         <ResumesAt agent={agent} />

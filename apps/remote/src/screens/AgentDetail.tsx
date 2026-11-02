@@ -517,14 +517,14 @@ function StatusBanner({
     const resumes = resumesLabel(agent);
     text = agent.rateLimited
       ? resumes
-        ? `Usage limit reached. ${resumes} automatically${canSwitch ? ", or switch accounts to keep going now." : "."}`
+        ? `Rate limit reached. ${resumes} automatically${canSwitch ? ", or switch accounts to keep going now." : "."}`
         : canSwitch
-          ? "Usage limit reached on this account. Switch accounts to keep going."
-          : "Usage limit reached on this account. Try again later."
+          ? "Rate limit reached on this account. Switch accounts to keep going."
+          : "Rate limit reached on this account. Try again later."
       : "The last turn failed. Send a message to try again.";
   } else if (agent.rateLimited && canSwitch) {
     tone = "err";
-    text = "Usage limit reached on this account. Switch accounts to keep going.";
+    text = "Rate limit reached on this account. Switch accounts to keep going.";
   }
   if (!tone) return null;
   const color = tone === "violet" ? "var(--violet)" : tone === "err" ? "var(--err)" : "var(--steel)";

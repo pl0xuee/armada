@@ -2,7 +2,7 @@
  * What the pinned dock above the composer shows (pure logic; the components are in `components/dock`).
  *
  * Same stack as the desktop's dock, shaped for a phone: the thing the agent waits on (approval, plan
- * approval, question), why it is blocked (usage limit, error, interrupted), then one row of small chips
+ * approval, question), why it is blocked (rate limit, error, interrupted), then one row of small chips
  * (plan progress, sub-agents) that open sheets, then the queue.
  */
 import { isPlanApproval } from "@shared/planApproval";
@@ -105,13 +105,13 @@ export interface DockBlock {
 }
 
 /**
- * What stops the agent (besides a request waiting on you), if anything. A usage limit outranks a plain
+ * What stops the agent (besides a request waiting on you), if anything. A rate limit outranks a plain
  * error; an interrupted or stopped agent is resumable.
  */
 export function dockBlock(agent: Pick<Agent, "status" | "rateLimited" | "helperSync" | "parentId">): DockBlock | null {
   const resumable = agent.status === "interrupted" || agent.status === "stopped";
-  // The desktop's `blockers`: a usage limit unless the agent is shut down; an error that isn't a limit.
-  if (agent.rateLimited === true && !resumable) return { kind: "usage_limit", title: "This account hit its usage limit" };
+  // The desktop's `blockers`: a rate limit unless the agent is shut down; an error that isn't a limit.
+  if (agent.rateLimited === true && !resumable) return { kind: "usage_limit", title: "This account hit its rate limit" };
   if (agent.status === "error") return { kind: "error", title: "The last turn failed" };
   if (agent.status === "interrupted") return { kind: "interrupted", title: "Interrupted when Kvistcode closed" };
   if (agent.status === "stopped") return { kind: "stopped", title: "This agent was stopped" };
@@ -193,7 +193,7 @@ export function subagentHeadline(running: readonly { description: string }[]): s
 }
 
 // ---------------------------------------------------------------------------
-// Usage limit
+// Rate limit
 
 const RESET = /\bresets?\s+(?:(at|in|on|around|after)\s+)?([^.;\n]{1,40})/i;
 

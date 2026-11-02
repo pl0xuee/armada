@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { agentDerived } from "@/components/agent/derived";
 import { api } from "@/lib/api";
+import { ALERT_SETTLE_MS, NotifiedRuns, workflowFinishedDetail } from "@/lib/finishedAlert";
 import { isBusy, isSubagentLive, SUBAGENT_TICK_MS } from "@/lib/agents";
 import {
   backgroundActive,
@@ -15,7 +16,14 @@ import {
 } from "@/lib/background";
 import { DONE_META, STATUS, type StatusMeta } from "@/lib/providers";
 import type { Agent, AgentStatus } from "@/lib/types";
-import { pollWorkflowNow, useWorkflows, watchWorkflow, workflowKey } from "@/lib/workflows";
+import {
+  pollWorkflowNow,
+  recheckWorkflow,
+  useWorkflows,
+  watchWorkflow,
+  workflowKey,
+  type WorkflowCall,
+} from "@/lib/workflows";
 import { useApp } from "./app";
 import { useIsDone } from "./completion";
 import { useUi } from "./ui";
@@ -110,6 +118,11 @@ export function installBackgroundTracker(): () => void {
   let awayTimer: ReturnType<typeof setInterval> | null = null;
   let prevAgents = useApp.getState().agents;
   let prevItems = useApp.getState().items;
+  // "Everything finished" alerts: only for runs seen running in this session, once per run (kept across
+  // restarts), and only once a run has stayed finished for a minute (a quiet spell is not the end).
+  const notified = new NotifiedRuns();
+  const seenRunning = new Set<string>();
+  const settling = new Map<string, ReturnType<typeof setTimeout>>();
 
   const leave = (key: string) => {
     joined.get(key)?.();
@@ -157,10 +170,16 @@ export function installBackgroundTracker(): () => void {
     );
     const subs = d.subagents.filter((r) => r.background && r.state === "running").length;
     const ended = d.workflows.some((c) => entries[workflowKey(id, c.toolCallId)]?.progress?.state === "finished");
-    commit(id, computeBackground(id, d.workflows, entries, subs), agent, ended);
+    const endedCalls = d.workflows.filter((c) => {
+      const key = workflowKey(id, c.toolCallId);
+      const state = entries[key]?.progress?.state;
+      if (state === "running") seenRunning.add(key);
+      return state === "finished" && seenRunning.has(key) && !notified.has(key);
+    });
+    commit(id, computeBackground(id, d.workflows, entries, subs), agent, ended, endedCalls);
   }
 
-  function commit(id: string, next: BackgroundWork, agent: Agent | undefined, ended = false) {
+  function commit(id: string, next: BackgroundWork, agent: Agent | undefined, ended = false, endedCalls: WorkflowCall[] = []) {
     const st = useBackgroundStore.getState();
     const before = st.byAgent[id] ?? NO_BACKGROUND;
     const patch: Partial<ReturnType<typeof useBackgroundStore.getState>> = {};
@@ -186,10 +205,35 @@ export function installBackgroundTracker(): () => void {
     // The last known work ended while the agent sat idle: say so (and tell the user, if away).
     if (ended && before.workflows > 0 && !backgroundActive(next) && agent?.status === "idle") {
       patch.finishedAt = { ...(patch.finishedAt ?? st.finishedAt), [id]: Date.now() };
-      if (!watching(id)) api.backgroundFinished(id, before.wfTotal || null).catch(() => {});
+      for (const call of endedCalls) settleAlert(id, call);
     }
     if (Object.keys(patch).length > 0) useBackgroundStore.setState(patch);
     syncTimer();
+  }
+
+  /** Announces `call` once it has stayed finished for a minute, if the user isn't looking at the agent. */
+  function settleAlert(id: string, call: WorkflowCall) {
+    const key = workflowKey(id, call.toolCallId);
+    if (settling.has(key) || notified.has(key)) return;
+    settling.set(
+      key,
+      setTimeout(() => {
+        void (async () => {
+          // Finished is final for the poller, so ask afresh: a run that moved again is not the end.
+          const progress = await recheckWorkflow(id, call.toolCallId);
+          settling.delete(key);
+          const agent = useApp.getState().agents[id];
+          if (!agent || agent.status !== "idle" || progress?.state !== "finished" || notified.has(key)) return;
+          notified.add(key);
+          if (watching(id)) return;
+          const item = useApp.getState().items[id]?.find((i) => i.id === call.itemId);
+          const description = item?.kind === "tool_call" ? (item.subagent?.description ?? null) : null;
+          api
+            .backgroundFinished(id, progress.agents.length || null, workflowFinishedDetail(description, progress.agents))
+            .catch(() => {});
+        })();
+      }, ALERT_SETTLE_MS),
+    );
   }
 
   function syncTimer() {
@@ -256,6 +300,8 @@ export function installBackgroundTracker(): () => void {
     if (awayTimer) clearInterval(awayTimer);
     for (const key of [...joined.keys()]) leave(key);
     callsOf.clear();
+    for (const t of settling.values()) clearTimeout(t);
+    settling.clear();
     useBackgroundStore.setState({ byAgent: {}, active: new Set(), finishedAt: {} });
   };
 }

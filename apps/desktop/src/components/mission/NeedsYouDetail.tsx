@@ -142,7 +142,7 @@ export function NeedsYouDetail({
           <RecoveryPanel
             tone="warn"
             icon={<Gauge className="h-4 w-4" />}
-            title="This account hit its usage limit"
+            title="This account hit its rate limit"
             text={lastOf(items, "notice")?.text ?? `${identity.short} paused until the limit resets.`}
             note={<ResumeLine agent={agent} className="mt-1.5" />}
             actions={

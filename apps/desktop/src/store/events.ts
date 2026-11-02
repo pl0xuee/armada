@@ -65,11 +65,11 @@ function handleUiEvent(e: KvistcodeEvent) {
   }
 }
 
-/** failover === "ask": offer a one-click move when an agent hits its usage limit. */
+/** failover === "ask": offer a one-click move when an agent hits its rate limit. */
 function offerFailover(agent: Agent) {
   if (useApp.getState().settings?.failover !== "ask") return;
   const target = switchCandidates(agent)[0];
-  toast.warning(`${agent.title} hit its usage limit`, {
+  toast.warning(`${agent.title} hit its rate limit`, {
     id: `limit-${agent.id}`,
     duration: 15_000,
     description: target ? `Move it to ${target.name} and keep going?` : "No other signed-in account for this provider.",

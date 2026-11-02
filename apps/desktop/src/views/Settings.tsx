@@ -309,7 +309,7 @@ const SOUND_EVENTS: {
     custom: "customError",
     reason: "error",
     title: "Error or rate limit",
-    description: "When something fails or a usage limit is hit",
+    description: "When something fails or a rate limit is hit",
   },
 ];
 
@@ -928,14 +928,14 @@ function Behavior({ settings }: { settings: Settings }) {
 
         <HelperSettings settings={settings} />
 
-        <SettingGroup title="Usage limits">
+        <SettingGroup title="Rate limits">
           <SettingRow
             stack
-            title="When an account hits its usage limit"
+            title="When an account hits its rate limit"
             description={FAILOVER.find((f) => f.value === settings.failover)?.description}
           >
             <Segmented
-              aria-label="When an account hits its usage limit"
+              aria-label="When an account hits its rate limit"
               value={settings.failover}
               onChange={(v) => void save({ failover: v })}
               className="w-full"
@@ -944,7 +944,7 @@ function Behavior({ settings }: { settings: Settings }) {
             <FieldError field="failover" />
           </SettingRow>
           <SettingRow
-            title="Resume agents automatically when a usage limit resets"
+            title="Resume agents automatically when a rate limit resets"
             description="Agents a limit stopped continue by themselves shortly after it resets, a few at a time. Never one you stopped or touched."
             htmlFor="b-limit-resume"
           >

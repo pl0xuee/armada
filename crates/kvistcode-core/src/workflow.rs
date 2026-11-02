@@ -822,6 +822,25 @@ pub fn turn_end_body(runs: &[LaunchedRun]) -> Option<String> {
     })
 }
 
+/// The body of the "work finished" alert: the interface's own one-line summary of the run (what it
+/// was and how it ended) when it sent one, else the generic line. One line, shortened, secrets removed.
+pub fn finished_alert_body(agents: Option<u32>, detail: Option<&str>) -> String {
+    let line = detail
+        .map(|d| d.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|d| !d.is_empty());
+    match line {
+        Some(d) => {
+            let d = crate::redact::redact_secrets(&d).into_owned();
+            if d.chars().count() > 240 {
+                format!("{}…", d.chars().take(239).collect::<String>())
+            } else {
+                d
+            }
+        }
+        None => everything_finished_body(agents),
+    }
+}
+
 /// The body of the quiet alert sent when an agent's last launched work ended after its turn did.
 pub fn everything_finished_body(agents: Option<u32>) -> String {
     match agents {

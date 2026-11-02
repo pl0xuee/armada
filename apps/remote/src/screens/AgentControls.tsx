@@ -127,7 +127,7 @@ export function OptionSheet({ agent, optionId, onClose }: { agent: Agent; option
   );
 }
 
-/** Move the agent to another account of the same provider (e.g. after a usage limit). */
+/** Move the agent to another account of the same provider (e.g. after a rate limit). */
 export function AccountSheet({ agent, open, onClose }: { agent: Agent; open: boolean; onClose: () => void }) {
   const accounts = useStore((s) => s.accounts);
   const switching = useStore((s) => !!s.busy[`account:${agent.id}`]);
@@ -137,7 +137,7 @@ export function AccountSheet({ agent, open, onClose }: { agent: Agent; open: boo
       open={open}
       onClose={onClose}
       title="Switch account"
-      description={agent.rateLimited ? "This account hit its usage limit. The session continues on the account you pick." : "The session continues on the account you pick."}
+      description={agent.rateLimited ? "This account hit its rate limit. The session continues on the account you pick." : "The session continues on the account you pick."}
     >
       {list.length <= 1 ? (
         <p className="py-2 text-[14px] text-muted">There's no other account for this provider. Add one in Kvistcode on your computer.</p>

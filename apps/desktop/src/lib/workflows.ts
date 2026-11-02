@@ -169,6 +169,22 @@ export function pollWorkflowNow(agentId: string, toolCallId: string) {
   void poll(workflowKey(agentId, toolCallId), true);
 }
 
+/**
+ * A fresh read of a run that was thought finished (finished is otherwise final, so nothing re-reads it):
+ * used before announcing the end. A run that moves again is stored as running, so it is watched again.
+ */
+export async function recheckWorkflow(agentId: string, toolCallId: string): Promise<WorkflowProgress | null> {
+  const key = workflowKey(agentId, toolCallId);
+  try {
+    const progress = await api.workflowProgress(agentId, toolCallId);
+    if (progress.state !== "finished") watches.delete(key);
+    put(key, { progress, failed: false });
+    return progress;
+  } catch {
+    return null;
+  }
+}
+
 function stop(w: Watch) {
   w.done = true;
   if (w.timer) clearInterval(w.timer);

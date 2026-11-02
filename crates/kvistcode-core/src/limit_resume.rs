@@ -1,9 +1,9 @@
-//! Resuming agents after a usage limit lifts: the data an agent carries and the decisions, as pure
+//! Resuming agents after a rate limit lifts: the data an agent carries and the decisions, as pure
 //! functions with the clock passed in so they can be tested without waiting.
 //!
 //! The manager (`manager/limit_wait.rs`) gathers the facts, asks these functions, and acts.
 //!
-//! One *episode* starts when an agent's turn fails on a usage limit and ends when a turn of that
+//! One *episode* starts when an agent's turn fails on a rate limit and ends when a turn of that
 //! agent completes, the user takes over, or the attempts run out. Within it:
 //!
 //! 1. The reset time is read from the provider's message and the account's usage windows.
@@ -20,7 +20,7 @@ use crate::model::{Agent, AgentStatus};
 use serde::{Deserialize, Serialize};
 
 /// What the automatic follow-up says. Short and plain: the agent has the whole conversation.
-pub const RESUME_PROMPT: &str = "Your usage limit has reset. Please continue where you left off.";
+pub const RESUME_PROMPT: &str = "Your rate limit has reset. Please continue where you left off.";
 
 /// Automatic attempts per episode before the agent is left for the user.
 pub const MAX_ATTEMPTS: u8 = 3;
@@ -268,18 +268,18 @@ impl ClockWatch {
     }
 }
 
-/// "Resumed 3 agents after your usage limit reset" (or the agent's title when it is one).
+/// "Resumed 3 agents after your rate limit reset" (or the agent's title when it is one).
 pub fn resumed_body(count: usize, title: &str) -> String {
     if count == 1 {
-        format!("Resumed {title} after your usage limit reset")
+        format!("Resumed {title} after your rate limit reset")
     } else {
-        format!("Resumed {count} agents after your usage limit reset")
+        format!("Resumed {count} agents after your rate limit reset")
     }
 }
 
 /// Whether an attention body is the one above (the desktop plays it quietly).
 pub fn is_resumed_body(body: &str) -> bool {
-    body.starts_with("Resumed ") && body.ends_with(" after your usage limit reset")
+    body.starts_with("Resumed ") && body.ends_with(" after your rate limit reset")
 }
 
 /// "6:00 PM", or "Thu 6:00 PM" when not today, for a notice in the timeline.
@@ -556,17 +556,17 @@ mod tests {
     fn notification_wording() {
         assert_eq!(
             resumed_body(3, "x"),
-            "Resumed 3 agents after your usage limit reset"
+            "Resumed 3 agents after your rate limit reset"
         );
         assert_eq!(
             resumed_body(1, "Fix login"),
-            "Resumed Fix login after your usage limit reset"
+            "Resumed Fix login after your rate limit reset"
         );
         assert!(is_resumed_body(&resumed_body(3, "x")));
         assert!(is_resumed_body(&resumed_body(1, "Fix login")));
         assert!(!is_resumed_body("Resumed work on the parser"));
         assert!(!is_resumed_body(
-            "All 6 tests pass after your usage limit reset"
+            "All 6 tests pass after your rate limit reset"
         ));
     }
 

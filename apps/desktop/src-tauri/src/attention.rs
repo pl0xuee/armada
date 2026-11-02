@@ -128,7 +128,7 @@ impl Attention {
                 }
             }
         }
-        // "Resumed 3 agents after your usage limit reset": one soft heads-up per wave.
+        // "Resumed 3 agents after your rate limit reset": one soft heads-up per wave.
         if reason == AttentionReason::Done && kvistcode_core::limit_resume::is_resumed_body(body) {
             self.alert_scaled(agent_id, reason, title, body, request_id, 0.45);
             return;
@@ -160,13 +160,13 @@ impl Attention {
     /// "everything finished" alert (the turn-end one said work was still running). The UI only
     /// asks when the user isn't looking at that agent; the usual switches, quiet hours and smart
     /// mute still apply, and the sound is softer.
-    pub fn background_finished(&self, agent_id: &str, agents: Option<u32>) {
+    pub fn background_finished(&self, agent_id: &str, agents: Option<u32>, detail: Option<&str>) {
         let title = self
             .core()
             .agent(agent_id)
             .map(|a| a.title)
-            .unwrap_or_else(|_| "Agent".into());
-        let body = kvistcode_core::workflow::everything_finished_body(agents);
+            .unwrap_or_else(|_| "Kvistcode".into());
+        let body = kvistcode_core::workflow::finished_alert_body(agents, detail);
         self.alert_scaled(agent_id, AttentionReason::Done, &title, &body, None, 0.45);
     }
 
@@ -540,7 +540,7 @@ fn push_text(detail: &str, reason: AttentionReason, title: &str, body: &str) -> 
             "Finished its turn; work is still running"
         }
         AttentionReason::Done if kvistcode_core::limit_resume::is_resumed_body(body) => {
-            "Resumed after the usage limit reset"
+            "Resumed after the rate limit reset"
         }
         AttentionReason::Done => "Finished",
         AttentionReason::Error => "Stopped with an error",

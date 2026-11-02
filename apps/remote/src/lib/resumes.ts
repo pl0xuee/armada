@@ -1,5 +1,5 @@
 /**
- * "Resumes 6:00 PM": an agent stopped by a usage limit that Kvistcode on the desktop will continue by
+ * "Resumes 6:00 PM": an agent stopped by a rate limit that Kvistcode on the desktop will continue by
  * itself. The desktop sends the time (`limitResetsAt`) only while it waits to do so, to owners and
  * viewers alike; nothing here knows the setting, so an agent without the time reads as before.
  */
