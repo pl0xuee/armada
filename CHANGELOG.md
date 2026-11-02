@@ -5,6 +5,23 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.3.3 — 2026-11-01
+
+Sub-agents show up reliably, long messages stop jumping around, and the voice assistant can do much more.
+
+### New
+- **The assistant knows where you are.** It can see which screen and agent are open and any text you have highlighted, so “stop this one” or “what does this say?” just works. Commands that name no agent act on the open one.
+- **Say “commit and push” and the agent does it.** The assistant sends your request to the agent as a message. You see the exact wording on the confirmation card and press Confirm first.
+- **More to ask for.** List your projects, check usage, search what was said earlier, rename an agent (with a confirmation), mark one done, and open Usage, Schedules, Accounts, Settings (any section), Compare or either Mission Control tab.
+- **Mute.** Say “mute”, “pause listening” or “go to sleep”, or press the Mute button. Kvistcode stops listening completely until you press Unmute.
+- **Billing at a glance.** Each account now says whether it runs on a subscription (with how much of each usage window is left and when it resets), API billing (with what is left of today's budget) or a local model. It shows in the inspector and in the assistant. Providers don't let an API key read a prepaid balance, so for API billing the figure is your daily budget.
+- **A clearer Confirm.** When the assistant waits for your OK, the panel says so and shows large Cancel and Confirm buttons right under the header.
+
+### Fixed
+- Sub-agents started in the background were sometimes missing from the list and from the sub-agents count, including in older conversations.
+- A long message no longer flips between a short and a long layout while an agent is working; once you open it with “Show more” it stays open.
+- A long status label in the agent list no longer runs past the edge of its card.
+
 ## v0.3.2 — 2026-11-01
 
 Agents resume on their own after a limit resets, Kvistcode helps your subscription last longer, local models work properly, and a full review of the app fixed a long list of bugs.
