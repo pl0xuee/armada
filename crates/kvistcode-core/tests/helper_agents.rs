@@ -19,11 +19,10 @@ impl EventSink for Sink {
     }
 }
 
+mod common;
+
 fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("kvistcode-test-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+    common::scratch(&format!("test-{name}"))
 }
 
 fn git(dir: &Path, args: &[&str]) {

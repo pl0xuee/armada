@@ -8,6 +8,8 @@ use std::time::Duration;
 
 use kvistcode_core::*;
 
+mod common;
+
 struct Sink;
 
 impl EventSink for Sink {
@@ -26,9 +28,8 @@ fn processes_with(marker: &str) -> usize {
 async fn kill_all_children_takes_down_every_agent_tree() {
     let tests = concat!(env!("CARGO_MANIFEST_DIR"), "/tests");
     let marker = format!("kvistcode-exit-marker-{}", std::process::id());
-    let data = std::env::temp_dir().join(format!("kvistcode-exit-{}", std::process::id()));
+    let data = common::scratch("exit");
     let project = data.join("project");
-    let _ = std::fs::remove_dir_all(&data);
     std::fs::create_dir_all(&project).unwrap();
     let core = Core::open(data.join("data"), Arc::new(Sink)).unwrap();
     let mut settings = core.settings().unwrap();

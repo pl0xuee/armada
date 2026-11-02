@@ -430,7 +430,7 @@ mod tests {
 
     #[test]
     fn installed_requires_the_exact_size() {
-        let dir = std::env::temp_dir().join(format!("kvistcode-voice-{}", uuid::Uuid::new_v4()));
+        let dir = crate::testutil::scratch("voice");
         let spec = model_spec("tiny.en").unwrap();
         assert!(!is_installed(&dir, spec));
         std::fs::create_dir_all(models_dir(&dir)).unwrap();

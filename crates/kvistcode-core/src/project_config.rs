@@ -799,11 +799,7 @@ mod tests {
     use super::*;
 
     fn tmp(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "kvistcode-projcfg-{tag}-{}-{}",
-            std::process::id(),
-            uuid::Uuid::new_v4().simple()
-        ));
+        let dir = crate::testutil::scratch(&format!("projcfg-{tag}"));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::canonicalize(dir).unwrap()
     }

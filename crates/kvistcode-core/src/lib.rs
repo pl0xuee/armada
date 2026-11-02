@@ -32,6 +32,8 @@ mod mcp;
 mod plan_approval;
 mod secrets;
 mod session;
+#[cfg(test)]
+mod testutil;
 
 pub use files::is_network_path;
 pub use git::{hardened_command, hardening, Hardening, PUSH_REDIRECT_ERROR};

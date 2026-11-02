@@ -842,8 +842,7 @@ pub(crate) mod tests {
 
     impl Repo {
         pub fn new() -> Self {
-            let root = std::env::temp_dir()
-                .join(format!("kvistcode-helper-test-{}", uuid::Uuid::new_v4()));
+            let root = crate::testutil::scratch("helper-test");
             let dir = root.join("work");
             std::fs::create_dir_all(&dir).unwrap();
             let r = Repo { root, dir };

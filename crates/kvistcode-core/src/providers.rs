@@ -601,7 +601,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn mise_launcher_scripts_are_skipped() {
-        let root = std::env::temp_dir().join(format!("kvistcode-wrap-{}", std::process::id()));
+        let root = crate::testutil::scratch("wrap");
         let _ = std::fs::remove_dir_all(&root);
         let wrapper_body =
             "#!/bin/bash\nexport MISE_MINIMUM_RELEASE_AGE=0\nmise use -g --quiet \"codex\" || exit 1\nexec mise x \"codex\" -- \"codex\" \"$@\"\n";
@@ -643,7 +643,7 @@ mod tests {
 
     #[test]
     fn finds_the_bundled_claude_code() {
-        let data = std::env::temp_dir().join(format!("kvistcode-bundled-{}", std::process::id()));
+        let data = crate::testutil::scratch("bundled");
         let _ = std::fs::remove_dir_all(&data);
         assert_eq!(bundled_claude(&data), None);
         let scope = adapter_dir(&data)
@@ -723,10 +723,7 @@ mod tests {
         assert!(started.elapsed() < std::time::Duration::from_secs(4));
 
         // A profile that never finishes is abandoned at the deadline, children included.
-        let marker = std::env::temp_dir().join(format!(
-            "kvistcode-capture-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let marker = crate::testutil::scratch("capture").join("marker");
         let script = format!("(sleep 2; touch '{}') & sleep 30", marker.display());
         let started = std::time::Instant::now();
         let out = capture_output(

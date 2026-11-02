@@ -998,8 +998,7 @@ mod tests {
 
     impl Repo {
         fn new() -> Self {
-            let root =
-                std::env::temp_dir().join(format!("kvistcode-ckpt-test-{}", uuid::Uuid::new_v4()));
+            let root = crate::testutil::scratch("ckpt-test");
             let dir = root.join("work");
             std::fs::create_dir_all(&dir).unwrap();
             let db = Db::open(&root.join("armada.db")).unwrap();
@@ -1206,8 +1205,7 @@ mod tests {
 
     #[tokio::test]
     async fn non_git_folders_are_skipped_and_old_checkpoints_pruned() {
-        let plain =
-            std::env::temp_dir().join(format!("kvistcode-ckpt-plain-{}", uuid::Uuid::new_v4()));
+        let plain = crate::testutil::scratch("ckpt-plain");
         std::fs::create_dir_all(&plain).unwrap();
         let r = Repo::new();
         let mut agent = r.agent.clone();
