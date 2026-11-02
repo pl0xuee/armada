@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { composerPlaceholders, filterCommands, insertCommand, pickPlaceholder, reconcilePending, slashQuery } from "./composerLogic";
+import { composerPlaceholders, filterCommands, insertCommand, pickPlaceholder, reconcilePending, showResumeQueue, slashQuery } from "./composerLogic";
 import type { PendingPrompt } from "./store";
-import type { TimelineItem } from "./types";
+import type { Agent, TimelineItem } from "./types";
 
 const pending = (id: string, text: string, extra: Partial<PendingPrompt> = {}): PendingPrompt => ({
   id,
@@ -130,5 +130,15 @@ describe("composer placeholder", () => {
     expect(c[0]).toBe("Answer above, or queue a message to run after this turn…");
     expect(c[1]).toBe("Answer above, or queue a message…");
     expect(pickPlaceholder(c, (t) => t.length <= 24)).toBe("Answer above, or queue…");
+  });
+});
+
+describe("Resume queue", () => {
+  it("is offered for a paused queue, but not beside a spending or turn limit hold", () => {
+    const hold = { scope: "agent", metric: "turns", spent: 20, cap: 20, since: 1 } as Agent["budgetHold"];
+    expect(showResumeQueue({ queuePaused: true, budgetHold: null })).toBe(true);
+    expect(showResumeQueue({ queuePaused: true })).toBe(true);
+    expect(showResumeQueue({ queuePaused: false, budgetHold: null })).toBe(false);
+    expect(showResumeQueue({ queuePaused: true, budgetHold: hold })).toBe(false);
   });
 });

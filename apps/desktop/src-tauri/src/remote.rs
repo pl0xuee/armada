@@ -1466,6 +1466,7 @@ impl Remote {
             .route("/api/agents/{id}/image", get(image))
             .route("/api/agents/{id}/budget", post(phone::budget_resolve))
             .route("/api/agents/{id}/pr", get(phone::pr))
+            .route("/api/background", get(phone::background))
             .route("/api/search", get(phone::search))
             .route("/api/response-style", post(phone::set_response_style))
             .route("/api/permissions", get(permissions))

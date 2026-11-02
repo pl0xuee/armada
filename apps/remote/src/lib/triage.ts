@@ -14,7 +14,7 @@ export type NeedsReason = "permission" | "budget" | "rate_limited" | "error" | "
  * answers being sent are subtracted (undefined: use the agent's own counter). An answer on its way
  * already counts as given, so a card leaves the queue the moment it is answered.
  */
-export function needsReason(a: Agent, pending?: number): NeedsReason | null {
+export function needsReason(a: Agent, pending?: number, background = false): NeedsReason | null {
   if (a.archived) return null;
   // Every open request was just answered here: the status that still says "waiting" is stale.
   const answered = pending !== undefined && a.pendingPermissions > 0 && pending === 0;
@@ -26,6 +26,8 @@ export function needsReason(a: Agent, pending?: number): NeedsReason | null {
   if (a.acknowledgedAt != null && a.acknowledgedAt >= a.lastActivityAt) return null;
   if (a.rateLimited) return "rate_limited";
   if (a.status === "error") return "error";
+  // Its turn ended but a workflow it started still runs: not finished yet, so nothing to review.
+  if (background) return null;
   if (a.unread && (a.status === "idle" || a.status === "stopped" || a.status === "interrupted")) return "done";
   return null;
 }
@@ -39,10 +41,14 @@ export interface TriageEntry {
 }
 
 /** Agents that need the owner, most urgent reason first, then the one waiting longest. */
-export function triageQueue(agents: readonly Agent[], pendingOf?: (a: Agent) => number | undefined): TriageEntry[] {
+export function triageQueue(
+  agents: readonly Agent[],
+  pendingOf?: (a: Agent) => number | undefined,
+  backgroundOf?: (a: Agent) => boolean,
+): TriageEntry[] {
   const out: TriageEntry[] = [];
   for (const agent of agents) {
-    const reason = needsReason(agent, pendingOf?.(agent));
+    const reason = needsReason(agent, pendingOf?.(agent), backgroundOf?.(agent));
     if (reason) out.push({ agent, reason });
   }
   return out.sort((a, b) => NEED_RANK[a.reason] - NEED_RANK[b.reason] || a.agent.lastActivityAt - b.agent.lastActivityAt);
@@ -100,7 +106,7 @@ export interface ProjectGroup {
   lastActivityAt: number;
 }
 
-const isWorking = (a: Agent) => a.status === "working" || a.status === "starting";
+const isWorking = (a: Agent, background = false) => background || a.status === "working" || a.status === "starting";
 
 /**
  * The agent list by project: every folder that has agents, projects that need you first and then the
@@ -111,6 +117,7 @@ export function groupByProject(
   agents: readonly Agent[],
   query = "",
   reasonOf: (a: Agent) => NeedsReason | null = (a) => needsReason(a),
+  backgroundOf: (a: Agent) => boolean = () => false,
 ): { projects: ProjectGroup[]; archived: Agent[] } {
   const q = query.trim().toLowerCase();
   const match = (a: Agent) =>
@@ -136,7 +143,7 @@ export function groupByProject(
   const byActivity = (x: Agent, y: Agent) => y.lastActivityAt - x.lastActivityAt;
   const rank = (a: Agent) => {
     const reason = reasonOf(a);
-    return reason ? NEED_RANK[reason] : isWorking(a) ? 5 : 6;
+    return reason ? NEED_RANK[reason] : isWorking(a, backgroundOf(a)) ? 5 : 6;
   };
   const projects: ProjectGroup[] = [];
   for (const [path, list] of byPath) {
@@ -146,7 +153,7 @@ export function groupByProject(
       name: path ? basename(path) : "Other",
       agents: list,
       needs: list.filter((a) => reasonOf(a) !== null).length,
-      working: list.filter(isWorking).length,
+      working: list.filter((a) => isWorking(a, backgroundOf(a))).length,
       lastActivityAt: Math.max(...list.map((a) => a.lastActivityAt)),
     });
   }
