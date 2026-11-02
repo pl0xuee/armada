@@ -357,6 +357,8 @@ const tauriApi = {
     invoke<void>("preview_proxy_stop", { agentId, token: token ?? null }),
 
   // settings & attention
+  /** Apply the "Save tokens" preset (shorter conversations, concise replies, medium effort). */
+  applyTokenSaver: () => invoke<Settings>("apply_token_saver"),
   updateSettings: (settings: Settings) => invoke<Settings>("update_settings", { settings }),
   /** Today's spend (since local midnight) against the daily budget limits. */
   budgetStatus: () => invoke<BudgetStatus>("budget_status"),
