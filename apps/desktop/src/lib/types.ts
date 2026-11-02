@@ -118,6 +118,9 @@ export interface SpeedResult {
 export interface LocalPrefs {
   /** Context window for local agents; null lets Kvistcode choose from memory. */
   contextTokens: number | null;
+  /** The local account and model that do cheap side jobs (condensing handoff briefs); both null = off. */
+  assistAccountId: string | null;
+  assistModel: string | null;
 }
 
 export interface PullProgress {

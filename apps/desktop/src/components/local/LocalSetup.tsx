@@ -197,7 +197,9 @@ export function LocalSetup({
               <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" />
               <span>
                 This server is not on this computer. Your prompts and your code will be sent to it over the network, so
-                only use a machine you trust.
+                only use a machine you trust. A GPU box away from home is best reached through Tailscale (run{" "}
+                <code className="font-mono text-[11px]">tailscale serve</code> on it and use its https address) rather
+                than an open port.
               </span>
             </p>
           )}

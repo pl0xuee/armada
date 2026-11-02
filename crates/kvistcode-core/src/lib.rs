@@ -7,6 +7,7 @@ pub mod checkpoints;
 pub mod childenv;
 pub mod hardware;
 pub mod local;
+pub mod local_assist;
 pub mod local_ctx;
 pub mod local_health;
 pub mod local_prefs;

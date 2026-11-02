@@ -1209,7 +1209,7 @@ let mockLoaded: LoadedModel[] = [
     expiresAt: new Date(Date.now() + 4 * 60_000).toISOString(),
   },
 ];
-let mockLocalPrefs: LocalPrefs = { contextTokens: null };
+let mockLocalPrefs: LocalPrefs = { contextTokens: null, assistAccountId: null, assistModel: null };
 
 function mockHealth(kind: LocalKind, baseUrl: string): LocalHealth {
   const probe = mockProbe(kind, baseUrl);
