@@ -153,8 +153,88 @@ if (params?.get("budget") === "turns") {
   db.settings.agentBudgetTurns = 20;
 }
 
+// ?limit=resume: two agents waiting out a usage limit that resets in ~75 s (?in=20 for 20 s), to watch
+// Kvistcode resume them by itself. ?limit=unknown: the same, but the provider named no time.
+const limitMode = params?.get("limit");
+if (limitMode === "resume" || limitMode === "unknown") {
+  const at = Date.now() + Number(params?.get("in") ?? 75) * 1000;
+  const clock = new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  for (const id of ["a-react19", "a-settings"]) {
+    const a = db.agents.find((x) => x.id === id);
+    if (!a) continue;
+    a.rateLimited = true;
+    a.status = "error";
+    a.running = false;
+    a.unread = true;
+    a.queuePaused = false;
+    a.queue = [];
+    a.queuedPrompts = 0;
+    a.limitResetsAt = limitMode === "resume" ? at : null;
+    a.limitResume = { state: "waiting", attempts: 0, hitAt: Date.now(), lastAttemptAt: null, probeAt: null };
+    const list = db.items[id] ?? [];
+    const last = list[list.length - 1];
+    if (last?.kind === "notice") {
+      last.text =
+        limitMode === "resume"
+          ? `Usage limit reached for ${id === "a-react19" ? "Claude (Personal)" : "ChatGPT Pro (Personal)"}. Resets at ${clock}.`
+          : `Usage limit reached for ${id === "a-react19" ? "Claude (Personal)" : "ChatGPT Pro (Personal)"}.`;
+    }
+  }
+}
+
+const resumingNow = new Set<string>();
+const AUTO_RESUME_PROMPT = "Your usage limit has reset. Please continue where you left off.";
+
+/** The core's limit watch, simplified: agents whose reset time passed continue, 3 s apart, with one alert. */
+function mockLimitWatch() {
+  const due = db.agents.filter(
+    (a) =>
+      a.rateLimited &&
+      a.status === "error" &&
+      a.limitResume?.state === "waiting" &&
+      !resumingNow.has(a.id) &&
+      db.settings.resumeAfterLimit &&
+      // With no time named, the mock "learns" it 20 s after the page opened.
+      (a.limitResetsAt ?? mockOpenedAt + 20_000) + 3_000 <= Date.now(),
+  );
+  if (due.length === 0) return;
+  due.forEach((a, i) => {
+    resumingNow.add(a.id);
+    setTimeout(() => {
+      resumingNow.delete(a.id);
+      addItem(a.id, { kind: "user_message", text: AUTO_RESUME_PROMPT, automatic: true });
+      patchAgent(a.id, {
+        rateLimited: false,
+        limitResetsAt: null,
+        limitResume: null,
+        status: "working",
+        running: true,
+        unread: false,
+        lastActivityAt: Date.now(),
+      });
+      void runTurn(a.id, (turn) => scriptedTurn(a.id, "Continuing where I left off", turn));
+    }, i * 3_000);
+  });
+  const first = due[0];
+  setTimeout(
+    () =>
+      emit({
+        type: "attention",
+        agentId: first.id,
+        reason: "done",
+        title: due.length === 1 ? first.title : "Usage limit reset",
+        body: due.length === 1 ? `Resumed ${first.title} after your usage limit reset` : `Resumed ${due.length} agents after your usage limit reset`,
+        requestId: null,
+      }),
+    (due.length - 1) * 3_000 + 400,
+  );
+}
+
+const mockOpenedAt = Date.now();
+if (limitMode === "resume" || limitMode === "unknown") setInterval(mockLimitWatch, 1000);
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const rand = (a: number, b: number) => a + Math.random() * (b - a);
+const rand =(a: number, b: number) => a + Math.random() * (b - a);
 const clone = <T>(v: T): T => structuredClone(v);
 
 function getAgent(id: string): Agent {
@@ -1766,8 +1846,26 @@ export const mockApi: KvistcodeApi = {
     const t = turns.get(agentId);
     if (t) t.cancelled = true;
     addItem(agentId, { kind: "notice", level: "info", text: "Shut down by you." });
-    patchAgent(agentId, { status: "stopped", running: false, pendingPermissions: 0 });
+    patchAgent(agentId, {
+      status: "stopped",
+      running: false,
+      pendingPermissions: 0,
+      limitResume: null,
+      limitResetsAt: null,
+    });
     return delay(undefined);
+  },
+
+  async cancelLimitResume(agentId) {
+    const a = getAgent(agentId);
+    if (a.limitResume?.state !== "waiting") return clone(a);
+    addItem(agentId, {
+      kind: "notice",
+      level: "info",
+      text: "Automatic resume cancelled for this agent. Continue it yourself when the limit is lifted.",
+    });
+    patchAgent(agentId, { limitResetsAt: null, limitResume: { ...a.limitResume, state: "cancelled" } });
+    return delay(clone(getAgent(agentId)), 60);
   },
 
   async deleteAgent(agentId, removeWorktree, force) {

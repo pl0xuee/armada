@@ -273,6 +273,13 @@ pub struct Agent {
     /// The last turn failed on a usage/rate limit; the UI offers switching accounts.
     #[serde(default)]
     pub rate_limited: bool,
+    /// When the usage limit that stopped this agent is expected to lift, or the next time
+    /// Kvistcode will try again after a failed resume (unix ms). None = not waiting or unknown.
+    #[serde(default)]
+    pub limit_resets_at: Option<i64>,
+    /// The automatic resume of this agent after a usage limit: present while it waits.
+    #[serde(default)]
+    pub limit_resume: Option<crate::limit_resume::LimitResume>,
     /// Set when the agent was started by a schedule.
     #[serde(default)]
     pub schedule_id: Option<String>,
@@ -704,6 +711,9 @@ pub enum ItemBody {
         /// Sent while the agent was working: it reads this at its next step.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         mid_turn: bool,
+        /// Sent by Kvistcode, not typed: the "continue" after a usage limit reset.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        automatic: bool,
     },
     AgentMessage {
         text: String,
@@ -1098,6 +1108,8 @@ pub struct Settings {
     pub quiet_hours: QuietHours,
     pub close_to_tray: bool,
     pub auto_resume: bool,
+    /// When a usage limit stops agents, continue them by themselves once it resets.
+    pub resume_after_limit: bool,
     /// Keep Kvistcode's own copies of the agent tools (Claude Code, Codex, Grok) up to date
     /// by itself; otherwise updates wait for a click in Settings → Agent tools.
     pub auto_update_tools: bool,
@@ -1559,6 +1571,7 @@ impl Default for Settings {
             quiet_hours: QuietHours::default(),
             close_to_tray: true,
             auto_resume: false,
+            resume_after_limit: true,
             auto_update_tools: true,
             default_worktree: true,
             launch_at_login: false,

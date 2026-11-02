@@ -3,6 +3,7 @@ import { onKvistcodeEvent } from "@/lib/api";
 import { tileNeighbour } from "@/lib/helpers";
 import { publishScheduleEvent } from "@/lib/scheduleEvents";
 import { TURN_ONLY_PREFIX } from "@/lib/background";
+import { isResumedBody } from "@/lib/limitResume";
 import { routeTerminalExit, routeTerminalOutput } from "@/lib/terminal-bus";
 import { switchAccount, switchCandidates } from "@/lib/actions";
 import type { Agent, KvistcodeEvent } from "@/lib/types";
@@ -37,7 +38,7 @@ function handleUiEvent(e: KvistcodeEvent) {
       if (e.reason === "permission") toast.warning(e.title, opts);
       else if (e.reason === "error") toast.error(e.title, opts);
       // The turn ended but launched work is still running: a plain message, not a green "success".
-      else if (e.body.startsWith(TURN_ONLY_PREFIX)) toast(e.title, opts);
+      else if (e.body.startsWith(TURN_ONLY_PREFIX) || isResumedBody(e.body)) toast(e.title, opts);
       else toast.success(e.title, opts);
       break;
     }

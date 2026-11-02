@@ -128,6 +128,11 @@ impl Attention {
                 }
             }
         }
+        // "Resumed 3 agents after your usage limit reset": one soft heads-up per wave.
+        if reason == AttentionReason::Done && kvistcode_core::limit_resume::is_resumed_body(body) {
+            self.alert_scaled(agent_id, reason, title, body, request_id, 0.45);
+            return;
+        }
         self.alert(agent_id, reason, title, body, request_id);
     }
 
@@ -533,6 +538,9 @@ fn push_text(detail: &str, reason: AttentionReason, title: &str, body: &str) -> 
         // Not "Finished" when the turn ended with launched work still going.
         AttentionReason::Done if body.starts_with(kvistcode_core::workflow::TURN_ONLY_PREFIX) => {
             "Finished its turn; work is still running"
+        }
+        AttentionReason::Done if kvistcode_core::limit_resume::is_resumed_body(body) => {
+            "Resumed after the usage limit reset"
         }
         AttentionReason::Done => "Finished",
         AttentionReason::Error => "Stopped with an error",

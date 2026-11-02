@@ -93,6 +93,7 @@ macro_rules! handler {
             commands::respond_permission,
             commands::answer_question,
             commands::resume_agent,
+            commands::cancel_limit_resume,
             commands::stop_agent,
             commands::delete_agent,
             commands::rename_agent,

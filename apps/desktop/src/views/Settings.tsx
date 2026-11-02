@@ -784,7 +784,7 @@ function Behavior({ settings }: { settings: Settings }) {
     if (hotkey.trim() !== (useApp.getState().settings?.globalHotkey ?? "") && !hotkeySaving) void commitHotkey(hotkey);
   });
 
-  const toggle = (key: "closeToTray" | "autoResume" | "defaultWorktree" | "launchAtLogin") => (v: boolean) =>
+  const toggle = (key: "closeToTray" | "autoResume" | "resumeAfterLimit" | "defaultWorktree" | "launchAtLogin") => (v: boolean) =>
     void save({ [key]: v } as Partial<Settings>);
 
   return (
@@ -942,6 +942,17 @@ function Behavior({ settings }: { settings: Settings }) {
               options={FAILOVER.map((f) => ({ value: f.value, label: f.label }))}
             />
             <FieldError field="failover" />
+          </SettingRow>
+          <SettingRow
+            title="Resume agents automatically when a usage limit resets"
+            description="Agents a limit stopped continue by themselves shortly after it resets, a few at a time. Never one you stopped or touched."
+            htmlFor="b-limit-resume"
+          >
+            <Switch
+              id="b-limit-resume"
+              checked={settings.resumeAfterLimit ?? true}
+              onCheckedChange={toggle("resumeAfterLimit")}
+            />
           </SettingRow>
         </SettingGroup>
       </div>
