@@ -55,7 +55,7 @@ import { AttachmentStrip } from "../AttachmentStrip";
 import { CopyButton } from "../CopyButton";
 import { DiffStat, FileDiffView } from "../DiffView";
 import { Markdown } from "../Markdown";
-import type { MessageRole } from "./collapse";
+import { userMessageFolds, userMessageLines, type MessageRole } from "./collapse";
 import { MessageFold } from "./MessageFold";
 import { runText } from "./messageFlow";
 import { CodeText } from "../CodeText";
@@ -75,6 +75,10 @@ export const UserBubble = memo(function UserBubble({
   /** Sent while the agent worked and not answered yet: says when it will be read, until the agent's next output. */
   awaiting?: boolean;
 }) {
+  // A long paste (a log, a diff) folds; it stays whole for Copy.
+  const long = userMessageFolds(item.text);
+  const [open, setOpen] = useState(false);
+  const folded = long && !open;
   return (
     <div className="group flex justify-end">
       <div className="relative max-w-[80%]">
@@ -82,8 +86,26 @@ export const UserBubble = memo(function UserBubble({
           <AttachmentStrip attachments={item.attachments} size={88} className="mb-1.5 justify-end" />
         )}
         {item.text && (
-          <div dir="auto" className="selectable whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-line/70 bg-raised/60 px-3.5 py-2 text-[14.5px] leading-[1.55] text-fg">
-            {item.text}
+          <div className="rounded-2xl rounded-br-md border border-line/70 bg-raised/60 text-[14.5px] leading-[1.55] text-fg">
+            <div
+              dir="auto"
+              className={cn(
+                "selectable whitespace-pre-wrap break-words px-3.5 py-2",
+                folded && "max-h-[22rem] overflow-hidden [mask-image:linear-gradient(to_bottom,#000_calc(100%-3rem),transparent)]",
+              )}
+            >
+              {item.text}
+            </div>
+            {long && (
+              <button
+                type="button"
+                aria-expanded={open}
+                onClick={() => setOpen((v) => !v)}
+                className="flex h-7 w-full items-center justify-center gap-1 rounded-b-2xl border-t border-line/60 text-[11.5px] text-steel transition-colors hover:bg-raised hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
+              >
+                {open ? "Show less" : `Show all ${userMessageLines(item.text).toLocaleString()} lines`}
+              </button>
+            )}
           </div>
         )}
         {awaiting && (
