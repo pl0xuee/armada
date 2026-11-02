@@ -69,8 +69,13 @@ export function holdReach(hold: HoldLike, projectPath: string | undefined): stri
   return null;
 }
 
-/** Two increments for "Raise limit by": the desktop's for dollars and tokens, a share of the cap otherwise. */
+/** Two increments for "Raise limit by": the desktop's for dollars, tokens and turns, a share of the cap otherwise. */
 export function raiseSteps(hold: HoldLike): [number, number] {
+  if (hold.metric === "turns") {
+    // The desktop's steps for a turn limit.
+    const base = hold.cap <= 10 ? 5 : hold.cap <= 40 ? 10 : hold.cap <= 100 ? 25 : 50;
+    return [base, base * 2];
+  }
   if (hold.metric === "cost") {
     const base = hold.cap < 10 ? 5 : hold.cap < 50 ? 10 : hold.cap < 200 ? 25 : 100;
     return [base, base * 2];

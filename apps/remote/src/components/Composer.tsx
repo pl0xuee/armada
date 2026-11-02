@@ -293,6 +293,7 @@ export const Composer = memo(function Composer({
         </div>
       )}
       <form
+        aria-label="Reply"
         className={cn("mx-auto flex w-full max-w-[860px] items-end gap-1.5 px-safe", busy && canSend && plan.note ? "pt-0.5" : "pt-2.5")}
         onSubmit={(e) => {
           e.preventDefault();
