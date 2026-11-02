@@ -402,7 +402,6 @@ function Chips({ agent, sheet, onSheet }: { agent: Agent; sheet: Sheets; onSheet
             type="button"
             className={CHIP}
             onClick={() => onSheet("chip-plan")}
-            aria-label={`Plan: ${progress.done} of ${progress.total} done${progress.current ? `, now ${progress.current}` : ""}. Open the checklist.`}
           >
             <span className="min-w-0 flex-1">
               <span className="flex items-baseline gap-1.5 text-[13px] leading-tight font-semibold text-fg">
@@ -441,7 +440,6 @@ function SubagentChip({ running, onOpen }: { running: ReturnType<typeof useRunni
       type="button"
       className={CHIP}
       onClick={onOpen}
-      aria-label={`${subagentHeadline(running)}, working for ${formatElapsed(now - since)}. Open the list.`}
     >
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-1.5 text-[13px] leading-tight font-semibold text-fg">

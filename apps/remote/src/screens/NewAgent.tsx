@@ -185,7 +185,7 @@ export function NewAgent() {
             />
           )}
           {projects.length > PROJECTS_SHOWN && !allProjects && (
-            <button type="button" onClick={() => setAllProjects(true)} className="press mt-1 h-10 px-1 text-[13px] font-medium text-accent">
+            <button type="button" onClick={() => setAllProjects(true)} className="press mt-1 h-11 px-1 text-[13px] font-medium text-accent">
               Show all {projects.length} folders
             </button>
           )}
@@ -223,14 +223,13 @@ export function NewAgent() {
 
         <Section title="First message" hint="Optional: the agent starts and waits if you leave it empty.">
           {templates.length > 0 && (
-            <div className="scroll-x -mx-1 mb-2 flex gap-1.5 px-1 pb-0.5" role="list" aria-label="Templates">
+            <div className="scroll-x -mx-1 mb-2 flex gap-1.5 px-1 pb-0.5" role="group" aria-label="Templates">
               {templates.map((t) => (
                 <button
                   key={t.id}
                   type="button"
-                  role="listitem"
                   onClick={() => update({ prompt: form.prompt.trim() ? `${form.prompt.trimEnd()}\n\n${t.text}` : t.text })}
-                  className="press inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-line-strong bg-card px-3 text-[13px] text-fg"
+                  className="press inline-flex h-11 shrink-0 items-center gap-1.5 rounded-full border border-line-strong bg-card px-3 text-[13px] text-fg"
                 >
                   <Icon name="plus" size={14} className="text-steel" />
                   {t.name}

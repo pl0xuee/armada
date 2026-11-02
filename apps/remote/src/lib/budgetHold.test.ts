@@ -53,11 +53,16 @@ describe("raise steps", () => {
     expect(raiseSteps(hold("tokens", 2e9, 1.5e9))).toEqual([750e6, 1.5e9]);
   });
 
-  it("scale with the cap for a count of anything else, always above zero", () => {
-    expect(raiseSteps(hold("turns", 41, 40))).toEqual([20, 40]);
+  it("match the desktop for turns", () => {
     expect(raiseSteps(hold("turns", 11, 10))).toEqual([5, 10]);
-    expect(raiseSteps(hold("turns", 1, 1))).toEqual([1, 2]);
-    expect(raiseSteps(hold("turns", 500, 450))).toEqual([300, 600]);
+    expect(raiseSteps(hold("turns", 41, 40))).toEqual([10, 20]);
+    expect(raiseSteps(hold("turns", 101, 100))).toEqual([25, 50]);
+    expect(raiseSteps(hold("turns", 500, 450))).toEqual([50, 100]);
+  });
+
+  it("scale with the cap for a count of anything else, always above zero", () => {
+    expect(raiseSteps(hold("api_calls", 41, 40))).toEqual([20, 40]);
+    expect(raiseSteps(hold("api_calls", 1, 1))).toEqual([1, 2]);
     for (const cap of [0, 0.2, 3, 7, 99, 12_345]) {
       const [a, b] = raiseSteps(hold("whatever", cap, cap));
       expect(a).toBeGreaterThan(0);

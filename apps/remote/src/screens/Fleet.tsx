@@ -12,7 +12,7 @@ import { confirmAction } from "@/lib/confirm";
 import { devParam } from "@/lib/dev";
 import { plainPreview, plural, relativeTime, relativeTimeLong } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
-import { agentIdentity, safeColor, statusMeta } from "@/lib/meta";
+import { agentIdentity, safeColor } from "@/lib/meta";
 import { navigate } from "@/lib/router";
 import { accountOf, filterAgents, isUsageLimited, pendingKindOf, permissionIndex, USAGE_LIMIT_LABEL, useAgentPending, useBackground, useTriage } from "@/lib/selectors";
 import { storage } from "@/lib/storage";
@@ -314,7 +314,6 @@ const AgentRow = memo(function AgentRow({ agent, now, reason }: { agent: Agent; 
     <button
       type="button"
       onClick={() => navigate({ name: "agent", agentId: agent.id })}
-      aria-label={`${agent.title}, ${limited ? USAGE_LIMIT_LABEL : agent.budgetHold ? holdLabel(agent.budgetHold) : (shown.label ?? statusMeta(agent.status).label)}${pending ? `, ${pending} waiting for approval` : ""}`}
       className={cn("press-row relative flex w-full items-start gap-3 px-3.5 py-3 text-left", needs && "bg-warn/[0.035]")}
     >
       {needs && <span className="absolute inset-y-3 left-0 w-[3px] rounded-r-full bg-warn" aria-hidden />}
@@ -358,6 +357,7 @@ const AgentRow = memo(function AgentRow({ agent, now, reason }: { agent: Agent; 
               <span className="mt-px inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full bg-warn px-2 text-[12px] font-bold text-warn-fg tabular">
                 <Icon name={pendingIcon} size={12} strokeWidth={2.4} />
                 {pending}
+                <span className="sr-only"> waiting for {pendingKind === "question" ? "an answer" : "approval"}</span>
               </span>
             )}
           </span>
