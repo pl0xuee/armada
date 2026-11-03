@@ -1,18 +1,22 @@
-import { ArrowUpRight, Check, Mic, MicOff, RotateCcw, ShieldQuestion, Square, X } from "lucide-react";
+import { ArrowUpRight, Check, Mic, MicOff, RefreshCw, RotateCcw, ShieldQuestion, Square, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { AssistantBilling } from "@/components/usage/BillingSummary";
+import { describeScreen } from "@/lib/describeScreen";
+import { tileIdsFor } from "@/lib/helpers";
 import { formatCost, formatElapsed, isLive, PHASE_LABEL } from "@/lib/voiceAssistant";
 import { cn, isEditableTarget, modKey } from "@/lib/utils";
 import {
   answerVaConfirm,
   connectVoiceAssistant,
   escapeVoiceAssistant,
+  resyncScreen,
   setVaMuted,
   stopVoiceAssistant,
   useVa,
 } from "@/store/voiceAssistant";
+import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { TONE, VoiceOrb } from "./VoiceOrb";
 import { usePanelDrag } from "./usePanelDrag";
@@ -236,6 +240,7 @@ function PanelBody() {
             {notice}
           </p>
         )}
+        {live && <SeesRow />}
         {live && <AssistantBilling className="border-t border-line px-4 py-2.5" />}
         {(captions.length > 0 || actions.length > 0) && (
           <div
@@ -317,6 +322,38 @@ function PanelBody() {
           </p>
         )}
       </section>
+    </div>
+  );
+}
+
+/** What the assistant sees right now (the open agent or the screen), and a button to send it again. */
+function SeesRow() {
+  const view = useUi((s) => s.view);
+  const agentId = useUi((s) => (s.view === "agents" ? s.selectedAgentId : null));
+  const tileGroup = useUi((s) => s.tileGroup);
+  const tileHelpers = useUi((s) => s.tileHelpers);
+  // Only the title, folder and grid size, so an agent that is streaming does not re-render this row.
+  const title = useApp((s) => (agentId ? s.agents[agentId]?.title : undefined));
+  const projectPath = useApp((s) => (agentId ? s.agents[agentId]?.projectPath : undefined));
+  // The same agents the assistant is told are shown together (see `reportScreen`).
+  const shownCount = useApp((s) => tileIdsFor(s.agents, agentId, tileGroup, tileHelpers).length);
+  const seen = describeScreen(
+    { view, agentId },
+    agentId && title !== undefined ? { [agentId]: { title, projectPath: projectPath ?? "" } } : {},
+    shownCount,
+  );
+  return (
+    <div className="flex items-center gap-1.5 border-t border-line px-4 py-1.5 text-[11.5px] leading-[16px] text-steel">
+      <span className="shrink-0">Sees:</span>
+      <Tooltip content={seen.full} side="top">
+        <span className="min-w-0 flex-1 cursor-default truncate text-fg">{seen.label}</span>
+      </Tooltip>
+      {seen.together && <span className="shrink-0">{seen.together}</span>}
+      <Tooltip content="Send the screen to the assistant again" side="top">
+        <Button variant="ghost" size="icon-sm" aria-label="Send the screen again" onClick={resyncScreen}>
+          <RefreshCw />
+        </Button>
+      </Tooltip>
     </div>
   );
 }

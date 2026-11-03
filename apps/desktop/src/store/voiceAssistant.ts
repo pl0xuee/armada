@@ -78,6 +78,11 @@ export function connectVoiceAssistant(): () => void {
 /** Sends the current screen again, even if it was already sent (see `startVoiceAssistant`). */
 let resendScreen: () => void = () => {};
 
+/** Send the screen to the assistant again (the panel's Sync button). Does nothing without a live session. */
+export function resyncScreen(): void {
+  if (isLive(useVa.getState())) resendScreen();
+}
+
 /** While a session is live, tell the backend what the window shows (screen, open agent, highlighted text). */
 function reportScreen(): () => void {
   let last = "";

@@ -11,6 +11,7 @@ docs/RELEASING.md).
 - **A Refresh button in the project list.** If you rename or move a project's folder, press it and Kvistcode finds the new place (it asks the project's worktrees) or, when it can't, offers “Locate…” so you pick the folder yourself. Agents, schedules and git worktrees follow.
 
 - **A reply language.** Settings → Behavior → Agent replies has a “Reply language”: pick Spanish, Japanese and so on and agents and the voice assistant answer in it (code and file names stay as they are). The default, “Match what I write”, changes nothing.
+- **See what the voice assistant sees.** While it is on, its panel shows “Sees:” with the open agent and its folder (or the screen you are on, and how many agents are side by side), plus a button to send the screen to it again.
 - **Voice assistant: run actions without asking.** Settings → Voice assistant has an option to skip the Confirm card, so starting an agent, sending a message or renaming one happens as soon as you say it. It is off by default, and agents you start still ask before changing files or running commands.
 
 ### Fixed
