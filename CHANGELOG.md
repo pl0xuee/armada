@@ -5,7 +5,7 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
-## Unreleased
+## v0.4.5 — 2026-11-03
 
 ### New
 - **Start the voice assistant by saying “Hey Kvistcode”.** Turn on Wake phrase in Settings > Voice, and Kvistcode listens for the phrase, like “Hey Siri” on a phone. Saying it starts the assistant, or wakes it when it is paused. Anything you say right after the phrase is its first question, as in “Hey Kvistcode, what are my agents doing?” Listening happens on your computer with the small dictation speech model (a 75 MB download), and nothing is sent to OpenAI until the phrase is heard. You can change the phrase to any two to five words. Your system may show that the microphone is on while it listens.
