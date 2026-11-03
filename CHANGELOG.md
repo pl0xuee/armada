@@ -5,6 +5,11 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## Unreleased
+
+### Fixed
+- **The message box's buttons stay inside it at any width.** When the window or a tile is narrow, the agent's settings (model, effort and the rest) move one at a time into the ⚙ menu, then Stop and Send become icons, so nothing spills past the edge or overlaps any more.
+
 ## v0.4.3 — 2026-11-03
 
 ### New

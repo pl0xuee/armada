@@ -33,6 +33,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { ConfigOverflowMenu, ConfigSelect } from "./ConfigSelect";
 import { plainConfigOptions } from "./composerModes";
 import { PinnedDock } from "./PinnedDock";
+import { useToolbarFit } from "./toolbarFit";
 
 const ESC_ARM_MS = 1500;
 /** The textarea sizes itself to its text in CSS (`field-sizing: content`); otherwise the layout effect measures. */
@@ -448,6 +449,27 @@ function ComposerImpl({
 
   /** What the main button does (and says) while busy. */
   const primary = decideBusySend(busySend, "queueButton", helperAllowed, canDeliver);
+  // The toolbar measures itself: session options that don't fit move into the ⚙ menu, then Stop / Send lose their
+  // labels, then the working dot goes, so the row never spills out of the box (what it needs depends on the agent's
+  // options and its state).
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const fold = useToolbarFit(
+    toolbarRef,
+    actionsRef,
+    [
+      configOptions.map((o) => `${o.id}=${o.currentValue}`).join(","),
+      busy,
+      docked,
+      resumable,
+      primary,
+      roomy,
+      roomForHints,
+      attach.attachments.length,
+    ].join("|"),
+    configOptions.length,
+    tight,
+  );
   /** The agent takes messages into a running turn (so the menu may offer it). */
   const agentTakesMidTurn = !!agent.steerable && !agent.queuePaused;
 
@@ -647,12 +669,12 @@ function ComposerImpl({
                 className="relative block max-h-[40vh] min-h-[52px] w-full resize-none field-sizing-content bg-transparent px-4 pb-1 pt-3.5 text-[13.5px] leading-relaxed text-fg placeholder:text-steel focus:outline-none"
               />
             </div>
-            <div className="flex items-center gap-2 px-2.5 pb-2.5 pt-1">
+            <div ref={toolbarRef} className="flex items-center gap-2 px-2.5 pb-2.5 pt-1">
               <div className="flex min-w-0 shrink-0 items-center gap-0.5">
-                {(tight ? configOptions.slice(0, 1) : configOptions).map((opt) => (
+                {configOptions.slice(0, fold.inline).map((opt) => (
                   <ConfigSelect key={opt.id} agent={agent} option={opt} compact={!roomy} />
                 ))}
-                {tight && <ConfigOverflowMenu agent={agent} options={configOptions.slice(1)} />}
+                <ConfigOverflowMenu agent={agent} options={configOptions.slice(fold.inline)} />
                 <AttachButton onClick={attach.openPicker} count={attach.attachments.length} iconOnly={!roomy} />
                 <TemplatePicker
                   onInsert={insertTemplate}
@@ -668,9 +690,19 @@ function ComposerImpl({
                     )
                   }
                 />
-                <span className={cn("mx-1.5 h-4 w-px bg-line", !busy && !roomForHints && "hidden")} aria-hidden />
+                <span
+                  className={cn("mx-1.5 h-4 w-px bg-line", ((!busy && !roomForHints) || fold.bare) && "hidden")}
+                  aria-hidden
+                />
               </div>
-              <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[11.5px] text-steel">
+              {/* Never narrower than the dot: a squeeze shows up as overflow and folds the toolbar instead of halving it. */}
+              <div
+                className={cn(
+                  "flex items-center gap-1.5 overflow-hidden text-[11.5px] text-steel",
+                  busy ? "min-w-2" : "min-w-0",
+                  fold.bare && "hidden",
+                )}
+              >
                 {busy ? (
                   <>
                     {/* Still dot with a glow: the shimmer line above and the header dot already move. */}
@@ -691,7 +723,7 @@ function ComposerImpl({
                   </span>
                 )}
               </div>
-              <div className="ml-auto flex shrink-0 items-center gap-1.5">
+              <div ref={actionsRef} className="ml-auto flex shrink-0 items-center gap-1.5">
                 <ComposerVoiceButtons onText={insertDictation} />
                 {busy && !docked && (
                   <Tooltip content="Stop this turn" shortcut={["Esc ×2"]}>
@@ -703,7 +735,7 @@ function ComposerImpl({
                       className="gap-1.5"
                     >
                       <Square className="!h-3 !w-3 fill-current" />
-                      {!tight && "Stop"}
+                      {!fold.iconButtons && "Stop"}
                     </Button>
                   </Tooltip>
                 )}
@@ -720,7 +752,7 @@ function ComposerImpl({
                       shortcut={["⏎"]}
                     >
                       <Button
-                        size={tight ? "icon-sm" : "sm"}
+                        size={fold.iconButtons ? "icon-sm" : "sm"}
                         // Flat until there's something to send, so it doesn't read as clickable.
                         variant={canSend ? "primary" : "secondary"}
                         disabled={!canSend}
@@ -741,7 +773,8 @@ function ComposerImpl({
                         ) : (
                           <ListPlus className="!h-4 !w-4" />
                         )}
-                        {!tight && (primary === "deliver" ? "Send" : primary === "helper" ? "Helper" : "Queue")}
+                        {!fold.iconButtons &&
+                          (primary === "deliver" ? "Send" : primary === "helper" ? "Helper" : "Queue")}
                       </Button>
                     </Tooltip>
                     <DropdownMenu>
