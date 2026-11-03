@@ -28,10 +28,6 @@ interface Props {
   working: number;
   collapsed: boolean;
   renaming: boolean;
-  /** A project being dragged would drop into this section. */
-  highlight: boolean;
-  /** This section is the one being dragged. */
-  dragging: boolean;
   canMoveUp: boolean;
   canMoveDown: boolean;
   onToggle: () => void;
@@ -88,11 +84,7 @@ export function ProjectSectionHeader(p: Props) {
         <div
           data-section-header={p.section.id}
           data-collapsed={p.collapsed}
-          className={cn(
-            "group/section relative mb-1 flex h-7 items-center gap-0.5 rounded-md pr-0.5 transition-colors",
-            p.highlight && "bg-accent/10 ring-1 ring-accent/50",
-            p.dragging && "opacity-40",
-          )}
+          className="group/section relative flex h-8 items-center gap-0.5 rounded-t-xl px-0.5"
         >
           {p.renaming ? (
             <SectionNameInput initial={p.section.name} onDone={p.onRenamed} />
@@ -105,13 +97,18 @@ export function ProjectSectionHeader(p: Props) {
               onKeyDown={onKeyDown}
               aria-expanded={!p.collapsed}
               title={p.section.name}
-              className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel outline-none transition-colors hover:text-muted focus-visible:ring-2 focus-visible:ring-accent/40"
+              className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 text-[11.5px] font-bold uppercase tracking-[0.08em] text-muted outline-none transition-colors hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/40"
             >
               <ChevronRight
-                className={cn("h-3 w-3 shrink-0 transition-transform duration-150", !p.collapsed && "rotate-90")}
+                className={cn(
+                  "h-3 w-3 shrink-0 text-steel transition-transform duration-150",
+                  !p.collapsed && "rotate-90",
+                )}
               />
               <span className="truncate">{p.section.name}</span>
-              <span className="shrink-0 font-medium tabular">{p.count}</span>
+              <span className="shrink-0 rounded-full bg-raised px-1.5 text-[10.5px] font-semibold leading-4 tracking-normal text-muted tabular">
+                {p.count}
+              </span>
               {/* Folded, it still says when something inside needs you. */}
               {p.collapsed && p.needs > 0 && (
                 <span

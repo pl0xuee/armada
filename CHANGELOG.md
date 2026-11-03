@@ -5,6 +5,11 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## Unreleased
+
+### Changed
+- **The project list is easier to read.** Each section you make is now a box with a clearer heading, so you can see which projects belong to it. A line runs down from each project folder past its agents, and it lights up next to the agent you have open. When you drag a project onto a section, the whole box lights up.
+
 ## v0.4.4 — 2026-11-03
 
 ### New

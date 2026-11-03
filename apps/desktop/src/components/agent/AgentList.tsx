@@ -339,7 +339,11 @@ export function AgentList({
     const together = p.agents.length >= 2;
     return (
       // One flat block per project: a quiet header, then its agents. No boxes, so the list reads as one column.
-      <div key={p.path} data-project-block={p.path} className={cn("mb-3", draggingProject === p.path && "opacity-40")}>
+      <div
+        key={p.path}
+        data-project-block={p.path}
+        className={cn(section ? "mb-2 last:mb-0" : "mb-3", draggingProject === p.path && "opacity-40")}
+      >
         <ContextMenu>
           <ContextMenuTrigger asChild>
             <div className="group/project @container/proj relative flex h-8 items-center rounded-lg pr-1 transition-colors hover:bg-raised/60">
@@ -449,7 +453,8 @@ export function AgentList({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.12 }}
-              className="space-y-0.5"
+              // A guide line from under the folder's arrow ties its agents to it.
+              className="ml-[9px] space-y-0.5 border-l border-line pl-1"
             >
               {p.agents.map((a) => (
                 <Fragment key={a.id}>
@@ -642,7 +647,16 @@ export function AgentList({
               const folded = !!collapsed[key] && !searching;
               const at = layout.sections.findIndex((x) => x.id === section.id);
               return (
-                <div key={section.id} data-section-block={section.id} className="pt-1">
+                // A section is a box, so what is in it reads apart from the projects around it.
+                <div
+                  key={section.id}
+                  data-section-block={section.id}
+                  className={cn(
+                    "mb-3 rounded-xl border border-line bg-card/70 transition-colors",
+                    drag?.target?.highlight === `header:${section.id}` && "border-accent/60 bg-accent/[0.06]",
+                    draggingSection === section.id && "opacity-40",
+                  )}
+                >
                   <ProjectSectionHeader
                     section={section}
                     count={list.length}
@@ -650,8 +664,6 @@ export function AgentList({
                     working={list.reduce((n, p) => n + p.working, 0)}
                     collapsed={folded}
                     renaming={renaming === section.id}
-                    highlight={drag?.target?.highlight === `header:${section.id}`}
-                    dragging={draggingSection === section.id}
                     canMoveUp={at > 0}
                     canMoveDown={at < layout.sections.length - 1}
                     onToggle={() => toggle(key)}
@@ -662,10 +674,10 @@ export function AgentList({
                     onDelete={() => deleteSection(section.id)}
                   />
                   {!folded && (
-                    <div data-drop-group={section.id} className={cn(draggingSection === section.id && "opacity-40")}>
+                    <div data-drop-group={section.id} className="border-t border-line p-1">
                       {list.map((p) => renderProject(p, section.id))}
                       {list.length === 0 && (
-                        <DropZone highlight={drag?.target?.highlight === `group:${section.id}`}>
+                        <DropZone highlight={drag?.target?.highlight === `group:${section.id}`} className="mb-0">
                           Drag projects here
                         </DropZone>
                       )}
@@ -754,12 +766,21 @@ export function AgentList({
 }
 
 /** A place to drop a project where a group has none (an empty section, or no section while all are in one). */
-function DropZone({ highlight, children }: { highlight: boolean; children: React.ReactNode }) {
+function DropZone({
+  highlight,
+  className,
+  children,
+}: {
+  highlight: boolean;
+  className?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div
       className={cn(
         "mb-3 flex h-9 items-center justify-center rounded-lg border border-dashed border-line px-2 text-center text-[11.5px] text-steel transition-colors",
         highlight && "border-accent/60 bg-accent/5 text-accent",
+        className,
       )}
     >
       {children}
@@ -982,7 +1003,7 @@ const AgentRow = memo(function AgentRow({
       };
 
   return (
-    <li className={nested ? "relative ml-[22px] border-l border-line pl-1.5" : undefined}>
+    <li className={nested ? "relative ml-[22px] border-l border-line pl-1" : undefined}>
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
@@ -1000,7 +1021,7 @@ const AgentRow = memo(function AgentRow({
               <m.span
                 layoutId="agent-row-active"
                 transition={{ type: "spring", stiffness: 600, damping: 42 }}
-                className="absolute -left-1 top-2.5 h-[22px] w-[3px] rounded-r-full bg-accent"
+                className="absolute -left-1.5 top-2.5 h-[22px] w-[3px] rounded-full bg-accent"
               />
             )}
             <div
