@@ -199,6 +199,11 @@ pub type ToolFuture = Pin<Box<dyn Future<Output = ToolOutcome> + Send>>;
 
 pub trait ToolHost: Send + Sync {
     fn call(&self, name: String, arguments: String) -> ToolFuture;
+    /// A silent note about what the agents did in the background (fixed words, agent
+    /// numbers only), when one is due. Polled by the session; no reply is asked for.
+    fn news_note(&self) -> Option<String> {
+        None
+    }
 }
 
 #[derive(Debug)]
@@ -857,6 +862,9 @@ async fn connection_inner(
                     emit_usage(ui, started, usage);
                 }
                 let now = Instant::now();
+                if state != VaState::Connecting && pause_at.is_none() {
+                    if let Some(note) = host.news_note() { send!(p::system_note(&note)); }
+                }
                 if notice_at.is_some_and(|t| now.duration_since(t) >= NOTICE_FOR) {
                     notice_at = None;
                     ui.emit(VaEvent::Notice { message: None });

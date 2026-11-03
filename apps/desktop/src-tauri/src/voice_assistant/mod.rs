@@ -8,6 +8,7 @@
 mod audio;
 mod cost;
 mod host;
+mod news;
 mod protocol;
 mod screen;
 mod session;
@@ -37,9 +38,23 @@ const MAX_REPORTED_AGENTS: usize = 200;
 pub struct VoiceAssistant {
     control: Mutex<Option<UnboundedSender<Control>>>,
     screen: Arc<Mutex<ScreenContext>>,
+    /// What the agents did while a session is live (see `news.rs`).
+    news: Arc<Mutex<news::Feed>>,
 }
 
 impl VoiceAssistant {
+    /// Core says an agent finished, needs the user or failed: remember it for the live
+    /// session. Only the kind and the id are kept, never what the agent wrote.
+    pub fn on_attention(&self, agent_id: &str, reason: kvistcode_core::AttentionReason) {
+        if self.active() {
+            self.news.lock().record(
+                agent_id,
+                news::Kind::from_reason(reason),
+                std::time::Instant::now(),
+            );
+        }
+    }
+
     /// Takes the single session slot; check and set happen under one lock.
     fn claim(&self, tx: &UnboundedSender<Control>) -> Result<(), String> {
         let mut slot = self.control.lock();
@@ -216,9 +231,11 @@ pub async fn va_start(
     va.claim(&ctl_tx)?;
     // A new session starts from what the window shows now, not from where the last one ended.
     *va.screen.lock() = ScreenContext::default();
+    va.news.lock().clear();
 
     let core = (*core).clone();
     let screen = va.screen.clone();
+    let news = va.news.clone();
     let sink: Arc<dyn VaSink> = Arc::new(TauriSink {
         app: app.clone(),
         ledger: Mutex::new(cost::SessionLedger::new(core.data_dir())),
@@ -234,6 +251,7 @@ pub async fn va_start(
         core,
         sink.clone(),
         screen,
+        news,
     ));
     tauri::async_runtime::spawn(async move {
         let devices = Box::new(audio::SystemAudio { input_device });

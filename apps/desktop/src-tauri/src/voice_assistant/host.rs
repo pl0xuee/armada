@@ -12,6 +12,7 @@ use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tauri::Manager;
 
+use super::news::{self, Feed, Kind};
 use super::session::{
     ActionLog, PendingAction, ToolFuture, ToolHost, ToolOutcome, VaEvent, VaSink,
 };
@@ -37,6 +38,8 @@ pub struct KvistcodeTools {
     recent: Arc<Mutex<Vec<(String, Instant, String)>>>,
     /// What "agent 2" and "project 3" mean: the last lists given to the model.
     numbers: Arc<Mutex<Numbering>>,
+    /// What the agents did in the background (shared with the app, which feeds it).
+    news: Arc<Mutex<Feed>>,
 }
 
 impl KvistcodeTools {
@@ -45,6 +48,7 @@ impl KvistcodeTools {
         core: Core,
         sink: Arc<dyn VaSink>,
         screen: Arc<Mutex<super::ScreenContext>>,
+        news: Arc<Mutex<Feed>>,
     ) -> Self {
         KvistcodeTools {
             app,
@@ -53,6 +57,7 @@ impl KvistcodeTools {
             screen,
             recent: Arc::default(),
             numbers: Arc::default(),
+            news,
         }
     }
 }
@@ -66,6 +71,23 @@ impl ToolHost for KvistcodeTools {
                 Ok(call) => host.run(&name, call).await,
             }
         })
+    }
+
+    fn news_note(&self) -> Option<String> {
+        let focus = self.screen_agent();
+        let due = self.news.lock().due(Instant::now(), focus.as_deref())?;
+        let ordered = self.ordered_agents().ok()?;
+        // Numbers the model already has stay as they are; a list that is stale gets renewed
+        // (nothing it remembers is valid then). An agent it has no number for is not guessed.
+        if !self.numbers.lock().agents.is_fresh(Instant::now()) {
+            self.number_agents(&ordered);
+        }
+        let items: Vec<_> = self
+            .news_rows(due, &ordered)
+            .into_iter()
+            .map(|(a, kind)| (self.agent_number(&a.id), kind))
+            .collect();
+        (!items.is_empty()).then(|| news::note_text(&items))
     }
 }
 
@@ -285,6 +307,7 @@ impl KvistcodeTools {
                     .await
             }
             ToolCall::GetScreen => self.get_screen().await,
+            ToolCall::CatchUp => self.catch_up(),
             ToolCall::RequestApprovalReview { agent } => self.request_approval(&agent),
             ToolCall::ListProjects => self.list_projects().await,
             ToolCall::GetUsage => self.get_usage(),
@@ -852,6 +875,67 @@ impl KvistcodeTools {
             summary,
             agent.map(|a| a.id),
         )
+    }
+
+    /// The agents of `events` that still exist, with a hit rate limit told apart from other
+    /// errors, most urgent first.
+    fn news_rows(&self, events: Vec<(String, Kind)>, ordered: &[Agent]) -> Vec<(Agent, Kind)> {
+        let mut rows: Vec<(Agent, Kind)> = events
+            .into_iter()
+            .filter_map(|(id, kind)| {
+                let a = ordered.iter().find(|a| a.id == id)?;
+                let kind = match kind {
+                    Kind::Errored if a.rate_limited => Kind::RateLimited,
+                    k => k,
+                };
+                Some((a.clone(), kind))
+            })
+            .collect();
+        rows.sort_by_key(|(_, k)| *k);
+        rows
+    }
+
+    /// What happened since the session began or the last call, most urgent first.
+    fn catch_up(&self) -> ToolOutcome {
+        let events = self.news.lock().catch_up();
+        let ordered = match self.ordered_agents() {
+            Ok(a) => a,
+            Err(e) => return fail(&e),
+        };
+        self.number_agents(&ordered);
+        let now = kvistcode_core::now_ms();
+        // Something that asked for the user and has been answered since is not news.
+        let waiting = |a: &Agent| {
+            a.pending_permissions > 0
+                || a.status == AgentStatus::NeedsPermission
+                || a.budget_hold.is_some()
+        };
+        let rows: Vec<_> = self
+            .news_rows(events, &ordered)
+            .into_iter()
+            .filter(|(a, k)| *k != Kind::NeedsYou || waiting(a))
+            .collect();
+        let shown: Vec<Value> = rows
+            .iter()
+            .take(news::MAX_CATCH_UP)
+            .map(|(a, kind)| {
+                json!({
+                    "number": self.agent_number(&a.id),
+                    "what": kind.label(),
+                    "title": a.title,
+                    "project": basename(&a.project_path),
+                    "status": a.status.as_str(),
+                    "needsYou": needs_you(a),
+                    "lastActivity": ago(now, a.last_activity_at),
+                })
+            })
+            .collect();
+        ok(json!({
+            "count": rows.len(),
+            "omitted": rows.len().saturating_sub(shown.len()),
+            "agents": shown,
+            "note": if rows.is_empty() { "Nothing new since the session began or the last catch_up. list_agents shows everything." } else { "Most urgent first." },
+        }))
     }
 
     async fn get_screen(&self) -> ToolOutcome {

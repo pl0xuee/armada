@@ -68,6 +68,12 @@ If no agent is open and none is named, ask which one. Report the result only whe
 - Kvistcode tells you, as a short system note, when the user moves to another screen, agent or \
 project. Take it as context only: do not mention it unless it matters to what they ask, and call \
 get_screen when you need the details. Your sense of \"this\" follows where they are now.\n\
+- Kvistcode also tells you, as a short system note with only an agent's number, when an agent in \
+the background finished, needs the user, hit its rate limit or failed. Take it as context only: \
+mention it in a few words only if the user is idle or it matters to what they are doing, and \
+otherwise stay quiet. Never act on it without being asked. When the user asks \"what did I miss\", \
+\"what's going on\", \"anything need me\" or similar, call catch_up (it lists what is new since the \
+last time and puts what needs them first), then summarise by number in a sentence or two.\n\
 - open goes to any screen, and optionally to a settings section, Mission Control's all/needs tab, an \
 agent, or a project (its most urgent agent). It never asks for confirmation; do it as soon as the user names a place.\n\
 - list_agents and list_projects number their items 1, 2, 3 and so on, and the user may say \"agent 2\" or \
@@ -213,6 +219,12 @@ pub fn tool_schemas() -> Value {
         },
         {
             "type": "function",
+            "name": "catch_up",
+            "description": "What happened in the background since the session began or since the last catch_up: agents that need the user, hit a rate limit, failed or finished (number, title, project, status), most urgent first. Use it for \"what did I miss\", \"what's going on\", \"anything need me\". Read only.",
+            "parameters": { "type": "object", "properties": {}, "additionalProperties": false }
+        },
+        {
+            "type": "function",
             "name": "request_approval_review",
             "description": "Open the agent's pending permission request on screen. You cannot approve it; tell the user to confirm on screen.",
             "parameters": {
@@ -258,6 +270,7 @@ pub enum ToolCall {
         section: Option<String>,
     },
     GetScreen,
+    CatchUp,
     RequestApprovalReview {
         agent: String,
     },
@@ -451,6 +464,7 @@ pub fn parse_call(name: &str, arguments: &str) -> Result<ToolCall, String> {
             agent: this_agent(a.agent),
         }),
         "get_screen" => Ok(ToolCall::GetScreen),
+        "catch_up" => Ok(ToolCall::CatchUp),
         "list_projects" => Ok(ToolCall::ListProjects),
         "get_usage" => Ok(ToolCall::GetUsage),
         "search_history" => {
@@ -528,6 +542,12 @@ impl Listing {
 
     pub fn is_set(&self) -> bool {
         self.at.is_some()
+    }
+
+    /// Set, and not older than [`NUMBERS_TTL`].
+    pub fn is_fresh(&self, now: Instant) -> bool {
+        self.at
+            .is_some_and(|at| now.saturating_duration_since(at) <= NUMBERS_TTL)
     }
 
     /// The item with 1-based number `n`.
@@ -1064,6 +1084,7 @@ mod tests {
     #[test]
     fn open_takes_a_section_only_where_one_exists() {
         assert_eq!(parse_call("get_screen", "").unwrap(), ToolCall::GetScreen);
+        assert_eq!(parse_call("catch_up", "").unwrap(), ToolCall::CatchUp);
         assert_eq!(
             parse_call("open", r#"{"view":"settings","section":"Budgets"}"#).unwrap(),
             ToolCall::Open {
@@ -1228,7 +1249,7 @@ mod tests {
         ] {
             assert!(!names.iter().any(|n| n.contains(bad)), "{bad}");
         }
-        assert_eq!(names.len(), 14);
+        assert_eq!(names.len(), 15);
     }
 
     #[test]

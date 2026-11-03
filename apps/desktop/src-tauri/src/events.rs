@@ -182,6 +182,9 @@ fn dispatch(app: &AppHandle, event: KvistcodeEvent) {
                     body,
                     request_id,
                 } => {
+                    if let Some(va) = app.try_state::<crate::voice_assistant::VoiceAssistant>() {
+                        va.on_attention(&agent_id, reason);
+                    }
                     if let Some(att) = app.try_state::<Arc<Attention>>() {
                         let att = att.inner().clone();
                         // Settings reads, notification + HTTP calls: keep them off the dispatcher.

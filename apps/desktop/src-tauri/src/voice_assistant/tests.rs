@@ -116,7 +116,7 @@ async fn full_tool_call_roundtrip_and_barge_in() {
 
         let update = next_json(&mut ws).await;
         assert_eq!(update["type"], "session.update");
-        assert_eq!(update["session"]["tools"].as_array().unwrap().len(), 14);
+        assert_eq!(update["session"]["tools"].as_array().unwrap().len(), 15);
         seen.push(update);
         send(&mut ws, json!({"type":"session.created"})).await;
 
@@ -1193,4 +1193,95 @@ fn the_default_language_is_added_to_the_assistants_instructions_only_when_set() 
     let note = kvistcode_core::guidance::language_note("Spanish");
     let with = super::with_language(base.clone(), &note);
     assert!(with.starts_with(&base) && with.contains("in Spanish"));
+}
+
+/// A host that has one piece of background news to report, once.
+struct NewsHost(Mutex<Option<String>>);
+
+impl ToolHost for NewsHost {
+    fn call(&self, _name: String, _arguments: String) -> ToolFuture {
+        Box::pin(async { ToolOutcome::error("not used") })
+    }
+
+    fn news_note(&self) -> Option<String> {
+        self.0.lock().take()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn background_news_reaches_the_model_silently_and_once() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let cfg = config(format!("ws://{}/", listener.local_addr().unwrap()));
+    let server = tokio::spawn(async move {
+        let (s, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+        assert_eq!(next_json(&mut ws).await["type"], "session.update");
+        send(&mut ws, json!({"type":"session.created"})).await;
+        let note = next_json(&mut ws).await;
+        assert_eq!(note["type"], "conversation.item.create");
+        assert_eq!(note["item"]["role"], "system");
+        let text = note["item"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("agent 3 finished"), "{text}");
+        // Information only: no reply is requested, and the note is not repeated.
+        let more = tokio::time::timeout(Duration::from_millis(500), ws.next()).await;
+        assert!(
+            more.is_err(),
+            "the model was asked to answer or got a second note"
+        );
+        // Stay connected until the session is stopped.
+        while let Some(Ok(m)) = ws.next().await {
+            if matches!(m, Message::Close(_)) {
+                break;
+            }
+        }
+    });
+    let sink = Arc::new(Events::default());
+    let (ctl_tx, ctl_rx) = unbounded_channel();
+    let stopper = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        let _ = ctl_tx.send(Control::Stop);
+    });
+    let host = NewsHost(Mutex::new(Some(
+        "Kvistcode: agent 3 finished. Information only.".into(),
+    )));
+    let end = tokio::time::timeout(
+        Duration::from_secs(20),
+        run(
+            cfg,
+            sink,
+            Arc::new(host),
+            Box::new(NullAudio::new()),
+            ctl_rx,
+        ),
+    )
+    .await
+    .expect("session hung");
+    assert_eq!(end.reason, EndReason::UserStopped);
+    stopper.await.unwrap();
+    server.await.unwrap();
+}
+
+#[test]
+fn catch_up_is_a_read_only_tool_the_model_is_told_to_use() {
+    let schemas = tools::tool_schemas();
+    let t = schemas
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "catch_up")
+        .expect("catch_up tool");
+    // It takes no arguments and is not one of the tools that change anything.
+    assert!(t["parameters"]["properties"]
+        .as_object()
+        .unwrap()
+        .is_empty());
+    assert!(t["description"].as_str().unwrap().contains("Read only"));
+    let instructions = tools::instructions();
+    for phrase in ["catch_up", "what did I miss", "anything need me"] {
+        assert!(instructions.contains(phrase), "{phrase}");
+    }
+    // The background notes are information only, and the assistant still can't act on them.
+    assert!(instructions.contains("only an agent's number"));
+    assert!(instructions.contains("Never act on it without being asked"));
+    assert!(instructions.contains("cannot approve or deny"));
 }
