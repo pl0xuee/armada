@@ -2,10 +2,10 @@ import { Archive, Columns3, MessageSquare, Plus, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AgentGrid } from "@/components/compare/AgentGrid";
-import { EmptyState } from "@/components/EmptyState";
 import { HeaderAction, PageHeader } from "@/components/PageHeader";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { Button } from "@/components/ui/button";
+import { EmptyPane } from "@/components/ui/emptyPane";
 import { api } from "@/lib/api";
 import { useNow } from "@/hooks/useNow";
 import { relativeTimeLong } from "@/lib/format";
@@ -82,18 +82,14 @@ export function CompareView() {
     return (
       <div className="@container flex h-full flex-col">
         <PageHeader icon={<Columns3 />} title="Compare" subtitle="One prompt, several agents, side by side" />
-        <div className="flex flex-1 items-center justify-center overflow-y-auto">
-          <EmptyState
-            icon={<Columns3 />}
-            title="Run a bake-off"
-            description="Send the same prompt to Claude, Codex and Grok at once (or two accounts of the same provider), then read the answers side by side and keep the best one."
-            action={
-              <Button variant="primary" onClick={() => openNewAgent({ compare: true })}>
-                <Sparkles /> Start a comparison
-              </Button>
-            }
-          />
-        </div>
+        <EmptyPane
+          icon={<Columns3 />}
+          title="No comparisons yet"
+          description="Send one prompt to several agents at once, read the answers side by side and keep the best."
+          actionIcon={<Plus />}
+          actionLabel="New comparison"
+          onAction={() => openNewAgent({ compare: true })}
+        />
       </div>
     );
   }

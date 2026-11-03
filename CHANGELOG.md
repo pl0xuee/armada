@@ -16,6 +16,7 @@ docs/RELEASING.md).
 - **Long lists of changed files stay short.** The card at the end of a turn shows a few files and “+N more”, so a big change no longer fills the conversation. Click it to see them all; Review diff still has everything.
 - **Agent titles fit in side-by-side tiles.** When several agents share the screen, each tile's title gets the room first; preview, side panel and helper buttons move into the tile's “…” menu, and a rate limit shows as a small icon that names the time it resumes.
 - **Smoother with many agents.** Compare columns now redraw only for their own agent's output, and Kvistcode forgets the leftover state of deleted agents (previews, approvals, pull-request status and more) instead of keeping it until a restart.
+- **Clear first steps on empty pages.** Every page with nothing in it yet says in one line what it is for and gives one button to start: New agent, New schedule, New comparison or Add account. On a first run the home screen names what is still missing (an account or a folder) with a button for it, instead of a Start button that does nothing, and setup warns when no account is signed in.
 - **A calmer title bar.** The sub-agents chip no longer wraps onto two lines, and the account strip shows three faces plus a count.
 
 ### Fixed
@@ -25,7 +26,7 @@ docs/RELEASING.md).
 - **“Workflow finished” alerts survive a failed last check.** If the final look at the run fails, Kvistcode tries again a few times before giving up.
 - **Moved projects on Windows** are matched whatever the letter case or slash direction.
 - **The phone stops its once-a-second timer while the page is hidden**, and unpairing also forgets the last project and groups it remembered.
-- **The agent list reads properly to screen readers.** A row's Resume button is no longer inside the row's own button.
+- **The agent list and Mission Control read properly to screen readers.** Buttons on a row or tile are no longer inside the row's own button.
 - **Smaller fixes:** cancelling a model download can't raise an unhandled error, a slow older pull-request check can't overwrite a newer one in the merge dialog, and a failed schedule switch only puts the switch back instead of an old copy of the schedule.
 
 ## v0.4.2 — 2026-11-02

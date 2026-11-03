@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Radar } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { NeedsYouDetail } from "@/components/mission/NeedsYouDetail";
@@ -14,6 +14,7 @@ import {
   type TriageEntry,
 } from "@/components/triage/useTriage";
 import { Button } from "@/components/ui/button";
+import { EmptyPane } from "@/components/ui/emptyPane";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip } from "@/components/ui/tooltip";
 import { RecoveryActions, needsRecovery } from "@/components/mission/RecoveryActions";
@@ -29,7 +30,7 @@ import { collectPending, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 
 /** Mission Control's "Needs you" tab: the agents waiting on you, most urgent first, with the answer inline. */
-export function NeedsYouPane() {
+export function NeedsYouPane({ hasAgents }: { hasAgents: boolean }) {
   const queue = useTriageQueue();
   const selectedId = useTriageStore((s) => s.selectedId);
   const select = useTriageStore((s) => s.select);
@@ -180,7 +181,7 @@ export function NeedsYouPane() {
   return (
     <div className="@container flex h-full flex-col">
       {!current ? (
-        <AllClear />
+        <AllClear hasAgents={hasAgents} />
       ) : (
         <div className="flex min-h-0 flex-1">
           <nav
@@ -309,7 +310,21 @@ const QueueRow = memo(function QueueRow({
   );
 });
 
-function AllClear() {
+function AllClear({ hasAgents }: { hasAgents: boolean }) {
+  const openNewAgent = useUi((s) => s.openNewAgent);
+  // No agent yet is not "all clear": it gets the same page as every other view with nothing in it.
+  if (!hasAgents) {
+    return (
+      <EmptyPane
+        icon={<Radar />}
+        title="No agents yet"
+        description="When an agent needs an answer or an approval, it shows up here."
+        actionIcon={<Plus />}
+        actionLabel="New agent"
+        onAction={() => openNewAgent()}
+      />
+    );
+  }
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 py-12 text-center">
       <div className="relative mb-6 h-28 w-28" aria-hidden>
@@ -327,7 +342,7 @@ function AllClear() {
         No approvals, errors or unread results. Agents that need you will line up here, most urgent first.
       </p>
       <div className="mt-5 flex flex-wrap justify-center gap-2">
-        <Button variant="secondary" onClick={() => useUi.getState().openNewAgent()}>
+        <Button variant="secondary" onClick={() => openNewAgent()}>
           <Plus /> New agent
         </Button>
         <Button variant="ghost" onClick={() => useUi.getState().openMission("all")}>

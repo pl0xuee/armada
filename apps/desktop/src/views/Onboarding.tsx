@@ -155,7 +155,7 @@ export function Onboarding() {
             {id === "providers" && <ProvidersStep />}
             {id === "accounts" && <AccountsStep />}
             {id === "prefs" && <PrefsStep />}
-            {id === "done" && <DoneStep onFinish={finish} finishing={finishing} />}
+            {id === "done" && <DoneStep onFinish={finish} finishing={finishing} onAddAccount={() => go(2)} />}
           </div>
         </div>
       </div>
@@ -247,7 +247,8 @@ function Welcome({ onNext }: { onNext: () => void }) {
 
 function ProvidersStep() {
   const providers = useApp((s) => s.providers);
-  const [detecting, setDetecting] = useState(false);
+  // Scanning starts as soon as the step opens, so there is no "nothing found" flash before it begins.
+  const [detecting, setDetecting] = useState(true);
   const ran = useRef(false);
 
   const detect = async () => {
@@ -291,9 +292,19 @@ function ProvidersStep() {
       </div>
       {!detecting && <InstallAllBanner providers={providers} className="mb-3" />}
       <div className="space-y-2.5">
-        {providers.length === 0
-          ? [0, 1, 2].map((i) => <div key={i} className="skeleton h-[86px] rounded-xl" />)
-          : providers.map((p) => <ProviderCard key={p.provider} info={p} compact />)}
+        {providers.length > 0 ? (
+          providers.map((p) => <ProviderCard key={p.provider} info={p} compact />)
+        ) : detecting ? (
+          [0, 1, 2].map((i) => <div key={i} className="skeleton h-[86px] rounded-xl" />)
+        ) : (
+          <div className="flex flex-col items-center rounded-xl border border-line bg-card px-4 py-8 text-center edge">
+            <p className="text-[13.5px] font-medium">No tools found yet</p>
+            <p className="mt-1 text-[12.5px] text-muted">Kvistcode couldn't look for Claude, Codex or Grok.</p>
+            <Button className="mt-4" variant="primary" onClick={detect}>
+              <RefreshCw /> Try again
+            </Button>
+          </div>
+        )}
       </div>
     </>
   );
@@ -308,23 +319,35 @@ function AccountsStep() {
     <>
       <StepHeader
         title="Sign in once, switch in one click"
-        description="Kvistcode found the logins your CLIs already use. Add more accounts (a second Claude Max, a work ChatGPT) and run agents on all of them at once."
+        description={
+          accounts.length === 0
+            ? "Add the login your agents will use: Claude, ChatGPT (Codex) or Grok."
+            : "Kvistcode found the logins your CLIs already use. Add more accounts (a second Claude Max, a work ChatGPT) and run agents on all of them at once."
+        }
       />
       <div className="overflow-hidden rounded-xl border border-line bg-card edge">
-        <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-          <span className="text-[12.5px] text-muted">
-            <span className="text-fg tabular">{signedIn}</span> of {accounts.length} signed in
-          </span>
-          <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
-            <UserPlus /> Add account
-          </Button>
-        </div>
+        {accounts.length > 0 && (
+          <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+            <span className="text-[12.5px] text-muted">
+              <span className="text-fg tabular">{signedIn}</span> of {accounts.length} signed in
+            </span>
+            <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
+              <UserPlus /> Add account
+            </Button>
+          </div>
+        )}
         <div className="max-h-[300px] divide-y divide-line overflow-y-auto">
           {accounts.map((a) => (
             <AccountRow key={a.id} account={a} compact />
           ))}
           {accounts.length === 0 && (
-            <div className="px-4 py-8 text-center text-[13px] text-muted">No accounts yet. Add one to get started.</div>
+            <div className="flex flex-col items-center px-4 py-8 text-center">
+              <p className="text-[13.5px] font-medium">No accounts yet</p>
+              <p className="mt-1 text-[12.5px] text-muted">Nothing is signed in on this computer so far.</p>
+              <Button variant="primary" className="mt-4" onClick={() => setAdding(true)}>
+                <UserPlus /> Add account
+              </Button>
+            </div>
           )}
         </div>
       </div>
@@ -456,7 +479,15 @@ function PrefCard({
   );
 }
 
-function DoneStep({ onFinish, finishing }: { onFinish: () => void; finishing: boolean }) {
+function DoneStep({
+  onFinish,
+  finishing,
+  onAddAccount,
+}: {
+  onFinish: () => void;
+  finishing: boolean;
+  onAddAccount: () => void;
+}) {
   const providers = useApp((s) => s.providers);
   const accounts = useApp((s) => s.accounts);
   const ready = providers.filter(providerReady).length;
@@ -487,6 +518,16 @@ function DoneStep({ onFinish, finishing }: { onFinish: () => void; finishing: bo
         <Stat value={`${ready}/${providers.length}`} label="providers ready" />
         <Stat value={`${signedIn}/${accounts.length}`} label="accounts signed in" />
       </div>
+      {signedIn === 0 && (
+        <div className="mt-4 flex w-full max-w-[420px] items-center gap-3 rounded-xl border border-warn/30 bg-warn/[0.06] px-4 py-3 text-left">
+          <p className="min-w-0 flex-1 text-[12.5px] leading-snug text-warn">
+            No account is signed in yet. Claude, Codex and Grok agents need one to start.
+          </p>
+          <Button size="sm" variant="secondary" onClick={onAddAccount}>
+            Add account
+          </Button>
+        </div>
+      )}
       <ProjectsGlimpse />
       <Button
         variant="primary"
@@ -524,7 +565,17 @@ function ProjectsGlimpse() {
       cancelled = true;
     };
   }, []);
-  if (failed || (found && found.length === 0)) return null;
+  if (failed) return null;
+  if (found && found.length === 0) {
+    return (
+      <div className="mt-4 flex w-full max-w-[420px] items-start gap-2 rounded-xl border border-line bg-card px-4 py-3 text-left text-[12.5px] edge">
+        <FolderGit2 className="mt-px h-4 w-4 shrink-0 text-steel" />
+        <span className="text-muted">
+          No projects found on this computer yet. You can pick any folder when you start an agent.
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="mt-4 w-full max-w-[420px] rounded-xl border border-line bg-card px-4 py-3 text-left edge">
       <div className="flex items-center gap-2 text-[12.5px]">

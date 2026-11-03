@@ -1,10 +1,22 @@
-import { Bot, ChartColumn, ChevronRight, Coins, Cpu, FolderOpen, Gauge, Layers, Timer, Trophy } from "lucide-react";
+import {
+  Bot,
+  ChartColumn,
+  ChevronRight,
+  Coins,
+  Cpu,
+  FolderOpen,
+  Gauge,
+  Layers,
+  Plus,
+  Timer,
+  Trophy,
+} from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { AccountAvatar } from "@/components/AccountAvatar";
-import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { StatusDot } from "@/components/StatusDot";
+import { EmptyPane } from "@/components/ui/emptyPane";
 import { Segmented } from "@/components/ui/segmented";
 import { BarList, ShareBar, type BarDatum } from "@/components/usage/BarList";
 import { BudgetBar } from "@/components/usage/BudgetBar";
@@ -77,6 +89,7 @@ export function UsageView() {
   const customAgents = useApp((s) => s.settings?.customAgents);
   const openAgent = useUi((s) => s.openAgent);
   const openSettings = useUi((s) => s.openSettings);
+  const openNewAgent = useUi((s) => s.openNewAgent);
   const dailyCap = useApp((s) => s.settings?.dailyBudgetUsd);
   const dailyTokenCap = useApp((s) => s.settings?.dailyBudgetTokens);
   const [metric, setMetric] = useState<Metric>("cost");
@@ -191,13 +204,14 @@ export function UsageView() {
           title="Usage"
           subtitle="Spend and tokens across providers, accounts and projects"
         />
-        <div className="flex flex-1 items-center justify-center overflow-y-auto">
-          <EmptyState
-            icon={<Coins />}
-            title="No usage yet"
-            description="Once your agents start working, their cost and token usage roll up here per provider, account and project."
-          />
-        </div>
+        <EmptyPane
+          icon={<Coins />}
+          title="No usage yet"
+          description="Once an agent has run, you'll see what it cost here, by account and project."
+          actionIcon={<Plus />}
+          actionLabel="New agent"
+          onAction={() => openNewAgent()}
+        />
       </div>
     );
   }

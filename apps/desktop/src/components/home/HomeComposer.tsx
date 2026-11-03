@@ -80,11 +80,16 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
   };
 
   const account = accounts.find((a) => a.id === target.accountId);
-  const missing = !target.folder.trim()
+  const needsFolder = !target.folder.trim();
+  const needsAccount = target.provider !== "custom" && !account;
+  const missing = needsFolder
     ? "Pick a project folder"
-    : target.provider !== "custom" && !account
+    : needsAccount
       ? `Add a ${PROVIDERS[target.provider].short} account first`
       : null;
+  // Before the first agent: say what is still needed, with a button, instead of a dead Start button.
+  const firstRun = useApp(hasNoAgents);
+  const [folderOpen, setFolderOpen] = useState(false);
   // Several agents, or the failed ones of a batch being retried: each in its own worktree.
   const parallel = needsWorktree(count) || batchRef.current !== null;
   const issues = usePreflight({
@@ -163,7 +168,11 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
             void start();
           }
         }}
-        placeholder="What should an agent do?"
+        placeholder={
+          firstRun && !compact
+            ? "What should an agent do? For example: find and fix the failing tests"
+            : "What should an agent do?"
+        }
         className={cn(
           "block w-full resize-none bg-transparent px-4 pt-3.5 leading-relaxed text-fg placeholder:text-steel focus:outline-none",
           compact ? "min-h-[56px] text-[13.5px]" : "min-h-[84px] text-[15px]",
@@ -171,7 +180,12 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
       />
       <div className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2.5 pt-1.5">
         <AgentPicker target={target} onChange={(t) => setTarget((cur) => ({ ...cur, ...t }))} />
-        <FolderPicker folder={target.folder} onChange={(folder) => setTarget((cur) => ({ ...cur, folder }))} />
+        <FolderPicker
+          folder={target.folder}
+          onChange={(folder) => setTarget((cur) => ({ ...cur, folder }))}
+          open={folderOpen}
+          onOpenChange={setFolderOpen}
+        />
         <Tooltip
           content={
             parallel
@@ -222,8 +236,32 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
         </div>
       </div>
       {issues.length > 0 && <PreflightNotes issues={issues} className="border-t border-line px-4 py-2" />}
+      {firstRun && (needsAccount || needsFolder) && (
+        <div className="flex items-center gap-3 border-t border-line px-4 py-2">
+          <p className="min-w-0 flex-1 text-[12px] leading-snug text-muted">
+            {needsAccount
+              ? "Sign in to an account to start your first agent."
+              : "Choose the folder your agent works in."}
+          </p>
+          {needsAccount ? (
+            <Button size="xs" variant="secondary" onClick={() => useUi.getState().setView("accounts")}>
+              Add account
+            </Button>
+          ) : (
+            <Button size="xs" variant="secondary" onClick={() => setFolderOpen(true)}>
+              Choose folder
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+/** True while no agent exists yet (the first run). Stops at the first key, so it stays cheap on a big list. */
+function hasNoAgents(s: { agents: Record<string, unknown> }): boolean {
+  for (const _id in s.agents) return false;
+  return true;
 }
 
 function AgentPicker({
@@ -313,9 +351,18 @@ function AgentPicker({
   );
 }
 
-function FolderPicker({ folder, onChange }: { folder: string; onChange: (f: string) => void }) {
+function FolderPicker({
+  folder,
+  onChange,
+  open,
+  onOpenChange: setOpen,
+}: {
+  folder: string;
+  onChange: (f: string) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const recent = useApp((s) => s.settings?.recentProjects) ?? [];
-  const [open, setOpen] = useState(false);
   const browse = async () => {
     const p = await pickFolder(folder || undefined);
     if (p) {

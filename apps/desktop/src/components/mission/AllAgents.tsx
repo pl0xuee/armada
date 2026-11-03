@@ -136,7 +136,7 @@ export function AllAgentsPane({
         className="my-auto"
         icon={<Radar />}
         title="No agents yet"
-        description="Launch an agent and it shows up here as a live tile: status, last action and approvals at a glance."
+        description="Every agent you start shows up here as a live tile."
         action={
           <Button variant="primary" onClick={() => openNewAgent()}>
             <Plus /> New agent

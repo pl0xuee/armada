@@ -95,7 +95,7 @@ export function MissionControlView() {
         }
         right={
           <>
-            {tab === "all" && (
+            {tab === "all" && agents.length > 0 && (
               <Segmented<Density>
                 size="sm"
                 aria-label="Density"
@@ -143,7 +143,7 @@ export function MissionControlView() {
               { value: "all", label: chip("All agents", agents.length) },
             ]}
           />
-          {tab === "all" && (
+          {tab === "all" && agents.length > 0 && (
             <Segmented<Filter>
               size="sm"
               aria-label="Filter agents"
@@ -161,7 +161,7 @@ export function MissionControlView() {
 
       {tab === "needs" ? (
         <div className="min-h-0 flex-1">
-          <NeedsYouPane />
+          <NeedsYouPane hasAgents={agents.length > 0} />
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 @2xl:px-6 @2xl:py-5">

@@ -2,6 +2,7 @@ import { CircleAlert, Download, Plus, RefreshCw, ShieldCheck, UserPlus, Users } 
 import { useState } from "react";
 import { AccountRow } from "@/components/accounts/AccountRow";
 import { AddAccountDialog } from "@/components/accounts/AddAccountDialog";
+import { EmptyState } from "@/components/EmptyState";
 import { FailoverRow } from "@/components/accounts/FailoverRow";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { providerReady } from "@/components/settings/ProviderCard";
@@ -53,7 +54,7 @@ export function AccountsView() {
         title="Accounts"
         subtitle={
           accounts.length === 0 ? (
-            "No accounts yet · every account runs in its own isolated profile"
+            "Where your agents sign in · every account runs in its own isolated profile"
           ) : (
             <>
               <span className="tabular text-fg">{signedIn}</span> of <span className="tabular">{accounts.length}</span>{" "}
@@ -62,26 +63,44 @@ export function AccountsView() {
           )
         }
         right={
-          <>
-            <HeaderAction
-              variant="ghost"
-              icon={<RefreshCw className={cn(checkingAll && "animate-spin")} />}
-              label="Check all"
-              onClick={() => void checkAll()}
-              disabled={checkingAll || accounts.length === 0}
-            />
-            <HeaderAction
-              variant="primary"
-              icon={<UserPlus />}
-              label="Add account"
-              onClick={() => setAddFor("claude")}
-            />
-          </>
+          // With no account yet the page body has the one Add account button; two would compete.
+          accounts.length > 0 && (
+            <>
+              <HeaderAction
+                variant="ghost"
+                icon={<RefreshCw className={cn(checkingAll && "animate-spin")} />}
+                label="Check all"
+                onClick={() => void checkAll()}
+                disabled={checkingAll}
+              />
+              <HeaderAction
+                variant="primary"
+                icon={<UserPlus />}
+                label="Add account"
+                onClick={() => setAddFor("claude")}
+              />
+            </>
+          )
         }
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[880px] px-4 pb-10 pt-4 @2xl:px-6 @2xl:pb-16 @2xl:pt-6">
-          <FailoverRow />
+          {accounts.length === 0 ? (
+            // The per-provider cards below still show what is installed; this is the one thing to do first.
+            <EmptyState
+              className="pb-8 pt-4"
+              icon={<Users />}
+              title="No accounts yet"
+              description="Add a Claude, ChatGPT or Grok login so your agents can start."
+              action={
+                <Button variant="primary" onClick={() => setAddFor("claude")}>
+                  <UserPlus /> Add account
+                </Button>
+              }
+            />
+          ) : (
+            <FailoverRow />
+          )}
           <div className="space-y-4 @2xl:space-y-5">
             {PROVIDER_ORDER.map((p) => {
               const meta = PROVIDERS[p];

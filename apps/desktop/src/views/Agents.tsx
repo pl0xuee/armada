@@ -477,7 +477,9 @@ function Welcome() {
           <div className="min-w-0">
             <h1 className="text-[20px] font-semibold tracking-[-0.02em]">Every coding agent, one calm place</h1>
             <div className="mt-1 flex min-h-[24px] flex-wrap items-center gap-1.5">
-              {live === 0 && needs === 0 && <span className="text-[12.5px] text-muted">All quiet</span>}
+              {live === 0 && needs === 0 && (
+                <span className="text-[12.5px] text-muted">{list.length === 0 ? "No agents yet" : "All quiet"}</span>
+              )}
               {live > 0 && <PulseChip tone="accent" label={`${live} working`} onClick={() => openMission("all")} />}
               {needs > 0 && (
                 <PulseChip

@@ -191,7 +191,7 @@ export function SchedulesView() {
               className="my-auto py-12"
               icon={<CalendarClock />}
               title="No schedules yet"
-              description="Have an agent audit dependencies every night, triage issues each morning, or draft a weekly changelog. It starts on its own and pings you when it's done."
+              description="A schedule starts an agent for you at set times, like a dependency check every night."
               action={
                 <Button variant="primary" onClick={() => setEditing(blankSchedule())}>
                   <Plus /> New schedule

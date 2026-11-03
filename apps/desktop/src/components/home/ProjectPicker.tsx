@@ -110,7 +110,9 @@ export function ProjectPicker({
                 ))}
               </div>
             ) : found.length === 0 ? (
-              <p className="px-1 py-1 text-[12px] text-steel">No git repositories found in your home folder.</p>
+              <p className="px-1 py-1 text-[12px] text-steel">
+                No git repositories found in your home folder. Use Browse… to pick any folder.
+              </p>
             ) : (
               <>
                 {found.length > 8 && (
