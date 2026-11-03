@@ -69,7 +69,26 @@ const CONTENT: &[&str] = &[
 
 /// Git subcommands whose output is content, not progress.
 const GIT_CONTENT: &[&str] = &[
-    "diff", "show", "blame", "cat-file", "grep", "ls-files", "log",
+    "diff",
+    "show",
+    "blame",
+    "annotate",
+    "cat-file",
+    "grep",
+    "ls-files",
+    "ls-tree",
+    "log",
+    "reflog",
+    "shortlog",
+    "whatchanged",
+    // These print diffs too (`stash show -p`, `format-patch --stdout`), where a blank context
+    // line or a repeated line must stay as it is.
+    "stash",
+    "format-patch",
+    "diff-tree",
+    "diff-index",
+    "diff-files",
+    "range-diff",
 ];
 
 /// Splits a shell command into the program names of its parts (`cd x && cargo test | tail`
@@ -487,6 +506,22 @@ mod tests {
         assert!(!applies_to("py script.py"));
         assert!(!applies_to("cd src && cat $(git ls-files)"));
         assert!(!applies_to(""));
+    }
+
+    #[test]
+    fn git_commands_that_print_diffs_are_left_alone() {
+        for cmd in [
+            "git stash show -p",
+            "git format-patch -1 --stdout",
+            "git -C /repo diff-tree -p HEAD",
+            "git range-diff a..b c..d",
+            "git whatchanged -p",
+            "git ls-tree -r HEAD",
+        ] {
+            assert!(!applies_to(cmd), "{cmd}");
+        }
+        assert!(applies_to("git status"));
+        assert!(applies_to("git push origin main"));
     }
 
     #[test]

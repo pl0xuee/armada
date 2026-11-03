@@ -2710,12 +2710,79 @@ impl Core {
                 self.emit(KvistcodeEvent::ScheduleUpdated { schedule: s });
             }
         }
+        self.move_project_settings(&old, &new);
         if !worktrees.is_empty() {
             if let Err(e) = git::repair_worktrees(Path::new(&new), &worktrees).await {
                 tracing::warn!("git worktree repair: {e:#}");
             }
         }
         Ok(count)
+    }
+
+    /// What is filed under a project's folder follows it to `new`: its spending limit, its own
+    /// MCP servers, its place in the recent list and its switched-off skills. Best effort: the
+    /// agents and schedules have moved already, so a failure here is only logged.
+    fn move_project_settings(&self, old: &str, new: &str) {
+        let is_old = |p: &str| {
+            providers::expand_home(p.trim())
+                .components()
+                .eq(Path::new(old).components())
+        };
+        let filed = |s: &Settings| {
+            s.project_budgets.keys().any(|k| is_old(k))
+                || s.mcp_servers.iter().any(|m| is_old(&m.project_path))
+                || s.recent_projects.iter().any(|p| is_old(p))
+        };
+        if filed(&self.inner.settings.lock()) {
+            let moved = self.update_settings(|s| {
+                let keys: Vec<String> = s
+                    .project_budgets
+                    .keys()
+                    .filter(|k| is_old(k))
+                    .cloned()
+                    .collect();
+                for key in keys {
+                    if let Some(cap) = s.project_budgets.remove(&key) {
+                        // A limit already set on the new folder stays.
+                        s.project_budgets.entry(new.to_string()).or_insert(cap);
+                    }
+                }
+                for server in s.mcp_servers.iter_mut().filter(|m| is_old(&m.project_path)) {
+                    server.project_path = new.to_string();
+                }
+                for recent in s.recent_projects.iter_mut().filter(|p| is_old(p)) {
+                    *recent = new.to_string();
+                }
+                let mut seen = HashSet::new();
+                s.recent_projects.retain(|p| seen.insert(p.clone()));
+            });
+            if let Err(e) = moved {
+                tracing::warn!("moving project settings: {e:#}");
+            }
+        }
+        let (from, to) = (
+            crate::skill_prefs::project_key(Path::new(old)),
+            crate::skill_prefs::project_key(Path::new(new)),
+        );
+        let skills = crate::skill_prefs::update(&self.inner.data_dir, |prefs| {
+            let keys: Vec<String> = prefs
+                .projects
+                .keys()
+                .filter(|k| **k == from || is_old(k))
+                .cloned()
+                .collect();
+            let mut changed = false;
+            for key in keys.into_iter().filter(|k| *k != to) {
+                if let Some(names) = prefs.projects.remove(&key) {
+                    prefs.projects.entry(to.clone()).or_default().extend(names);
+                    changed = true;
+                }
+            }
+            Ok((changed, ()))
+        });
+        if let Err(e) = skills {
+            tracing::warn!("moving project skill settings: {e:#}");
+        }
     }
 
     /// Triage "Done": dismisses the agent's current attention (it comes back on new
