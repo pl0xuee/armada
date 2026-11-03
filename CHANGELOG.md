@@ -30,6 +30,7 @@ docs/RELEASING.md).
 - **Quieter when hidden:** clocks and status polling pause while the window is in the background.
 
 ### Fixed
+- Sub-agents that have already handed back their result no longer show as “working” while the main agent is still busy.
 - The voice assistant now sees which agent is open as soon as you press Talk, instead of only after you click away and back.
 - The “Turn finished · 4 agents may be running” pill is shorter and no longer runs under the header buttons.
 - Test-connection errors for MCP servers no longer echo passwords or keys.

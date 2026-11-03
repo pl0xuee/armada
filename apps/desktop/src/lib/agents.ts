@@ -239,9 +239,13 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, c
   const lastChildTs = new Map<string, number>();
   const callCount = new Map<string, number>();
   const openChildTs = new Map<string, number>();
+  // A sub-agent that has called SubagentHandback has reported its result: it is finished, whatever
+  // else the parent is still doing.
+  const handedBack = new Set<string>();
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     if (it.kind === "tool_call" && it.parentToolCallId) {
+      if (/^SubagentHandback\b/i.test(it.title)) handedBack.add(it.parentToolCallId);
       lastChild.set(it.parentToolCallId, it);
       callCount.set(it.parentToolCallId, (callCount.get(it.parentToolCallId) ?? 0) + 1);
       lastChildTs.set(it.parentToolCallId, Math.max(it.ts, lastChildTs.get(it.parentToolCallId) ?? 0));
@@ -257,6 +261,7 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, c
     const bg = isBackgroundLaunch(it);
     const open = unfinished(it.status) || (bg && it.status === "completed" && i > turnStartIdx);
     let running = open && busy;
+    const reported = handedBack.has(it.toolCallId);
     if (bg && clock && it.status === "completed") {
       const lastTs = lastChildTs.get(it.toolCallId);
       const openTs = openChildTs.get(it.toolCallId);
@@ -267,6 +272,7 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, c
           (lastTs !== undefined && clock.now - lastTs < SUBAGENT_ACTIVE_WINDOW_MS) ||
           clock.now - it.ts < SUBAGENT_LAUNCH_GRACE_MS);
     }
+    if (reported) running = false;
     if (!running && i <= turnStartIdx) continue;
     if (!running && unfinished(it.status)) continue; // stale: open call of an idle agent
     const child = lastChild.get(it.toolCallId);
