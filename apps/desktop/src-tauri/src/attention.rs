@@ -9,7 +9,9 @@ use std::time::{Duration, Instant};
 
 use crate::AppHandle;
 use chrono::{NaiveTime, Timelike};
-use kvistcode_core::{AgentStatus, AttentionReason, Core, ItemBody, QuietHours, Settings};
+use kvistcode_core::{
+    AgentStatus, AttentionReason, Core, ItemBody, NotificationSettings, QuietHours, Settings,
+};
 use parking_lot::Mutex;
 use tauri::{Manager, UserAttentionType};
 use tracing::{debug, info, warn};
@@ -225,7 +227,7 @@ impl Attention {
         // Which agent in which project: titles alone repeat across projects ("Fix tests").
         let shown_title = title_with_project(title, &project);
 
-        if !window_focused {
+        if flashes_taskbar(&settings.notifications, reason, window_focused) {
             // Taskbar flash (Windows) / dock bounce (macOS) / urgency hint (Linux).
             if let Some(w) = window::main_window(&self.app) {
                 let _ = w.request_user_attention(Some(UserAttentionType::Informational));
@@ -244,11 +246,7 @@ impl Attention {
                 AttentionReason::Done => settings.sounds.on_done,
                 AttentionReason::Error => settings.sounds.on_error,
             };
-        let notify_reason_on = match reason {
-            AttentionReason::Permission => settings.notifications.on_permission,
-            AttentionReason::Done => settings.notifications.on_done,
-            AttentionReason::Error => settings.notifications.on_error,
-        };
+        let notify_reason_on = reason_notifies(&settings.notifications, reason);
 
         if sound_on {
             self.audio.play_scaled(reason, &settings.sounds, volume);
@@ -554,6 +552,25 @@ pub fn quiet_hours_active(q: &QuietHours, now: NaiveTime) -> bool {
     }
 }
 
+/// Whether the "Desktop notifications" switches let `reason` through.
+fn reason_notifies(n: &NotificationSettings, reason: AttentionReason) -> bool {
+    match reason {
+        AttentionReason::Permission => n.on_permission,
+        AttentionReason::Done => n.on_done,
+        AttentionReason::Error => n.on_error,
+    }
+}
+
+/// The taskbar flash / dock bounce is a notification too: it needs the window to be out of
+/// focus and the same switches as the popup (turned off, it must not flash anyway).
+fn flashes_taskbar(
+    n: &NotificationSettings,
+    reason: AttentionReason,
+    window_focused: bool,
+) -> bool {
+    !window_focused && n.enabled && reason_notifies(n, reason)
+}
+
 /// Longest message body pushed to the phone (agent text can be long; the push is a
 /// nudge, the details are in the app).
 const MAX_PUSH_BODY_CHARS: usize = 200;
@@ -826,6 +843,26 @@ mod tests {
             b.starts_with("run: curl") && !b.contains("abcdefghijklmnop1234"),
             "{b}"
         );
+    }
+
+    #[test]
+    fn taskbar_flash_follows_the_notification_switches() {
+        let on = NotificationSettings::default();
+        assert!(flashes_taskbar(&on, AttentionReason::Done, false));
+        // The window is in front: nothing to flash.
+        assert!(!flashes_taskbar(&on, AttentionReason::Done, true));
+        // Notifications off, or this kind of alert off: no flash either.
+        let off = NotificationSettings {
+            enabled: false,
+            ..on.clone()
+        };
+        assert!(!flashes_taskbar(&off, AttentionReason::Permission, false));
+        let no_done = NotificationSettings {
+            on_done: false,
+            ..on.clone()
+        };
+        assert!(!flashes_taskbar(&no_done, AttentionReason::Done, false));
+        assert!(flashes_taskbar(&no_done, AttentionReason::Error, false));
     }
 
     #[test]
