@@ -96,6 +96,18 @@ pub fn system_note(text: &str) -> Value {
     })
 }
 
+/// Words from the user as text (said with the wake phrase, before the session was up).
+pub fn user_text(text: &str) -> Value {
+    json!({
+        "type": "conversation.item.create",
+        "item": {
+            "type": "message",
+            "role": "user",
+            "content": [{ "type": "input_text", "text": text }]
+        }
+    })
+}
+
 pub fn response_create() -> Value {
     json!({ "type": "response.create" })
 }

@@ -13,6 +13,7 @@ import { pluralize } from "./format";
 import { TURN_ONLY_PREFIX } from "./background";
 import { validateAlertUrl } from "./alertTargets";
 import { sameAccelerator } from "../components/settings/acceleratorLabels";
+import { WAKE_MODEL, wakePhraseProblem } from "./wakePhrase";
 import { isMac } from "./utils";
 import { mockProjectConfig, mockSaveRules } from "./mock-project-config";
 import {
@@ -83,6 +84,7 @@ import type {
   TimelineItem,
   ToolKind,
   UpdateInfo,
+  WakeStatus,
 } from "./types";
 
 type Listener = (e: KvistcodeEvent | KvistcodeEvent[]) => void;
@@ -2875,7 +2877,9 @@ export const mockApi: KvistcodeApi = {
       throw new Error(invalid);
     }
     const prevRemote = db.settings.remote;
+    const prevWake = JSON.stringify(mockWakeStatus());
     db.settings = clone(settings);
+    if (JSON.stringify(mockWakeStatus()) !== prevWake) emitVoiceBus("va-wake-status", mockWakeStatus());
     const r = settings.remote;
     if (r.enabled !== prevRemote.enabled || r.lan !== prevRemote.lan || r.port !== prevRemote.port) {
       await sleep(500);
@@ -3167,13 +3171,15 @@ export const mockApi: KvistcodeApi = {
   },
 
   // ---- voice assistant (simulated session: states, captions, one sample action)
-  async vaStart() {
+  async vaStart(request) {
     if (mockVa.timers.length > 0) throw new Error("The voice assistant is already running.");
     const bus = (e: unknown) => emitVoiceBus("va-event", e);
     const at = (ms: number, fn: () => void) => mockVa.timers.push(setTimeout(fn, ms));
     const t0 = Date.now();
     bus({ type: "state", state: "connecting", message: null });
     at(600, () => bus({ type: "state", state: "listening", message: null }));
+    // Said in the same breath as the wake phrase: the first thing the user asked.
+    if (request) at(900, () => bus({ type: "caption", role: "user", itemId: "u0", text: request, done: true }));
     const tick = setInterval(() => {
       // Paused: nothing is heard or counted.
       if (mockVa.phase === "paused") return;
@@ -3275,6 +3281,9 @@ export const mockApi: KvistcodeApi = {
   },
   async vaVoices() {
     return ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
+  },
+  async vaWakeStatus() {
+    return mockWakeStatus();
   },
 
   async installUpdate() {
@@ -3630,6 +3639,18 @@ const mockVoice = {
   timer: null as ReturnType<typeof setInterval> | null,
 };
 
+/** The wake phrase listener, as the core would report it for these settings. */
+function mockWakeStatus(): WakeStatus {
+  const va = db.settings.voiceAssistant;
+  const on = va.enabled && va.wakeWord;
+  return {
+    state: on ? "listening" : "off",
+    phrase: va.wakePhrase,
+    model: on ? WAKE_MODEL : null,
+    message: !va.enabled && va.wakeWord ? "Turn on the voice assistant first." : null,
+  };
+}
+
 let nextHelperParent: Agent | null = null;
 
 function validateSettings(s: Settings): string | null {
@@ -3650,6 +3671,8 @@ function validateSettings(s: Settings): string | null {
     return `Unknown helper model “${ts.subagentModel}”`;
   if (sameAccelerator(s.voiceAssistant.hotkey, s.globalHotkey, isMac))
     return "The voice assistant hotkey must differ from the global hotkey (which brings Kvistcode forward)";
+  const wakeProblem = wakePhraseProblem(s.voiceAssistant.wakePhrase);
+  if (wakeProblem) return wakeProblem;
   const layout = layoutProblem(s.projectLayout ?? EMPTY_LAYOUT);
   if (layout) return layout;
   if (!["off", "ask", "auto"].includes(s.failover)) return `Unknown failover setting “${s.failover}”`;

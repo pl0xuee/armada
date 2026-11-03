@@ -4,6 +4,7 @@ import { isLive } from "@/lib/voiceAssistant";
 import { cn, isMac, modKey } from "@/lib/utils";
 import { useUi } from "@/store/ui";
 import { toggleVoiceAssistant, useVa } from "@/store/voiceAssistant";
+import { useWake } from "@/store/wake";
 import { useVaReady } from "./ComposerVoiceButtons";
 
 /** What pressing the talk button does right now, and how to say it. */
@@ -34,16 +35,27 @@ function useTalk() {
 export function VoiceAssistantButton({ compact = false }: { compact?: boolean }) {
   const { live, paused, label, status, press, ready } = useTalk();
   const text = live ? (compact ? null : status) : compact ? "Talk" : label;
+  // While the wake phrase is being listened for, say so: the microphone is open.
+  const wakePhrase = useWake((s) => (s.status?.state === "listening" && !live ? s.status.phrase : null));
+  const tip =
+    !ready && !live
+      ? "Set up the voice assistant"
+      : paused
+        ? "Unmute the voice assistant"
+        : live
+          ? "End the voice assistant"
+          : "Talk to Kvistcode: ask for anything out loud";
   return (
     <Tooltip
       content={
-        !ready && !live
-          ? "Set up the voice assistant"
-          : paused
-            ? "Unmute the voice assistant"
-            : live
-              ? "End the voice assistant"
-              : "Talk to Kvistcode: ask for anything out loud"
+        wakePhrase ? (
+          <span className="flex flex-col">
+            <span>{tip}</span>
+            <span className="text-muted">Say “{wakePhrase}” to start</span>
+          </span>
+        ) : (
+          tip
+        )
       }
       shortcut={[modKey, "⇧", "A"]}
       side="bottom"
@@ -66,6 +78,9 @@ export function VoiceAssistantButton({ compact = false }: { compact?: boolean })
           aria-hidden
         />
         {text && <span className="whitespace-nowrap">{text}</span>}
+        {wakePhrase && (
+          <span aria-hidden className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-ok ring-2 ring-panel" />
+        )}
       </button>
     </Tooltip>
   );

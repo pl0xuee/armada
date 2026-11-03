@@ -61,6 +61,7 @@ import type {
   VoiceInputDevice,
   VoiceStatus,
   VoiceTranscript,
+  WakeStatus,
   WorkflowProgress,
 } from "./types";
 import type {
@@ -450,7 +451,8 @@ const tauriApi = {
   voiceCancel: () => invoke<void>("voice_cancel"),
 
   // voice assistant (OpenAI Realtime; audio is sent to OpenAI; the key never leaves the backend)
-  vaStart: () => invoke<void>("va_start"),
+  /** `request`: what the user asked in the same breath as the wake phrase; the assistant answers it first. */
+  vaStart: (request?: string | null) => invoke<void>("va_start", { request: request ?? null }),
   vaStop: () => invoke<void>("va_stop"),
   vaSetMuted: (muted: boolean) => invoke<void>("va_set_muted", { muted }),
   vaSetScreen: (screen: ScreenContext) => invoke<void>("va_set_screen", { screen }),
@@ -458,6 +460,8 @@ const tauriApi = {
   vaActive: () => invoke<boolean>("va_active"),
   vaUsage: () => invoke<VoiceAssistantUsage>("va_usage"),
   vaVoices: () => invoke<string[]>("va_voices"),
+  /** What the wake phrase listener is doing; changes arrive as va-wake-status events. */
+  vaWakeStatus: () => invoke<WakeStatus>("va_wake_status"),
 };
 
 export type KvistcodeApi = typeof tauriApi;
@@ -519,6 +523,18 @@ export function onVaEvent(cb: (e: VaEvent) => void): Promise<UnlistenFn> {
 export function onVaHotkey(cb: () => void): Promise<UnlistenFn> {
   if (!isTauri()) return Promise.resolve(onVoiceBus("va-hotkey", cb));
   return listen("va-hotkey", () => cb());
+}
+
+/** The wake phrase was heard and no session was running: start one, with what was said after it. */
+export function onVaWake(cb: (e: { request: string | null }) => void): Promise<UnlistenFn> {
+  if (!isTauri()) return Promise.resolve(onVoiceBus("va-wake", cb));
+  return listen<{ request: string | null }>("va-wake", (e) => cb(e.payload));
+}
+
+/** The wake phrase listener started, stopped or changed what it is doing. */
+export function onVaWakeStatus(cb: (e: WakeStatus) => void): Promise<UnlistenFn> {
+  if (!isTauri()) return Promise.resolve(onVoiceBus("va-wake-status", cb));
+  return listen<WakeStatus>("va-wake-status", (e) => cb(e.payload));
 }
 
 export function onVoiceLimit(cb: () => void): Promise<UnlistenFn> {

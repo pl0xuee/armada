@@ -1270,6 +1270,8 @@ pub async fn update_settings(
     // No-op when unchanged; retries a previously failed registration otherwise.
     let hotkey = crate::hotkey::apply(&app, &saved.global_hotkey);
     let va_hotkey = crate::hotkey::apply_voice_assistant(&app, &saved.voice_assistant.hotkey);
+    // Starts, restarts or stops listening for the wake phrase (no-op when unchanged).
+    crate::wake::apply(&app);
     app.state::<Arc<Remote>>().apply(&saved.remote).await;
     // Reported when the user just set this hotkey; an unchanged one that still can't
     // be registered (e.g. Wayland) shouldn't fail every later save.

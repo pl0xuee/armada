@@ -29,6 +29,7 @@ mod tools;
 mod tray;
 mod updater;
 mod voice_assistant;
+mod wake;
 mod webhooks;
 mod window;
 mod workspace;
@@ -77,6 +78,7 @@ macro_rules! handler {
             voice_assistant::va_active,
             voice_assistant::va_usage,
             voice_assistant::va_voices,
+            wake::va_wake_status,
             clipboard::read_clipboard_images,
             commands::list_items,
             commands::workflow_progress,
@@ -289,6 +291,7 @@ fn manage_state(
     app.manage(Terminals::default());
     app.manage(dictation::Dictation::default());
     app.manage(voice_assistant::VoiceAssistant::default());
+    app.manage(wake::WakeWord::default());
     app.manage(pr_status::PrCache::default());
     app.manage(updater::UpdateState::default());
     app.manage(preview_proxy::PreviewProxies::default());
@@ -357,6 +360,7 @@ fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()>
         tauri::async_runtime::spawn_blocking(move || {
             let _ = hotkey::apply(&app, &hotkey);
             let _ = hotkey::apply_voice_assistant(&app, &va_hotkey);
+            wake::apply(&app);
         });
     }
     // The login item from before the rename (Armada) would keep starting the old app.
@@ -531,6 +535,7 @@ pub(crate) fn begin_update() -> bool {
 pub(crate) async fn shutdown_services(app: &AppHandle) {
     // End a live voice session first (bounded to 2 s) so its usage is recorded.
     voice_assistant::shutdown(app).await;
+    wake::shutdown(app);
     if let Some(remote) = app.try_state::<Arc<remote::Remote>>() {
         // Also keeps a still-running startup `apply` from starting it again.
         remote.shutdown().await;
@@ -677,6 +682,8 @@ mod tests {
             "dictation::Dictation",
             "VoiceAssistant",
             "voice_assistant::VoiceAssistant",
+            "WakeWord",
+            "wake::WakeWord",
             "PrCache",
             "pr_status::PrCache",
             "UpdateState",

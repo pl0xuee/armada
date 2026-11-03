@@ -17,6 +17,7 @@ import type {
   TimelineItem,
 } from "./types";
 import { INVEST_NARRATION, PRIOR_ANSWER, REPORT_FINAL, SUMMARY_FINAL } from "./mock-demo-replies";
+import { DEFAULT_WAKE_PHRASE } from "./wakePhrase";
 
 const NOW = Date.now();
 const min = (m: number) => NOW - m * 60_000;
@@ -300,6 +301,8 @@ export function seedSettings(onboarded: boolean): Settings {
       headphones: false,
       autoConfirm: false,
       hotkey: "",
+      wakeWord: false,
+      wakePhrase: DEFAULT_WAKE_PHRASE,
     },
     customAgents: [
       {

@@ -16,6 +16,7 @@ mod session;
 mod tests;
 mod tools;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,6 +28,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tracing::warn;
 
 use crate::commands::CmdResult;
+use crate::state::Shell;
 pub use screen::ScreenContext;
 use session::{ApiKey, Control, EndReason, SessionConfig, VaEvent, VaSink, VaState};
 
@@ -40,6 +42,8 @@ pub struct VoiceAssistant {
     screen: Arc<Mutex<ScreenContext>>,
     /// What the agents did while a session is live (see `news.rs`).
     news: Arc<Mutex<news::Feed>>,
+    /// The live session is paused (its microphone is closed).
+    paused: Arc<AtomicBool>,
 }
 
 impl VoiceAssistant {
@@ -82,6 +86,25 @@ impl VoiceAssistant {
     fn active(&self) -> bool {
         self.control.lock().is_some()
     }
+
+    /// A session is running with its microphone open (not paused).
+    pub fn holds_mic(&self) -> bool {
+        self.active() && !self.paused.load(Ordering::Relaxed)
+    }
+
+    /// The wake phrase was heard: a paused session listens again and is asked `request`.
+    /// `false` when no session is running.
+    pub fn wake(&self, request: Option<String>) -> bool {
+        let slot = self.control.lock();
+        let Some(tx) = slot.as_ref() else {
+            return false;
+        };
+        let _ = tx.send(match request {
+            Some(text) => Control::Request(text),
+            None => Control::Resume,
+        });
+        true
+    }
 }
 
 /// Owns the session slot for the lifetime of the session task. If the task panics, the
@@ -123,10 +146,19 @@ impl Drop for SessionGuard {
 struct TauriSink {
     app: AppHandle,
     ledger: Mutex<cost::SessionLedger>,
+    paused: Arc<AtomicBool>,
 }
 
 impl VaSink for TauriSink {
     fn emit(&self, event: VaEvent) {
+        match &event {
+            VaEvent::State { state, .. } => {
+                self.paused
+                    .store(*state == VaState::Paused, Ordering::Relaxed);
+            }
+            VaEvent::Ended { .. } => self.paused.store(false, Ordering::Relaxed),
+            _ => {}
+        }
         let _ = self.app.emit(EVENT, event);
     }
 
@@ -169,9 +201,35 @@ fn with_language(instructions: String, language_note: &str) -> String {
     }
 }
 
-fn build_config(core: &Core) -> Result<SessionConfig, String> {
+/// With the wake phrase on, a paused assistant can be woken by voice after all.
+fn with_wake_phrase(instructions: String, phrase: Option<&str>) -> String {
+    match phrase {
+        Some(phrase) => format!(
+            "{instructions}\n- Exception: the user has a wake phrase, \u{201c}{phrase}\u{201d}. While you are \
+paused, Kvistcode listens on this computer for it and wakes you when they say it, so you may tell \
+them they can say \u{201c}{phrase}\u{201d} to wake you."
+        ),
+        None => instructions,
+    }
+}
+
+/// What the user said after the wake phrase, as the first thing to answer.
+fn clean_request(request: Option<String>) -> Option<String> {
+    let text = request?.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text: String = text.chars().take(MAX_REQUEST_CHARS).collect();
+    (!text.is_empty()).then_some(text)
+}
+
+const MAX_REQUEST_CHARS: usize = 500;
+
+fn build_config(
+    core: &Core,
+    data_dir: &std::path::Path,
+    request: Option<String>,
+) -> Result<SessionConfig, String> {
     let all = core.settings().map_err(|e| format!("{e:#}"))?;
     let language = kvistcode_core::guidance::language_note(&all.default_language);
+    let wake_phrase = crate::wake::ready_phrase(&all, data_dir);
     let s = all.voice_assistant;
     if !s.enabled {
         return Err("The voice assistant is off. Turn it on in Settings > Voice assistant.".into());
@@ -205,9 +263,12 @@ fn build_config(core: &Core) -> Result<SessionConfig, String> {
         api_key: ApiKey(key.trim().to_string()),
         model,
         voice,
-        instructions: with_auto_confirm(
-            with_language(tools::instructions(), &language),
-            s.auto_confirm,
+        instructions: with_wake_phrase(
+            with_auto_confirm(
+                with_language(tools::instructions(), &language),
+                s.auto_confirm,
+            ),
+            wake_phrase.as_deref(),
         ),
         tools: tools::tool_schemas(),
         max_secs: u64::from(s.max_session_mins.clamp(1, 60)) * 60,
@@ -216,22 +277,27 @@ fn build_config(core: &Core) -> Result<SessionConfig, String> {
         headphones: s.headphones,
         auto_confirm: s.auto_confirm,
         confirm_ttl: session::CONFIRM_TTL,
+        first_request: clean_request(request),
     })
 }
 
+/// `request`: what the user said after the wake phrase, asked as soon as the session is up.
 #[tauri::command]
 pub async fn va_start(
     app: AppHandle,
     core: State<'_, Core>,
+    shell: State<'_, Shell>,
     va: State<'_, VoiceAssistant>,
+    request: Option<String>,
 ) -> CmdResult<()> {
-    let cfg = build_config(&core)?;
+    let cfg = build_config(&core, &shell.data_dir, request)?;
     let input_device = core.settings().ok().and_then(|s| s.voice.input_device);
     let (ctl_tx, ctl_rx) = unbounded_channel();
     va.claim(&ctl_tx)?;
     // A new session starts from what the window shows now, not from where the last one ended.
     *va.screen.lock() = ScreenContext::default();
     va.news.lock().clear();
+    va.paused.store(false, Ordering::Relaxed);
 
     let core = (*core).clone();
     let screen = va.screen.clone();
@@ -239,6 +305,7 @@ pub async fn va_start(
     let sink: Arc<dyn VaSink> = Arc::new(TauriSink {
         app: app.clone(),
         ledger: Mutex::new(cost::SessionLedger::new(core.data_dir())),
+        paused: va.paused.clone(),
     });
     let guard = SessionGuard {
         app: app.clone(),

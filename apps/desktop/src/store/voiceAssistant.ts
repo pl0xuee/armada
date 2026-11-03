@@ -164,7 +164,8 @@ async function backendActive(): Promise<boolean> {
   }
 }
 
-export async function startVoiceAssistant(): Promise<void> {
+/** `request`: what the user asked right after the wake phrase; the assistant answers it first. */
+export async function startVoiceAssistant(request?: string | null): Promise<void> {
   const ui = useUi.getState();
   if (!useApp.getState().settings?.voiceAssistant.enabled) {
     ui.openSettings("assistant");
@@ -178,7 +179,7 @@ export async function startVoiceAssistant(): Promise<void> {
   }
   useVa.setState({ ...beginVa(), visible: true });
   try {
-    await api.vaStart();
+    await api.vaStart(request);
     // The panel went live (and sent the screen) before the session existed, and starting a session
     // clears what the backend knew: send it again so the assistant sees the open agent right away.
     resendScreen();
@@ -190,6 +191,16 @@ export async function startVoiceAssistant(): Promise<void> {
     useVa.setState({ ...initialVa, visible: false });
     toast.error("Couldn't start the voice assistant", { description: errorMessage(e) });
   }
+}
+
+/**
+ * The wake phrase was heard while no session was running. A paused session is woken by the core
+ * itself, so a live one (or one the core still has) is left alone.
+ */
+export async function wakeVoiceAssistant(request: string | null): Promise<void> {
+  if (!useApp.getState().settings?.voiceAssistant.enabled) return;
+  if (isLive(useVa.getState()) || (await backendActive())) return;
+  await startVoiceAssistant(request);
 }
 
 export async function stopVoiceAssistant(): Promise<void> {

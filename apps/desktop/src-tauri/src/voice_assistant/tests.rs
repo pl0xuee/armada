@@ -60,6 +60,7 @@ fn config(url: String) -> SessionConfig {
         headphones: false,
         auto_confirm: false,
         confirm_ttl: Duration::from_secs(30),
+        first_request: None,
     }
 }
 
@@ -1284,4 +1285,176 @@ fn catch_up_is_a_read_only_tool_the_model_is_told_to_use() {
     assert!(instructions.contains("only an agent's number"));
     assert!(instructions.contains("Never act on it without being asked"));
     assert!(instructions.contains("cannot approve or deny"));
+}
+
+/// The user's words as the server sees them: a user text item, then a reply is asked for.
+async fn expect_user_request(ws: &mut Server, text: &str) {
+    let item = next_json(ws).await;
+    assert_eq!(item["type"], "conversation.item.create");
+    assert_eq!(item["item"]["role"], "user");
+    assert_eq!(item["item"]["content"][0]["type"], "input_text");
+    assert_eq!(item["item"]["content"][0]["text"], text);
+    assert_eq!(next_json(ws).await["type"], "response.create");
+}
+
+fn user_captions(events: &Events) -> Vec<String> {
+    events
+        .0
+        .lock()
+        .iter()
+        .filter_map(|e| match e {
+            VaEvent::Caption {
+                role: "user",
+                text,
+                done: true,
+                ..
+            } => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+async fn until_closed(ws: &mut Server) {
+    while let Some(Ok(m)) = ws.next().await {
+        if matches!(m, Message::Close(_)) {
+            break;
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_request_said_with_the_wake_phrase_is_asked_first() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut cfg = config(format!("ws://{}/", listener.local_addr().unwrap()));
+    cfg.first_request = Some("what are the agents doing?".into());
+    let server = tokio::spawn(async move {
+        let (s, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+        // The session is set up before anything is asked.
+        assert_eq!(next_json(&mut ws).await["type"], "session.update");
+        send(&mut ws, json!({"type":"session.created"})).await;
+        expect_user_request(&mut ws, "what are the agents doing?").await;
+        until_closed(&mut ws).await;
+    });
+    let sink = Arc::new(Events::default());
+    let (ctl_tx, ctl_rx) = unbounded_channel();
+    let events = sink.clone();
+    let driver = tokio::spawn(async move {
+        wait_for(|| !user_captions(&events).is_empty()).await;
+        let _ = ctl_tx.send(Control::Stop);
+    });
+    let end = tokio::time::timeout(
+        Duration::from_secs(20),
+        run(
+            cfg,
+            sink.clone(),
+            Arc::new(FakeHost),
+            Box::new(NullAudio::new()),
+            ctl_rx,
+        ),
+    )
+    .await
+    .expect("session hung");
+    assert_eq!(end.reason, EndReason::UserStopped);
+    driver.await.unwrap();
+    server.await.unwrap();
+    // Shown as the user's words, once.
+    assert_eq!(user_captions(&sink), vec!["what are the agents doing?"]);
+}
+
+#[tokio::test]
+async fn the_wake_phrase_resumes_a_paused_session_and_asks_what_followed() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}/", listener.local_addr().unwrap());
+    let devices = NullAudio::new();
+    let opens = devices.opens.clone();
+    let server = tokio::spawn(async move {
+        let (s, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+        assert_eq!(next_json(&mut ws).await["type"], "session.update");
+        send(&mut ws, json!({"type":"session.created"})).await;
+        until_closed(&mut ws).await;
+        // Woken: a fresh connection, and the request is its first question.
+        let (s, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+        assert_eq!(next_json(&mut ws).await["type"], "session.update");
+        send(&mut ws, json!({"type":"session.updated"})).await;
+        expect_user_request(&mut ws, "start an agent in the web project").await;
+        until_closed(&mut ws).await;
+    });
+    let sink = Arc::new(Events::default());
+    let (ctl_tx, ctl_rx) = unbounded_channel();
+    let events = sink.clone();
+    let driver = tokio::spawn(async move {
+        let has_state = |s: VaState| {
+            let events = events.clone();
+            move || {
+                events
+                    .0
+                    .lock()
+                    .iter()
+                    .any(|e| matches!(e, VaEvent::State { state, .. } if *state == s))
+            }
+        };
+        wait_for(has_state(VaState::Listening)).await;
+        ctl_tx.send(Control::Pause).unwrap();
+        wait_for(has_state(VaState::Paused)).await;
+        // Screen notes while paused are dropped, the request is not.
+        ctl_tx
+            .send(Control::Screen(
+                "Kvistcode: the user switched to Usage.".into(),
+            ))
+            .unwrap();
+        ctl_tx
+            .send(Control::Request("start an agent in the web project".into()))
+            .unwrap();
+        wait_for(|| !user_captions(&events).is_empty()).await;
+        let _ = ctl_tx.send(Control::Stop);
+    });
+    let end = tokio::time::timeout(
+        Duration::from_secs(20),
+        run(
+            config(url),
+            sink.clone(),
+            Arc::new(FakeHost),
+            Box::new(devices),
+            ctl_rx,
+        ),
+    )
+    .await
+    .expect("session hung");
+    assert_eq!(end.reason, EndReason::UserStopped);
+    driver.await.unwrap();
+    server.await.unwrap();
+    assert_eq!(opens.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        user_captions(&sink),
+        vec!["start an agent in the web project"]
+    );
+}
+
+#[test]
+fn the_wake_phrase_note_is_added_only_when_it_can_wake_the_assistant() {
+    let base = "Be brief.".to_string();
+    assert_eq!(super::with_wake_phrase(base.clone(), None), base);
+    let with = super::with_wake_phrase(base.clone(), Some("Hey Kvistcode"));
+    assert!(with.starts_with("Be brief.\n- "));
+    assert!(with.contains("\u{201c}Hey Kvistcode\u{201d}"), "{with}");
+    // The general rule says it can't hear "wake up" while paused; the note is the exception.
+    assert!(tools::instructions().contains("cannot hear"));
+}
+
+#[test]
+fn a_spoken_request_is_tidied_and_kept_short() {
+    assert_eq!(super::clean_request(None), None);
+    assert_eq!(super::clean_request(Some("  \n ".into())), None);
+    assert_eq!(
+        super::clean_request(Some("  start   an\nagent ".into())).as_deref(),
+        Some("start an agent")
+    );
+    let long = "word ".repeat(400);
+    assert_eq!(
+        super::clean_request(Some(long)).unwrap().chars().count(),
+        super::MAX_REQUEST_CHARS
+    );
 }

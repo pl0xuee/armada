@@ -82,6 +82,8 @@ pub struct SessionConfig {
     /// Run proposed actions at once instead of waiting for the user to confirm on screen.
     pub auto_confirm: bool,
     pub confirm_ttl: Duration,
+    /// Said with the wake phrase: asked as soon as the session is up.
+    pub first_request: Option<String>,
 }
 
 /// Everything the UI is told, as `va-event`.
@@ -220,6 +222,8 @@ pub enum Control {
         id: String,
         accept: bool,
     },
+    /// The user said the wake phrase and then this. Resumes a paused session too.
+    Request(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -321,6 +325,7 @@ pub async fn run(
     };
     let mut attempt = 0;
     let mut announce: Option<&'static str> = None;
+    let mut request = cfg.first_request.clone();
     loop {
         let ws = match connect(&cfg).await {
             Ok(ws) => ws,
@@ -351,6 +356,7 @@ pub async fn run(
             &mut usage,
             started,
             announce.take(),
+            request.take(),
         )
         .await;
         match end {
@@ -369,7 +375,7 @@ pub async fn run(
                 });
                 emit_usage(&sink, started, &usage);
                 let paused_at = Instant::now();
-                if !wait_for_resume(&mut control).await {
+                if !wait_for_resume(&mut control, &mut request).await {
                     return finish(started, EndReason::UserStopped, usage);
                 }
                 sink.emit(VaEvent::State {
@@ -423,11 +429,19 @@ async fn open_devices(
     .ok()
 }
 
-/// Waits while paused. `true` to resume, `false` if the session was stopped.
-async fn wait_for_resume(control: &mut UnboundedReceiver<Control>) -> bool {
+/// Waits while paused. `true` to resume, `false` if the session was stopped. A request
+/// (the wake phrase and what followed it) resumes too, and is kept to be asked.
+async fn wait_for_resume(
+    control: &mut UnboundedReceiver<Control>,
+    request: &mut Option<String>,
+) -> bool {
     loop {
         match control.recv().await {
             Some(Control::Resume) => return true,
+            Some(Control::Request(text)) => {
+                *request = Some(text);
+                return true;
+            }
             Some(Control::Stop) | None => return false,
             Some(_) => {}
         }
@@ -503,6 +517,7 @@ async fn connection(
     usage: &mut Usage,
     started: Instant,
     announce: Option<&'static str>,
+    request: Option<String>,
 ) -> ConnEnd {
     let mut pending: HashMap<String, PendingConfirm> = HashMap::new();
     let end = connection_inner(
@@ -516,6 +531,7 @@ async fn connection(
         usage,
         started,
         announce,
+        request,
         &mut pending,
     )
     .await;
@@ -541,6 +557,7 @@ async fn connection_inner(
     usage: &mut Usage,
     started: Instant,
     announce: Option<&'static str>,
+    request: Option<String>,
     pending: &mut HashMap<String, PendingConfirm>,
 ) -> ConnEnd {
     let (mut tx, mut rx) = ws.split();
@@ -581,6 +598,8 @@ async fn connection_inner(
     // Set when the model called `pause_listening`; the pause starts once its goodbye ends.
     let mut pause_at: Option<Instant> = None;
     let mut announce_reconnect = announce;
+    let mut first_request = request;
+    let mut asked = 0u32;
 
     macro_rules! set_state {
         ($s:expr) => {
@@ -599,6 +618,27 @@ async fn connection_inner(
             ui.emit(VaEvent::Notice {
                 message: Some(String::from($m)),
             });
+        };
+    }
+    // What the user said with the wake phrase: shown as theirs, and answered.
+    macro_rules! ask {
+        ($text:expr) => {
+            let text: String = $text;
+            last_activity = Instant::now();
+            asked += 1;
+            ui.emit(VaEvent::Caption {
+                role: "user",
+                item_id: format!("wake-{asked}"),
+                text: text.clone(),
+                done: true,
+            });
+            send!(p::user_text(&text));
+            if response_active {
+                need_followup = true;
+            } else {
+                response_active = true;
+                send!(p::response_create());
+            }
         };
     }
     // Tells the model something Kvistcode knows (not the user, not a tool) and lets it speak.
@@ -625,6 +665,7 @@ async fn connection_inner(
                     return ConnEnd::Paused;
                 }
                 Some(Control::Resume) => {}
+                Some(Control::Request(text)) => { ask!(text); }
                 // Context only: no reply is asked for, so nothing is said aloud.
                 Some(Control::Screen(note)) => { send!(p::system_note(&note)); }
                 Some(Control::Confirm { id, accept }) => {
@@ -662,6 +703,9 @@ async fn connection_inner(
                         if state == VaState::Connecting { set_state!(VaState::Listening); }
                         if let Some(note) = announce_reconnect.take() {
                             set_notice!(note);
+                        }
+                        if let Some(text) = first_request.take() {
+                            ask!(text);
                         }
                     }
                     ServerEvent::Error { error } => {

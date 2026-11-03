@@ -104,6 +104,13 @@ pub struct Dictation {
     reaper_started: AtomicBool,
 }
 
+impl Dictation {
+    /// The microphone is opening or recording for dictation.
+    pub fn is_recording(&self) -> bool {
+        !matches!(*self.recording.lock(), Slot::Idle)
+    }
+}
+
 // ---- payloads --------------------------------------------------------------------
 
 #[derive(Serialize)]
@@ -246,6 +253,10 @@ pub async fn voice_download_model(
             error,
         },
     );
+    if outcome.is_ok() {
+        // The wake phrase may have been waiting for this model.
+        crate::wake::apply(&app);
+    }
     outcome.map_err(|e| format!("{e:#}"))
 }
 
@@ -258,6 +269,7 @@ pub fn voice_cancel_download(dict: State<'_, Dictation>) {
 
 #[tauri::command]
 pub fn voice_delete_model(
+    app: AppHandle,
     shell: State<'_, Shell>,
     dict: State<'_, Dictation>,
     id: String,
@@ -272,7 +284,10 @@ pub fn voice_delete_model(
             *loaded = None;
         }
     }
-    voice::delete_model(&shell.data_dir, spec).map_err(|e| format!("{e:#}"))
+    voice::delete_model(&shell.data_dir, spec).map_err(|e| format!("{e:#}"))?;
+    // The wake phrase moves to another model, or says it needs one.
+    crate::wake::apply(&app);
+    Ok(())
 }
 
 // ---- recording -------------------------------------------------------------------

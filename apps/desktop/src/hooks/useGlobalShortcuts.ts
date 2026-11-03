@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { orderedAgents } from "@/lib/agents";
 import { layoutOf } from "@/lib/projectLayout";
-import { onVaHotkey } from "@/lib/api";
+import { onVaHotkey, onVaWake } from "@/lib/api";
 import { LIST_DOCK_QUERY } from "@/lib/layout";
 import { selectNextTriage, triageQueueNow } from "@/components/triage/useTriage";
 import { toggleAgentList } from "./useAgentListLayout";
@@ -12,7 +12,7 @@ import { useApp } from "@/store/app";
 import { goBack, goForward } from "@/store/navHistory";
 import { togglePreview } from "@/store/preview";
 import { useUi } from "@/store/ui";
-import { toggleVoiceAssistant } from "@/store/voiceAssistant";
+import { toggleVoiceAssistant, wakeVoiceAssistant } from "@/store/voiceAssistant";
 
 /** App-wide keyboard shortcuts. Mod = ⌘ on macOS, Ctrl elsewhere. */
 export function useGlobalShortcuts(enabled: boolean) {
@@ -166,18 +166,21 @@ export function useGlobalShortcuts(enabled: boolean) {
   }, [enabled]);
 
   // The system-wide voice assistant hotkey (works while the window is in the background):
-  // the shell sends an event, and it does what the in-app shortcut does.
+  // the shell sends an event, and it does what the in-app shortcut does. The wake phrase
+  // arrives the same way, with whatever was said after it.
   useEffect(() => {
     if (!enabled) return;
-    let off: (() => void) | null = null;
+    const offs: (() => void)[] = [];
     let gone = false;
-    void onVaHotkey(toggleVoiceAssistant).then((un) => {
+    const keep = (un: () => void) => {
       if (gone) un();
-      else off = un;
-    });
+      else offs.push(un);
+    };
+    void onVaHotkey(toggleVoiceAssistant).then(keep);
+    void onVaWake((e) => void wakeVoiceAssistant(e.request)).then(keep);
     return () => {
       gone = true;
-      off?.();
+      for (const off of offs) off();
     };
   }, [enabled]);
 }

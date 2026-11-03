@@ -17,6 +17,7 @@ import { acceleratorCaps, sameAccelerator } from "./acceleratorLabels";
 import { HotkeyRecorder } from "./HotkeyRecorder";
 import { saveSettingsPatch } from "./settingsErrors";
 import { SectionHeader, SettingGroup, SettingRow } from "./SettingRow";
+import { WakePhraseGroup } from "./WakePhraseSettings";
 
 export const VA_PRIVACY_NOTICE =
   "Your voice and the agent information it reads are sent to OpenAI. Billed to your OpenAI API account per minute.";
@@ -168,6 +169,8 @@ export function VoiceAssistantSection({ settings }: { settings: Settings }) {
           </div>
         </SettingRow>
       </SettingGroup>
+
+      <WakePhraseGroup va={va} update={update} />
 
       <SettingGroup title="OpenAI account" description="Sessions are billed to this account's API key.">
         {keyAccounts.length === 0 ? (

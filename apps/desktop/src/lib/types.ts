@@ -745,6 +745,22 @@ export interface VoiceAssistantSettings {
   autoConfirm: boolean;
   /** System-wide shortcut that starts or stops the assistant from any app. Empty: off. */
   hotkey: string;
+  /** Listen on this computer for `wakePhrase` and start (or wake) the assistant when it is said. */
+  wakeWord: boolean;
+  /** Two to five words, up to 40 characters. */
+  wakePhrase: string;
+}
+
+export type WakeState = "off" | "needsModel" | "starting" | "listening" | "waiting" | "error";
+
+/** What the wake phrase listener is doing (`va_wake_status`, `va-wake-status`). */
+export interface WakeStatus {
+  state: WakeState;
+  phrase: string;
+  /** needsModel: the speech model to download. listening: the one in use. */
+  model: string | null;
+  /** Why it is off or waiting, or what went wrong. */
+  message: string | null;
 }
 
 export interface VoiceAssistantUsage {

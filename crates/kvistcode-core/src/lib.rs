@@ -23,6 +23,7 @@ pub mod skill_prefs;
 pub mod skills;
 pub mod toolchain;
 pub mod voice;
+pub mod wake;
 pub mod workflow;
 
 mod acp;

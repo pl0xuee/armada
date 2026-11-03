@@ -1350,6 +1350,10 @@ pub struct VoiceAssistantSettings {
     /// System-wide shortcut that starts or stops the assistant while Kvistcode is in the
     /// background (a Tauri accelerator like `CmdOrCtrl+Shift+V`). Empty: off.
     pub hotkey: String,
+    /// Listen (on this device, with the dictation speech model) for `wake_phrase`, which
+    /// starts the assistant or wakes a paused one. Off by default.
+    pub wake_word: bool,
+    pub wake_phrase: String,
 }
 
 impl Default for VoiceAssistantSettings {
@@ -1364,6 +1368,8 @@ impl Default for VoiceAssistantSettings {
             headphones: false,
             auto_confirm: false,
             hotkey: String::new(),
+            wake_word: false,
+            wake_phrase: crate::wake::DEFAULT_WAKE_PHRASE.into(),
         }
     }
 }
@@ -1661,6 +1667,9 @@ impl Settings {
         if self.voice_assistant.hotkey.chars().count() > MAX_HOTKEY_LEN {
             return Err("The voice assistant hotkey is too long".into());
         }
+        if let Some(problem) = crate::wake::wake_phrase_problem(&self.voice_assistant.wake_phrase) {
+            return Err(problem);
+        }
         if self.voice_assistant_hotkey_clashes() {
             return Err(
                 "The voice assistant hotkey must differ from the global hotkey (which brings Kvistcode forward)"
@@ -1751,6 +1760,10 @@ impl Settings {
         {
             self.voice_assistant.hotkey = String::new();
             reset.push("voiceAssistant.hotkey");
+        }
+        if crate::wake::wake_phrase_problem(&self.voice_assistant.wake_phrase).is_some() {
+            self.voice_assistant.wake_phrase = defaults.voice_assistant.wake_phrase.clone();
+            reset.push("voiceAssistant.wakePhrase");
         }
         if crate::voice::model_spec(&self.voice.model).is_none() {
             self.voice.model = defaults.voice.model.clone();
@@ -1969,6 +1982,21 @@ mod sound_settings_tests {
 #[cfg(test)]
 mod voice_settings_tests {
     use super::*;
+
+    #[test]
+    fn wake_phrase_defaults_off_loads_from_old_settings_and_is_checked() {
+        // Saved before the wake phrase existed.
+        let old: Settings =
+            serde_json::from_str(r#"{"voiceAssistant":{"enabled":true,"hotkey":""}}"#).unwrap();
+        assert!(!old.voice_assistant.wake_word);
+        assert_eq!(old.voice_assistant.wake_phrase, "Hey Kvistcode");
+        let mut s = Settings::default();
+        s.voice_assistant.wake_phrase = "Kvistcode".into();
+        assert!(s.validate().unwrap_err().contains("at least two words"));
+        assert_eq!(s.sanitize(), vec!["voiceAssistant.wakePhrase"]);
+        assert_eq!(s.voice_assistant.wake_phrase, "Hey Kvistcode");
+        assert!(s.validate().is_ok());
+    }
 
     #[test]
     fn defaults_validate() {

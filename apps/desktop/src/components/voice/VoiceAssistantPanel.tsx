@@ -18,12 +18,15 @@ import {
 } from "@/store/voiceAssistant";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
+import { connectWakeStatus } from "@/store/wake";
 import { TONE, VoiceOrb } from "./VoiceOrb";
 import { usePanelDrag } from "./usePanelDrag";
 
 /** Floating voice-assistant panel (bottom right). Mount once; it also owns the event subscription. */
 export function VoiceAssistantPanel() {
   useEffect(() => connectVoiceAssistant(), []);
+  // The wake phrase status is shared (the title-bar button and Settings show it): follow it from here too.
+  useEffect(() => connectWakeStatus(), []);
   const visible = useVa((s) => s.visible);
   const phase = useVa((s) => s.phase);
   if (!visible) return null;
