@@ -5,7 +5,9 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
-## Unreleased
+## v0.4.2 — 2026-11-02
+
+A voice assistant you can reach from any app and that keeps you posted, notifications that say what finished and where, a reply language, a Refresh button for moved projects, and a full review round of fixes.
 
 ### New
 - **A Refresh button in the project list.** If you rename or move a project's folder, press it and Kvistcode finds the new place (it asks the project's worktrees) or, when it can't, offers “Locate…” so you pick the folder yourself. Agents, schedules and git worktrees follow.
@@ -28,6 +30,8 @@ docs/RELEASING.md).
 - **Phone: fixed “an Kvistcode pairing link”.**
 - **A second click on Commit can't commit twice.** The button shows it is busy while Kvistcode checks for secret-looking files, not only after.
 - **New agents start in the right folder after a project moves.** Refresh or Locate now updates the folder Kvistcode remembers for the next launch.
+- **A moved project keeps its settings.** After Refresh or Locate, the project's spending limit, its own MCP servers, its place in the recent list and the skills you switched off follow it to the new folder (before, the limit silently stopped applying).
+- **Diffs that agents read back stay exact.** Output from commands like `git stash show -p` and `git format-patch` is no longer tidied, which could drop blank or repeated lines from a patch.
 - **Times are right the moment a view opens.** “2m ago” and countdowns no longer show an old time for up to 30 seconds after you come back to a view.
 
 ## v0.4.1 — 2026-11-02
