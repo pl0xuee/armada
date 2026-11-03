@@ -5,7 +5,7 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
-## Unreleased
+## v0.4.3 — 2026-11-03
 
 ### New
 - **Back and Forward.** Arrows next to the search box step back and forward through the pages and agents you opened, like a browser. Alt+← and Alt+→ (⌘[ and ⌘] on a Mac) and the mouse's side buttons do the same. Hover an arrow to see where it goes.
