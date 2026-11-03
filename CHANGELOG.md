@@ -5,7 +5,9 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
-## Unreleased
+## v0.4.1 — 2026-11-02
+
+Simpler Settings, header and rate-limit banner, a voice assistant that sees the open agent right away, six more themes, and a round of fixes.
 
 ### New
 - **A calmer agent list.** Projects are now plain sections instead of boxes, agent rows are lighter, and the account name only shows where a provider has more than one account.
