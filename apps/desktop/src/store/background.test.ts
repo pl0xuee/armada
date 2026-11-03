@@ -269,7 +269,7 @@ describe("statusView", () => {
   it("says Done only when nothing is left running", () => {
     expect(statusView({ ...base, status: "idle", unread: true }, false, NO_BACKGROUND)).toMatchObject({
       done: true,
-      pill: "Done",
+      pill: "Ready to review",
     });
     expect(statusView({ ...base, status: "idle", unread: false }, false, NO_BACKGROUND)).toMatchObject({
       done: false,

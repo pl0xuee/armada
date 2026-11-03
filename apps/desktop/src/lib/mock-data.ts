@@ -2558,7 +2558,7 @@ export function seedSchedules(): Schedule[] {
       lastAgentId: null,
       customAgentId: null,
       updatedAt: min(60 * 24 * 2),
-      lastError: "Didn't start at 08:30: Codex · Personal hit its usage limit (resets 10:00).",
+      lastError: "Codex · Personal had hit its usage limit at 08:30 (resets 10:00).",
       permissionMode: "ask",
     },
   ];

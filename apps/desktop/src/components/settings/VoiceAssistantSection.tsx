@@ -135,7 +135,7 @@ export function VoiceAssistantSection({ settings }: { settings: Settings }) {
           title="Hotkey to talk from anywhere"
           description="Starts or stops the assistant even when Kvistcode is in the background. Record a shortcut, or leave it empty to turn it off."
         >
-          <div className="flex w-[240px] max-w-full flex-col items-end gap-1.5">
+          <div className="flex max-w-full flex-col items-end gap-1.5">
             <div className="flex items-center gap-1.5">
               {hotkeyCaps.length > 0 ? (
                 <span className="flex items-center gap-1">
@@ -158,10 +158,10 @@ export function VoiceAssistantSection({ settings }: { settings: Settings }) {
                   <X className="h-3 w-3" />
                 </button>
               )}
+              <HotkeyRecorder disabled={hotkeySaving} onRecord={(acc) => void saveHotkey(acc)} />
             </div>
-            <HotkeyRecorder disabled={hotkeySaving} onRecord={(acc) => void saveHotkey(acc)} />
             {hotkeyError && (
-              <p role="alert" className="text-right text-[11.5px] leading-snug text-err">
+              <p role="alert" className="max-w-[300px] text-right text-[11.5px] leading-snug text-err">
                 {hotkeyError}
               </p>
             )}

@@ -118,19 +118,24 @@ export const AgentTile = memo(function AgentTile({
       )}
 
       <div className="relative flex items-center gap-1.5 px-3.5 pt-3">
-        <span
-          title={view.detail ?? undefined}
-          className="flex h-5 min-w-0 items-center gap-1.5 rounded-full border px-1.5 text-[10.5px] font-medium"
-          style={{
-            color:
-              !done && !background && (agent.status === "idle" || agent.status === "stopped") ? "var(--text-2)" : color,
-            borderColor: `color-mix(in srgb, ${color} 30%, var(--border))`,
-            background: `color-mix(in srgb, ${color} 8%, transparent)`,
-          }}
-        >
-          <StatusDot status={view.dot} size={6} done={done} />
-          <span className="truncate">{meta.label}</span>
-        </span>
+        {/* A rate limit is shown once, by its own chip (not also as "Error"). */}
+        {!(agent.rateLimited && agent.status === "error") && (
+          <span
+            title={view.detail ?? undefined}
+            className="flex h-5 min-w-0 items-center gap-1.5 rounded-full border px-1.5 text-[10.5px] font-medium"
+            style={{
+              color:
+                !done && !background && (agent.status === "idle" || agent.status === "stopped")
+                  ? "var(--text-2)"
+                  : color,
+              borderColor: `color-mix(in srgb, ${color} 30%, var(--border))`,
+              background: `color-mix(in srgb, ${color} 8%, transparent)`,
+            }}
+          >
+            <StatusDot status={view.dot} size={6} done={done} />
+            <span className="truncate">{meta.label}</span>
+          </span>
+        )}
         {agent.rateLimited && (
           <span className="flex h-5 min-w-0 shrink items-center gap-1 rounded-full border border-warn/35 bg-warn/10 px-1.5 text-[10.5px] font-medium text-warn">
             <Gauge className="h-3 w-3 shrink-0" />

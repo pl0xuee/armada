@@ -9,12 +9,15 @@ docs/RELEASING.md).
 
 ### New
 - **A Refresh button in the project list.** If you rename or move a project's folder, press it and Kvistcode finds the new place (it asks the project's worktrees) or, when it can't, offers “Locate…” so you pick the folder yourself. Agents, schedules and git worktrees follow.
-
 - **A reply language.** Settings → Behavior → Agent replies has a “Reply language”: pick Spanish, Japanese and so on and agents and the voice assistant answer in it (code and file names stay as they are). The default, “Match what I write”, changes nothing.
 - **See what the voice assistant sees.** While it is on, its panel shows “Sees:” with the open agent and its folder (or the screen you are on, and how many agents are side by side), plus a button to send the screen to it again.
 - **A hotkey to talk from anywhere.** Settings → Voice assistant can set a system-wide shortcut that starts or stops the assistant while you are in another app. On Wayland, bind `kvistcode --voice-assistant` to a key in your compositor instead (for example Hyprland: `bind = SUPER, V, exec, kvistcode --voice-assistant`).
 - **The voice assistant keeps you posted.** While it is on, it quietly hears when an agent finishes, needs you, hits a rate limit or fails, and mentions it when that fits the moment. Ask “what did I miss?” and it catches you up, most urgent first.
 - **Voice assistant: run actions without asking.** Settings → Voice assistant has an option to skip the Confirm card, so starting an agent, sending a message or renaming one happens as soon as you say it. It is off by default, and agents you start still ask before changing files or running commands.
+
+### Improved
+- **The same status words everywhere.** A finished agent reads “Ready to review” on its Mission Control card too (it said “Done” there), and a rate-limited card shows only “Rate limited” instead of “Error” next to it.
+- **A tidier voice hotkey setting.** The shortcut, its clear button and “Record” sit on one line.
 
 ### Fixed
 - **Notifications say what finished and where.** The title now names the project too (“Fix tests · shop-app”), and the “everything finished” alert says what the workflow was or quotes the agent's last message instead of a bare “Its workflow is done”. A turn that ends with work still running also says what the agent last said. No alert is sent for an agent that was deleted.

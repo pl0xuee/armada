@@ -80,8 +80,8 @@ export interface StatusMeta {
   live: boolean;
 }
 
-/** Presentation for an idle agent whose last turn just completed. */
-export const DONE_META: StatusMeta = { label: "Done", colorVar: "var(--ok)", live: false };
+/** Presentation for an idle agent whose last turn just completed (the same words as Mission Control). */
+export const DONE_META: StatusMeta = { label: "Ready to review", colorVar: "var(--ok)", live: false };
 
 export const STATUS: Record<AgentStatus, StatusMeta> = {
   starting: { label: "Starting", colorVar: "var(--accent)", live: true },
