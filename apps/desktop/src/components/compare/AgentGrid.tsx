@@ -1,12 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CompareColumn } from "@/components/compare/CompareColumn";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { useNow } from "@/hooks/useNow";
 import { idealTileColumns } from "@/lib/helpers";
 import { identityFor } from "@/lib/identity";
-import type { Agent } from "@/lib/types";
+import type { Account, Agent } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { useApp } from "@/store/app";
+import { useApp, type AppStore } from "@/store/app";
 import { useUi } from "@/store/ui";
 
 /** Narrowest a column can be before the agents go behind tabs instead. */
@@ -45,6 +45,48 @@ function useWidth() {
   return [setEl, width] as const;
 }
 
+/** One agent's timeline: the same array until that agent's items change, whatever the others do. */
+export const itemsOf = (agentId: string) => (s: AppStore) => s.items[agentId];
+
+/**
+ * One column. It reads its own agent's timeline, so streaming into any other agent (in this grid or
+ * anywhere else) doesn't re-render it, and the grid itself doesn't re-render for any timeline at all.
+ */
+const GridColumn = memo(function GridColumn({
+  agent,
+  account,
+  now,
+  cheapest,
+  badge,
+  keeping,
+  onOpen,
+  onKeep,
+}: {
+  agent: Agent;
+  account: Account | undefined;
+  now: number;
+  cheapest: boolean;
+  badge?: string;
+  keeping: boolean;
+  onOpen: (id: string) => void;
+  onKeep: (a: Agent) => void;
+}) {
+  const items = useApp(itemsOf(agent.id));
+  return (
+    <CompareColumn
+      agent={agent}
+      account={account}
+      items={items}
+      now={now}
+      cheapest={cheapest}
+      badge={badge}
+      onOpen={() => onOpen(agent.id)}
+      onKeep={() => onKeep(agent)}
+      keeping={keeping}
+    />
+  );
+});
+
 const isBusyStatus = (a: Agent) => a.status === "working" || a.status === "starting" || a.status === "needs_permission";
 
 /**
@@ -62,7 +104,6 @@ export function AgentGrid({
   onKeep: (a: Agent) => void;
   keepDisabled?: (a: Agent) => boolean;
 }) {
-  const items = useApp((s) => s.items);
   const accounts = useApp((s) => s.accounts);
   const customAgents = useApp((s) => s.settings?.customAgents);
   const openAgent = useUi((s) => s.openAgent);
@@ -71,6 +112,12 @@ export function AgentGrid({
   /** Column shown on narrow panes, where columns become tabs. */
   const [tabId, setTabId] = useState<string | null>(null);
   const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
+  // The callers pass fresh closures each render; the columns get stable ones so they can skip renders.
+  const keepRef = useRef(onKeep);
+  useLayoutEffect(() => {
+    keepRef.current = onKeep;
+  });
+  const keep = useCallback((a: Agent) => keepRef.current(a), []);
 
   const ids = agents.map((a) => a.id).join(",");
   useEffect(() => {
@@ -167,16 +214,15 @@ export function AgentGrid({
                 a.archived && "opacity-55",
               )}
             >
-              <CompareColumn
+              <GridColumn
                 agent={a}
                 account={accountMap.get(a.accountId)}
-                items={items[a.id]}
                 now={now}
                 cheapest={showCheapest && a.costUsd === minCost}
                 badge={numbers.get(a.id)}
-                onOpen={() => openAgent(a.id)}
-                onKeep={() => onKeep(a)}
                 keeping={keepDisabled?.(a) ?? false}
+                onOpen={openAgent}
+                onKeep={keep}
               />
             </div>
           ))}

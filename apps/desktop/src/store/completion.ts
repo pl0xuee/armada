@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api } from "@/lib/api";
 import { LONG_TURN_MS, turnOutcome, turnStart } from "@/components/timeline/thinking";
 import type { Agent, AgentStatus } from "@/lib/types";
-import { useApp } from "./app";
+import { onAgentRemoved, useApp } from "./app";
 import { useUi } from "./ui";
 
 /**
@@ -21,6 +21,9 @@ function setDone(id: string, on: boolean) {
   else delete next[id];
   useCompletion.setState({ done: next });
 }
+
+// An agent deleted for real can't be "Done" any more (a pending, undoable delete keeps the mark).
+onAgentRemoved((id) => setDone(id, false));
 
 /** Shown as "Done": just finished a turn here, or finished while you were away (unread). */
 export function isDone(agent: Agent, marked: boolean): boolean {

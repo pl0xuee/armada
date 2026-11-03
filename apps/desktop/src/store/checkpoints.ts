@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
 import type { Checkpoint } from "@/lib/types";
-import { useApp } from "./app";
+import { isRemoved, onAgentRemoved, useApp } from "./app";
 
 interface Entry {
   available: boolean;
@@ -24,6 +24,7 @@ async function load(agentId: string) {
   try {
     const list = await api.listCheckpoints(agentId);
     if (loadSeq.get(agentId) !== seq) return; // a newer load superseded this one
+    if (isRemoved(agentId)) return; // deleted while loading
     const byItem: Record<string, Checkpoint> = {};
     for (const c of list.checkpoints) if (c.kind === "turn" && c.itemId) byItem[c.itemId] = c;
     useCheckpoints.setState((s) => ({ byAgent: { ...s.byAgent, [agentId]: { available: list.available, byItem } } }));
@@ -73,4 +74,20 @@ useApp.subscribe((s) => {
     }
   }
   last = next;
+});
+
+// An agent deleted for real takes its rewind points with it (a pending, undoable delete keeps them).
+onAgentRemoved((id) => {
+  const t = timers.get(id);
+  if (t) clearTimeout(t);
+  timers.delete(id);
+  loadSeq.delete(id);
+  inflight.delete(id);
+  known.delete(id);
+  delete last[id];
+  useCheckpoints.setState((s) => {
+    if (!(id in s.byAgent)) return s;
+    const { [id]: _gone, ...byAgent } = s.byAgent;
+    return { byAgent };
+  });
 });

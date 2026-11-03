@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { onAgentRemoved } from "./app";
 
 /**
  * UI state of the pinned dock that outlives it unmounting: whether each agent's pinned plan was
@@ -25,3 +26,13 @@ export const usePinnedUi = create<PinnedUiStore>((set) => ({
       return { planPinned };
     }),
 }));
+
+// An agent deleted for real takes its plan state with it (a pending, undoable delete keeps it).
+onAgentRemoved((id) =>
+  usePinnedUi.setState((s) => {
+    if (!(id in s.planOpen) && !(id in s.planPinned)) return s;
+    const { [id]: _open, ...planOpen } = s.planOpen;
+    const { [id]: _pinned, ...planPinned } = s.planPinned;
+    return { planOpen, planPinned };
+  }),
+);

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { onAgentRemoved, useApp } from "./app";
 
 /**
  * Per-request UI state for approval cards that must survive the row being virtualized away:
@@ -46,3 +47,10 @@ export const usePermissionUi = create<PermissionUiStore>((set) => ({
       reasonDraft: without(s.reasonDraft, id),
     })),
 }));
+
+// An agent deleted for real leaves no approval card behind: forget what was kept for its requests.
+onAgentRemoved((agentId) => {
+  for (const it of useApp.getState().items[agentId] ?? []) {
+    if (it.kind === "permission") usePermissionUi.getState().clear(it.requestId);
+  }
+});

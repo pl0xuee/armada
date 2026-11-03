@@ -242,6 +242,17 @@ export function watchWorkflow(agentId: string, toolCallId: string): () => void {
   };
 }
 
+/** Forgets the cached reports of one agent's runs (it was deleted). Runs still being watched keep their watch until left. */
+export function forgetWorkflowsOf(agentId: string) {
+  const prefix = `${agentId}\u0000`;
+  const { byKey } = useWorkflows.getState();
+  const gone = Object.keys(byKey).filter((k) => k.startsWith(prefix));
+  if (gone.length === 0) return;
+  const rest = { ...byKey };
+  for (const k of gone) delete rest[k];
+  useWorkflows.setState({ byKey: rest });
+}
+
 /** Test hook: forget every watch and cached report. */
 export function resetWorkflows() {
   for (const w of watches.values()) stop(w);

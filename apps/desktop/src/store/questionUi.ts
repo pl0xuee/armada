@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { onAgentRemoved, useApp } from "./app";
 import { EMPTY_DRAFT, type QuestionDraft } from "@/lib/question";
 
 /**
@@ -43,3 +44,10 @@ export const useQuestionUi = create<QuestionUiStore>((set) => ({
       return { drafts, visible, docked };
     }),
 }));
+
+// An agent deleted for real leaves no question card behind: forget what was kept for its requests.
+onAgentRemoved((agentId) => {
+  for (const it of useApp.getState().items[agentId] ?? []) {
+    if (it.kind === "question") useQuestionUi.getState().clear(it.requestId);
+  }
+});

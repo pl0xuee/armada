@@ -584,6 +584,7 @@ const AgentRow = memo(function AgentRow({
   const { done, meta: status } = view;
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const resumable = agent.status === "interrupted" || agent.status === "stopped";
+  const compact = density === "compact";
 
   const inputRef = useRef<HTMLInputElement>(null);
   /** Always start from the current title (it may have changed since the row mounted). */
@@ -625,36 +626,35 @@ const AgentRow = memo(function AgentRow({
     if (selected) rowRef.current?.scrollIntoView({ block: "nearest" });
   }, [selected]);
 
+  // The row opens the agent. Resume is a button of its own beside it, not inside it (a button can't hold a
+  // button), so the opener is one element and the row around it also takes the click on its padding.
+  const open = () => {
+    openAgent(agent.id);
+    onNavigate?.();
+  };
+  // While the title is being edited the opener holds a text field: it is no button then.
+  const openerProps = renaming
+    ? {}
+    : {
+        role: "button",
+        tabIndex: 0,
+        "aria-current": selected ? ("true" as const) : undefined,
+        "aria-label": `${agent.title}, ${status.label}`,
+      };
+
   return (
     <li className={nested ? "relative ml-[22px] border-l border-line pl-1.5" : undefined}>
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
             ref={rowRef}
-            role="button"
-            tabIndex={0}
-            aria-current={selected ? "true" : undefined}
-            aria-label={`${agent.title}, ${status.label}`}
             onClick={() => {
-              if (renaming) return;
-              openAgent(agent.id);
-              onNavigate?.();
-            }}
-            onKeyDown={(e) => {
-              // Keys pressed on something inside the row (Resume, the title field) are theirs, not the row's.
-              if (e.target !== e.currentTarget) return;
-              if ((e.key === "Enter" || e.key === " ") && !renaming) {
-                e.preventDefault();
-                openAgent(agent.id);
-                onNavigate?.();
-              }
-              if (e.key === "F2") startRename();
+              if (!renaming) open();
             }}
             className={cn(
-              "group relative flex gap-2.5 rounded-lg px-2 outline-none transition-colors duration-100",
-              density === "compact" ? "py-1.5" : "py-2",
+              "group relative rounded-lg transition-colors duration-100",
               selected ? "bg-accent/[0.11]" : "hover:bg-raised/60",
-              "focus-visible:shadow-[inset_0_0_0_1.5px_color-mix(in_srgb,var(--accent)_70%,transparent)]",
+              "has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1.5px_color-mix(in_srgb,var(--accent)_70%,transparent)]",
             )}
           >
             {selected && (
@@ -664,137 +664,158 @@ const AgentRow = memo(function AgentRow({
                 className="absolute -left-1 top-2.5 h-[22px] w-[3px] rounded-r-full bg-accent"
               />
             )}
-            <div className="relative mt-0.5 self-start">
-              <ProviderGlyph
-                provider={agent.provider}
-                customAgentId={agent.customAgentId}
-                size={nested ? "sm" : "md"}
-              />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                {renaming ? (
-                  <input
-                    ref={inputRef}
-                    value={title}
-                    aria-label="Agent title"
-                    onChange={(e) => setTitle(e.target.value)}
-                    onClick={(e) => e.stopPropagation()}
-                    onBlur={() => void commitRename()}
-                    onKeyDown={(e) => {
-                      e.stopPropagation();
-                      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        void commitRename();
-                      } else if (e.key === "Escape") {
-                        e.preventDefault();
-                        cancelRename();
-                      }
-                    }}
-                    className="h-5 min-w-0 flex-1 rounded border border-accent/50 bg-base px-1 text-[13px] focus:outline-none"
-                  />
-                ) : (
-                  <span
-                    className={cn(
-                      "min-w-0 flex-1 truncate text-[13px]",
-                      agent.unread ? "font-semibold text-fg" : "font-medium text-fg/90",
-                    )}
-                  >
-                    {agent.title}
-                  </span>
-                )}
-                {agent.parentId && (
-                  <Tooltip content="Helper agent" side="right">
-                    <span className="flex shrink-0 items-center text-accent" aria-label="Helper agent">
-                      <GitFork className="h-3 w-3" />
-                    </span>
-                  </Tooltip>
-                )}
-                {agent.unread && !selected && (
-                  <span
-                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]"
-                    aria-label="Unread"
-                  />
-                )}
-                <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-steel">
-                  {hotkey !== null && (
-                    <span aria-hidden className="hidden text-[11px] text-steel group-hover:inline">
-                      {modKey}
-                      {hotkey}
+            <div
+              {...openerProps}
+              onKeyDown={(e) => {
+                // Keys pressed on something inside the row (the title field) are theirs, not the row's.
+                if (e.target !== e.currentTarget) return;
+                if ((e.key === "Enter" || e.key === " ") && !renaming) {
+                  e.preventDefault();
+                  open();
+                }
+                if (e.key === "F2") startRename();
+              }}
+              className={cn(
+                "flex gap-2.5 rounded-lg px-2 outline-none",
+                // The Resume button below takes the bottom padding of a row that has one.
+                resumable ? (compact ? "pt-1.5" : "pt-2") : compact ? "py-1.5" : "py-2",
+              )}
+            >
+              <div className="relative mt-0.5 self-start">
+                <ProviderGlyph
+                  provider={agent.provider}
+                  customAgentId={agent.customAgentId}
+                  size={nested ? "sm" : "md"}
+                />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  {renaming ? (
+                    <input
+                      ref={inputRef}
+                      value={title}
+                      aria-label="Agent title"
+                      onChange={(e) => setTitle(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      onBlur={() => void commitRename()}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void commitRename();
+                        } else if (e.key === "Escape") {
+                          e.preventDefault();
+                          cancelRename();
+                        }
+                      }}
+                      className="h-5 min-w-0 flex-1 rounded border border-accent/50 bg-base px-1 text-[13px] focus:outline-none"
+                    />
+                  ) : (
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-[13px]",
+                        agent.unread ? "font-semibold text-fg" : "font-medium text-fg/90",
+                      )}
+                    >
+                      {agent.title}
                     </span>
                   )}
-                  {voiceNumber !== null && (
-                    <Tooltip content={`Say "agent ${voiceNumber}" to the voice assistant`} side="right">
-                      <span className="tabular rounded border border-line px-1 text-[10px] leading-[14px] text-steel/80">
-                        {voiceNumber}
+                  {agent.parentId && (
+                    <Tooltip content="Helper agent" side="right">
+                      <span className="flex shrink-0 items-center text-accent" aria-label="Helper agent">
+                        <GitFork className="h-3 w-3" />
                       </span>
                     </Tooltip>
                   )}
-                  <span className="sr-only">Last active </span>
-                  <Tooltip
-                    content={`${relativeTimeLong(agent.lastActivityAt, now)} · ${new Date(agent.lastActivityAt).toLocaleString()}`}
-                    side="right"
-                  >
-                    <time dateTime={new Date(agent.lastActivityAt).toISOString()} className="tabular">
-                      {relativeTime(agent.lastActivityAt, now)}
-                    </time>
-                  </Tooltip>
-                </span>
-              </div>
-              <div className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[11.5px] text-steel">
-                <StatusDot status={view.dot} size={6} done={done} />
-                {/* May shrink (and end in …) when the label is long, e.g. "1 background agent may be running". */}
-                <span
-                  className="min-w-0 truncate"
-                  title={view.detail ?? undefined}
-                  style={{
-                    color:
-                      !done && !view.background && (agent.status === "idle" || agent.status === "stopped")
-                        ? undefined
-                        : status.colorVar,
-                  }}
-                >
-                  {status.label}
-                </span>
-                {agent.rateLimited && (
-                  <Tooltip content="Hit its rate limit" side="right">
-                    <span className="flex min-w-0 items-center gap-1 text-warn" aria-label="Rate limit reached">
-                      <Gauge className="h-3 w-3 shrink-0" />
-                      <span className="truncate text-[10.5px]">
-                        <ResumesAt agent={agent} />
+                  {agent.unread && !selected && (
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]"
+                      aria-label="Unread"
+                    />
+                  )}
+                  <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-steel">
+                    {hotkey !== null && (
+                      <span aria-hidden className="hidden text-[11px] text-steel group-hover:inline">
+                        {modKey}
+                        {hotkey}
                       </span>
-                    </span>
-                  </Tooltip>
-                )}
-                {agent.scheduleId && (
-                  <Tooltip content="Started by a schedule" side="right">
-                    <span className="flex items-center text-steel" aria-label="Scheduled">
-                      <CalendarClock className="h-3 w-3" />
-                    </span>
-                  </Tooltip>
-                )}
-                {agent.helperSync && <SyncHint sync={agent.helperSync} />}
-                <SubagentBadge agentId={agent.id} />
-                <PrIndicator agentId={agent.id} />
-                {(showAccount || showProject) && (
-                  <>
-                    <span className="text-line-strong">·</span>
-                    <span className="truncate">
-                      {showAccount && (agent.provider === "custom" ? identity.name : (account?.name ?? "—"))}
-                      {showAccount && showProject && " · "}
-                      {showProject && basename(agent.projectPath)}
-                    </span>
-                  </>
-                )}
+                    )}
+                    {voiceNumber !== null && (
+                      <Tooltip content={`Say "agent ${voiceNumber}" to the voice assistant`} side="right">
+                        <span className="tabular rounded border border-line px-1 text-[10px] leading-[14px] text-steel/80">
+                          {voiceNumber}
+                        </span>
+                      </Tooltip>
+                    )}
+                    <span className="sr-only">Last active </span>
+                    <Tooltip
+                      content={`${relativeTimeLong(agent.lastActivityAt, now)} · ${new Date(agent.lastActivityAt).toLocaleString()}`}
+                      side="right"
+                    >
+                      <time dateTime={new Date(agent.lastActivityAt).toISOString()} className="tabular">
+                        {relativeTime(agent.lastActivityAt, now)}
+                      </time>
+                    </Tooltip>
+                  </span>
+                </div>
+                <div className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[11.5px] text-steel">
+                  <StatusDot status={view.dot} size={6} done={done} />
+                  {/* May shrink (and end in …) when the label is long, e.g. "1 background agent may be running". */}
+                  <span
+                    className="min-w-0 truncate"
+                    title={view.detail ?? undefined}
+                    style={{
+                      color:
+                        !done && !view.background && (agent.status === "idle" || agent.status === "stopped")
+                          ? undefined
+                          : status.colorVar,
+                    }}
+                  >
+                    {status.label}
+                  </span>
+                  {agent.rateLimited && (
+                    <Tooltip content="Hit its rate limit" side="right">
+                      <span className="flex min-w-0 items-center gap-1 text-warn" aria-label="Rate limit reached">
+                        <Gauge className="h-3 w-3 shrink-0" />
+                        <span className="truncate text-[10.5px]">
+                          <ResumesAt agent={agent} />
+                        </span>
+                      </span>
+                    </Tooltip>
+                  )}
+                  {agent.scheduleId && (
+                    <Tooltip content="Started by a schedule" side="right">
+                      <span className="flex items-center text-steel" aria-label="Scheduled">
+                        <CalendarClock className="h-3 w-3" />
+                      </span>
+                    </Tooltip>
+                  )}
+                  {agent.helperSync && <SyncHint sync={agent.helperSync} />}
+                  <SubagentBadge agentId={agent.id} />
+                  <PrIndicator agentId={agent.id} />
+                  {(showAccount || showProject) && (
+                    <>
+                      <span className="text-line-strong">·</span>
+                      <span className="truncate">
+                        {showAccount && (agent.provider === "custom" ? identity.name : (account?.name ?? "—"))}
+                        {showAccount && showProject && " · "}
+                        {showProject && basename(agent.projectPath)}
+                      </span>
+                    </>
+                  )}
+                </div>
+                {agent.lastMessage &&
+                  !nested &&
+                  density === "comfortable" &&
+                  (selected || agent.status === "needs_permission") && (
+                    <p className="mt-1 line-clamp-1 text-[12px] leading-snug text-muted">{agent.lastMessage}</p>
+                  )}
               </div>
-              {agent.lastMessage &&
-                !nested &&
-                density === "comfortable" &&
-                (selected || agent.status === "needs_permission") && (
-                  <p className="mt-1 line-clamp-1 text-[12px] leading-snug text-muted">{agent.lastMessage}</p>
-                )}
-              {resumable && (
+            </div>
+            {resumable && (
+              // Lined up with the text above (row padding + glyph + gap).
+              <div className={cn("pt-1.5", compact ? "pb-1.5" : "pb-2", nested ? "pl-[38px]" : "pl-[44px]")}>
                 <button
                   type="button"
                   onClick={(e) => {
@@ -802,7 +823,7 @@ const AgentRow = memo(function AgentRow({
                     void resumeAgent(agent);
                   }}
                   className={cn(
-                    "mt-1.5 inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[11.5px] font-medium transition-colors",
+                    "inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[11.5px] font-medium transition-colors",
                     agent.status === "interrupted"
                       ? "border-violet/40 bg-violet/10 text-violet hover:bg-violet/20"
                       : "border-line-strong bg-raised text-muted hover:text-fg",
@@ -810,8 +831,8 @@ const AgentRow = memo(function AgentRow({
                 >
                   <Play className="h-3 w-3" /> Resume
                 </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent onCloseAutoFocus={(e) => renaming && e.preventDefault()}>

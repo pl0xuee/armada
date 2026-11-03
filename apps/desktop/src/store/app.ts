@@ -193,6 +193,11 @@ export function isSuppressed(id: string): boolean {
   return suppressed.has(id);
 }
 
+/** True once the agent was deleted for real: a late reply about it (PR status, checkpoints) is dropped. */
+export function isRemoved(id: string): boolean {
+  return removed.has(id);
+}
+
 /** Events that arrive while a timeline is (re)loading, replayed over the snapshot. */
 const buffered = new Map<string, ItemEvent[]>();
 const pendingRefetch = new Set<string>();

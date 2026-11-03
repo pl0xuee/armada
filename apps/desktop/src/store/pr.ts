@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
 import type { PrStatus } from "@/lib/types";
+import { isRemoved, onAgentRemoved } from "./app";
 
 interface PrState {
   byAgent: Record<string, PrStatus>;
@@ -27,7 +28,8 @@ export function refreshPr(agentId: string, force = false): Promise<void> {
   const p = api
     .prStatus(agentId, force)
     .then((status) => {
-      if (seq < (applied.get(agentId) ?? 0)) return;
+      // The agent was deleted while this was in flight: nothing to show.
+      if (isRemoved(agentId) || seq < (applied.get(agentId) ?? 0)) return;
       applied.set(agentId, seq);
       const prev = usePr.getState().byAgent[agentId];
       // Keep the last good PR info across transient "unknown" results.
@@ -45,3 +47,14 @@ export function refreshPrSoon(agentId: string) {
   void refreshPr(agentId, true);
   setTimeout(() => void refreshPr(agentId, true), 8000);
 }
+
+// An agent deleted for real takes its PR status with it (a pending, undoable delete keeps it).
+onAgentRemoved((id) => {
+  started.delete(id);
+  applied.delete(id);
+  usePr.setState((s) => {
+    if (!(id in s.byAgent)) return s;
+    const { [id]: _gone, ...byAgent } = s.byAgent;
+    return { byAgent };
+  });
+});

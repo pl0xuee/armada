@@ -23,6 +23,7 @@ import {
 import { DONE_META, STATUS, type StatusMeta } from "@/lib/providers";
 import type { Agent, AgentStatus } from "@/lib/types";
 import {
+  forgetWorkflowsOf,
   pollWorkflowNow,
   recheckWorkflow,
   useWorkflows,
@@ -30,7 +31,7 @@ import {
   workflowKey,
   type WorkflowCall,
 } from "@/lib/workflows";
-import { useApp } from "./app";
+import { onAgentRemoved, useApp } from "./app";
 import { useIsDone } from "./completion";
 import { useUi } from "./ui";
 
@@ -300,6 +301,17 @@ export function installBackgroundTracker(): () => void {
     prevItems = items;
   });
 
+  // An agent deleted for real takes its reports and its "Everything finished" note with it (a pending,
+  // undoable delete keeps them: Undo needs them back).
+  const offRemoved = onAgentRemoved((id) => {
+    forget(id);
+    forgetWorkflowsOf(id);
+    const st = useBackgroundStore.getState();
+    if (st.finishedAt[id] === undefined) return;
+    const { [id]: _gone, ...finishedAt } = st.finishedAt;
+    useBackgroundStore.setState({ finishedAt });
+  });
+
   // A report arrived: re-count the agents whose runs it belongs to.
   const offWf = useWorkflows.subscribe((s, p) => {
     if (s.byKey === p.byKey) return;
@@ -311,6 +323,7 @@ export function installBackgroundTracker(): () => void {
   return () => {
     offApp();
     offWf();
+    offRemoved();
     window.removeEventListener("focus", onWake);
     if (timer) clearInterval(timer);
     if (awayTimer) clearInterval(awayTimer);

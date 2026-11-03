@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { api } from "@/lib/api";
 import { rankDevUrls, urlPort, type DetectedUrl } from "@/lib/ports";
-import { useApp } from "@/store/app";
+import { isRemoved, onAgentRemoved, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { terminalTranscript, useWorkspace } from "@/store/workspace";
 
@@ -50,19 +50,46 @@ export function previewOf(s: Store, agentId: string): PreviewState {
   return s.byAgent[agentId] ?? EMPTY;
 }
 
-export function patchPreview(agentId: string, p: Partial<PreviewState>) {
-  usePreview.setState((s) => ({ byAgent: { ...s.byAgent, [agentId]: { ...(s.byAgent[agentId] ?? EMPTY), ...p } } }));
-  if ("url" in p || "width" in p) {
-    try {
-      const out = Object.fromEntries(
-        Object.entries(usePreview.getState().byAgent).map(([id, v]) => [id, { url: v.url, width: v.width }]),
-      );
-      localStorage.setItem(KEY, JSON.stringify(out));
-    } catch {
-      /* storage unavailable: state still works in memory */
-    }
+/** Writes what is kept across restarts (each agent's address and width). */
+function save() {
+  try {
+    const out = Object.fromEntries(
+      Object.entries(usePreview.getState().byAgent).map(([id, v]) => [id, { url: v.url, width: v.width }]),
+    );
+    localStorage.setItem(KEY, JSON.stringify(out));
+  } catch {
+    /* storage unavailable: state still works in memory */
   }
 }
+
+export function patchPreview(agentId: string, p: Partial<PreviewState>) {
+  // A late scan or a click can't bring back an agent that was deleted.
+  if (isRemoved(agentId)) return;
+  usePreview.setState((s) => ({ byAgent: { ...s.byAgent, [agentId]: { ...(s.byAgent[agentId] ?? EMPTY), ...p } } }));
+  if ("url" in p || "width" in p) save();
+}
+
+/** Drops the pane state of every agent not in `keep` (and from storage). Returns whether anything was dropped. */
+export function prunePreviews(keep: (id: string) => boolean): boolean {
+  const byAgent = usePreview.getState().byAgent;
+  const gone = Object.keys(byAgent).filter((id) => !keep(id));
+  if (gone.length === 0) return false;
+  const rest = { ...byAgent };
+  for (const id of gone) {
+    delete rest[id];
+    lastProbe.delete(id);
+  }
+  usePreview.setState({ byAgent: rest });
+  save();
+  return true;
+}
+
+// An agent deleted for real takes its preview state with it (a pending, undoable delete keeps it).
+onAgentRemoved((id) => prunePreviews((k) => k !== id));
+// Addresses remembered for agents deleted in an earlier session are dropped once the agent list is known.
+useApp.subscribe((s, p) => {
+  if (s.booted && !p.booted) prunePreviews((id) => id in s.agents);
+});
 
 /**
  * Shows `agentId`'s Preview pane (right of the conversation) and loads `url` (already a loopback URL;
