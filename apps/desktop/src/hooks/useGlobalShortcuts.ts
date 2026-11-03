@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { orderedAgents } from "@/lib/agents";
+import { onVaHotkey } from "@/lib/api";
 import { LIST_DOCK_QUERY } from "@/lib/layout";
 import { selectNextTriage, triageQueueNow } from "@/components/triage/useTriage";
 import { toggleAgentList } from "./useAgentListLayout";
@@ -138,6 +139,22 @@ export function useGlobalShortcuts(enabled: boolean) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [enabled]);
+
+  // The system-wide voice assistant hotkey (works while the window is in the background):
+  // the shell sends an event, and it does what the in-app shortcut does.
+  useEffect(() => {
+    if (!enabled) return;
+    let off: (() => void) | null = null;
+    let gone = false;
+    void onVaHotkey(toggleVoiceAssistant).then((un) => {
+      if (gone) un();
+      else off = un;
+    });
+    return () => {
+      gone = true;
+      off?.();
+    };
   }, [enabled]);
 }
 

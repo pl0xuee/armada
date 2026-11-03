@@ -724,6 +724,8 @@ export interface VoiceAssistantSettings {
   headphones: boolean;
   /** Run what the assistant proposes at once, without the confirmation card. */
   autoConfirm: boolean;
+  /** System-wide shortcut that starts or stops the assistant from any app. Empty: off. */
+  hotkey: string;
 }
 
 export interface VoiceAssistantUsage {

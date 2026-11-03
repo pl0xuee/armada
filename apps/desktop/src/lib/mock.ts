@@ -12,6 +12,8 @@ import { mockWorkflowProgress, mockWorkflowStart } from "./mock-workflow";
 import { pluralize } from "./format";
 import { TURN_ONLY_PREFIX } from "./background";
 import { validateAlertUrl } from "./alertTargets";
+import { sameAccelerator } from "../components/settings/acceleratorLabels";
+import { isMac } from "./utils";
 import { mockProjectConfig, mockSaveRules } from "./mock-project-config";
 import {
   mockInstructionsSave,
@@ -3645,6 +3647,8 @@ function validateSettings(s: Settings): string | null {
     return "The command output limit must be between 4,000 and 128,000 characters (or empty for Claude's default)";
   if (ts.subagentModel != null && !["sonnet", "haiku"].includes(ts.subagentModel))
     return `Unknown helper model “${ts.subagentModel}”`;
+  if (sameAccelerator(s.voiceAssistant.hotkey, s.globalHotkey, isMac))
+    return "The voice assistant hotkey must differ from the global hotkey (which brings Kvistcode forward)";
   if (!["off", "ask", "auto"].includes(s.failover)) return `Unknown failover setting “${s.failover}”`;
   if (!["auto", "ask"].includes(s.defaultPermissionMode)) return `Unknown permission mode “${s.defaultPermissionMode}”`;
   if (!Number.isInteger(s.remote.port) || s.remote.port < 1 || s.remote.port > 65535) {

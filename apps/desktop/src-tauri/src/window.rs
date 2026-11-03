@@ -99,6 +99,18 @@ pub fn show_main(app: &AppHandle) {
     }
 }
 
+/// Makes the window visible again if it is hidden or minimized, without taking focus.
+pub fn reveal_main(app: &AppHandle) {
+    if let Some(w) = main_window(app) {
+        if !w.is_visible().unwrap_or(true) {
+            let _ = w.show();
+        }
+        if w.is_minimized().unwrap_or(false) {
+            let _ = w.unminimize();
+        }
+    }
+}
+
 pub fn hide_main(app: &AppHandle) {
     if let Some(w) = main_window(app) {
         let _ = w.hide();

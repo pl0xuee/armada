@@ -238,6 +238,8 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if argv.iter().any(|a| a == "--new-agent") {
                 window::navigate(app, kvistcode_core::NavigateTarget::NewAgent);
+            } else if argv.iter().any(|a| a == "--voice-assistant") {
+                hotkey::toggle_voice_assistant(app);
             } else {
                 window::show_main(app);
             }
@@ -350,9 +352,11 @@ fn setup(app: &AppHandle, startup_data_dir: Option<&Path>) -> anyhow::Result<()>
         // Registration hops to the main thread and waits; do it off the main thread.
         let app = app.clone();
         let hotkey = settings.global_hotkey.clone();
+        let va_hotkey = settings.voice_assistant.hotkey.clone();
         // Failures are logged; Settings reports them when the user changes the hotkey.
         tauri::async_runtime::spawn_blocking(move || {
             let _ = hotkey::apply(&app, &hotkey);
+            let _ = hotkey::apply_voice_assistant(&app, &va_hotkey);
         });
     }
     // The login item from before the rename (Armada) would keep starting the old app.

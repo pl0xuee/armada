@@ -11,6 +11,8 @@ pub struct Shell {
     providers: tokio::sync::Mutex<Option<Vec<ProviderInfo>>>,
     /// The global hotkey currently registered with the OS.
     pub hotkey: Mutex<Option<String>>,
+    /// The voice assistant hotkey currently registered with the OS.
+    pub va_hotkey: Mutex<Option<String>>,
 }
 
 impl Shell {
@@ -19,6 +21,7 @@ impl Shell {
             data_dir,
             providers: tokio::sync::Mutex::new(None),
             hotkey: Mutex::new(None),
+            va_hotkey: Mutex::new(None),
         }
     }
 

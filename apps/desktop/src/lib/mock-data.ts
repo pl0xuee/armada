@@ -298,6 +298,7 @@ export function seedSettings(onboarded: boolean): Settings {
       silenceTimeoutSecs: 60,
       headphones: false,
       autoConfirm: false,
+      hotkey: "",
     },
     customAgents: [
       {

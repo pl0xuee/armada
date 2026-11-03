@@ -12,6 +12,7 @@ docs/RELEASING.md).
 
 - **A reply language.** Settings → Behavior → Agent replies has a “Reply language”: pick Spanish, Japanese and so on and agents and the voice assistant answer in it (code and file names stay as they are). The default, “Match what I write”, changes nothing.
 - **See what the voice assistant sees.** While it is on, its panel shows “Sees:” with the open agent and its folder (or the screen you are on, and how many agents are side by side), plus a button to send the screen to it again.
+- **A hotkey to talk from anywhere.** Settings → Voice assistant can set a system-wide shortcut that starts or stops the assistant while you are in another app. On Wayland, bind `kvistcode --voice-assistant` to a key in your compositor instead (for example Hyprland: `bind = SUPER, V, exec, kvistcode --voice-assistant`).
 - **Voice assistant: run actions without asking.** Settings → Voice assistant has an option to skip the Confirm card, so starting an agent, sending a message or renaming one happens as soon as you say it. It is off by default, and agents you start still ask before changing files or running commands.
 
 ### Fixed

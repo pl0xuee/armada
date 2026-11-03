@@ -1203,6 +1203,14 @@ fn validate_settings(previous: Option<&Settings>, settings: &Settings) -> CmdRes
     if let (Some(url), true) = (url, url_changed) {
         crate::attention::validate_ntfy_url(url).map_err(|e| format!("Phone push URL: {e}"))?;
     }
+    let va_hotkey = settings.voice_assistant.hotkey.trim();
+    let va_hotkey_changed = previous.is_none_or(|p| {
+        p.voice_assistant.hotkey.trim() != va_hotkey
+            || p.global_hotkey.trim() != settings.global_hotkey.trim()
+    });
+    if va_hotkey_changed {
+        crate::hotkey::validate_voice_assistant_hotkey(&settings.global_hotkey, va_hotkey)?;
+    }
     validate_alert_targets(previous, settings)
 }
 
@@ -1261,17 +1269,22 @@ pub async fn update_settings(
     }
     // No-op when unchanged; retries a previously failed registration otherwise.
     let hotkey = crate::hotkey::apply(&app, &saved.global_hotkey);
+    let va_hotkey = crate::hotkey::apply_voice_assistant(&app, &saved.voice_assistant.hotkey);
     app.state::<Arc<Remote>>().apply(&saved.remote).await;
-    if let Err(e) = hotkey {
-        // Reported when the user just set this hotkey; an unchanged one that still can't
-        // be registered (e.g. Wayland) shouldn't fail every later save.
-        let changed =
-            previous.as_ref().map(|p| p.global_hotkey.trim()) != Some(saved.global_hotkey.trim());
-        if changed {
+    // Reported when the user just set this hotkey; an unchanged one that still can't
+    // be registered (e.g. Wayland) shouldn't fail every later save.
+    let global_changed =
+        previous.as_ref().map(|p| p.global_hotkey.trim()) != Some(saved.global_hotkey.trim());
+    let va_changed = previous.as_ref().map(|p| p.voice_assistant.hotkey.trim())
+        != Some(saved.voice_assistant.hotkey.trim());
+    for (result, changed, hotkey) in [
+        (hotkey, global_changed, saved.global_hotkey.trim()),
+        (va_hotkey, va_changed, saved.voice_assistant.hotkey.trim()),
+    ] {
+        if let (Err(e), true) = (result, changed) {
             return Err(format!(
-                "Settings saved, but the shortcut \"{}\" couldn't be registered: {e}{}",
-                saved.global_hotkey.trim(),
-                if e.to_string().contains("Wayland") {
+                "Settings saved, but the shortcut \"{hotkey}\" couldn't be registered: {e}{}",
+                if e.contains("Wayland") {
                     ""
                 } else {
                     ". It may be invalid or used by another app."

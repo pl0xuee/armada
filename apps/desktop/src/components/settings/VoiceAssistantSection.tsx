@@ -1,4 +1,4 @@
-import { ChevronRight, ShieldAlert } from "lucide-react";
+import { ChevronRight, ShieldAlert, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
@@ -10,9 +10,11 @@ import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import type { Settings, VoiceAssistantSettings, VoiceAssistantUsage } from "@/lib/types";
 import { formatCost, VA_DEFAULT_VOICES, VA_MODEL_DEFAULT } from "@/lib/voiceAssistant";
-import { cn, errorMessage, modKey } from "@/lib/utils";
+import { cn, errorMessage, isMac, modKey } from "@/lib/utils";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
+import { acceleratorCaps, sameAccelerator } from "./acceleratorLabels";
+import { HotkeyRecorder } from "./HotkeyRecorder";
 import { saveSettingsPatch } from "./settingsErrors";
 import { SectionHeader, SettingGroup, SettingRow } from "./SettingRow";
 
@@ -33,6 +35,8 @@ export function VoiceAssistantSection({ settings }: { settings: Settings }) {
   const [confirm, setConfirm] = useState(false);
   const [model, setModel] = useState(va.model);
   const [advanced, setAdvanced] = useState(false);
+  const [hotkeyError, setHotkeyError] = useState<string | null>(null);
+  const [hotkeySaving, setHotkeySaving] = useState(false);
 
   const keyAccounts = accounts.filter((a) => a.provider === "codex" && a.authKind === "api_key");
 
@@ -60,6 +64,24 @@ export function VoiceAssistantSection({ settings }: { settings: Settings }) {
     });
     if (ok) setConfirm(false);
   };
+
+  const saveHotkey = async (hotkey: string) => {
+    if (sameAccelerator(hotkey, settings.globalHotkey, isMac)) {
+      setHotkeyError("That is already the global hotkey that brings Kvistcode forward. Pick a different one.");
+      return;
+    }
+    setHotkeySaving(true);
+    try {
+      await useApp.getState().patchSettings({ voiceAssistant: { ...va, hotkey } });
+      setHotkeyError(null);
+    } catch (e) {
+      // The backend refuses shortcuts it can't register (taken by another app, or not valid).
+      setHotkeyError(errorMessage(e));
+    } finally {
+      setHotkeySaving(false);
+    }
+  };
+  const hotkeyCaps = acceleratorCaps(va.hotkey, isMac);
 
   const accountOptions = [
     ...(va.accountId === null ? [{ value: MISSING, label: "Choose an OpenAI account…" }] : []),
@@ -108,6 +130,42 @@ export function VoiceAssistantSection({ settings }: { settings: Settings }) {
             checked={va.enabled}
             onCheckedChange={(on) => (on ? setConfirm(true) : void update({ enabled: false }))}
           />
+        </SettingRow>
+        <SettingRow
+          title="Hotkey to talk from anywhere"
+          description="Starts or stops the assistant even when Kvistcode is in the background. Record a shortcut, or leave it empty to turn it off."
+        >
+          <div className="flex w-[240px] max-w-full flex-col items-end gap-1.5">
+            <div className="flex items-center gap-1.5">
+              {hotkeyCaps.length > 0 ? (
+                <span className="flex items-center gap-1">
+                  {hotkeyCaps.map((c, i) => (
+                    <Kbd key={`${c}${i}`}>{c}</Kbd>
+                  ))}
+                </span>
+              ) : (
+                <span className="text-[12px] text-steel">Off</span>
+              )}
+              {va.hotkey && (
+                <button
+                  type="button"
+                  aria-label="Clear hotkey (turn off)"
+                  title="Clear (turn off)"
+                  disabled={hotkeySaving}
+                  onClick={() => void saveHotkey("")}
+                  className="flex h-5 w-5 items-center justify-center rounded text-steel transition-colors hover:bg-raised hover:text-fg"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+            <HotkeyRecorder disabled={hotkeySaving} onRecord={(acc) => void saveHotkey(acc)} />
+            {hotkeyError && (
+              <p role="alert" className="text-right text-[11.5px] leading-snug text-err">
+                {hotkeyError}
+              </p>
+            )}
+          </div>
         </SettingRow>
       </SettingGroup>
 

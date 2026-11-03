@@ -1216,6 +1216,9 @@ pub struct VoiceAssistantSettings {
     /// without the confirmation card. Off by default. Agents' own permission requests are
     /// never answered by the assistant, whatever this says.
     pub auto_confirm: bool,
+    /// System-wide shortcut that starts or stops the assistant while Kvistcode is in the
+    /// background (a Tauri accelerator like `CmdOrCtrl+Shift+V`). Empty: off.
+    pub hotkey: String,
 }
 
 impl Default for VoiceAssistantSettings {
@@ -1229,8 +1232,18 @@ impl Default for VoiceAssistantSettings {
             silence_timeout_secs: 60,
             headphones: false,
             auto_confirm: false,
+            hotkey: String::new(),
         }
     }
+}
+
+/// A shortcut with case and spaces ignored, to spot two settings that mean the same keys.
+fn hotkey_key(hotkey: &str) -> String {
+    hotkey
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 /// Voice dictation (local speech-to-text).
@@ -1443,6 +1456,8 @@ fn default_custom_color() -> String {
 
 pub const MIN_INTERFACE_SCALE: u32 = 75;
 pub const MAX_INTERFACE_SCALE: u32 = 150;
+/// Longest shortcut string accepted for a hotkey setting.
+pub const MAX_HOTKEY_LEN: usize = 64;
 
 impl Settings {
     /// Rejects values the rest of Kvistcode can't act on.
@@ -1509,6 +1524,15 @@ impl Settings {
                 self.default_language
             ));
         }
+        if self.voice_assistant.hotkey.chars().count() > MAX_HOTKEY_LEN {
+            return Err("The voice assistant hotkey is too long".into());
+        }
+        if self.voice_assistant_hotkey_clashes() {
+            return Err(
+                "The voice assistant hotkey must differ from the global hotkey (which brings Kvistcode forward)"
+                    .into(),
+            );
+        }
         if let Some(w) = self.auto_compact_window {
             if !crate::token_saver::COMPACT_WINDOW_RANGE.contains(&w) {
                 return Err("The auto-compact size must be between 100,000 and 1,000,000 tokens (or empty for Claude's default)".into());
@@ -1518,6 +1542,12 @@ impl Settings {
             return Err(problem);
         }
         Ok(())
+    }
+
+    /// The voice assistant hotkey is set and is the same keys as the global hotkey.
+    fn voice_assistant_hotkey_clashes(&self) -> bool {
+        let va = hotkey_key(&self.voice_assistant.hotkey);
+        !va.is_empty() && va == hotkey_key(&self.global_hotkey)
     }
 
     /// Resets values `validate` would reject to their defaults (for settings read
@@ -1578,6 +1608,12 @@ impl Settings {
         self.project_budgets.retain(|_, cap| !cap.is_empty());
         if bad_project {
             reset.push("projectBudgets");
+        }
+        if self.voice_assistant.hotkey.chars().count() > MAX_HOTKEY_LEN
+            || self.voice_assistant_hotkey_clashes()
+        {
+            self.voice_assistant.hotkey = String::new();
+            reset.push("voiceAssistant.hotkey");
         }
         if crate::voice::model_spec(&self.voice.model).is_none() {
             self.voice.model = defaults.voice.model.clone();
@@ -1802,6 +1838,33 @@ mod voice_settings_tests {
         assert!(s.validate().is_ok());
         assert_eq!(s.voice.model, "base.en");
         assert!(!s.voice.auto_send);
+    }
+
+    #[test]
+    fn voice_assistant_hotkey_is_optional_and_must_differ_from_the_global_one() {
+        let mut s = Settings::default();
+        assert!(s.voice_assistant.hotkey.is_empty());
+        s.voice_assistant.hotkey = "CmdOrCtrl+Shift+V".into();
+        assert!(s.validate().is_ok());
+        // Same keys, written differently.
+        s.voice_assistant.hotkey = " cmdorctrl + shift+space ".into();
+        assert!(s.validate().is_err());
+        assert_eq!(s.sanitize(), vec!["voiceAssistant.hotkey"]);
+        assert!(s.voice_assistant.hotkey.is_empty());
+        // With the global hotkey off, any shortcut is fine.
+        s.global_hotkey.clear();
+        s.voice_assistant.hotkey = "CmdOrCtrl+Shift+Space".into();
+        assert!(s.validate().is_ok());
+        s.voice_assistant.hotkey = "A".repeat(MAX_HOTKEY_LEN + 1);
+        assert!(s.validate().is_err());
+    }
+
+    #[test]
+    fn old_voice_assistant_settings_load_without_a_hotkey() {
+        let va: VoiceAssistantSettings =
+            serde_json::from_str(r#"{"enabled":true,"voice":"marin"}"#).unwrap();
+        assert!(va.enabled);
+        assert!(va.hotkey.is_empty());
     }
 
     #[test]

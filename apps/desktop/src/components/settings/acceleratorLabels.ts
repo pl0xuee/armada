@@ -47,3 +47,9 @@ export function acceleratorCaps(accelerator: string, mac: boolean): string[] {
   if (key) caps.push(key);
   return caps;
 }
+
+/** Two accelerators that press the same keys (case, spacing and Ctrl/CmdOrCtrl aside). Empty never matches. */
+export function sameAccelerator(a: string, b: string, mac: boolean): boolean {
+  const capsA = acceleratorCaps(a, mac);
+  return capsA.length > 0 && capsA.join("+").toLowerCase() === acceleratorCaps(b, mac).join("+").toLowerCase();
+}

@@ -515,6 +515,12 @@ export function onVaEvent(cb: (e: VaEvent) => void): Promise<UnlistenFn> {
   return listen<VaEvent>("va-event", (e) => cb(e.payload));
 }
 
+/** The system-wide voice assistant hotkey was pressed (the shell asks the window to start or stop it). */
+export function onVaHotkey(cb: () => void): Promise<UnlistenFn> {
+  if (!isTauri()) return Promise.resolve(onVoiceBus("va-hotkey", cb));
+  return listen("va-hotkey", () => cb());
+}
+
 export function onVoiceLimit(cb: () => void): Promise<UnlistenFn> {
   if (!isTauri()) return Promise.resolve(onVoiceBus("voice-limit", cb));
   return listen("voice-limit", () => cb());
