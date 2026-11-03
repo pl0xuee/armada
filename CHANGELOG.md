@@ -5,6 +5,18 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## Unreleased
+
+### New
+- **A Refresh button in the project list.** If you rename or move a project's folder, press it and Kvistcode finds the new place (it asks the project's worktrees) or, when it can't, offers “Locate…” so you pick the folder yourself. Agents, schedules and git worktrees follow.
+
+- **A reply language.** Settings → Behavior → Agent replies has a “Reply language”: pick Spanish, Japanese and so on and agents and the voice assistant answer in it (code and file names stay as they are). The default, “Match what I write”, changes nothing.
+- **Voice assistant: run actions without asking.** Settings → Voice assistant has an option to skip the Confirm card, so starting an agent, sending a message or renaming one happens as soon as you say it. It is off by default, and agents you start still ask before changing files or running commands.
+
+### Fixed
+- **The voice assistant now sees an archived agent you have open**, which agents are shown side by side, and projects whose folder went missing (it can tell you to refresh or locate it instead of losing the project).
+- **The assistant is told again about your screen if a report didn't arrive**, and no longer reports an open agent that was deleted.
+
 ## v0.4.1 — 2026-11-02
 
 Simpler Settings, header and rate-limit banner, a voice assistant that sees the open agent right away, six more themes, and a round of fixes.

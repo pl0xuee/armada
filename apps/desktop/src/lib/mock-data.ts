@@ -274,6 +274,7 @@ export function seedSettings(onboarded: boolean): Settings {
     defaultPermissionMode: "auto",
     busySend: "deliver",
     responseStyle: "concise",
+    defaultLanguage: "",
     helperDefaults: { provider: null, accountId: null, customAgentId: null, model: null },
     dailyBudgetUsd: 15,
     agentBudgetUsd: 3,
@@ -296,6 +297,7 @@ export function seedSettings(onboarded: boolean): Settings {
       maxSessionMins: 10,
       silenceTimeoutSecs: 60,
       headphones: false,
+      autoConfirm: false,
     },
     customAgents: [
       {

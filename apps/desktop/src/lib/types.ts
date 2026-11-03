@@ -610,6 +610,8 @@ export interface Settings {
   busySend: BusySend;
   /** How agents write their replies: new agents from the start, others when their session next resumes. */
   responseStyle: ResponseStyle;
+  /** The language agents and the voice assistant reply in; "" = follow the language you write in. */
+  defaultLanguage: string;
   helperDefaults: HelperDefaults;
   /** Cap on all agents' spend per local day, in USD; null = no cap. */
   dailyBudgetUsd: number | null;
@@ -720,6 +722,8 @@ export interface VoiceAssistantSettings {
   silenceTimeoutSecs: number;
   /** Headphones on: keep the mic open while the assistant talks (allows interrupting). */
   headphones: boolean;
+  /** Run what the assistant proposes at once, without the confirmation card. */
+  autoConfirm: boolean;
 }
 
 export interface VoiceAssistantUsage {
@@ -900,6 +904,11 @@ export interface McpServer {
   headers: KeyValue[];
   /** Empty or missing: every project. Otherwise only agents in that project folder get it. */
   projectPath?: string;
+}
+
+export interface ProjectRefresh {
+  moved: { from: string; to: string }[];
+  missing: string[];
 }
 
 export interface Schedule {

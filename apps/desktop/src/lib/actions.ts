@@ -16,7 +16,8 @@ import type {
   Provider,
   TimelineItem,
 } from "./types";
-import { errorMessage } from "./utils";
+import { basename, errorMessage } from "./utils";
+import { pickFolder } from "./window";
 
 type PermissionItem = Extract<TimelineItem, { kind: "permission" }>;
 
@@ -140,6 +141,35 @@ export async function checkAccount(account: Account) {
     else toast.warning(`${updated.name} is not signed in`, { description: updated.status?.error ?? undefined });
   } catch (e) {
     toast.error("Account check failed", { description: errorMessage(e) });
+  }
+}
+
+/** Lets the user point a project at the folder it moved to. */
+async function locateProject(from: string) {
+  const to = await pickFolder();
+  if (!to) return;
+  try {
+    await api.relocateProject(from, to);
+    toast.success(`${basename(from)} now points to ${basename(to)}`);
+  } catch (e) {
+    toast.error("Couldn't use that folder", { description: errorMessage(e) });
+  }
+}
+
+/** Finds projects whose folder was renamed or moved. What it can't find, you locate by hand. */
+export async function refreshProjects() {
+  try {
+    const { moved, missing } = await api.refreshProjects();
+    for (const m of moved) toast.success(`${basename(m.from)} is now ${basename(m.to)}`, { description: m.to });
+    for (const from of missing)
+      toast.warning(`Can't find the folder "${basename(from)}"`, {
+        description: from,
+        duration: 15000,
+        action: { label: "Locate…", onClick: () => void locateProject(from) },
+      });
+    if (!moved.length && !missing.length) toast.success("Every project folder is where it should be");
+  } catch (e) {
+    toast.error("Couldn't refresh projects", { description: errorMessage(e) });
   }
 }
 

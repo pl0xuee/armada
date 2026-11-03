@@ -99,6 +99,8 @@ macro_rules! handler {
             commands::delete_agent,
             commands::rename_agent,
             commands::archive_agent,
+            commands::refresh_projects,
+            commands::relocate_project,
             commands::mark_read,
             commands::set_agent_config,
             commands::config_defaults,

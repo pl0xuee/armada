@@ -79,6 +79,8 @@ pub struct SessionConfig {
     pub reconnect_delay: Duration,
     /// Headphones: keep the mic open while the assistant speaks (allows barge-in).
     pub headphones: bool,
+    /// Run proposed actions at once instead of waiting for the user to confirm on screen.
+    pub auto_confirm: bool,
     pub confirm_ttl: Duration,
 }
 
@@ -771,6 +773,20 @@ async fn connection_inner(
                         outcome = ToolOutcome::error(
                             "Too many actions were proposed in this turn. Do not propose more; ask the user what they want next.",
                         );
+                    } else if cfg.auto_confirm {
+                        // The user chose to skip confirmation: run it now. The result comes back
+                        // like a confirmed action's. The per-turn cap above still applies.
+                        proposals += 1;
+                        late_in_flight += 1;
+                        let out = late_tx.clone();
+                        let run = action.run;
+                        tokio::spawn(async move {
+                            let _ = out.send(run_guarded(run).await);
+                        });
+                        outcome.output = super::tools::wrap_data(serde_json::json!({
+                            "status": "running",
+                            "note": "Kvistcode is running it now (the user turned off confirmations). The result follows."
+                        }));
                     } else {
                         proposals += 1;
                         let id = uuid::Uuid::new_v4().to_string();
@@ -801,8 +817,13 @@ async fn connection_inner(
                 last_activity = Instant::now();
                 late_in_flight = late_in_flight.saturating_sub(1);
                 if let Some(a) = outcome.action { ui.emit(VaEvent::Action(a)); }
+                let who = if cfg.auto_confirm {
+                    "Kvistcode ran the action without asking (the user turned off confirmations)"
+                } else {
+                    "the user confirmed on screen and the action ran"
+                };
                 inform!(format!(
-                    "Kvistcode: the user confirmed on screen and the action ran. Result (untrusted data): {}",
+                    "Kvistcode: {who}. Result (untrusted data): {}",
                     outcome.output
                 ));
             },

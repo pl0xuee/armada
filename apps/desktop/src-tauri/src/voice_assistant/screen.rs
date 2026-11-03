@@ -16,6 +16,8 @@ pub struct ScreenContext {
     /// The Compare screen's open group (an id the window made).
     pub compare_group_id: Option<String>,
     pub selected_text: Option<String>,
+    /// Agents shown side by side (the open one included); empty with a single agent.
+    pub shown_agent_ids: Vec<String>,
     /// Every agent that is not archived in the order the sidebar shows them (the order the
     /// assistant numbers them in). Only ever used to pick among agents that exist.
     pub agent_order: Vec<String>,

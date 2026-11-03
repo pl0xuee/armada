@@ -43,3 +43,12 @@ describe("screenContextOf: comparison and agent order", () => {
     expect(screenContextOf(ui, null, many).agentOrder).toHaveLength(MAX_ORDER);
   });
 });
+
+describe("screenContextOf: agents shown together", () => {
+  it("lists them only when several are on the agents screen", () => {
+    expect(screenContextOf(ui, null, [], ["a1", "a2"]).shownAgentIds).toEqual(["a1", "a2"]);
+    expect(screenContextOf(ui, null, [], ["a1"]).shownAgentIds).toEqual([]);
+    expect(screenContextOf({ ...ui, view: "usage" }, null, [], ["a1", "a2"]).shownAgentIds).toEqual([]);
+    expect(screenContextOf(ui, null).shownAgentIds).toEqual([]);
+  });
+});

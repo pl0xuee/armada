@@ -1346,9 +1346,12 @@ impl Core {
             &self.inner.settings.lock(),
             std::env::current_exe().ok().as_deref(),
         );
-        let response_style = self.inner.settings.lock().response_style;
-        let guidance = crate::guidance::guidance(response_style);
-        let guide_tag = crate::guidance::tag(response_style);
+        let (response_style, language) = {
+            let s = self.inner.settings.lock();
+            (s.response_style, s.default_language.clone())
+        };
+        let guidance = crate::guidance::guidance(response_style, &language);
+        let guide_tag = crate::guidance::tag(response_style, &language);
         let started = match agent.provider {
             Provider::Codex | Provider::Local => CodexDriver::start(
                 ctx.clone(),
@@ -1445,7 +1448,8 @@ impl Core {
         // note goes ahead of its next prompt instead, once per version and style (the session
         // keeps it from then on).
         if !driver.guided() && agent.guide_tag != guide_tag {
-            let note = crate::guidance::note(response_style, !agent.guide_tag.is_empty());
+            let note =
+                crate::guidance::note(response_style, &language, !agent.guide_tag.is_empty());
             ctx.set_preamble(match ctx.take_preamble() {
                 Some(pre) => format!("{note}\n\n---\n\n{pre}"),
                 None => note,
@@ -2619,6 +2623,99 @@ impl Core {
     pub fn archive_agent(&self, agent_id: &str, archived: bool) -> Result<()> {
         self.update_agent(agent_id, |a| a.archived = archived)?;
         Ok(())
+    }
+
+    /// Re-points every project whose folder no longer exists. The new place is read from
+    /// the project's worktrees (they still know their repository); projects with no
+    /// worktree to ask are returned in `missing` for the user to locate.
+    pub async fn refresh_projects(&self) -> Result<ProjectRefresh> {
+        let agents = self.agents()?;
+        let mut out = ProjectRefresh::default();
+        let mut seen = HashSet::new();
+        for a in &agents {
+            let old = a.project_path.trim_end_matches(['/', '\\']).to_string();
+            if old.is_empty() || !seen.insert(old.clone()) || Path::new(&old).is_dir() {
+                continue;
+            }
+            let mut found = None;
+            for w in agents
+                .iter()
+                .filter(|w| w.worktree && w.project_path.trim_end_matches(['/', '\\']) == old)
+            {
+                if let Some(p) = git::moved_project_path(Path::new(&w.cwd)).await {
+                    if p.is_dir() {
+                        found = Some(p);
+                        break;
+                    }
+                }
+            }
+            match found {
+                Some(new) => {
+                    let to = new.to_string_lossy().into_owned();
+                    self.relocate_project(&old, &to).await?;
+                    out.moved.push(ProjectMove { from: old, to });
+                }
+                None => out.missing.push(old),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Moves a project to `new`: its agents and schedules now point there, and git is
+    /// told where the project's worktrees' repository went. Returns how many agents moved.
+    pub async fn relocate_project(&self, old: &str, new: &str) -> Result<usize> {
+        let trim = |s: &str| s.trim_end_matches(['/', '\\']).to_string();
+        let old = trim(old);
+        let new = trim(&providers::expand_home(new).to_string_lossy());
+        if old.is_empty() || !Path::new(&new).is_dir() {
+            bail!("Folder not found: {new}");
+        }
+        // `cwd` follows only when it sat inside the old folder.
+        let moved_cwd = |cwd: &str| {
+            Path::new(cwd)
+                .strip_prefix(&old)
+                .ok()
+                .map(|rel| Path::new(&new).join(rel).to_string_lossy().into_owned())
+        };
+        let mut worktrees = Vec::new();
+        let mut count = 0;
+        for a in self.agents()? {
+            if trim(&a.project_path) != old {
+                continue;
+            }
+            if a.worktree {
+                // The worktree's own root (cwd may be a folder inside it).
+                let root = Path::new(&a.cwd)
+                    .ancestors()
+                    .find(|p| p.join(".git").exists())
+                    .map(Path::to_path_buf);
+                worktrees.extend(root.map(|r| match moved_cwd(&r.to_string_lossy()) {
+                    Some(m) => PathBuf::from(m),
+                    None => r,
+                }));
+            }
+            let cwd = moved_cwd(&a.cwd);
+            self.update_agent(&a.id, |x| {
+                x.project_path = new.clone();
+                if let Some(c) = cwd {
+                    x.cwd = c;
+                }
+            })?;
+            count += 1;
+        }
+        for mut s in self.inner.db.schedules()? {
+            if trim(&s.project_path) == old {
+                s.project_path = new.clone();
+                self.inner.db.put_schedule_keeping_run(&mut s)?;
+                self.emit(KvistcodeEvent::ScheduleUpdated { schedule: s });
+            }
+        }
+        if !worktrees.is_empty() {
+            if let Err(e) = git::repair_worktrees(Path::new(&new), &worktrees).await {
+                tracing::warn!("git worktree repair: {e:#}");
+            }
+        }
+        Ok(count)
     }
 
     /// Triage "Done": dismisses the agent's current attention (it comes back on new

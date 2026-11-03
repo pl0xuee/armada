@@ -2,6 +2,7 @@
 // It mirrors the command surface of ./api.ts and emits the same KvistcodeEvents,
 // including simulated streaming, permissions, login terminals and installs.
 
+import { LANGUAGES } from "./languages";
 import type { ScreenContext } from "./screenContext";
 import type { KvistcodeApi } from "./api";
 import { emitVoiceBus } from "./voiceBus";
@@ -1894,6 +1895,17 @@ export const mockApi: KvistcodeApi = {
     return delay(undefined, 40);
   },
 
+  async refreshProjects() {
+    return delay({ moved: [], missing: [] }, 60);
+  },
+
+  async relocateProject(from, to) {
+    const strip = (p: string) => p.replace(/[\\/]+$/, "");
+    const mine = db.agents.filter((a) => strip(a.projectPath) === strip(from));
+    for (const a of mine) patchAgent(a.id, { projectPath: strip(to) });
+    return delay(mine.length, 60);
+  },
+
   async acknowledgeAgent(agentId) {
     getAgent(agentId);
     patchAgent(agentId, { unread: false, acknowledgedAt: Date.now() });
@@ -3624,6 +3636,8 @@ function validateSettings(s: Settings): string | null {
   if (!["deliver", "queue", "helper"].includes(s.busySend)) return `Unknown busy-send setting “${s.busySend}”`;
   if (!["concise", "balanced", "detailed"].includes(s.responseStyle))
     return `Unknown response style “${s.responseStyle}”`;
+  if (s.defaultLanguage !== "" && !(LANGUAGES as readonly string[]).includes(s.defaultLanguage))
+    return `Unknown language “${s.defaultLanguage}”`;
   if (s.autoCompactWindow != null && (s.autoCompactWindow < 100_000 || s.autoCompactWindow > 1_000_000))
     return "The auto-compact size must be between 100,000 and 1,000,000 tokens (or empty for Claude's default)";
   const ts = s.tokenSaver;

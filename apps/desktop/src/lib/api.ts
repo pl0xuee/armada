@@ -8,6 +8,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  ProjectRefresh,
   CheckpointList,
   QuestionAnswers,
   RestorePreview,
@@ -177,6 +178,10 @@ const tauriApi = {
     invoke<void>("delete_agent", { agentId, removeWorktree, force: force ?? false }),
   renameAgent: (agentId: string, title: string) => invoke<void>("rename_agent", { agentId, title }),
   archiveAgent: (agentId: string, archived: boolean) => invoke<void>("archive_agent", { agentId, archived }),
+  /** Re-points projects whose folder moved; `missing` are the ones it couldn't find. */
+  refreshProjects: () => invoke<ProjectRefresh>("refresh_projects"),
+  /** Moves a project to the folder you picked. Resolves to how many agents moved. */
+  relocateProject: (from: string, to: string) => invoke<number>("relocate_project", { from, to }),
   markRead: (agentId: string) => invoke<void>("mark_read", { agentId }),
   /** Triage "Done": records acknowledgedAt and clears unread; new activity brings it back. */
   acknowledgeAgent: (agentId: string) => invoke<void>("acknowledge_agent", { agentId }),

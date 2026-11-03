@@ -58,6 +58,7 @@ fn config(url: String) -> SessionConfig {
         silence_secs: 30,
         reconnect_delay: Duration::from_millis(10),
         headphones: false,
+        auto_confirm: false,
         confirm_ttl: Duration::from_secs(30),
     }
 }
@@ -386,9 +387,26 @@ where
     D: FnOnce(Arc<Events>, tokio::sync::mpsc::UnboundedSender<Control>) -> DF + Send + 'static,
     DF: std::future::Future<Output = ()> + Send + 'static,
 {
+    gated_session_with(false, ttl, ran, script, driver).await
+}
+
+async fn gated_session_with<S, SF, D, DF>(
+    auto_confirm: bool,
+    ttl: Duration,
+    ran: Arc<AtomicUsize>,
+    script: S,
+    driver: D,
+) -> Arc<Events>
+where
+    S: FnOnce(Server) -> SF + Send + 'static,
+    SF: std::future::Future<Output = ()> + Send + 'static,
+    D: FnOnce(Arc<Events>, tokio::sync::mpsc::UnboundedSender<Control>) -> DF + Send + 'static,
+    DF: std::future::Future<Output = ()> + Send + 'static,
+{
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let mut cfg = config(format!("ws://{}/", listener.local_addr().unwrap()));
     cfg.confirm_ttl = ttl;
+    cfg.auto_confirm = auto_confirm;
     let server = tokio::spawn(async move {
         let (s, _) = listener.accept().await.unwrap();
         let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
@@ -503,6 +521,56 @@ async fn side_effects_run_only_after_the_user_confirms() {
             ..
         }
     )));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn with_confirmations_off_the_action_runs_at_once_with_no_card() {
+    let ran = Arc::new(AtomicUsize::new(0));
+    let sink = gated_session_with(
+        true,
+        Duration::from_secs(30),
+        ran.clone(),
+        move |mut ws| async move {
+            send(&mut ws, json!({"type":"response.created"})).await;
+            call_start_agent(&mut ws, "call_1").await;
+            send(
+                &mut ws,
+                json!({"type":"response.done","response":{"status":"completed"}}),
+            )
+            .await;
+            let out = next_json(&mut ws).await;
+            assert_eq!(out["item"]["call_id"], "call_1");
+            let text = out["item"]["output"].as_str().unwrap();
+            assert!(
+                text.contains("running") && !text.contains("waiting_for_user"),
+                "{text}"
+            );
+            let _ = next_json(&mut ws).await; // response.create
+            send(&mut ws, json!({"type":"response.created"})).await;
+            send(
+                &mut ws,
+                json!({"type":"response.done","response":{"status":"completed"}}),
+            )
+            .await;
+            let note = next_json(&mut ws).await;
+            let t = note["item"]["content"][0]["text"].as_str().unwrap();
+            assert!(t.contains("without asking") && t.contains("started"), "{t}");
+            while let Some(Ok(m)) = ws.next().await {
+                if matches!(m, Message::Close(_)) {
+                    break;
+                }
+            }
+        },
+        move |_events, _ctl| async move {
+            tokio::time::sleep(Duration::from_millis(600)).await;
+        },
+    )
+    .await;
+    assert_eq!(ran.load(Ordering::SeqCst), 1);
+    assert!(
+        confirm_ids(&sink).is_empty(),
+        "no confirmation card is shown"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1116,4 +1184,13 @@ fn every_agent_and_project_argument_takes_a_number() {
     };
     assert!(d("list_agents").contains("number") && d("list_projects").contains("number"));
     assert!(d("get_screen").contains("number"));
+}
+
+#[test]
+fn the_default_language_is_added_to_the_assistants_instructions_only_when_set() {
+    let base = tools::instructions();
+    assert_eq!(super::with_language(base.clone(), ""), base);
+    let note = kvistcode_core::guidance::language_note("Spanish");
+    let with = super::with_language(base.clone(), &note);
+    assert!(with.starts_with(&base) && with.contains("in Spanish"));
 }

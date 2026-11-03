@@ -1164,6 +1164,9 @@ pub struct Settings {
     /// Read whenever an agent is briefed: new agents get it from the start, existing ones
     /// the next time their session is resumed.
     pub response_style: ResponseStyle,
+    /// The language agents and the voice assistant reply in: a name from `guidance::LANGUAGES`,
+    /// or empty to follow whatever language the user writes in. Applied like the response style.
+    pub default_language: String,
     /// Which agent a helper runs as (unset = same as the main agent).
     pub helper_defaults: HelperDefaults,
     /// Cap on what all agents together spend per local day, in USD (None = no cap).
@@ -1209,6 +1212,10 @@ pub struct VoiceAssistantSettings {
     /// talks and they can interrupt it. Off: the mic is muted during playback so the
     /// speakers don't feed the assistant its own voice.
     pub headphones: bool,
+    /// Run what the assistant proposes (start an agent, send a message, rename) at once,
+    /// without the confirmation card. Off by default. Agents' own permission requests are
+    /// never answered by the assistant, whatever this says.
+    pub auto_confirm: bool,
 }
 
 impl Default for VoiceAssistantSettings {
@@ -1221,6 +1228,7 @@ impl Default for VoiceAssistantSettings {
             max_session_mins: 10,
             silence_timeout_secs: 60,
             headphones: false,
+            auto_confirm: false,
         }
     }
 }
@@ -1336,6 +1344,23 @@ pub struct McpServer {
     /// Empty: available to every project. Otherwise only to agents in that project folder.
     #[serde(default)]
     pub project_path: String,
+}
+
+/// A project whose folder was found at a new place.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMove {
+    pub from: String,
+    pub to: String,
+}
+
+/// What "refresh projects" did: folders it re-pointed, and folders it couldn't find
+/// (the user picks those by hand).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRefresh {
+    pub moved: Vec<ProjectMove>,
+    pub missing: Vec<String>,
 }
 
 /// Starts an agent automatically at `time` (local, "HH:MM") on the given weekdays.
@@ -1478,6 +1503,12 @@ impl Settings {
             }
         }
         crate::voice::validate_voice(&self.voice.model, &self.voice.language)?;
+        if !crate::guidance::valid_language(&self.default_language) {
+            return Err(format!(
+                "Unknown language \u{201c}{}\u{201d}",
+                self.default_language
+            ));
+        }
         if let Some(w) = self.auto_compact_window {
             if !crate::token_saver::COMPACT_WINDOW_RANGE.contains(&w) {
                 return Err("The auto-compact size must be between 100,000 and 1,000,000 tokens (or empty for Claude's default)".into());
@@ -1556,6 +1587,10 @@ impl Settings {
             self.voice.language = defaults.voice.language;
             reset.push("voice.language");
         }
+        if !crate::guidance::valid_language(&self.default_language) {
+            self.default_language = String::new();
+            reset.push("defaultLanguage");
+        }
         if self
             .auto_compact_window
             .is_some_and(|w| !crate::token_saver::COMPACT_WINDOW_RANGE.contains(&w))
@@ -1627,6 +1662,7 @@ impl Default for Settings {
             config_defaults: Default::default(),
             busy_send: BusySend::Deliver,
             response_style: ResponseStyle::Concise,
+            default_language: String::new(),
             helper_defaults: HelperDefaults::default(),
             daily_budget_usd: None,
             agent_budget_usd: None,
@@ -1806,6 +1842,23 @@ mod voice_settings_tests {
         let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert_eq!(back.config_defaults["claude"]["model"], "opus");
         assert!(back.validate().is_ok());
+    }
+
+    #[test]
+    fn default_language_is_empty_by_default_and_must_be_listed() {
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.default_language, "");
+        let mut s = Settings {
+            default_language: "German".into(),
+            ..Settings::default()
+        };
+        assert!(s.validate().is_ok());
+        s.default_language = "Elvish".into();
+        assert!(s.validate().unwrap_err().contains("Unknown language"));
+        // A stored value that is no longer listed falls back instead of breaking startup.
+        let reset = s.sanitize();
+        assert_eq!(s.default_language, "");
+        assert!(reset.contains(&"defaultLanguage"));
     }
 
     #[test]

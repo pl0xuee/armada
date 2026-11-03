@@ -378,6 +378,39 @@ fn empty_hooks_dir(data_dir: &Path) -> anyhow::Result<PathBuf> {
     Ok(dir)
 }
 
+/// Where a project's folder lives now, found from one of its linked worktrees (which
+/// still records its repository). `cwd` is the worktree directory matching the project
+/// folder; the answer is the same place inside the main checkout. `None` when `cwd`
+/// isn't a working linked worktree (for instance its link to the old folder is broken).
+pub async fn moved_project_path(cwd: &Path) -> Option<PathBuf> {
+    let common = git(cwd, &["rev-parse", "--git-common-dir"]).await.ok()?;
+    let top = git(cwd, &["rev-parse", "--show-toplevel"]).await.ok()?;
+    let common = cwd.join(common.trim());
+    if common.file_name()? != ".git" {
+        return None;
+    }
+    let main = common.parent()?.to_path_buf();
+    let rel = cwd
+        .canonicalize()
+        .ok()?
+        .strip_prefix(Path::new(top.trim()).canonicalize().ok()?)
+        .ok()?
+        .to_path_buf();
+    Some(main.join(rel))
+}
+
+/// Points the repository at linked worktrees that moved or whose repository moved
+/// (`git worktree repair`). Best effort: `paths` that aren't worktrees are ignored by git.
+pub async fn repair_worktrees(repo: &Path, paths: &[PathBuf]) -> anyhow::Result<()> {
+    let strs: Vec<String> = paths
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    let mut args = vec!["worktree", "repair"];
+    args.extend(strs.iter().map(String::as_str));
+    git(repo, &args).await.map(|_| ())
+}
+
 /// Creates `<data>/worktrees/<repo>-<id8>` on a new branch `kvistcode/<slug>-<id8>`.
 /// Returns the directory matching `project_path` inside the new worktree.
 pub async fn create_worktree(

@@ -16,6 +16,7 @@ import {
   Play,
   Power,
   Plus,
+  RefreshCw,
   Rows3,
   Search,
   Trash2,
@@ -24,7 +25,7 @@ import {
 } from "lucide-react";
 import { m, AnimatePresence } from "motion/react";
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
-import { archiveAgent, exportConversation, renameAgent, resumeAgent, stopAgent } from "@/lib/actions";
+import { archiveAgent, exportConversation, refreshProjects, renameAgent, resumeAgent, stopAgent } from "@/lib/actions";
 import { ARCHIVED_KEY, groupByProject, orderedAgents, projectKey } from "@/lib/agents";
 import { MAX_TILES, nestHelpers, syncPresentation } from "@/lib/helpers";
 import { relativeTime, relativeTimeLong } from "@/lib/format";
@@ -109,6 +110,7 @@ export function AgentList({
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [density, setDensity] = useState(readDensity);
+  const [refreshing, setRefreshing] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const now = useNow();
   // Rows join the second frame at boot (header and filter paint first); later mounts are immediate.
@@ -222,10 +224,26 @@ export function AgentList({
             Projects
           </h2>
           <span className="rounded-md bg-raised px-1.5 text-[11px] font-medium text-steel tabular">{total}</span>
+          <Tooltip content="Refresh: find projects whose folder was renamed or moved">
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              className="ml-auto"
+              aria-label="Refresh projects"
+              disabled={refreshing}
+              onClick={async () => {
+                setRefreshing(true);
+                await refreshProjects();
+                setRefreshing(false);
+              }}
+            >
+              <RefreshCw className={cn("!h-3.5 !w-3.5", refreshing && "animate-spin")} />
+            </Button>
+          </Tooltip>
           <DropdownMenu>
             <Tooltip content="Row density">
               <DropdownMenuTrigger asChild>
-                <Button size="icon-xs" variant="ghost" className="ml-auto" aria-label="Row density">
+                <Button size="icon-xs" variant="ghost" aria-label="Row density">
                   <Rows3 className="!h-3.5 !w-3.5" />
                 </Button>
               </DropdownMenuTrigger>

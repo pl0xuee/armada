@@ -170,6 +170,17 @@ export function VoiceAssistantSection({ settings }: { settings: Settings }) {
             />
           </SettingRow>
           <SettingRow
+            title="Run actions without asking"
+            description="When you ask the voice assistant to start an agent, send a message or rename one, it does it at once instead of showing a card for you to press Confirm. Anyone or anything that reaches the assistant, including text an agent wrote, could then trigger those actions with no check from you. Agents you start this way still ask before changing files or running commands, and the assistant can never approve those requests. Off by default."
+            htmlFor="va-autoconfirm"
+          >
+            <Switch
+              id="va-autoconfirm"
+              checked={va.autoConfirm}
+              onCheckedChange={(on) => void update({ autoConfirm: on })}
+            />
+          </SettingRow>
+          <SettingRow
             title="Maximum session length"
             description="The session ends by itself after this long, so a forgotten one can't keep billing."
             htmlFor="va-max"

@@ -5,6 +5,7 @@ import { beginVa, initialVa, isLive, reduceVa, type VaEvent, type VaState } from
 import { errorMessage } from "@/lib/utils";
 import { useApp } from "./app";
 import { orderedAgents } from "@/lib/agents";
+import { tileIdsFor } from "@/lib/helpers";
 import { screenContextOf } from "@/lib/screenContext";
 import { useUi, type MissionTab, type SettingsSection, type View } from "./ui";
 
@@ -86,12 +87,20 @@ function reportScreen(): () => void {
       last = "";
       return;
     }
-    const order = orderedAgents(Object.values(useApp.getState().agents)).map((a) => a.id);
-    const ctx = screenContextOf(useUi.getState(), window.getSelection()?.toString(), order);
+    const agents = useApp.getState().agents;
+    const order = orderedAgents(Object.values(agents)).map((a) => a.id);
+    const ui = useUi.getState();
+    // An agent that no longer exists isn't on screen (the pane shows the welcome page instead).
+    const open = ui.selectedAgentId && agents[ui.selectedAgentId] ? ui.selectedAgentId : null;
+    const shown = tileIdsFor(agents, open, ui.tileGroup, ui.tileHelpers);
+    const ctx = screenContextOf({ ...ui, selectedAgentId: open }, window.getSelection()?.toString(), order, shown);
     const key = JSON.stringify(ctx);
     if (key === last) return;
     last = key;
-    api.vaSetScreen(ctx).catch(() => {});
+    // A report that didn't arrive must be sent again, not skipped as "unchanged".
+    api.vaSetScreen(ctx).catch(() => {
+      if (last === key) last = "";
+    });
   };
   // A drag-select fires many events: send once it settles.
   const soon = () => {

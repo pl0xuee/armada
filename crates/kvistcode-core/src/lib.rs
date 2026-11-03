@@ -31,7 +31,7 @@ mod config_memory;
 mod db;
 mod files;
 mod git;
-mod guidance;
+pub mod guidance;
 mod helpers;
 mod jsonrpc;
 mod limit_reset;

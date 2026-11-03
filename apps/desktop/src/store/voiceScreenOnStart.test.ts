@@ -23,7 +23,8 @@ describe("assistant sees the open agent when it starts", () => {
     const { connectVoiceAssistant, startVoiceAssistant } = await import("./voiceAssistant");
     const { useApp } = await import("./app");
     const { useUi } = await import("./ui");
-    useApp.setState({ settings: { voiceAssistant: { enabled: true } } as never });
+    const a1 = { id: "a1", archived: false, projectPath: "/p/one", status: "idle", lastActivityAt: 1 };
+    useApp.setState({ settings: { voiceAssistant: { enabled: true } }, agents: { a1 } } as never);
     useUi.setState({ view: "agents", selectedAgentId: "a1" });
     vi.stubGlobal("document", { addEventListener: () => {}, removeEventListener: () => {} });
     vi.stubGlobal("window", { getSelection: () => null });
@@ -31,6 +32,25 @@ describe("assistant sees the open agent when it starts", () => {
     await startVoiceAssistant();
     expect(calls[calls.length - 1]).toBe("screen:a1");
     expect(backendKnows).toBe("a1");
+    off();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not report an open agent that no longer exists", async () => {
+    calls.length = 0;
+    const { connectVoiceAssistant, startVoiceAssistant, stopVoiceAssistant } = await import("./voiceAssistant");
+    const { useApp } = await import("./app");
+    const { useUi } = await import("./ui");
+    const { useVa } = await import("./voiceAssistant");
+    useVa.getState().dismiss();
+    useApp.setState({ settings: { voiceAssistant: { enabled: true } }, agents: {} } as never);
+    useUi.setState({ view: "agents", selectedAgentId: "gone" });
+    vi.stubGlobal("document", { addEventListener: () => {}, removeEventListener: () => {} });
+    vi.stubGlobal("window", { getSelection: () => null });
+    const off = connectVoiceAssistant();
+    await startVoiceAssistant();
+    expect(calls[calls.length - 1]).toBe("screen:null");
+    await stopVoiceAssistant();
     off();
     vi.unstubAllGlobals();
   });

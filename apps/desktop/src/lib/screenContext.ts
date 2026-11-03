@@ -11,6 +11,8 @@ export interface ScreenContext {
   /** The Compare screen's open group. */
   compareGroupId: string | null;
   selectedText: string | null;
+  /** The agents on screen together (tiles side by side), the open one included; empty with a single agent. */
+  shownAgentIds: string[];
   /** The ids of the agents that are not archived, in the sidebar's order: how the assistant numbers them. */
   agentOrder: string[];
 }
@@ -34,6 +36,7 @@ export function screenContextOf(
   ui: UiLike,
   selection: string | null | undefined,
   agentOrder: readonly string[] = [],
+  shownAgentIds: readonly string[] = [],
 ): ScreenContext {
   const text = (selection ?? "").replace(/\s+/g, " ").trim();
   return {
@@ -44,6 +47,7 @@ export function screenContextOf(
     missionTab: ui.view === "mission" ? ui.missionTab : null,
     reviewAgentId: ui.reviewAgentId,
     compareGroupId: ui.view === "compare" ? (ui.compareGroupId ?? null) : null,
+    shownAgentIds: ui.view === "agents" && shownAgentIds.length > 1 ? shownAgentIds.slice(0, 8) : [],
     selectedText: text ? text.slice(0, MAX_SELECTION) : null,
     agentOrder: agentOrder.slice(0, MAX_ORDER),
   };

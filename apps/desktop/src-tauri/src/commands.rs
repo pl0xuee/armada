@@ -6,8 +6,9 @@ use std::sync::Arc;
 use crate::AppHandle;
 use kvistcode_core::{
     accounts, toolchain, Account, Agent, AgentStatus, AlertKind, Attachment, AttentionReason, Core,
-    CreateAccountRequest, CreateAgentRequest, CustomAgent, KvistcodeEvent, McpServer, Provider,
-    ProviderInfo, Schedule, SearchResults, Settings, TimelineItem, UpdateInfo,
+    CreateAccountRequest, CreateAgentRequest, CustomAgent, KvistcodeEvent, McpServer,
+    ProjectRefresh, Provider, ProviderInfo, Schedule, SearchResults, Settings, TimelineItem,
+    UpdateInfo,
 };
 use serde::Serialize;
 use tauri::{Manager, State};
@@ -291,6 +292,18 @@ pub async fn delete_agent(
 #[tauri::command]
 pub async fn rename_agent(core: State<'_, Core>, agent_id: String, title: String) -> CmdResult<()> {
     core.rename_agent(&agent_id, &title).map_err(err)
+}
+
+/// Re-points projects whose folder moved; returns what it moved and what it couldn't find.
+#[tauri::command]
+pub async fn refresh_projects(core: State<'_, Core>) -> CmdResult<ProjectRefresh> {
+    core.refresh_projects().await.map_err(err)
+}
+
+/// Moves a project to a folder the user picked. Returns how many agents moved.
+#[tauri::command]
+pub async fn relocate_project(core: State<'_, Core>, from: String, to: String) -> CmdResult<usize> {
+    core.relocate_project(&from, &to).await.map_err(err)
 }
 
 #[tauri::command]

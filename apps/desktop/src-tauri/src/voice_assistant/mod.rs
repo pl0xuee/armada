@@ -130,11 +130,34 @@ fn valid_model(m: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || "-._".contains(c))
 }
 
+/// With confirmations off the instructions above (which describe a confirmation card) are
+/// corrected, so the assistant doesn't tell the user to press a button that isn't there.
+fn with_auto_confirm(instructions: String, auto: bool) -> String {
+    if auto {
+        format!(
+            "{instructions}\n- The user has turned confirmations off: start_agent, send_message and the \
+other actions run at once, with no card to press. Say in a few words what you are doing, and \
+never say they need to confirm on screen."
+        )
+    } else {
+        instructions
+    }
+}
+
+/// The user's default language, as one more line of the assistant's instructions (the model
+/// speaks it, and understands them in any language).
+fn with_language(instructions: String, language_note: &str) -> String {
+    if language_note.is_empty() {
+        instructions
+    } else {
+        format!("{instructions}\n- {language_note}")
+    }
+}
+
 fn build_config(core: &Core) -> Result<SessionConfig, String> {
-    let s = core
-        .settings()
-        .map_err(|e| format!("{e:#}"))?
-        .voice_assistant;
+    let all = core.settings().map_err(|e| format!("{e:#}"))?;
+    let language = kvistcode_core::guidance::language_note(&all.default_language);
+    let s = all.voice_assistant;
     if !s.enabled {
         return Err("The voice assistant is off. Turn it on in Settings > Voice assistant.".into());
     }
@@ -167,12 +190,16 @@ fn build_config(core: &Core) -> Result<SessionConfig, String> {
         api_key: ApiKey(key.trim().to_string()),
         model,
         voice,
-        instructions: tools::instructions(),
+        instructions: with_auto_confirm(
+            with_language(tools::instructions(), &language),
+            s.auto_confirm,
+        ),
         tools: tools::tool_schemas(),
         max_secs: u64::from(s.max_session_mins.clamp(1, 60)) * 60,
         silence_secs: u64::from(s.silence_timeout_secs.clamp(10, 600)),
         reconnect_delay: Duration::from_millis(1200),
         headphones: s.headphones,
+        auto_confirm: s.auto_confirm,
         confirm_ttl: session::CONFIRM_TTL,
     })
 }

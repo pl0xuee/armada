@@ -538,15 +538,25 @@ impl KvistcodeTools {
         if let Ok(s) = self.core.settings() {
             out.extend(s.recent_projects);
         }
+        let mut in_use = std::collections::HashSet::new();
         if let Ok(a) = self.core.agents() {
-            out.extend(a.into_iter().map(|a| a.project_path));
+            for p in a
+                .into_iter()
+                .filter(|a| !a.archived)
+                .map(|a| a.project_path)
+            {
+                in_use.insert(tools::project_key(&p).to_string());
+                out.push(p);
+            }
         }
         if let Ok(found) = self.core.discover_projects().await {
             out.extend(found);
         }
         let mut seen = std::collections::HashSet::new();
-        out.retain(|p| seen.insert(p.clone()));
-        out.retain(|p| std::path::Path::new(p).is_dir());
+        out.retain(|p| seen.insert(tools::project_key(p).to_string()));
+        // A folder that went missing stays listed while agents use it, so it keeps its number
+        // and the assistant can say it needs locating; anything else must still exist.
+        out.retain(|p| std::path::Path::new(p).is_dir() || in_use.contains(tools::project_key(p)));
         out
     }
 
@@ -855,10 +865,19 @@ impl KvistcodeTools {
             Ok(a) => a,
             Err(e) => return fail(&e),
         };
+        // The agent on screen may be archived (opened from the Archived list), which the numbered
+        // list leaves out: look it up among all agents so the assistant still sees it.
+        let all = self.core.agents().unwrap_or_default();
+        let find = |id: &str| {
+            ordered
+                .iter()
+                .find(|a| a.id == id)
+                .or_else(|| all.iter().find(|a| a.id == id))
+        };
         let focus = s.agent_id.clone().or_else(|| s.review_agent_id.clone());
         let focus_path = focus
-            .as_ref()
-            .and_then(|id| ordered.iter().find(|a| &a.id == id))
+            .as_deref()
+            .and_then(find)
             .map(|a| a.project_path.clone());
         // Numbers come from the lists the model already has; with none yet, from the order
         // the user sees now.
@@ -875,19 +894,18 @@ impl KvistcodeTools {
                 .number_where(Instant::now(), |p| project_key(p) == key)
         };
         let describe = |id: &Option<String>| {
-            id.as_ref()
-                .and_then(|id| ordered.iter().find(|a| &a.id == id))
-                .map(|a| {
-                    json!({
-                        "number": self.agent_number(&a.id),
-                        "id": a.id,
-                        "title": a.title,
-                        "provider": a.provider.as_str(),
-                        "status": serde_json::to_value(a.status).unwrap_or(Value::Null),
-                        "project": basename(&a.project_path),
-                        "projectNumber": project_number(&a.project_path),
-                    })
+            id.as_deref().and_then(find).map(|a| {
+                json!({
+                    "archived": a.archived,
+                    "number": self.agent_number(&a.id),
+                    "id": a.id,
+                    "title": a.title,
+                    "provider": a.provider.as_str(),
+                    "status": serde_json::to_value(a.status).unwrap_or(Value::Null),
+                    "project": basename(&a.project_path),
+                    "projectNumber": project_number(&a.project_path),
                 })
+            })
         };
         let comparison: Option<Vec<Value>> = s.compare_group_id.as_ref().map(|g| {
             ordered
@@ -909,9 +927,12 @@ impl KvistcodeTools {
             "known": true,
             "screen": s.view,
             "agent": describe(&s.agent_id),
+            "alsoShownTogether": s.shown_agent_ids.iter().filter(|id| Some(*id) != s.agent_id.as_ref())
+                .take(8).map(|id| describe(&Some(id.clone()))).collect::<Vec<_>>(),
             "project": focus_path.as_deref().map(|p| json!({
                 "name": basename(p),
                 "number": project_number(p),
+                "folderMissing": !std::path::Path::new(p).is_dir(),
             })),
             "settingsSection": s.settings_section,
             "missionControlTab": s.mission_tab,
