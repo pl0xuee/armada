@@ -1,4 +1,4 @@
-import { Bot, ChartColumn, Coins, Cpu, FolderOpen, Gauge, Layers, Timer, Trophy, Users } from "lucide-react";
+import { Bot, ChartColumn, ChevronRight, Coins, Cpu, FolderOpen, Gauge, Layers, Timer, Trophy } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { AccountAvatar } from "@/components/AccountAvatar";
 import { EmptyState } from "@/components/EmptyState";
@@ -22,6 +22,7 @@ import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 
 type Metric = "cost" | "tokens";
+type Group = "provider" | "account" | "project";
 
 interface Bucket {
   key: string;
@@ -79,6 +80,8 @@ export function UsageView() {
   const dailyCap = useApp((s) => s.settings?.dailyBudgetUsd);
   const dailyTokenCap = useApp((s) => s.settings?.dailyBudgetTokens);
   const [metric, setMetric] = useState<Metric>("cost");
+  const [group, setGroup] = useState<Group>("provider");
+  const [topOpen, setTopOpen] = useState(false);
 
   const agents = useMemo(() => Object.values(agentsMap), [agentsMap]);
   const total = useMemo(
@@ -260,16 +263,6 @@ export function UsageView() {
 
           <TokenInsights agents={agents} />
 
-          <Panel title="Provider share" icon={<Layers />}>
-            <ShareBar
-              segments={runtimeKeys.map((k) => {
-                const b = byProvider.get(k)!;
-                const id = identity(k);
-                return { key: k, label: id.name, value: val(b), display: fmt(b), color: id.color };
-              })}
-            />
-          </Panel>
-
           {metered.length > 0 && (
             <Panel title="Rate limits" icon={<Timer />} flush>
               <ul className="divide-y divide-line/70">
@@ -302,19 +295,47 @@ export function UsageView() {
             </Panel>
           )}
 
-          <div className="grid gap-3 @2xl:gap-4 @4xl:grid-cols-3">
-            <Panel title="By provider" icon={<Layers />}>
-              <BarList data={providerData} />
-            </Panel>
-            <Panel title="By account" icon={<Users />}>
-              <BarList data={accountData} />
-            </Panel>
-            <Panel title="By project" icon={<FolderOpen />}>
-              <BarList data={projectData} />
-            </Panel>
-          </div>
+          <Panel
+            title="Where it goes"
+            icon={<Layers />}
+            right={
+              <Segmented<Group>
+                size="sm"
+                aria-label="Group by"
+                value={group}
+                onChange={setGroup}
+                options={[
+                  { value: "provider", label: "Provider" },
+                  { value: "account", label: "Account" },
+                  { value: "project", label: "Project" },
+                ]}
+              />
+            }
+          >
+            {group === "provider" && (
+              <div className="space-y-4">
+                <ShareBar
+                  segments={runtimeKeys.map((k) => {
+                    const b = byProvider.get(k)!;
+                    const id = identity(k);
+                    return { key: k, label: id.name, value: val(b), display: fmt(b), color: id.color };
+                  })}
+                />
+                <BarList data={providerData} />
+              </div>
+            )}
+            {group === "account" && <BarList data={accountData} />}
+            {group === "project" && <BarList data={projectData} />}
+          </Panel>
 
-          <Panel title="Top agents by cost" icon={<Trophy />} flush>
+          <Panel
+            title="Top agents by cost"
+            icon={<Trophy />}
+            flush
+            open={topOpen}
+            onToggle={() => setTopOpen((o) => !o)}
+            hint={top[0] ? `${top[0].title} · ${formatCost(top[0].costUsd)}` : undefined}
+          >
             <table className="w-full text-[12.5px]">
               <thead>
                 <tr className="border-b border-line text-left text-[11px] uppercase tracking-[0.06em] text-steel">
@@ -399,19 +420,57 @@ function Panel({
   icon,
   children,
   flush,
+  right,
+  open,
+  onToggle,
+  hint,
 }: {
   title: string;
   icon: ReactNode;
   children: ReactNode;
   flush?: boolean;
+  right?: ReactNode;
+  /** Set with onToggle to make the panel a fold: collapsed it shows only its title and `hint`. */
+  open?: boolean;
+  onToggle?: () => void;
+  hint?: string;
 }) {
+  const heading = (
+    <>
+      {onToggle && (
+        <ChevronRight className={`!h-3.5 !w-3.5 transition-transform duration-150 ${open ? "rotate-90" : ""}`} />
+      )}
+      {icon}
+      {title}
+      {onToggle && !open && hint && (
+        <span className="ml-1 min-w-0 truncate text-[11.5px] font-normal normal-case tracking-normal text-muted">
+          {hint}
+        </span>
+      )}
+    </>
+  );
+  const headingClass =
+    "flex min-w-0 items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel [&_svg]:h-3.5 [&_svg]:w-3.5";
   return (
     <section className="rounded-xl border border-line bg-card edge">
-      <h2 className="flex items-center gap-2 px-4 pb-2 pt-3.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel [&_svg]:h-3.5 [&_svg]:w-3.5">
-        {icon}
-        {title}
-      </h2>
-      <div className={flush ? "" : "px-4 pb-4 pt-1"}>{children}</div>
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 pb-2 pt-3.5">
+        {onToggle ? (
+          <h2 className="min-w-0 flex-1">
+            <button
+              type="button"
+              aria-expanded={open}
+              onClick={onToggle}
+              className={`${headingClass} w-full rounded text-left transition-colors hover:text-fg`}
+            >
+              {heading}
+            </button>
+          </h2>
+        ) : (
+          <h2 className={headingClass}>{heading}</h2>
+        )}
+        {right}
+      </div>
+      {(!onToggle || open) && <div className={flush ? "" : "px-4 pb-4 pt-1"}>{children}</div>}
     </section>
   );
 }

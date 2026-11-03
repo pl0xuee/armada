@@ -254,6 +254,13 @@ struct PairingCode {
 
 /// Decides which connections the server accepts: a total cap, a per-address cap,
 /// and slots kept for addresses that sent a valid token recently.
+///
+/// A connection is admitted at accept time, when only the socket peer is known. Behind
+/// Tailscale Serve every connection comes from loopback and the real client is only
+/// named in `X-Forwarded-For` of each request, so loopback connections count against
+/// the total cap alone at first and are then charged to the client's address on every
+/// request (`ConnGuard::attribute`). A request over its client's cap is refused and its
+/// connection closed.
 struct ConnLimiter {
     max_total: usize,
     reserved: usize,
@@ -269,10 +276,10 @@ struct LimiterState {
     trusted: HashMap<IpAddr, Instant>,
 }
 
-/// One admitted connection; released on drop.
+/// One admitted connection; released on drop. `ip` is the address it is charged to.
 struct ConnGuard {
     limiter: Arc<ConnLimiter>,
-    ip: IpAddr,
+    ip: Mutex<IpAddr>,
 }
 
 impl ConnLimiter {
@@ -336,8 +343,52 @@ impl ConnLimiter {
         *st.per_ip.entry(ip).or_insert(0) += 1;
         Some(ConnGuard {
             limiter: self.clone(),
-            ip,
+            ip: Mutex::new(ip),
         })
+    }
+
+    fn release_ip(st: &mut LimiterState, ip: &IpAddr) {
+        if let Some(n) = st.per_ip.get_mut(ip) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                st.per_ip.remove(ip);
+            }
+        }
+    }
+}
+
+impl ConnGuard {
+    /// Charges this connection to `client` (the real device behind a proxy), applying
+    /// the per-address and reserved-slot rules to it. False = over the cap, nothing
+    /// changed; the caller must refuse the request and close the connection.
+    fn attribute(&self, client: IpAddr) -> bool {
+        let client = client.to_canonical();
+        let limiter = &self.limiter;
+        // Lock order: state, then the guard's own address (as in `drop`).
+        let mut st = limiter.state.lock();
+        let mut cur = self.ip.lock();
+        if *cur == client {
+            return true;
+        }
+        if !client.is_loopback() {
+            let trusted = ConnLimiter::is_trusted(&st, &client);
+            let cap = if trusted {
+                limiter.per_trusted_peer
+            } else {
+                limiter.per_peer
+            };
+            if st.per_ip.get(&client).copied().unwrap_or(0) >= cap {
+                return false;
+            }
+            // This connection is already in `total`.
+            if !trusted && st.total > limiter.max_total.saturating_sub(limiter.reserved) {
+                return false;
+            }
+        }
+        ConnLimiter::release_ip(&mut st, &cur);
+        *st.per_ip.entry(client).or_insert(0) += 1;
+        *cur = client;
+        true
     }
 }
 
@@ -345,12 +396,8 @@ impl Drop for ConnGuard {
     fn drop(&mut self) {
         let mut st = self.limiter.state.lock();
         st.total = st.total.saturating_sub(1);
-        if let Some(n) = st.per_ip.get_mut(&self.ip) {
-            *n = n.saturating_sub(1);
-            if *n == 0 {
-                st.per_ip.remove(&self.ip);
-            }
-        }
+        let ip = *self.ip.lock();
+        ConnLimiter::release_ip(&mut st, &ip);
     }
 }
 
@@ -1506,6 +1553,11 @@ impl Remote {
                 post(pair).layer(DefaultBodyLimit::max(PAIR_BODY_LIMIT)),
             )
             .merge(api)
+            // Charge the connection to the real client once its address is known.
+            .layer(axum::middleware::from_fn_with_state(
+                ctx.clone(),
+                per_client_cap,
+            ))
             .layer(axum::middleware::map_response(no_store))
             .with_state(ctx)
     }
@@ -1801,11 +1853,13 @@ async fn serve(
         };
         let router = router.clone();
         let mut closing = closing_rx.clone();
+        let permit = Arc::new(permit);
         connections.spawn(async move {
-            let _permit = permit;
+            let _permit = permit.clone();
             let service = hyper::service::service_fn(
                 move |mut req: axum::extract::Request<hyper::body::Incoming>| {
                     req.extensions_mut().insert(ConnectInfo(peer));
+                    req.extensions_mut().insert(permit.clone());
                     router.clone().oneshot(req)
                 },
             );
@@ -1891,6 +1945,31 @@ fn body_limit(method: &axum::http::Method, path: &str, scope: &Scope) -> Option<
     } else {
         MAX_REMOTE_BODY
     })
+}
+
+/// Enforces the per-client connection cap once the client is known (behind Tailscale
+/// Serve it is only in `X-Forwarded-For`, not the socket address).
+async fn per_client_cap(
+    State(c): State<Ctx>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let slot = req.extensions().get::<Arc<ConnGuard>>().cloned();
+    let peer = req.extensions().get::<ConnectInfo<SocketAddr>>().cloned();
+    if let (Some(slot), Some(ConnectInfo(peer))) = (slot, peer) {
+        let client = c.remote.client_ip(peer.ip(), req.headers());
+        if !slot.attribute(client) {
+            let mut res = ApiError(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Too many connections from this device.".into(),
+            )
+            .into_response();
+            res.headers_mut()
+                .insert(header::CONNECTION, HeaderValue::from_static("close"));
+            return res;
+        }
+    }
+    next.run(req).await
 }
 
 /// Every API request: check the token (and Host/origin) before reading the body,
@@ -4650,5 +4729,62 @@ mod tests {
         // IPv4-mapped addresses are the same peer.
         let mapped: IpAddr = "::ffff:192.168.1.10".parse().unwrap();
         assert!(limiter.admit(mapped).is_none(), "same peer as {a}");
+    }
+
+    #[test]
+    fn proxied_connections_are_charged_to_the_forwarded_client() {
+        let limiter = Arc::new(ConnLimiter::new(10, 4, 2, 5));
+        let lo: IpAddr = "127.0.0.1".parse().unwrap();
+        let a: IpAddr = "100.101.1.2".parse().unwrap();
+        let b: IpAddr = "100.101.1.3".parse().unwrap();
+        // Behind a proxy every socket is loopback: accepted, then charged per request.
+        let c1 = limiter.admit(lo).unwrap();
+        let c2 = limiter.admit(lo).unwrap();
+        let c3 = limiter.admit(lo).unwrap();
+        assert!(c1.attribute(a));
+        assert!(c1.attribute(a), "same client again is a no-op");
+        assert!(c2.attribute(a));
+        assert!(!c3.attribute(a), "client a is at its cap of 2");
+        assert!(c3.attribute(b), "another client is unaffected");
+        assert_eq!(limiter.state.lock().per_ip.get(&a), Some(&2));
+        // A pooled connection moving to another client frees the first one's slot.
+        assert!(c2.attribute(b));
+        assert!(c3.attribute(a));
+        assert_eq!(limiter.state.lock().per_ip.get(&a), Some(&2));
+        assert_eq!(limiter.state.lock().per_ip.get(&b), Some(&1));
+        // Trusted clients get the larger cap.
+        limiter.trust(a);
+        let extra: Vec<_> = (0..3).map(|_| limiter.admit(lo).unwrap()).collect();
+        for g in &extra {
+            assert!(g.attribute(a));
+        }
+        assert_eq!(limiter.state.lock().per_ip.get(&a), Some(&5));
+        drop((c1, c2, c3, extra));
+        let st = limiter.state.lock();
+        assert_eq!(st.total, 0);
+        assert!(st.per_ip.is_empty(), "no leaked entries");
+    }
+
+    #[test]
+    fn proxied_strangers_cannot_use_the_reserved_slots() {
+        let limiter = Arc::new(ConnLimiter::new(6, 3, 8, 8));
+        let lo: IpAddr = "127.0.0.1".parse().unwrap();
+        let held: Vec<_> = (0..6).map(|_| limiter.admit(lo).unwrap()).collect();
+        assert!(limiter.admit(lo).is_none(), "total cap still applies");
+        let stranger: IpAddr = "100.64.0.9".parse().unwrap();
+        let friend: IpAddr = "100.64.0.8".parse().unwrap();
+        limiter.trust(friend);
+        // Six are open, past max - reserved = 3: an unknown client is refused.
+        assert!(!held[0].attribute(stranger));
+        assert!(
+            held[1].attribute(friend),
+            "authenticated clients may use them"
+        );
+        // The computer itself is never refused.
+        assert!(held[1].attribute(lo));
+        drop(held);
+        // With room, strangers are fine.
+        let g = limiter.admit(lo).unwrap();
+        assert!(g.attribute(stranger));
     }
 }

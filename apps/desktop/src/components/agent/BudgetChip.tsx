@@ -99,7 +99,7 @@ function HeaderMeter({ agent, compact }: { agent: Agent; compact?: boolean }) {
     return (
       <Tooltip content={tip}>
         <span role="img" aria-label="Cost limit set, but this agent reports no cost" className="inline-flex">
-          <Badge className="px-1 opacity-70">
+          <Badge className="h-7 px-1.5 text-xs opacity-70">
             <Wallet />
             {!compact && <span>No cost</span>}
           </Badge>
@@ -113,7 +113,7 @@ function HeaderMeter({ agent, compact }: { agent: Agent; compact?: boolean }) {
       <span role="img" aria-label={`${label}, ${worst.pct}%`} className="inline-flex">
         <Badge
           tone={worst.level === "hit" ? "err" : worst.level === "warn" ? "warn" : "neutral"}
-          className={cn("gap-1.5", compact ? "px-1" : "px-1.5")}
+          className={cn("h-7 gap-1.5 text-xs", compact ? "px-1.5" : "px-2")}
         >
           <Wallet />
           {!compact && (

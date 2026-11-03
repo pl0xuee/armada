@@ -3056,25 +3056,18 @@ impl Core {
         if !Path::new(&schedule.project_path).is_dir() {
             bail!("Folder not found: {}", schedule.project_path);
         }
-        let existing = self
-            .inner
-            .db
-            .schedules()?
-            .into_iter()
-            .find(|s| s.id == schedule.id && !s.id.is_empty());
         if schedule.id.is_empty() {
             schedule.id = uuid::Uuid::new_v4().to_string();
-        }
-        if let Some(prev) = existing {
-            schedule.last_run_at = prev.last_run_at;
-            schedule.last_agent_id = prev.last_agent_id;
         }
         // Edited: an earlier failure no longer describes this schedule.
         schedule.last_error = None;
         schedule.days.sort_unstable();
         schedule.days.dedup();
         schedule.updated_at = now_ms();
-        self.inner.db.put_schedule(&schedule)?;
+        // Keeps the stored run record (a new schedule has none).
+        schedule.last_run_at = None;
+        schedule.last_agent_id = None;
+        self.inner.db.put_schedule_keeping_run(&mut schedule)?;
         self.emit(KvistcodeEvent::ScheduleUpdated {
             schedule: schedule.clone(),
         });
@@ -3146,7 +3139,21 @@ impl Core {
 
     /// Records the run, creates the agent, and records the outcome on the schedule
     /// (`last_agent_id`, or `last_error`, which the UI shows) via `schedule_updated`.
-    async fn start_scheduled(&self, mut schedule: Schedule) -> Result<Agent> {
+    async fn start_scheduled(&self, schedule: Schedule) -> Result<Agent> {
+        // Record the run first so a failing schedule can't fire again every tick. Only
+        // the run time is changed, on the stored copy, so an edit made since the caller
+        // read the schedule isn't overwritten (and a deleted schedule isn't brought back).
+        let ran_at = now_ms();
+        let Some(schedule) = self
+            .inner
+            .db
+            .update_schedule(&schedule.id, |s| s.last_run_at = Some(ran_at))?
+        else {
+            bail!("Schedule not found");
+        };
+        self.emit(KvistcodeEvent::ScheduleUpdated {
+            schedule: schedule.clone(),
+        });
         let stamp = Local::now().format("%b %-d, %H:%M");
         let req = CreateAgentRequest {
             provider: schedule.provider,
@@ -3161,33 +3168,24 @@ impl Core {
             permission_mode: schedule.permission_mode.clone(),
             attachments: Vec::new(),
         };
-        // Record the run first so a failing schedule can't fire again every tick.
-        schedule.last_run_at = Some(now_ms());
-        self.inner.db.put_schedule(&schedule)?;
-        self.emit(KvistcodeEvent::ScheduleUpdated {
-            schedule: schedule.clone(),
-        });
         let result = self
             .create_agent_inner(req, None, Some(schedule.id.clone()), None)
             .await;
-        // Re-read: the schedule may have been edited or deleted meanwhile.
-        match self.find_schedule(&schedule.id) {
-            Ok(Some(mut current)) => {
-                current.last_run_at = schedule.last_run_at;
-                match &result {
-                    Ok(agent) => {
-                        current.last_agent_id = Some(agent.id.clone());
-                        current.last_error = None;
-                    }
-                    Err(e) => current.last_error = Some(format!("{e:#}")),
+        // The schedule may have been edited or deleted meanwhile: change only the outcome.
+        let outcome = self
+            .inner
+            .db
+            .update_schedule(&schedule.id, |current| match &result {
+                Ok(agent) => {
+                    current.last_agent_id = Some(agent.id.clone());
+                    current.last_error = None;
                 }
-                if let Err(e) = self.inner.db.put_schedule(&current) {
-                    tracing::warn!("saving schedule {}: {e:#}", current.id);
-                }
-                self.emit(KvistcodeEvent::ScheduleUpdated { schedule: current });
-            }
+                Err(e) => current.last_error = Some(format!("{e:#}")),
+            });
+        match outcome {
+            Ok(Some(current)) => self.emit(KvistcodeEvent::ScheduleUpdated { schedule: current }),
             Ok(None) => {}
-            Err(e) => tracing::warn!("re-reading schedule {}: {e:#}", schedule.id),
+            Err(e) => tracing::warn!("saving schedule {}: {e:#}", schedule.id),
         }
         result
     }

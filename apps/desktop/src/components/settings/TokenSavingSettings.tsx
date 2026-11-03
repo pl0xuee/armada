@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { formatTokens } from "@/lib/format";
 import type { OutputFilterStats, Settings, TokenSaverOptions } from "@/lib/types";
 import { useApp } from "@/store/app";
+import { MoreRows } from "./Disclosure";
 import { SettingGroup, SettingRow } from "./SettingRow";
 import { saveSettingsPatch } from "./settingsErrors";
 
@@ -37,7 +38,7 @@ export async function applyTokenSaver(): Promise<boolean> {
 /** About 3.5 characters per token. */
 const tokensOf = (chars: number) => Math.round(chars / 3.5);
 
-/** "Save tokens" group in Settings → Behavior. */
+/** "Save tokens" group on the General page. */
 export function TokenSavingSettings({ settings }: { settings: Settings }) {
   const value = settings.autoCompactWindow;
   const opts = settings.tokenSaver;
@@ -76,6 +77,14 @@ export function TokenSavingSettings({ settings }: { settings: Settings }) {
   return (
     <SettingGroup title="Save tokens">
       <SettingRow
+        title="Save tokens preset"
+        description="One click: summarize at 250k tokens, helpers on Sonnet, tidy command output, a 12k output limit, concise replies, and new Claude agents start at medium effort. It never changes the model you chose for an agent, or your budgets."
+      >
+        <Button size="sm" variant="secondary" onClick={() => void applyTokenSaver()}>
+          Apply preset
+        </Button>
+      </SettingRow>
+      <SettingRow
         title="Summarize conversations at"
         description="Every step an agent takes re-reads its whole conversation, so a shorter one uses far fewer tokens. Claude agents on 1M-token models otherwise grow to several hundred thousand before they summarize. Applies to Claude agents as they start."
       >
@@ -91,52 +100,46 @@ export function TokenSavingSettings({ settings }: { settings: Settings }) {
           options={options}
         />
       </SettingRow>
-      <SettingRow
-        title="Helper agents use"
-        description="Claude splits work into helper agents, each with its own conversation and its own usage. In one measured install, four in five tool calls came from helpers. Running them on a smaller model saves usage and rarely changes the result. Applies to Claude agents as they start."
-      >
-        <Select
-          aria-label="Helper agents use"
-          className="h-8 w-[170px]"
-          value={opts.subagentModel ?? "same"}
-          onValueChange={(v) => patch({ subagentModel: v === "same" ? null : v })}
-          options={HELPER_MODELS}
-        />
-      </SettingRow>
-      <SettingRow
-        title="Tidy build and test output"
-        description={
-          saved > 0
-            ? `Removes colors, progress spam and long runs of passing-test or "Compiling" lines before an agent reads them. Errors, warnings and failures always stay. So far about ${formatTokens(saved)} tokens saved over ${stats?.calls} commands. Never touches file contents or search results.`
-            : 'Removes colors, progress spam and long runs of passing-test or "Compiling" lines before an agent reads them. Errors, warnings and failures always stay. Never touches file contents or search results. Helps most in build- and test-heavy projects.'
-        }
-      >
-        <Switch
-          checked={opts.outputFilter}
-          onCheckedChange={(v) => patch({ outputFilter: v })}
-          aria-label="Tidy build and test output"
-        />
-      </SettingRow>
-      <SettingRow
-        title="Longest command output an agent reads"
-        description="Longer output is kept in a file with a short preview, and the agent reads the parts it needs. Everything an agent reads is re-read on every later step, so a 30k-character dump costs far more than its size. Applies to Claude agents as they start."
-      >
-        <Select
-          aria-label="Longest command output an agent reads"
-          className="h-8 w-[190px]"
-          value={limit == null ? "auto" : String(limit)}
-          onValueChange={(v) => patch({ bashOutputMaxChars: v === "auto" ? null : Number(v) })}
-          options={limitOptions}
-        />
-      </SettingRow>
-      <SettingRow
-        title="Save tokens preset"
-        description="One click: summarize at 250k tokens, helpers on Sonnet, tidy command output, a 12k output limit, concise replies, and new Claude agents start at medium effort. It never changes the model you chose for an agent, or your budgets."
-      >
-        <Button size="sm" variant="secondary" onClick={() => void applyTokenSaver()}>
-          Apply preset
-        </Button>
-      </SettingRow>
+      <MoreRows label="More options">
+        <SettingRow
+          title="Helper agents use"
+          description="Claude splits work into helper agents, each with its own conversation and its own usage. In one measured install, four in five tool calls came from helpers. Running them on a smaller model saves usage and rarely changes the result. Applies to Claude agents as they start."
+        >
+          <Select
+            aria-label="Helper agents use"
+            className="h-8 w-[170px]"
+            value={opts.subagentModel ?? "same"}
+            onValueChange={(v) => patch({ subagentModel: v === "same" ? null : v })}
+            options={HELPER_MODELS}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Tidy build and test output"
+          description={
+            saved > 0
+              ? `Removes colors, progress spam and long runs of passing-test or "Compiling" lines before an agent reads them. Errors, warnings and failures always stay. So far about ${formatTokens(saved)} tokens saved over ${stats?.calls} commands. Never touches file contents or search results.`
+              : 'Removes colors, progress spam and long runs of passing-test or "Compiling" lines before an agent reads them. Errors, warnings and failures always stay. Never touches file contents or search results. Helps most in build- and test-heavy projects.'
+          }
+        >
+          <Switch
+            checked={opts.outputFilter}
+            onCheckedChange={(v) => patch({ outputFilter: v })}
+            aria-label="Tidy build and test output"
+          />
+        </SettingRow>
+        <SettingRow
+          title="Longest command output an agent reads"
+          description="Longer output is kept in a file with a short preview, and the agent reads the parts it needs. Everything an agent reads is re-read on every later step, so a 30k-character dump costs far more than its size. Applies to Claude agents as they start."
+        >
+          <Select
+            aria-label="Longest command output an agent reads"
+            className="h-8 w-[190px]"
+            value={limit == null ? "auto" : String(limit)}
+            onValueChange={(v) => patch({ bashOutputMaxChars: v === "auto" ? null : Number(v) })}
+            options={limitOptions}
+          />
+        </SettingRow>
+      </MoreRows>
     </SettingGroup>
   );
 }

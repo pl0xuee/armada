@@ -35,7 +35,7 @@ export function AccountSwitcher({ agent, showName }: { agent: Agent; showName: b
             type="button"
             aria-label={`Account: ${current.name}. Change account`}
             className={cn(
-              "inline-flex h-6 min-w-0 max-w-[168px] items-center gap-1.5 rounded-full border border-line bg-card/60 text-[11.5px] text-muted transition-colors hover:border-line-strong hover:text-fg data-[state=open]:border-accent/50",
+              "inline-flex h-7 min-w-0 max-w-[168px] items-center gap-1.5 rounded-full border border-line bg-card/60 text-xs text-muted transition-colors hover:border-line-strong hover:text-fg data-[state=open]:border-accent/50",
               showName ? "pl-1 pr-1.5" : "px-1",
             )}
           >
@@ -62,7 +62,7 @@ export function AccountSwitcher({ agent, showName }: { agent: Agent; showName: b
               <AccountAvatar account={a} size={20} showProvider={false} />
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate">{a.name}</span>
-                <span className={cn("truncate text-[11.5px]", signedIn ? "text-steel" : "text-warn")}>
+                <span className={cn("truncate text-xs", signedIn ? "text-steel" : "text-warn")}>
                   {signedIn
                     ? [a.status?.label, a.status?.email].filter(Boolean).join(" · ") || "Signed in"
                     : "Not signed in"}
@@ -73,7 +73,7 @@ export function AccountSwitcher({ agent, showName }: { agent: Agent; showName: b
           );
         })}
         {busy && options.length > 1 && (
-          <p className="px-2 pb-1 pt-0.5 text-[11.5px] leading-snug text-steel">
+          <p className="px-2 pb-1 pt-0.5 text-xs leading-snug text-steel">
             Wait for the current turn to finish, or stop it, before switching.
           </p>
         )}

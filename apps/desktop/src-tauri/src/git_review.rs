@@ -1986,6 +1986,15 @@ fn lenient_canonicalize(path: &Path) -> PathBuf {
     }
 }
 
+/// Branch names go to git as plain arguments; one that starts with `-` (only possible via
+/// plumbing like `git update-ref`) would be read as an option, so refuse it up front.
+fn plain_branch_name(name: &str) -> anyhow::Result<()> {
+    if name.starts_with('-') || name.contains('\0') {
+        bail!("The branch name “{name}” isn't one Kvistcode can use safely; rename the branch.");
+    }
+    Ok(())
+}
+
 /// The checks `merge` makes on the project before touching anything, so "Commit &
 /// merge" can refuse up front instead of committing and then failing to merge.
 /// Returns (branch, base, project).
@@ -1993,6 +2002,8 @@ pub async fn merge_preflight(agent: &Agent) -> anyhow::Result<(&str, &str, &Path
     let (Some(branch), Some(base)) = (agent.branch.as_deref(), agent.base_branch.as_deref()) else {
         bail!("Only agents running in their own worktree branch can be merged");
     };
+    plain_branch_name(branch)?;
+    plain_branch_name(base)?;
     if !agent.worktree {
         bail!("Only agents running in their own worktree branch can be merged");
     }
@@ -2161,6 +2172,7 @@ fn base_of(agent: &Agent) -> anyhow::Result<(&str, &Path)> {
     let Some(base) = agent.base_branch.as_deref() else {
         bail!("Only agents running in their own worktree branch have a base branch");
     };
+    plain_branch_name(base)?;
     let project = Path::new(&agent.project_path);
     if !project.is_dir() {
         bail!(
@@ -2289,6 +2301,8 @@ pub async fn create_pr(
     else {
         bail!("Pull requests need an agent running on its own branch (enable worktree)");
     };
+    plain_branch_name(branch)?;
+    plain_branch_name(agent_base)?;
     let base = base
         .map(str::trim)
         .filter(|b| !b.is_empty())
@@ -2453,6 +2467,16 @@ pub(crate) async fn push_remote(cwd: &Path, branch: &str) -> anyhow::Result<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn option_like_branch_names_are_refused() {
+        for bad in ["-x", "--upload-pack=evil", "-", "a\0b"] {
+            assert!(plain_branch_name(bad).is_err(), "{bad:?}");
+        }
+        for good in ["main", "kvistcode/fix-1a2b3c4d", "feature/-dash", "a-b"] {
+            assert!(plain_branch_name(good).is_ok(), "{good:?}");
+        }
+    }
 
     /// A throwaway repository with a deterministic identity and no user/global hooks.
     struct Repo {

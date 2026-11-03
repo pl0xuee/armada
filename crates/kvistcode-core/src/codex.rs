@@ -460,7 +460,11 @@ impl CodexDriver {
                 let id = v["turn"]["id"].as_str().map(str::to_string);
                 let finished = id.is_some() && *self.completed_turn.lock() == id;
                 if !finished {
-                    *self.turn_id.lock() = id;
+                    // A reply without an id must not erase the one `turn/started` gave.
+                    {
+                        let mut turn = self.turn_id.lock();
+                        *turn = known_turn(turn.take(), id.as_deref());
+                    }
                     if self
                         .cancel_requested
                         .swap(false, std::sync::atomic::Ordering::SeqCst)
@@ -1135,11 +1139,14 @@ impl CodexDriver {
                 });
             }
             "turn/started" => {
-                *self.turn_id.lock() = p["turn"]["id"].as_str().map(str::to_string);
+                // An event without an id says nothing new; never forget the running turn.
+                let mut turn = self.turn_id.lock();
+                *turn = known_turn(turn.take(), p["turn"]["id"].as_str());
             }
             "turn/completed" => {
-                *self.turn_id.lock() = None;
-                *self.completed_turn.lock() = p["turn"]["id"].as_str().map(str::to_string);
+                // Without an id it ended the turn we know of, so remember that one.
+                let ended = known_turn(self.turn_id.lock().take(), p["turn"]["id"].as_str());
+                *self.completed_turn.lock() = ended;
                 // Spawn calls are kept open while their sub-agents run; none may outlive
                 // the turn, or its card would spin on an idle agent.
                 let mut calls: Vec<String> = self.sub_threads.lock().values().cloned().collect();
@@ -1573,6 +1580,12 @@ async fn write_attachment(dir: &Path, a: &Attachment) -> anyhow::Result<String> 
 }
 
 /// Whether a Codex collaborator-agent state means the sub-agent is still working.
+/// The turn we are tracking after an event named `reported` (None = it carried no id,
+/// so what we already knew stays).
+fn known_turn(current: Option<String>, reported: Option<&str>) -> Option<String> {
+    reported.map(str::to_string).or(current)
+}
+
 fn sub_state_working(status: Option<&str>) -> bool {
     matches!(status, Some("pendingInit" | "running"))
 }
@@ -1677,6 +1690,14 @@ fn capitalize(s: &str) -> String {
 #[cfg(test)]
 mod subagent_state_tests {
     use super::*;
+
+    #[test]
+    fn an_event_without_a_turn_id_keeps_the_known_turn() {
+        let known = Some("t1".to_string());
+        assert_eq!(known_turn(known.clone(), None), known);
+        assert_eq!(known_turn(known, Some("t2")), Some("t2".to_string()));
+        assert_eq!(known_turn(None, None), None);
+    }
 
     #[test]
     fn working_states() {

@@ -24,3 +24,23 @@ describe("themes", () => {
     expect(isLightTheme(undefined)).toBe(false);
   });
 });
+
+describe("match system", () => {
+  it("is a valid choice that is not a theme of its own", async () => {
+    const { SYSTEM_THEME, SYSTEM_DARK, SYSTEM_LIGHT, resolveTheme } = await import("./themes");
+    expect(isThemeId(SYSTEM_THEME)).toBe(true);
+    expect(THEME_IDS).not.toContain(SYSTEM_THEME);
+    expect(resolveTheme("system", false)).toBe(SYSTEM_DARK);
+    expect(resolveTheme("system", true)).toBe(SYSTEM_LIGHT);
+    expect(THEMES.find((t) => t.id === SYSTEM_DARK)?.light).toBe(false);
+    expect(THEMES.find((t) => t.id === SYSTEM_LIGHT)?.light).toBe(true);
+  });
+
+  it("leaves a fixed theme alone and falls back to the default for unknown values", async () => {
+    const { resolveTheme } = await import("./themes");
+    expect(resolveTheme("paper", false)).toBe("paper");
+    expect(resolveTheme("midnight", true)).toBe("midnight");
+    expect(resolveTheme("neon", true)).toBe("gunmetal");
+    expect(resolveTheme(undefined, true)).toBe("gunmetal");
+  });
+});

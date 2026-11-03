@@ -693,6 +693,7 @@ impl Db {
         Ok(out)
     }
 
+    #[cfg(test)]
     pub fn put_schedule(&self, schedule: &Schedule) -> anyhow::Result<()> {
         self.conn.lock().execute(
             "INSERT INTO schedules (id, data) VALUES (?1, ?2)
@@ -700,6 +701,57 @@ impl Db {
             params![schedule.id, serde_json::to_string(schedule)?],
         )?;
         Ok(())
+    }
+
+    /// Saves an edited schedule but keeps the run record (`last_run_at`, `last_agent_id`)
+    /// as stored right now, so a run finishing meanwhile isn't undone by the edit.
+    pub fn put_schedule_keeping_run(&self, schedule: &mut Schedule) -> anyhow::Result<()> {
+        let conn = self.conn.lock();
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT data FROM schedules WHERE id = ?1",
+                params![schedule.id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(prev) = stored.and_then(|d| serde_json::from_str::<Schedule>(&d).ok()) {
+            schedule.last_run_at = prev.last_run_at;
+            schedule.last_agent_id = prev.last_agent_id;
+        }
+        conn.execute(
+            "INSERT INTO schedules (id, data) VALUES (?1, ?2)
+             ON CONFLICT(id) DO UPDATE SET data = excluded.data",
+            params![schedule.id, serde_json::to_string(schedule)?],
+        )?;
+        Ok(())
+    }
+
+    /// Changes the stored schedule in one step (read, `change`, write under the same
+    /// lock), so a run's bookkeeping never overwrites an edit made in the meantime.
+    /// None if the schedule is gone (it is not brought back).
+    pub fn update_schedule(
+        &self,
+        id: &str,
+        change: impl FnOnce(&mut Schedule),
+    ) -> anyhow::Result<Option<Schedule>> {
+        let conn = self.conn.lock();
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT data FROM schedules WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(mut schedule) = stored.and_then(|d| serde_json::from_str::<Schedule>(&d).ok())
+        else {
+            return Ok(None);
+        };
+        change(&mut schedule);
+        conn.execute(
+            "UPDATE schedules SET data = ?2 WHERE id = ?1",
+            params![id, serde_json::to_string(&schedule)?],
+        )?;
+        Ok(Some(schedule))
     }
 
     pub fn delete_schedule(&self, id: &str) -> anyhow::Result<()> {
@@ -812,6 +864,68 @@ mod tests {
     }
 
     use crate::model::{RemoteSettings, SoundSettings};
+
+    fn sample_schedule() -> Schedule {
+        serde_json::from_value(serde_json::json!({
+            "id": "s1", "name": "Nightly", "enabled": true, "provider": "claude",
+            "accountId": "a", "projectPath": "/p", "prompt": "old", "worktree": false,
+            "time": "03:00", "days": [], "lastRunAt": null, "lastAgentId": null
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_runs_bookkeeping_does_not_overwrite_a_newer_edit() {
+        let dir = temp("schedule-stale");
+        let db = Db::open(&dir.join("armada.db")).unwrap();
+        db.put_schedule(&sample_schedule()).unwrap();
+        // The run read the schedule, then the user edited it while the agent started.
+        let mut edited = sample_schedule();
+        edited.prompt = "new".into();
+        edited.enabled = false;
+        db.put_schedule_keeping_run(&mut edited).unwrap();
+        let after_start = db
+            .update_schedule("s1", |s| s.last_agent_id = Some("agent".into()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(after_start.prompt, "new");
+        assert!(!after_start.enabled);
+        let stored = db.schedules().unwrap().remove(0);
+        assert_eq!(stored.prompt, "new");
+        assert_eq!(stored.last_agent_id.as_deref(), Some("agent"));
+    }
+
+    #[test]
+    fn an_edit_keeps_the_stored_run_record_and_a_deleted_schedule_stays_deleted() {
+        let dir = temp("schedule-edit");
+        let db = Db::open(&dir.join("armada.db")).unwrap();
+        db.put_schedule(&sample_schedule()).unwrap();
+        db.update_schedule("s1", |s| {
+            s.last_run_at = Some(123);
+            s.last_agent_id = Some("agent".into());
+        })
+        .unwrap();
+        // An edit built from an older read has no run record; the stored one survives.
+        let mut edited = sample_schedule();
+        edited.name = "Renamed".into();
+        db.put_schedule_keeping_run(&mut edited).unwrap();
+        assert_eq!(edited.last_run_at, Some(123));
+        let stored = db.schedules().unwrap().remove(0);
+        assert_eq!(
+            (
+                stored.name.as_str(),
+                stored.last_run_at,
+                stored.last_agent_id.as_deref()
+            ),
+            ("Renamed", Some(123), Some("agent"))
+        );
+        db.delete_schedule("s1").unwrap();
+        assert!(db
+            .update_schedule("s1", |s| s.last_run_at = Some(5))
+            .unwrap()
+            .is_none());
+        assert!(db.schedules().unwrap().is_empty(), "not brought back");
+    }
 
     #[test]
     fn settings_backup_written_once() {

@@ -14,6 +14,13 @@ docs/RELEASING.md).
 - **Change an agent's account from the agent itself.** The account the agent runs on now sits in its header: click it to pick another account of the same provider (for example Personal or Work) and the agent carries on there with its history. It waits for the current turn to finish first.
 
 ### Improved
+- **Settings has 9 pages instead of 15.** Sounds and Notifications are one Alerts page, rarely used options sit under “Advanced”, and a new “Match system” theme follows your computer's light or dark mode.
+- **Simpler rate-limit banner.** One plain headline with the time it resumes, one main button (Switch account or Resume), and the rest under More.
+- **A calmer agent header.** “Review 3 files” is labelled, rarely used actions moved into the … menu, every icon has a tooltip, and the title no longer shrinks to one letter in narrow windows.
+- **Usage page is tidier.** Provider, account and project breakdowns share one panel.
+- **Phone setup is clearer.** “This computer” explains what to do next, and a plain-network connection warns that it is not encrypted.
+- **One set of status words** (Needs you, Ready to review, Rate limited, Error) across Mission Control, the sidebar and the header; the agent composer uses “Ask before changes” / “Run without asking”.
+- **The sidebar scrolls to the agent you open**, and shows “agent N” numbers while the voice assistant is on.
 - **Review is simpler.** One main button (Commit & merge, or Merge) with the rest under More; actions that can't do anything are disabled, and merging asks first.
 - **Mission Control: Allow / Deny always visible**, long diffs are collapsed, and rate-limited or failed agents have Switch account / Retry / Resume right on their card.
 - **Plainer wording.** “Ask before changes” and “Run without asking” everywhere, simpler first-run and tour text, a hint that Ctrl+Enter starts an agent, and “Keep this & archive others” in Compare.
@@ -23,6 +30,12 @@ docs/RELEASING.md).
 - **Quieter when hidden:** clocks and status polling pause while the window is in the background.
 
 ### Fixed
+- The voice assistant now sees which agent is open as soon as you press Talk, instead of only after you click away and back.
+- The “Turn finished · 4 agents may be running” pill is shorter and no longer runs under the header buttons.
+- Test-connection errors for MCP servers no longer echo passwords or keys.
+- A scheduled run no longer overwrites a schedule you edited while it ran, or brings back one you deleted.
+- Codex turns without an id no longer lose track of the running turn; an oversized message from an agent now fails the waiting request with a clear error instead of hanging.
+- The phone link limits connections per device even behind Tailscale, and closing the preview ends its live connections.
 - “Everything finished” alerts say what the agent last reported instead of a bare “done”.
 - The “3 sub-agents” label is no longer cut off.
 - Long chats load earlier history when the screen isn't full, and a failed load shows a Retry.

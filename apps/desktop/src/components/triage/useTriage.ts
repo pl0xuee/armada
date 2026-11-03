@@ -43,16 +43,16 @@ export function selectNextTriage(queue: TriageEntry[]) {
 }
 
 export const REASON_LABEL: Record<NeedsReason, string> = {
-  permission: "Needs approval",
+  permission: "Needs you",
   budget: "Budget limit",
-  rate_limited: "Rate limit",
+  rate_limited: "Rate limited",
   error: "Error",
-  done: "Done · unread",
+  done: "Ready to review",
 };
 
 /** The pill text: a question is not an approval, so it reads "Needs you". */
 export function reasonLabel(reason: NeedsReason, asksQuestion = false, backgroundRunning = false): string {
-  if (reason === "done" && backgroundRunning) return "Turn finished · unread";
+  if (reason === "done" && backgroundRunning) return "Turn finished, unread";
   return asksQuestion && reason === "permission" ? "Needs you" : REASON_LABEL[reason];
 }
 

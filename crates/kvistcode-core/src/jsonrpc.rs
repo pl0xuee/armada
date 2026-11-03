@@ -59,6 +59,8 @@ impl std::error::Error for RpcError {}
 
 /// Code used for "the agent process went away" (our own, not the agent's).
 pub const CODE_EXITED: i64 = -32099;
+/// Code used when one message from the agent was too long to read (our own).
+pub const CODE_TOO_LARGE: i64 = -32098;
 
 /// A request that could not be delivered or answered because the process is gone
 /// (as opposed to the agent answering with an error).
@@ -103,6 +105,18 @@ impl Closer {
             }));
         }
         let _ = self.tx.send(Incoming::Closed);
+    }
+
+    /// Answers every waiting request with an error (the reply may be the message that
+    /// was lost), without ending the connection.
+    fn fail_pending(&self, code: i64, message: &str) {
+        for (_, waiter) in self.pending.lock().drain() {
+            let _ = waiter.send(Err(RpcError {
+                code,
+                message: message.into(),
+                data: Value::Null,
+            }));
+        }
     }
 }
 
@@ -152,6 +166,15 @@ pub(crate) async fn read_lines(
     max_len: usize,
     mut on_line: impl FnMut(String),
 ) -> std::io::Result<()> {
+    read_lines_flagged(reader, max_len, |line, _| on_line(line)).await
+}
+
+/// Like `read_lines`; the second argument says the line was cut at `max_len`.
+async fn read_lines_flagged(
+    reader: impl AsyncRead + Unpin,
+    max_len: usize,
+    mut on_line: impl FnMut(String, bool),
+) -> std::io::Result<()> {
     let mut reader = BufReader::with_capacity(64 * 1024, reader);
     let mut buf: Vec<u8> = Vec::with_capacity(8 * 1024);
     let mut overflow = false;
@@ -162,11 +185,11 @@ pub(crate) async fn read_lines(
         if *overflow {
             tracing::debug!(target: "kvistcode::rpc", "line longer than {max_len} bytes was cut");
         }
-        *overflow = false;
+        let was_cut = std::mem::replace(overflow, false);
         let bytes = std::mem::take(buf);
         let line = String::from_utf8(bytes)
             .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
-        on_line(line);
+        on_line(line, was_cut);
     };
     loop {
         let available = match reader.fill_buf().await {
@@ -291,7 +314,17 @@ impl Peer {
             let closer = closer.clone();
             let label = label.clone();
             tokio::spawn(async move {
-                let result = read_lines(stdout, MAX_STDOUT_LINE, |line| {
+                let result = read_lines_flagged(stdout, MAX_STDOUT_LINE, |line, cut| {
+                    if cut {
+                        // The message is lost (a cut JSON line never parses). Don't leave
+                        // callers waiting for a reply that may have been it.
+                        tracing::warn!(target: "kvistcode::rpc", "[{label}] a message over {} MB was dropped", MAX_STDOUT_LINE / (1024 * 1024));
+                        closer.fail_pending(
+                            CODE_TOO_LARGE,
+                            "The agent sent a message that was too large to read",
+                        );
+                        return;
+                    }
                     if line.trim().is_empty() {
                         return;
                     }
@@ -877,6 +910,34 @@ mod tests {
         let mut lines = Vec::new();
         read_lines(&input[..], 10, |l| lines.push(l)).await.unwrap();
         assert_eq!(lines, ["short", "xxxxxxxxxx", "\u{fffd} ok", "last"]);
+    }
+
+    #[tokio::test]
+    async fn a_cut_line_is_flagged_and_does_not_grow_memory() {
+        let mut input = b"ok\n".to_vec();
+        input.extend(std::iter::repeat_n(b'y', 5_000_000));
+        input.extend(b"\nafter\n");
+        let mut seen = Vec::new();
+        read_lines_flagged(&input[..], 1000, |l, cut| seen.push((l.len(), cut)))
+            .await
+            .unwrap();
+        assert_eq!(seen, [(2, false), (1000, true), (5, false)]);
+    }
+
+    #[tokio::test]
+    async fn waiting_requests_fail_when_a_message_was_too_large() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let closer = Closer {
+            closed: AtomicBool::new(false),
+            pending: Mutex::default(),
+            tx,
+        };
+        let (wtx, wrx) = oneshot::channel();
+        closer.pending.lock().insert("1".into(), wtx);
+        closer.fail_pending(CODE_TOO_LARGE, "too large");
+        let err = wrx.await.unwrap().unwrap_err();
+        assert_eq!(err.code, CODE_TOO_LARGE);
+        assert!(!closer.closed.load(Ordering::SeqCst), "still connected");
     }
 
     #[test]

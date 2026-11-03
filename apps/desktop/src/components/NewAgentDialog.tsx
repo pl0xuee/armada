@@ -427,6 +427,13 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                       <>
                         <ProviderGlyph provider={p} size="xs" />
                         {PROVIDERS[p].short}
+                        {p !== "local" && !accounts.some((a) => a.provider === p && a.status?.loggedIn) && (
+                          <span
+                            className="h-1.5 w-1.5 rounded-full bg-warn"
+                            title={`Not signed in to ${PROVIDERS[p].short}`}
+                            aria-label="Not signed in"
+                          />
+                        )}
                       </>
                     ),
                   })),

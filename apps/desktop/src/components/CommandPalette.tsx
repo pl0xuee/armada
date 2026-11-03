@@ -759,6 +759,14 @@ function Palette({ onClose }: { onClose: () => void }) {
                     )
                   }
                 />
+                {settings.theme !== "system" && (
+                  <PaletteAction
+                    icon={<PaletteIcon />}
+                    label="Theme: Match system"
+                    keywords={["theme", "appearance", "system", "automatic", "light", "dark"]}
+                    onSelect={() => run(() => patch({ theme: "system" }))}
+                  />
+                )}
                 {THEMES.filter((t) => t.id !== settings.theme).map((t) => (
                   <PaletteAction
                     key={t.id}

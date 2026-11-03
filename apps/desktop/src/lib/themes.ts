@@ -1,6 +1,14 @@
 import type { Settings } from "@/lib/types";
 
-export type ThemeId = Settings["theme"];
+/** What Settings.theme can hold: a theme, or "system" to follow the OS light/dark setting. */
+export type ThemeChoice = Settings["theme"];
+/** A theme that has its own set of variables in styles/globals.css. */
+export type ThemeId = Exclude<ThemeChoice, "system">;
+
+export const SYSTEM_THEME = "system" as const;
+/** The themes "Match system" switches between. */
+export const SYSTEM_DARK: ThemeId = "gunmetal";
+export const SYSTEM_LIGHT: ThemeId = "titanium";
 
 export interface ThemeInfo {
   id: ThemeId;
@@ -24,10 +32,28 @@ export const THEMES: ThemeInfo[] = [
 
 export const THEME_IDS: readonly ThemeId[] = THEMES.map((t) => t.id);
 
-export function isThemeId(v: unknown): v is ThemeId {
-  return typeof v === "string" && (THEME_IDS as readonly string[]).includes(v);
+export function isThemeId(v: unknown): v is ThemeChoice {
+  return v === SYSTEM_THEME || (typeof v === "string" && (THEME_IDS as readonly string[]).includes(v));
+}
+
+const LIGHT_QUERY = "(prefers-color-scheme: light)";
+
+/** True when the OS is set to a light appearance (false when it can't be told). */
+export function systemPrefersLight(): boolean {
+  try {
+    return typeof window !== "undefined" && !!window.matchMedia?.(LIGHT_QUERY).matches;
+  } catch {
+    return false;
+  }
+}
+
+/** The theme to draw: "Match system" becomes the dark or light theme the OS asks for. */
+export function resolveTheme(id: string | undefined, prefersLight: boolean = systemPrefersLight()): ThemeId {
+  if (id === SYSTEM_THEME) return prefersLight ? SYSTEM_LIGHT : SYSTEM_DARK;
+  return isThemeId(id) ? (id as ThemeId) : "gunmetal";
 }
 
 export function isLightTheme(id: string | undefined): boolean {
+  if (id === SYSTEM_THEME) return systemPrefersLight();
   return THEMES.some((t) => t.id === id && t.light);
 }

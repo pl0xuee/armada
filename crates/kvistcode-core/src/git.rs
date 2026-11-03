@@ -590,7 +590,7 @@ pub async fn remove_worktree(
     if let Some(branch) = branch {
         if branch_exists(project_path, branch).await {
             let flag = if force { "-D" } else { "-d" };
-            if let Err(e) = git(project_path, &["branch", flag, branch]).await {
+            if let Err(e) = git(project_path, &["branch", flag, "--", branch]).await {
                 // Nothing is lost by keeping it (the unsaved-work check passed, or
                 // the user forced and only the branch survived).
                 tracing::warn!("keeping branch {branch}: {e:#}");

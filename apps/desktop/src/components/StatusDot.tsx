@@ -79,7 +79,7 @@ export function StatusPill({
   return (
     <span
       className={cn(
-        "inline-flex h-6 items-center gap-1.5 rounded-full border px-2 text-[11.5px] font-medium",
+        "inline-flex h-6 min-w-0 items-center gap-1.5 rounded-full border px-2 text-[11.5px] font-medium",
         className,
       )}
       style={{
@@ -89,7 +89,9 @@ export function StatusPill({
       }}
     >
       <StatusDot status={status} size={6} done={done} />
-      <span className={label ? "truncate" : undefined}>{label ?? meta.label}</span>
+      <span className={label ? "truncate" : undefined} title={label}>
+        {label ?? meta.label}
+      </span>
     </span>
   );
 }

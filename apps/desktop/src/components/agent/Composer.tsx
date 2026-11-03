@@ -31,6 +31,7 @@ import { Kbd } from "../ui/kbd";
 import { Tooltip } from "../ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/menu";
 import { ConfigOverflowMenu, ConfigSelect } from "./ConfigSelect";
+import { plainConfigOptions } from "./composerModes";
 import { PinnedDock } from "./PinnedDock";
 
 const ESC_ARM_MS = 1500;
@@ -106,6 +107,7 @@ function ComposerImpl({
   // Toolbar tiers by available width: labels → icons → extra options in a "+" menu.
   const roomy = width === 0 || width >= 700;
   const tight = width > 0 && width < 520;
+  const configOptions = useMemo(() => plainConfigOptions(agent), [agent]);
   const ref = useRef<HTMLTextAreaElement>(null);
   const focusTick = useUi((s) => s.composerFocusTick);
 
@@ -647,10 +649,10 @@ function ComposerImpl({
             </div>
             <div className="flex items-center gap-2 px-2.5 pb-2.5 pt-1">
               <div className="flex min-w-0 shrink-0 items-center gap-0.5">
-                {(tight ? agent.configOptions.slice(0, 1) : agent.configOptions).map((opt) => (
+                {(tight ? configOptions.slice(0, 1) : configOptions).map((opt) => (
                   <ConfigSelect key={opt.id} agent={agent} option={opt} compact={!roomy} />
                 ))}
-                {tight && <ConfigOverflowMenu agent={agent} options={agent.configOptions.slice(1)} />}
+                {tight && <ConfigOverflowMenu agent={agent} options={configOptions.slice(1)} />}
                 <AttachButton onClick={attach.openPicker} count={attach.attachments.length} iconOnly={!roomy} />
                 <TemplatePicker
                   onInsert={insertTemplate}

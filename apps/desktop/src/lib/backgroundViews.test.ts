@@ -36,8 +36,8 @@ describe("background work in the views", () => {
   });
 
   it("an unread agent whose work goes on is 'Turn finished', not 'Done'", () => {
-    expect(reasonLabel("done")).toBe("Done · unread");
-    expect(reasonLabel("done", false, true)).toBe("Turn finished · unread");
-    expect(reasonLabel("permission", false, true)).toBe("Needs approval");
+    expect(reasonLabel("done")).toBe("Ready to review");
+    expect(reasonLabel("done", false, true)).toBe("Turn finished, unread");
+    expect(reasonLabel("permission", false, true)).toBe("Needs you");
   });
 });

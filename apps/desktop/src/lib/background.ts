@@ -75,8 +75,7 @@ export function backgroundShort(b: BackgroundWork): string {
     if (b.wfTotal === 0) return "Workflow running";
     return b.wfWorking > 0 ? `Workflow ${b.wfWorking} of ${b.wfTotal} running` : "Workflow wrapping up";
   }
-  if (b.subagents > 0)
-    return `${pluralize(b.subagents, "background agent")} may be running`;
+  if (b.subagents > 0) return `${pluralize(b.subagents, "background agent")} may be running`;
   return "";
 }
 
@@ -99,7 +98,9 @@ export function backgroundDetail(b: BackgroundWork): string {
 }
 
 /** The header pill: names what finished and what did not. */
-export const backgroundPill = (b: BackgroundWork) => `Turn finished · ${backgroundShort(b)}`;
+/** The header pill: "background" is left out ("4 agents may be running") so it fits beside the other controls. */
+export const backgroundPill = (b: BackgroundWork) =>
+  `Turn finished · ${backgroundShort(b).replace("background agent", "agent")}`;
 
 /** Agents with background work, readable without React (the timeline cache keeps their items). */
 const activeIds = new Set<string>();

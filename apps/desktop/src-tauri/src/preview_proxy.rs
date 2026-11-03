@@ -191,6 +191,7 @@ impl PreviewProxies {
             target: target.clone(),
             proxy_port: port,
             token: token.clone(),
+            stop: rx.clone(),
         });
         tokio::spawn(serve(listener, ctx, rx));
         let info = ProxyInfo {
@@ -246,6 +247,13 @@ struct Ctx {
     proxy_port: u16,
     /// The pane's session secret (see `agent_script`).
     token: String,
+    /// Turns true when the proxy is stopped; every task it spawned must end then.
+    stop: watch::Receiver<bool>,
+}
+
+/// Resolves once `stop` is true (or its sender is gone).
+async fn stopped(mut stop: watch::Receiver<bool>) {
+    let _ = stop.wait_for(|s| *s).await;
 }
 
 /// The preview agent for one proxy session, bound to the secret the app holds: the agent ignores
@@ -437,8 +445,12 @@ async fn forward(ctx: &Ctx, mut req: Request<Incoming>) -> Result<Response<Body>
     let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
         .await
         .map_err(|e| e.to_string())?;
+    let stop = ctx.stop.clone();
     tokio::spawn(async move {
-        let _ = conn.with_upgrades().await;
+        tokio::select! {
+            _ = conn.with_upgrades() => {}
+            () = stopped(stop) => {}
+        }
     });
     let mut res = sender
         .send_request(up)
@@ -451,10 +463,18 @@ async fn forward(ctx: &Ctx, mut req: Request<Incoming>) -> Result<Response<Body>
         *out.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
         *out.headers_mut() = res.headers().clone();
         if let Some(cu) = client_up {
+            // Ends with the proxy (or when either side closes), so no tunnel outlives it.
+            let stop = ctx.stop.clone();
             tokio::spawn(async move {
-                if let (Ok(c), Ok(u)) = (cu.await, up_up.await) {
-                    let (mut c, mut u) = (TokioIo::new(c), TokioIo::new(u));
-                    let _ = tokio::io::copy_bidirectional(&mut c, &mut u).await;
+                let tunnel = async {
+                    if let (Ok(c), Ok(u)) = (cu.await, up_up.await) {
+                        let (mut c, mut u) = (TokioIo::new(c), TokioIo::new(u));
+                        let _ = tokio::io::copy_bidirectional(&mut c, &mut u).await;
+                    }
+                };
+                tokio::select! {
+                    () = tunnel => {}
+                    () = stopped(stop) => {}
                 }
             });
         }
@@ -1026,6 +1046,47 @@ mod tests {
         let echoed = ws.next().await.unwrap().unwrap();
         assert_eq!(echoed.into_text().unwrap().as_str(), "ping");
         proxies.stop("agent-ws", None);
+    }
+
+    #[tokio::test]
+    async fn websocket_tunnels_end_when_the_proxy_stops() {
+        // Upstream accepts a WebSocket and reports when its side of the socket closes.
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let up = l.local_addr().unwrap().port();
+        let (closed_tx, mut closed_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Ok((s, _)) = l.accept().await {
+                let closed_tx = closed_tx.clone();
+                tokio::spawn(async move {
+                    let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+                    while let Some(Ok(_)) = ws.next().await {}
+                    let _ = closed_tx.send(());
+                });
+            }
+        });
+        let proxies = PreviewProxies::default();
+        let info = proxies
+            .start("agent-ws-stop", &format!("http://localhost:{up}/"))
+            .await
+            .unwrap();
+        let p = proxy_port(&info);
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{p}/hmr"))
+            .await
+            .unwrap();
+        ws.send("hello".into()).await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), closed_rx.recv())
+                .await
+                .is_err(),
+            "the tunnel stays open while the proxy runs"
+        );
+        proxies.stop("agent-ws-stop", None);
+        // The upstream side must see the socket close even though the client never did.
+        tokio::time::timeout(Duration::from_secs(5), closed_rx.recv())
+            .await
+            .expect("stopping the proxy ends its websocket tunnels")
+            .unwrap();
+        drop(ws);
     }
 
     #[tokio::test]

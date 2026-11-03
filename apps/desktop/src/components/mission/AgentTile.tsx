@@ -135,7 +135,7 @@ export const AgentTile = memo(function AgentTile({
           <span className="flex h-5 min-w-0 shrink items-center gap-1 rounded-full border border-warn/35 bg-warn/10 px-1.5 text-[10.5px] font-medium text-warn">
             <Gauge className="h-3 w-3 shrink-0" />
             <span className="truncate">
-              <ResumesAt agent={agent} fallback="Rate limit" />
+              <ResumesAt agent={agent} fallback="Rate limited" />
             </span>
           </span>
         )}

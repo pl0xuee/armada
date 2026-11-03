@@ -218,8 +218,7 @@ try {
   // ---- settings sections (each one loads its own backend data) -----------------------
   await goRail("Settings");
   const sections = [
-    "Appearance", "Sounds", "Notifications", "Behavior", "Budgets", "Templates", "Projects", "Tools & instructions",
-    "Providers", "Agent tools", "Custom agents", "Voice", "Voice assistant", "Remote & mobile", "About",
+    "General", "Alerts", "Budgets", "Projects", "Tools & instructions", "Agents", "Voice", "Remote & mobile", "About",
   ];
   for (const name of sections) {
     log(`settings: ${name}`);

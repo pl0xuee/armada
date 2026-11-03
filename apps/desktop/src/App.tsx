@@ -21,6 +21,7 @@ import { installCompletionTracker } from "@/store/completion";
 import { api } from "@/lib/api";
 import { applyDevLinks } from "@/lib/devlinks";
 import { isLightTheme } from "@/lib/themes";
+import { useResolvedTheme } from "@/lib/useResolvedTheme";
 import { installNavigationGuard } from "@/lib/external";
 import { useApp } from "@/store/app";
 import { connectEvents } from "@/store/events";
@@ -102,7 +103,7 @@ export function App() {
   const booted = useApp((s) => s.booted);
   const bootError = useApp((s) => s.bootError);
   const settings = useApp((s) => s.settings);
-  const theme = settings?.theme ?? "gunmetal";
+  const theme = useResolvedTheme(settings?.theme);
 
   // Boot + events
   useEffect(() => {

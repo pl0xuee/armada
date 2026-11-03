@@ -75,13 +75,29 @@ fn describe(init: &Value, tools: Option<&Value>) -> String {
 }
 
 pub async fn test_server(server: &McpServer, cwd: &Path) -> anyhow::Result<String> {
-    match server.transport {
+    let result = match server.transport {
         McpTransport::Stdio => test_stdio(server, cwd).await,
         McpTransport::Http => {
             let server = server.clone();
             tokio::task::spawn_blocking(move || test_http(&server)).await?
         }
+    };
+    // The error is shown in the UI: a server (or its stderr) may echo the credentials
+    // it was given, in any shape.
+    result.map_err(|e| anyhow!("{}", scrub(server, &format!("{e:#}"))))
+}
+
+/// `text` with recognizable secrets removed and any env/header value configured for
+/// `server` (a plain password is not recognizable by shape).
+fn scrub(server: &McpServer, text: &str) -> String {
+    let mut out = crate::redact::redact_secrets(text).into_owned();
+    for (_, value) in named(&server.env).chain(named(&server.headers)) {
+        // Short values would mangle ordinary words; the shape-based pass covers the rest.
+        if value.trim().len() >= 6 {
+            out = out.replace(value.trim(), crate::redact::REDACTED);
+        }
     }
+    out
 }
 
 async fn test_stdio(server: &McpServer, cwd: &Path) -> anyhow::Result<String> {
@@ -342,6 +358,29 @@ mod tests {
         let tools = json!({ "tools": [{ "name": "read" }, { "name": "write" }] });
         assert_eq!(describe(&init, Some(&tools)), "fs 1.2.0 · 2 tools");
         assert_eq!(describe(&json!({}), None), "MCP server");
+    }
+
+    #[test]
+    fn errors_never_echo_configured_credentials() {
+        use crate::model::KeyValue;
+        let kv = |name: &str, value: &str| KeyValue {
+            name: name.into(),
+            value: value.into(),
+        };
+        let mut server = scoped("s", "api", "");
+        server.env = vec![kv("DB_PASS", "hunter2-correct"), kv("MODE", "dev")];
+        server.headers = vec![kv("X-Api-Key", "plainkey9999")];
+        let shown = scrub(
+            &server,
+            "HTTP 400: bad key plainkey9999 for hunter2-correct; mode dev; Bearer abcdefghijklmnopqrstuvwxyz0123",
+        );
+        assert!(!shown.contains("plainkey9999"), "{shown}");
+        assert!(!shown.contains("hunter2-correct"), "{shown}");
+        assert!(!shown.contains("abcdefghijklmnopqrstuvwxyz0123"), "{shown}");
+        assert!(
+            shown.contains("mode dev"),
+            "short values are left alone: {shown}"
+        );
     }
 
     #[test]

@@ -1,9 +1,10 @@
-import { ArrowRightLeft, ChevronDown, Gauge, Play, RotateCcw, Settings2, UserPlus } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, Gauge, Play, RotateCcw, Settings2, Timer, UserPlus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { attempt, switchAccount } from "@/lib/actions";
 import { api } from "@/lib/api";
-import { waitingToResume } from "@/lib/limitResume";
-import { resetClause, withoutReset } from "@/lib/pinned";
+import { limitCopy } from "@/lib/limitBanner";
+import { useMinuteNow, waitingToResume } from "@/lib/limitResume";
+import { withoutReset } from "@/lib/pinned";
 import { PROVIDERS } from "@/lib/providers";
 import type { Account, Agent } from "@/lib/types";
 import { useApp } from "@/store/app";
@@ -11,7 +12,6 @@ import { cn } from "@/lib/utils";
 import { useUi } from "@/store/ui";
 import { AccountAvatar } from "../AccountAvatar";
 import { ProviderGlyph } from "../ProviderGlyph";
-import { ResumeLine } from "./ResumesAt";
 import { Button } from "../ui/button";
 import {
   DropdownMenu,
@@ -33,8 +33,9 @@ function accountDetail(a: Account): string {
 const FAILOVER_LABEL = { off: "Off", ask: "Ask me", auto: "Switch automatically" } as const;
 
 /**
- * Shown above the composer when the agent's account hit its rate limit. `embedded`: a row of the
- * pinned dock (no card of its own, compact, and the failover note folded into a link).
+ * Shown above the composer when the agent's account hit its rate limit: a plain headline, one main
+ * button, and everything else under "More". `embedded`: a row of the
+ * pinned dock (no card of its own, compact).
  */
 export function RateLimitBanner({ agent, embedded = false }: { agent: Agent; embedded?: boolean }) {
   const accounts = useApp((s) => s.accounts);
@@ -53,7 +54,6 @@ export function RateLimitBanner({ agent, embedded = false }: { agent: Agent; emb
   // What to re-send: the user's own last message, not our automatic "continue".
   const lastPrompt = useApp((s) => s.items[agent.id]?.findLast((i) => i.kind === "user_message" && !i.automatic));
   const resumeOn = useApp((s) => s.settings?.resumeAfterLimit ?? true);
-  // With the resume line below there is no need for the provider's own "resets at" badge.
   const waiting = waitingToResume(agent, resumeOn);
   const retry = async () => {
     if (lastPrompt?.kind !== "user_message") return;
@@ -65,14 +65,20 @@ export function RateLimitBanner({ agent, embedded = false }: { agent: Agent; emb
     setBusy(false);
   };
   const current = accounts.find((a) => a.id === agent.accountId);
+  // Plan-covered accounts first, so the one-click switch never lands on a pay-per-token key by default.
   const candidates = useMemo(
-    () => accounts.filter((a) => a.provider === agent.provider && a.id !== agent.accountId && a.status?.loggedIn),
+    () =>
+      accounts
+        .filter((a) => a.provider === agent.provider && a.id !== agent.accountId && a.status?.loggedIn)
+        .sort((a, b) => Number(a.authKind === "api_key") - Number(b.authKind === "api_key")),
     [accounts, agent.provider, agent.accountId],
   );
   const provider = PROVIDERS[agent.provider].short;
   const first = candidates[0];
-  const reset = resetClause(notice);
+  const now = useMinuteNow(waiting);
+  const copy = limitCopy(agent, resumeOn, notice, now);
   const detail = notice ? withoutReset(notice) : "";
+  const canRetry = lastPrompt?.kind === "user_message";
 
   const go = async (accountId: string, cont: boolean) => {
     const acc = accounts.find((a) => a.id === accountId);
@@ -81,6 +87,11 @@ export function RateLimitBanner({ agent, embedded = false }: { agent: Agent; emb
     await switchAccount(agent, acc, cont);
     setBusy(false);
   };
+  const retryLabel = waiting ? (agent.running ? "Retry now" : "Resume now") : agent.running ? "Retry" : "Resume";
+  // What sits under the headline: the automatic-resume line, a note why it won't, or what switching does.
+  const billed = first?.authKind === "api_key" ? `Switching uses ${first.name}, billed per token.` : null;
+  const sub =
+    [copy.sub, billed].filter(Boolean).join(" ") || (first ? "Switching keeps your session and history." : null);
 
   return (
     <div
@@ -104,52 +115,72 @@ export function RateLimitBanner({ agent, embedded = false }: { agent: Agent; emb
           <Gauge className="h-4 w-4" />
         </span>
         <div className="min-w-[200px] flex-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            <span className="text-[13px] font-semibold">Rate limit reached</span>
-            {reset && !waiting && (
-              <span className="rounded-md border border-warn/30 bg-warn/10 px-1.5 py-px text-[11.5px] font-medium text-warn">
-                {reset}
-              </span>
-            )}
+          <div className="text-[13px] font-semibold leading-snug" data-testid="limit-headline">
+            {copy.headline}
           </div>
-          <ResumeLine agent={agent} className="mt-0.5" />
-          <div className="line-clamp-2 text-[12px] leading-snug text-muted [@media(max-height:700px)]:line-clamp-1">
-            {current ? `${provider} · ${current.name}. ` : `${provider}. `}
-            {!reset && detail ? `${detail} ` : ""}
-            {first
-              ? "Switch accounts to keep going; the session and history come along."
-              : `No other signed-in ${provider} accounts. Add one to keep going now.`}
-          </div>
+          {sub && (
+            <div className="line-clamp-2 text-[12px] leading-snug text-muted" data-testid="resume-line">
+              {sub}
+            </div>
+          )}
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           {first ? (
-            <>
-              <Tooltip content={`${provider} · ${first.name} — ${accountDetail(first)}`}>
-                <Button size="sm" variant="warn" disabled={busy} onClick={() => void go(first.id, true)}>
-                  {busy ? <Spinner className="h-3.5 w-3.5 text-current" /> : <Play className="!h-3.5 !w-3.5" />}
-                  Switch to {first.name} & continue
-                </Button>
-              </Tooltip>
-              {lastPrompt?.kind === "user_message" && (
-                <Tooltip content="Try again on this account (works once the limit resets)">
-                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => void retry()}>
-                    <RotateCcw className="!h-3.5 !w-3.5" />
-                    {agent.running ? "Retry" : "Resume & retry"}
-                  </Button>
-                </Tooltip>
+            <Tooltip content={`${provider} · ${first.name} — ${accountDetail(first)}`}>
+              <Button size="sm" variant="warn" disabled={busy} onClick={() => void go(first.id, true)}>
+                {busy ? <Spinner className="h-3.5 w-3.5 text-current" /> : <Play className="!h-3.5 !w-3.5" />}
+                <span className="max-w-[180px] truncate">Switch to {first.name}</span>
+              </Button>
+            </Tooltip>
+          ) : canRetry ? (
+            <Tooltip content="Try again on this account (works once the limit resets)">
+              <Button size="sm" variant="warn" disabled={busy} onClick={() => void retry()}>
+                {busy ? <Spinner className="h-3.5 w-3.5 text-current" /> : <RotateCcw className="!h-3.5 !w-3.5" />}
+                {retryLabel}
+              </Button>
+            </Tooltip>
+          ) : (
+            <Button size="sm" variant="warn" onClick={() => useUi.getState().setView("accounts")}>
+              <UserPlus className="!h-3.5 !w-3.5" /> Add {provider} account
+            </Button>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="ghost" disabled={busy} aria-label="More options">
+                More
+                <ChevronDown className="!h-3.5 !w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72">
+              <div className="px-2 py-1.5 text-[12px] leading-snug text-muted">
+                <div className="text-fg">{current ? `${provider} · ${current.name}` : provider}</div>
+                {detail && <div className="mt-0.5 line-clamp-3">{detail}</div>}
+                {!first && <div className="mt-0.5">No other signed-in {provider} accounts.</div>}
+              </div>
+              {first && canRetry && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => void retry()}>
+                    <RotateCcw /> {agent.running ? "Try again on this account" : "Resume on this account"}
+                  </DropdownMenuItem>
+                </>
               )}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="sm" variant="secondary" disabled={busy} aria-label="Switch to another account">
-                    <span className="max-sm:hidden">Switch to…</span>
-                    <ChevronDown className="!h-3.5 !w-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-72">
+              {waiting && (
+                <DropdownMenuItem
+                  onSelect={() =>
+                    void attempt("Couldn't cancel the automatic resume", () => api.cancelLimitResume(agent.id))
+                  }
+                >
+                  <Timer /> Stop automatic resume
+                </DropdownMenuItem>
+              )}
+              {first && (
+                <>
+                  <DropdownMenuSeparator />
                   <DropdownMenuLabel>
                     <span className="flex items-center gap-1.5">
                       <ProviderGlyph provider={agent.provider} size="xs" />
-                      Signed-in {provider} accounts
+                      Switch without continuing
                     </span>
                   </DropdownMenuLabel>
                   {candidates.map((a) => (
@@ -165,39 +196,22 @@ export function RateLimitBanner({ agent, embedded = false }: { agent: Agent; emb
                       </span>
                     </DropdownMenuItem>
                   ))}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={() => useUi.getState().setView("accounts")}>
-                    <UserPlus /> Add another account
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </>
-          ) : (
-            <>
-              <Button size="sm" variant="secondary" onClick={() => useUi.getState().setView("accounts")}>
-                <UserPlus className="!h-3.5 !w-3.5" /> Add {provider} account
-              </Button>
-              <Tooltip content="Continue on another provider with this conversation's context">
-                <Button size="sm" variant="ghost" onClick={() => useUi.getState().setHandoffAgent(agent)}>
-                  <ArrowRightLeft className="!h-3.5 !w-3.5" /> Hand off
-                </Button>
-              </Tooltip>
-            </>
-          )}
+                </>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => useUi.getState().setView("accounts")}>
+                <UserPlus /> {first ? "Add another account" : `Add a ${provider} account`}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => useUi.getState().setHandoffAgent(agent)}>
+                <ArrowRightLeft /> Continue with another provider
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => useUi.getState().openSettings("behavior")}>
+                <Settings2 /> Automatic failover: {FAILOVER_LABEL[failover]}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
-      <button
-        type="button"
-        onClick={() => useUi.getState().openSettings("behavior")}
-        className={cn(
-          "flex w-full items-center gap-1.5 border-t bg-base/30 px-3.5 py-1.5 text-left text-[11.5px] text-steel transition-colors hover:text-muted [@media(max-height:700px)]:hidden",
-          embedded ? "border-line" : "border-warn/15",
-        )}
-      >
-        <Settings2 className="h-3 w-3" />
-        Automatic failover: <span className="text-muted">{FAILOVER_LABEL[failover]}</span>
-        <span className="ml-auto">Change</span>
-      </button>
     </div>
   );
 }

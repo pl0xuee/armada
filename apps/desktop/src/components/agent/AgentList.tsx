@@ -38,6 +38,8 @@ import { useApp } from "@/store/app";
 import { usePr } from "@/store/pr";
 import { ciSummary, listIndicator } from "@/lib/pr";
 import { useUi } from "@/store/ui";
+import { useVa } from "@/store/voiceAssistant";
+import { isLive } from "@/lib/voiceAssistant";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { useRunningSubagentCount } from "./useSubagents";
 import { useAfterPaint } from "@/hooks/useAfterPaint";
@@ -176,6 +178,17 @@ export function AgentList({
       .forEach((a, i) => m.set(a.id, i + 1));
     return m;
   }, [agents]);
+  // "Agent 2" to the voice assistant is the 2nd agent in this same order (it lists the first 25). Shown only
+  // while it is on. It numbers projects from its own list (recent and found folders), which this list isn't.
+  const vaOn = useVa((s) => isLive(s));
+  const voiceNumbers = useMemo(() => {
+    const m = new Map<string, number>();
+    if (vaOn)
+      orderedAgents(agents)
+        .slice(0, 25)
+        .forEach((a, i) => m.set(a.id, i + 1));
+    return m;
+  }, [agents, vaOn]);
 
   return (
     <aside
@@ -381,6 +394,7 @@ export function AgentList({
                             selected={a.id === selected}
                             now={now}
                             hotkey={hotkeys.get(a.id) ?? null}
+                            voiceNumber={voiceNumbers.get(a.id) ?? null}
                             density={density}
                             onNavigate={onNavigate}
                           />
@@ -394,6 +408,7 @@ export function AgentList({
                               selected={h.id === selected}
                               now={now}
                               hotkey={hotkeys.get(h.id) ?? null}
+                              voiceNumber={voiceNumbers.get(h.id) ?? null}
                               density={density}
                               onNavigate={onNavigate}
                             />
@@ -520,6 +535,7 @@ const AgentRow = memo(function AgentRow({
   selected,
   now,
   hotkey,
+  voiceNumber = null,
   density,
   onNavigate,
   nested = false,
@@ -537,6 +553,8 @@ const AgentRow = memo(function AgentRow({
   selected: boolean;
   now: number;
   hotkey: number | null;
+  /** Its place in the voice assistant's numbering; only while the assistant is on. */
+  voiceNumber?: number | null;
   onNavigate?: () => void;
 }) {
   const openAgent = useUi((s) => s.openAgent);
@@ -583,11 +601,18 @@ const AgentRow = memo(function AgentRow({
     else setTitle(agent.title);
   };
 
+  // Opened from the palette, Mission Control or a notification: bring its row into view so the list shows where you are.
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selected) rowRef.current?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
+
   return (
     <li className={nested ? "relative ml-[22px] border-l border-line pl-1.5" : undefined}>
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
+            ref={rowRef}
             role="button"
             tabIndex={0}
             aria-current={selected ? "true" : undefined}
@@ -680,6 +705,13 @@ const AgentRow = memo(function AgentRow({
                       {modKey}
                       {hotkey}
                     </span>
+                  )}
+                  {voiceNumber !== null && (
+                    <Tooltip content={`Say "agent ${voiceNumber}" to the voice assistant`} side="right">
+                      <span className="tabular rounded border border-line px-1 text-[10px] leading-[14px] text-steel/80">
+                        {voiceNumber}
+                      </span>
+                    </Tooltip>
                   )}
                   <span className="sr-only">Last active </span>
                   <Tooltip

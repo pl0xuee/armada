@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip } from "@/components/ui/tooltip";
+import { RecoveryActions, needsRecovery } from "@/components/mission/RecoveryActions";
 import { archiveAgent, findOption, respondPermission, attempt } from "@/lib/actions";
 import { api } from "@/lib/api";
 import { approvalActionFor, createArm, shouldIgnoreApprovalKey } from "@/lib/approvalKeys";
@@ -231,8 +232,8 @@ export function NeedsYouPane() {
 /** Agents stuck on you come first; finished work waiting to be looked at gets its own, quieter section. */
 function sectionHeading(reason: NeedsReason, previous: NeedsReason | undefined): string | null {
   const review = reason === "done";
-  if (previous === undefined) return review ? "To review" : "Blocked";
-  return review && previous !== "done" ? "To review" : null;
+  if (previous === undefined) return review ? "Ready to review" : "Needs you";
+  return review && previous !== "done" ? "Ready to review" : null;
 }
 
 /** Memoised: props are the (stable) agent object, so one agent updating doesn't re-render every row. */
@@ -264,35 +265,46 @@ const QueueRow = memo(function QueueRow({
           {heading}
         </p>
       )}
-      <button
-        type="button"
-        data-agent={agent.id}
-        aria-current={active ? "true" : undefined}
-        // Roving focus: only the selected row is in the tab order; arrows move within the list.
-        tabIndex={active ? 0 : -1}
-        onClick={() => onSelect(agent.id)}
+      {/* The row is a div so the recovery buttons below can sit beside the open-agent button, not inside it. */}
+      <div
         className={cn(
-          "flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors",
+          "rounded-lg transition-colors",
           active ? "bg-gunmetal/70 shadow-[inset_0_0_0_1px_var(--border-strong)]" : "hover:bg-raised/60",
         )}
       >
-        <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="sm" className="mt-0.5" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[12.5px] font-medium text-fg">{agent.title}</span>
-          <span className="mt-1 flex items-center gap-1.5">
-            <span className={cn("rounded-full border px-1.5 text-[10.5px] font-medium", REASON_TONE[reason])}>
-              {reason === "rate_limited" ? (
-                <ResumesAt agent={agent} fallback={reasonLabel(reason, asking, backgroundRunning)} />
-              ) : (
-                reasonLabel(reason, asking, backgroundRunning)
-              )}
-            </span>
-            <span className="text-[11px] text-steel">
-              <RelTime ts={agent.lastActivityAt} side="right" />
+        <button
+          type="button"
+          data-agent={agent.id}
+          aria-current={active ? "true" : undefined}
+          // Roving focus: only the selected row is in the tab order; arrows move within the list.
+          tabIndex={active ? 0 : -1}
+          onClick={() => onSelect(agent.id)}
+          className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left"
+        >
+          <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="sm" className="mt-0.5" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[12.5px] font-medium text-fg">{agent.title}</span>
+            <span className="mt-1 flex items-center gap-1.5">
+              <span className={cn("rounded-full border px-1.5 text-[10.5px] font-medium", REASON_TONE[reason])}>
+                {reason === "rate_limited" ? (
+                  <ResumesAt agent={agent} fallback={reasonLabel(reason, asking, backgroundRunning)} />
+                ) : (
+                  reasonLabel(reason, asking, backgroundRunning)
+                )}
+              </span>
+              <span className="text-[11px] text-steel">
+                <RelTime ts={agent.lastActivityAt} side="right" />
+              </span>
             </span>
           </span>
-        </span>
-      </button>
+        </button>
+        {/* Reserved for every limit or error row (even while empty), so a state change never moves the list. */}
+        {(reason === "rate_limited" || reason === "error") && (
+          <div className="flex h-7 items-center pb-1.5 pl-[42px] pr-2.5">
+            {needsRecovery(agent) && <RecoveryActions agent={agent} />}
+          </div>
+        )}
+      </div>
     </li>
   );
 });

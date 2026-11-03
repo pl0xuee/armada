@@ -17,6 +17,7 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
+  Plus,
   Pencil,
   Play,
   SquareTerminal,
@@ -35,6 +36,7 @@ import { basename, cn, modKey } from "@/lib/utils";
 import { useAgentListLayout } from "@/hooks/useAgentListLayout";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { MAX_TILES, tileIdsFor } from "@/lib/helpers";
 import { headerTier, INSPECTOR_DOCK_QUERY } from "@/lib/layout";
 import { selectFromAgents } from "@/lib/memoSelector";
 import { useApp } from "@/store/app";
@@ -80,7 +82,7 @@ function PreviewChip({ agentId, showLabel }: { agentId: string; showLabel: boole
   return (
     <Tooltip content={label} shortcut={[modKey, "⇧", "P"]}>
       <Button
-        size={showLabel ? "xs" : "icon-sm"}
+        size={showLabel ? "sm" : "icon"}
         variant={open ? "secondary" : "ghost"}
         aria-label={label}
         aria-pressed={open}
@@ -150,6 +152,18 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
   const tail = useApp((s) => (live ? liveTail(s.items[agent.id]) : null));
   const changed = useApp((s) => (agent.worktree ? agentDerived(agent.id, s.items[agent.id]).changedCount : 0));
   const [confirmShutdown, setConfirmShutdown] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  // "Add agents" lives in the ⋯ menu; its popover keeps its own (hidden) anchor button next to ⋯.
+  const addRef = useRef<HTMLSpanElement>(null);
+  const keepFocus = useRef(true);
+  const tileGroup = useUi((s) => s.tileGroup);
+  const tileHelpers = useUi((s) => s.tileHelpers);
+  const shownCount = useApp((s) => tileIdsFor(s.agents, agent.id, tileGroup, tileHelpers).length);
+  const addRoom = MAX_TILES - Math.max(1, shownCount);
+  // Narrow headers drop the budget chip, then the account chip, so the title always keeps room.
+  const noBudget = width > 0 && width < 600;
+  const tight = width > 0 && width < 520;
+  const iconSize = tier === "compact" ? "icon-sm" : "icon";
 
   const scheduleThis = () => {
     const first = useApp.getState().items[agent.id]?.find((i) => i.kind === "user_message");
@@ -165,13 +179,16 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
   };
 
   return (
-    <header ref={ref} className={cn("shrink-0 border-b border-line bg-panel/40", tier === "compact" ? "px-3" : "px-5")}>
+    <header
+      ref={ref}
+      className={cn("relative shrink-0 border-b border-line bg-panel/40", tier === "compact" ? "px-3" : "px-5")}
+    >
       {/* Fixed height: title + one meta line on the left, status/chips/actions on the right.
           Nothing wraps, so switching agents or states never moves the conversation. */}
       <div className="flex h-[58px] min-w-0 items-center gap-2.5">
         {(!list.docked || !list.open) && (!tile || tile.first) && (
           <Tooltip content="Show agents" shortcut={[modKey, "B"]}>
-            <Button size="icon-sm" variant="ghost" aria-label="Show agent list" onClick={list.toggle} className="-ml-1">
+            <Button size="icon" variant="ghost" aria-label="Show agent list" onClick={list.toggle} className="-ml-1">
               <PanelLeftOpen />
             </Button>
           </Tooltip>
@@ -185,9 +202,9 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
           </span>
         )}
         <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="md" />
-        <div className="min-w-0 flex-1">
-          <EditableTitle agent={agent} />
-          <div className="flex h-4 min-w-0 items-center gap-1.5 text-[11.5px] leading-none text-steel">
+        <div className="min-w-[132px] flex-1">
+          <EditableTitle agent={agent} editing={renaming} setEditing={setRenaming} />
+          <div className="flex h-4 min-w-0 items-center gap-1.5 text-xs leading-none text-steel">
             {agent.parentId ? (
               <>
                 <HelperOfLine agent={agent} />
@@ -208,8 +225,8 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
                 {agent.branch && (
                   <>
                     <span className="mx-1.5 text-line-strong">·</span>
-                    <span className="font-mono text-[11px]">{agent.branch}</span>
-                    {agent.baseBranch && <span className="font-mono text-[11px]"> → {agent.baseBranch}</span>}
+                    <span className="font-mono text-xs">{agent.branch}</span>
+                    {agent.baseBranch && <span className="font-mono text-xs"> → {agent.baseBranch}</span>}
                   </>
                 )}
                 {account && agent.provider !== "custom" && tile && !tile.focused && (
@@ -223,7 +240,7 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          {tile || (tier === "compact" && inGroup) ? (
+          {tile || tight || (tier === "compact" && inGroup) ? (
             <Tooltip content={view.detail ? `${view.pill}. ${view.detail}` : view.meta.label}>
               <span
                 className="flex h-6 w-5 items-center justify-center"
@@ -236,29 +253,29 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
           ) : view.background ? (
             <Tooltip content={view.detail}>
               <span className="inline-flex min-w-0 max-w-[280px]">
-                <StatusPill status="working" label={view.pill} />
+                <StatusPill status="working" label={view.pill} className="h-7 text-xs" />
               </span>
             </Tooltip>
           ) : (
-            <StatusPill status={agent.status} done={done} />
+            <StatusPill status={agent.status} done={done} className="h-7 text-xs" />
           )}
           {helperCount > 0 && <HelpersChip count={helperCount} label={tier !== "compact"} />}
           {agent.rateLimited && (
             <Chip className="border-warn/35 bg-warn/10 text-warn">
               <Gauge className="h-3 w-3" />
-              <ResumesAt agent={agent} fallback={tier === "compact" ? "Limit" : "Rate limit"} />
+              <ResumesAt agent={agent} fallback={tier === "full" ? "Rate limited" : "Limit"} />
             </Chip>
           )}
-          {agent.provider !== "custom" && (!tile || tile.focused) && (
-            <AccountSwitcher agent={agent} showName={tier !== "compact"} />
+          {agent.provider !== "custom" && (!tile || tile.focused) && !tight && (
+            <AccountSwitcher agent={agent} showName={tier === "full"} />
           )}
-          <BudgetChip agent={agent} compact={tier === "compact"} always />
+          {!noBudget && <BudgetChip agent={agent} compact={tier !== "full"} always />}
           {!tile && tier !== "compact" && <PrChip agent={agent} compact={tier !== "full"} />}
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="relative flex shrink-0 items-center gap-1">
           {resumable && !busy ? (
             <ActionButton
-              tier={tier === "icons" ? "full" : tier}
+              tier={tier === "full" || tier === "icons" ? "full" : "compact"}
               label="Resume"
               tooltip="Resume this agent"
               onClick={() => void resumeAgent(agent)}
@@ -266,44 +283,17 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
               <Play className="!h-3.5 !w-3.5" />
             </ActionButton>
           ) : null}
-          {agent.worktree && tier !== "compact" && (
+          {agent.worktree && !tight && (
             <ReviewPill tier={tier} count={changed} onClick={() => setReviewAgent(agent.id)} />
           )}
           {(!tile || tile.focused) && <PreviewChip agentId={agent.id} showLabel={tier === "full"} />}
-          {(!tile || tile.focused) && <AddAgents agent={agent} showLabel={tier === "full"} />}
           {agent.parentId && <TileToggle />}
-          {!tile && (
-            <>
-              <Tooltip
-                content={
-                  workspaceOpen
-                    ? workspaceRoom === 0
-                      ? "Hide workspace panel (not enough room to show it)"
-                      : "Hide workspace panel"
-                    : workspaceRoom === 0
-                      ? "Show workspace panel (window is small)"
-                      : "Show workspace panel"
-                }
-                shortcut={[modKey, "`"]}
-              >
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Toggle workspace panel"
-                  aria-pressed={workspaceOpen}
-                  onClick={() => useUi.getState().setWorkspaceOpen(!workspaceOpen)}
-                >
-                  <SquareTerminal />
-                </Button>
-              </Tooltip>
-            </>
-          )}
           {(!tile || tile.focused) && (
-            <Tooltip content={inspectorOpen ? "Hide inspector" : "Show inspector"}>
+            <Tooltip content={inspectorOpen ? "Hide the side panel" : "Show the side panel"}>
               <Button
-                size="icon-sm"
+                size={iconSize}
                 variant="ghost"
-                aria-label="Toggle inspector"
+                aria-label={inspectorOpen ? "Hide side panel" : "Show side panel"}
                 aria-pressed={inspectorOpen}
                 onClick={toggleInspector}
               >
@@ -312,18 +302,57 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
             </Tooltip>
           )}
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="icon-sm" variant="ghost" aria-label="More actions">
-                <Ellipsis />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {tier === "compact" && agent.worktree && (
+            <Tooltip content="More actions">
+              <DropdownMenuTrigger asChild>
+                <Button size={iconSize} variant="ghost" aria-label="More actions">
+                  <Ellipsis />
+                </Button>
+              </DropdownMenuTrigger>
+            </Tooltip>
+            <DropdownMenuContent
+              align="end"
+              onCloseAutoFocus={(e) => {
+                // The Add agents popover is opening: keep focus off the ⋯ button so it stays open.
+                if (!keepFocus.current) e.preventDefault();
+                keepFocus.current = true;
+              }}
+            >
+              {tight && agent.worktree && (
                 <DropdownMenuItem onSelect={() => setReviewAgent(agent.id)}>
-                  <GitCompare /> Review diff{changed > 0 ? ` (${changed} file${changed === 1 ? "" : "s"})` : "…"}
+                  <GitCompare /> Review changes{changed > 0 ? ` (${changed} file${changed === 1 ? "" : "s"})` : "…"}
+                </DropdownMenuItem>
+              )}
+              {(!tile || tile.focused) && (
+                <DropdownMenuItem
+                  disabled={addRoom <= 0}
+                  onSelect={() => {
+                    keepFocus.current = false;
+                    setTimeout(() => addRef.current?.querySelector("button")?.click(), 0);
+                  }}
+                >
+                  <Plus /> {addRoom <= 0 ? `Add agents (${MAX_TILES} is the most shown)` : "Add agents…"}
                 </DropdownMenuItem>
               )}
               <HandoffSub agent={agent} onCustom={() => setHandoffAgent(agent)} />
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() => {
+                  keepFocus.current = false;
+                  // After the menu has closed, so it doesn't pull focus back from the field.
+                  setTimeout(() => setRenaming(true), 50);
+                }}
+              >
+                <Pencil /> Rename
+              </DropdownMenuItem>
+              {!tile && (
+                <DropdownMenuItem
+                  shortcut={`${modKey}+\``}
+                  onSelect={() => useUi.getState().setWorkspaceOpen(!workspaceOpen)}
+                >
+                  <SquareTerminal /> {workspaceOpen ? "Hide terminal panel" : "Show terminal panel"}
+                  {workspaceRoom === 0 ? " (window is small)" : ""}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onSelect={() => void attempt("Couldn't open the folder", () => api.openPath(agent.cwd))}
@@ -354,7 +383,7 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
                 <DropdownMenuItem onSelect={() => void compactContext(agent)}>
                   <Shrink /> Compact context
                   {agent.contextSize ? (
-                    <span className="ml-auto pl-3 text-[11px] text-steel tabular">
+                    <span className="ml-auto pl-3 text-xs text-steel tabular">
                       {Math.round(contextRatio(agent) * 100)}%
                     </span>
                   ) : null}
@@ -378,6 +407,16 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          {(!tile || tile.focused) && (
+            <span
+              ref={addRef}
+              aria-hidden
+              inert
+              className="pointer-events-none absolute right-0 top-0 h-px w-px overflow-hidden opacity-0"
+            >
+              <AddAgents agent={agent} showLabel={false} />
+            </span>
+          )}
         </div>
       </div>
 
@@ -397,7 +436,7 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
   );
 }
 
-/** Header "Review diff" pill: changed-file count for worktree agents. */
+/** Header "Review" button: says what it is and how many files changed; icon + count badge when narrow. */
 function ReviewPill({
   tier,
   count,
@@ -407,28 +446,26 @@ function ReviewPill({
   count: number;
   onClick: () => void;
 }) {
-  const label = count > 0 ? `${count} file${count === 1 ? "" : "s"} changed` : "No changes yet";
+  const files = `${count} file${count === 1 ? "" : "s"}`;
+  const label = count > 0 ? `Review ${files}` : "Review changes";
+  const tip = count > 0 ? `Review the ${files} this agent changed` : "Review changes (none yet)";
+  const full = tier === "full";
   return (
-    <Tooltip content={`Review diff · ${label}`}>
+    <Tooltip content={tip}>
       <Button
-        size={tier === "full" ? "sm" : "icon-sm"}
+        size={full ? "md" : tier === "icons" ? "icon" : "icon-sm"}
         variant="secondary"
         onClick={onClick}
-        aria-label={`Review diff, ${label}`}
-        className={cn("relative", tier === "full" && "gap-1.5")}
+        aria-label={label}
+        className={cn("relative", full && "gap-1.5 px-2.5")}
       >
-        <GitCompare className="!h-3.5 !w-3.5" />
-        {tier === "full" && <span>Review</span>}
-        {count > 0 &&
-          (tier === "full" ? (
-            <span className="rounded-full bg-accent/15 px-1.5 text-[11px] font-semibold text-accent tabular">
-              {count}
-            </span>
-          ) : (
-            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[11px] font-bold text-accent-fg tabular">
-              {count}
-            </span>
-          ))}
+        <GitCompare />
+        {full && <span>{label}</span>}
+        {!full && count > 0 && (
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[11px] font-bold leading-none text-accent-fg tabular">
+            {count}
+          </span>
+        )}
       </Button>
     </Tooltip>
   );
@@ -438,7 +475,7 @@ function Chip({ children, className }: { children: React.ReactNode; className?: 
   return (
     <span
       className={cn(
-        "inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border border-line bg-card/60 px-2 text-[11.5px]",
+        "inline-flex h-7 max-w-full items-center gap-1.5 rounded-full border border-line bg-card/60 px-2 text-xs",
         className,
       )}
     >
@@ -447,8 +484,15 @@ function Chip({ children, className }: { children: React.ReactNode; className?: 
   );
 }
 
-function EditableTitle({ agent }: { agent: Agent }) {
-  const [editing, setEditing] = useState(false);
+function EditableTitle({
+  agent,
+  editing,
+  setEditing,
+}: {
+  agent: Agent;
+  editing: boolean;
+  setEditing: (v: boolean) => void;
+}) {
   const [value, setValue] = useState(agent.title);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -462,6 +506,7 @@ function EditableTitle({ agent }: { agent: Agent }) {
   useEffect(() => {
     if (editing) {
       settled.current = false;
+      inputRef.current?.focus();
       inputRef.current?.select();
     }
   }, [editing]);
@@ -544,14 +589,14 @@ function HandoffSub({ agent, onCustom }: { agent: Agent; onCustom: () => void })
           <DropdownMenuItem key={a.id} onSelect={() => void quick(a.provider, a.id, null)}>
             <ProviderGlyph provider={a.provider} size="xs" />
             <span className="truncate">Ask {PROVIDERS[a.provider].short}</span>
-            <span className="ml-auto truncate pl-3 text-[11px] text-steel">{a.name}</span>
+            <span className="ml-auto truncate pl-3 text-xs text-steel">{a.name}</span>
           </DropdownMenuItem>
         ))}
         {customs.slice(0, 3).map((c) => (
           <DropdownMenuItem key={c.id} onSelect={() => void quick("custom", CUSTOM_ACCOUNT_ID, c.id)}>
             <ProviderGlyph provider="custom" customAgentId={c.id} size="xs" />
             <span className="truncate">Ask {c.name}</span>
-            <span className="ml-auto truncate pl-3 text-[11px] text-steel">ACP</span>
+            <span className="ml-auto truncate pl-3 text-xs text-steel">ACP</span>
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />

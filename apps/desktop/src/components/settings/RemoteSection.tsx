@@ -291,11 +291,26 @@ export function RemoteSection({ settings }: { settings: Settings }) {
         ) : (
           <>
             <StatusCard status={status} starting={starting} />
+            {status.running && reach === "local" && (
+              <ReachNote
+                kind="local"
+                disabled={applying}
+                onTailscale={() => void apply({ lan: false, tailscale: true })}
+                onLan={() => setConfirmLan(true)}
+              />
+            )}
+            {status.running && reach === "lan" && (
+              <ReachNote
+                kind="lan"
+                disabled={applying}
+                onTailscale={() => void apply({ lan: false, tailscale: true })}
+              />
+            )}
             {status.running && status.tailscale && (
               <TailscaleCard tailscale={status.tailscale} onRecheck={() => void refresh()} />
             )}
             {status.running && status.firewall && <FirewallCard firewall={status.firewall} />}
-            {status.running && status.pairingUrl && (
+            {status.running && status.pairingUrl && reach !== "local" && (
               <PairingCard
                 status={status}
                 rotating={rotating}
@@ -358,6 +373,49 @@ function networkDescription(status: RemoteStatus, saved: string | null | undefin
     return "The address you picked isn't connected, so Kvistcode is using the best one available.";
   }
   return "Which of this computer's addresses phones on your network connect to.";
+}
+
+/**
+ * What to do next for the two choices that need a word of advice: "This computer" can't pair
+ * a phone, and the local network is plain HTTP.
+ */
+function ReachNote({
+  kind,
+  disabled,
+  onTailscale,
+  onLan,
+}: {
+  kind: "local" | "lan";
+  disabled: boolean;
+  onTailscale: () => void;
+  onLan?: () => void;
+}) {
+  const local = kind === "local";
+  return (
+    <div role="note" className="flex gap-3 rounded-xl border border-warn/30 bg-warn/[0.06] px-4 py-3">
+      <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-medium">
+          {local ? "A phone can't reach this yet" : "This connection is not encrypted"}
+        </div>
+        <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted">
+          {local
+            ? 'Right now only this computer can connect, so there is no pairing code. To use your phone, choose "Tailscale" (safest) or "Local network" above.'
+            : "Anyone on the same Wi-Fi could read what your phone sends and receives. Use it only on a network you trust, or switch to Tailscale."}
+        </p>
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" disabled={disabled} onClick={onTailscale}>
+            Use Tailscale
+          </Button>
+          {local && onLan && (
+            <Button size="sm" variant="ghost" disabled={disabled} onClick={onLan}>
+              Use local network
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** Linux firewalls drop the phone's connections silently: Safari just shows a blank page. */

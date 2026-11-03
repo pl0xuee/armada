@@ -2,22 +2,17 @@ import {
   Bell,
   Bot,
   Smartphone,
-  BookText,
   FolderCog,
   Plug,
   Info,
   Keyboard,
-  Package,
-  Palette,
   Play,
   RefreshCw,
   Send,
   SlidersHorizontal,
   Volume2,
   Wallet,
-  Wrench,
   Mic,
-  AudioLines,
   ExternalLink,
   Heart,
   Download,
@@ -25,7 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { m } from "motion/react";
-import { useEffect, useRef, useState, type ComponentType } from "react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { toast } from "sonner";
 import { AppMark } from "@/components/AppMark";
 import { GithubGlyph } from "@/components/settings/GithubGlyph";
@@ -34,6 +29,7 @@ import { HelperSettings } from "@/components/settings/HelperSettings";
 import { ResponseStyleSettings } from "@/components/settings/ResponseStyleSettings";
 import { TokenSavingSettings } from "@/components/settings/TokenSavingSettings";
 import { RememberedChoicesRow } from "@/components/settings/RememberedChoicesRow";
+import { Advanced } from "@/components/settings/Disclosure";
 import { FAILOVER } from "@/components/accounts/FailoverRow";
 import { AgentsSection } from "@/components/settings/AgentsSection";
 import { AlertTargets } from "@/components/settings/AlertTargets";
@@ -49,7 +45,9 @@ import { SectionHeader, SettingGroup, SettingRow } from "@/components/settings/S
 import { ToolsSection } from "@/components/settings/ToolsSection";
 import { TemplatesSection } from "@/components/settings/TemplatesSection";
 import { ThemeCard } from "@/components/settings/ThemeCard";
-import { THEMES } from "@/lib/themes";
+import { PAGE_OF, ANCHOR_OF, parseSection } from "@/lib/settingsPages";
+import { SYSTEM_THEME, THEMES } from "@/lib/themes";
+import { useResolvedTheme } from "@/lib/useResolvedTheme";
 import { Button } from "@/components/ui/button";
 import { fieldClass, Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
@@ -75,20 +73,15 @@ import { useApp } from "@/store/app";
 import { openTour } from "@/store/tour";
 import { useUi, type SettingsSection } from "@/store/ui";
 
-const SECTIONS: { id: SettingsSection; label: string; icon: ComponentType<{ className?: string }> }[] = [
-  { id: "appearance", label: "Appearance", icon: Palette },
-  { id: "sounds", label: "Sounds", icon: Volume2 },
-  { id: "notifications", label: "Notifications", icon: Bell },
-  { id: "behavior", label: "Behavior", icon: SlidersHorizontal },
+/** The pages in the sidebar. Older section ids still work: see lib/settingsPages.ts. */
+const PAGES: { id: SettingsSection; label: string; icon: ComponentType<{ className?: string }> }[] = [
+  { id: "appearance", label: "General", icon: SlidersHorizontal },
+  { id: "notifications", label: "Alerts", icon: Bell },
   { id: "budgets", label: "Budgets", icon: Wallet },
-  { id: "templates", label: "Templates", icon: BookText },
   { id: "projects", label: "Projects", icon: FolderCog },
   { id: "toolkit", label: "Tools & instructions", icon: Plug },
-  { id: "providers", label: "Providers", icon: Package },
-  { id: "tools", label: "Agent tools", icon: Wrench },
-  { id: "agents", label: "Custom agents", icon: Bot },
+  { id: "providers", label: "Agents", icon: Bot },
   { id: "voice", label: "Voice", icon: Mic },
-  { id: "assistant", label: "Voice assistant", icon: AudioLines },
   { id: "remote", label: "Remote & mobile", icon: Smartphone },
   { id: "about", label: "About", icon: Info },
 ];
@@ -102,46 +95,92 @@ export function SettingsView() {
   const section = useUi((s) => s.settingsSection);
   const openSettings = useUi((s) => s.openSettings);
   const settings = useApp((s) => s.settings);
+  const page = PAGE_OF[section] ?? "appearance";
 
   // Dev/review convenience: ?view=settings&section=sounds
   useEffect(() => {
     try {
-      const want = new URLSearchParams(location.search).get("section");
-      if (want && SECTIONS.some((s) => s.id === want)) openSettings(want as SettingsSection);
+      const want = parseSection(new URLSearchParams(location.search).get("section"));
+      if (want) openSettings(want);
     } catch {
       /* ignore */
     }
   }, [openSettings]);
-  // Each section starts at the top.
+  // Each page starts at the top, or at the heading an older section id points to.
   const scrollRef = useRef<HTMLDivElement>(null);
+  const ready = !!settings;
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: 0 });
-  }, [section]);
+    const anchor = ANCHOR_OF[section];
+    const el = anchor ? scrollRef.current?.querySelector<HTMLElement>(`[data-settings-anchor="${anchor}"]`) : null;
+    if (el) el.scrollIntoView({ block: "start" });
+    else scrollRef.current?.scrollTo({ top: 0 });
+  }, [section, ready]);
   if (!settings) return null;
 
   return (
     <div className="flex h-full max-[860px]:flex-col">
-      <SettingsNav section={section} onSelect={openSettings} />
+      <SettingsNav page={page} onSelect={openSettings} />
 
       <div ref={scrollRef} className="@container min-h-0 min-w-0 flex-1 overflow-y-auto">
-        <div key={section} className="view-enter mx-auto max-w-[720px] px-4 pb-16 pt-6 @md:px-6 @2xl:px-8 @2xl:pt-8">
-          {section === "appearance" && <Appearance settings={settings} />}
-          {section === "sounds" && <Sounds settings={settings} />}
-          {section === "notifications" && <Notifications settings={settings} />}
-          {section === "behavior" && <Behavior settings={settings} />}
-          {section === "budgets" && <BudgetsSection settings={settings} />}
-          {section === "templates" && <TemplatesSection templates={settings.templates} />}
-          {section === "projects" && <ProjectSettingsSection />}
-          {section === "toolkit" && <ToolsHub servers={settings.mcpServers} />}
-          {section === "providers" && <Providers />}
-          {section === "tools" && <ToolsSection settings={settings} />}
-          {section === "agents" && <AgentsSection agents={settings.customAgents} />}
-          {section === "voice" && <VoiceSection settings={settings} />}
-          {section === "assistant" && <VoiceAssistantSection settings={settings} />}
-          {section === "remote" && <RemoteSection settings={settings} />}
-          {section === "about" && <About />}
+        <div key={page} className="view-enter mx-auto max-w-[720px] px-4 pb-16 pt-6 @md:px-6 @2xl:px-8 @2xl:pt-8">
+          {page === "appearance" && (
+            <>
+              <Appearance settings={settings} />
+              <Part id="behavior">
+                <Behavior settings={settings} />
+              </Part>
+            </>
+          )}
+          {page === "notifications" && (
+            <>
+              <Notifications settings={settings} />
+              <Part id="sounds">
+                <Sounds settings={settings} />
+              </Part>
+            </>
+          )}
+          {page === "budgets" && <BudgetsSection settings={settings} />}
+          {page === "projects" && (
+            <>
+              <ProjectSettingsSection />
+              <Part id="templates">
+                <TemplatesSection templates={settings.templates} />
+              </Part>
+            </>
+          )}
+          {page === "toolkit" && <ToolsHub servers={settings.mcpServers} />}
+          {page === "providers" && (
+            <>
+              <Providers />
+              <Part id="tools">
+                <ToolsSection settings={settings} />
+              </Part>
+              <Part id="agents">
+                <AgentsSection agents={settings.customAgents} />
+              </Part>
+            </>
+          )}
+          {page === "voice" && (
+            <>
+              <VoiceSection settings={settings} />
+              <Part id="assistant">
+                <VoiceAssistantSection settings={settings} />
+              </Part>
+            </>
+          )}
+          {page === "remote" && <RemoteSection settings={settings} />}
+          {page === "about" && <About />}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** A later part of a page that holds several: a divider, then its own heading. */
+function Part({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <div data-settings-anchor={id} className="mt-12 scroll-mt-6 border-t border-line pt-10">
+      {children}
     </div>
   );
 }
@@ -150,7 +189,7 @@ export function SettingsView() {
  * Section navigation: a sidebar on wide windows, a horizontally scrolling pill
  * strip below 860px (tiling window managers routinely give us narrow tiles).
  */
-function SettingsNav({ section, onSelect }: { section: SettingsSection; onSelect: (s: SettingsSection) => void }) {
+function SettingsNav({ page, onSelect }: { page: SettingsSection; onSelect: (s: SettingsSection) => void }) {
   const stripRef = useRef<HTMLDivElement>(null);
   const updates = useApp((s) => updateCount(s.providers));
 
@@ -161,7 +200,7 @@ function SettingsNav({ section, onSelect }: { section: SettingsSection; onSelect
     if (!strip || !el || strip.scrollWidth <= strip.clientWidth) return;
     const target = el.offsetLeft - (strip.clientWidth - el.offsetWidth) / 2;
     strip.scrollTo({ left: Math.max(0, target), behavior: "smooth" });
-  }, [section]);
+  }, [page]);
 
   return (
     <nav
@@ -183,8 +222,8 @@ function SettingsNav({ section, onSelect }: { section: SettingsSection; onSelect
           "max-[860px]:[mask-image:linear-gradient(to_right,transparent,black_14px,black_calc(100%-14px),transparent)]",
         )}
       >
-        {SECTIONS.map((s) => {
-          const active = s.id === section;
+        {PAGES.map((s) => {
+          const active = s.id === page;
           const Icon = s.icon;
           return (
             <button
@@ -207,7 +246,7 @@ function SettingsNav({ section, onSelect }: { section: SettingsSection; onSelect
               )}
               <Icon className={cn("relative h-4 w-4", active ? "text-accent" : "text-steel")} />
               <span className="relative">{s.label}</span>
-              {s.id === "tools" && updates > 0 && (
+              {s.id === "providers" && updates > 0 && (
                 <CountBadge count={updates} className="relative ml-auto shadow-none max-[860px]:ml-0" />
               )}
             </button>
@@ -224,15 +263,34 @@ function Appearance({ settings }: { settings: Settings }) {
   // Zoom applies on release: resizing the UI under the dragged thumb would make it jump.
   const [dragScale, setDragScale] = useState<number | null>(null);
   const shownScale = dragScale ?? settings.interfaceScale;
+  const followSystem = settings.theme === SYSTEM_THEME;
+  const shown = useResolvedTheme(settings.theme);
   return (
     <>
       <SectionHeader title="Appearance" description="Choose a look." />
+      <SettingGroup className="mb-3">
+        <SettingRow
+          title="Match system"
+          description={
+            followSystem
+              ? `Following your computer's light or dark setting. Now showing ${THEMES.find((t) => t.id === shown)?.name}.`
+              : "Switch between a dark and a light theme with your computer's setting."
+          }
+          htmlFor="theme-system"
+        >
+          <Switch
+            id="theme-system"
+            checked={followSystem}
+            onCheckedChange={(v) => void save({ theme: v ? SYSTEM_THEME : shown })}
+          />
+        </SettingRow>
+      </SettingGroup>
       <div role="radiogroup" aria-label="Theme" className="grid grid-cols-1 gap-3 @md:grid-cols-3">
         {THEMES.map((t) => (
           <ThemeCard
             key={t.id}
             id={t.id}
-            active={settings.theme === t.id}
+            active={!followSystem && settings.theme === t.id}
             onSelect={() => void save({ theme: t.id })}
           />
         ))}
@@ -776,11 +834,87 @@ function Behavior({ settings }: { settings: Settings }) {
     (key: "closeToTray" | "autoResume" | "resumeAfterLimit" | "defaultWorktree" | "launchAtLogin") => (v: boolean) =>
       void save({ [key]: v } as Partial<Settings>);
 
+  const hotkeyRow = (
+    <SettingRow
+      title="Global hotkey"
+      description="Bring Kvistcode forward from anywhere. Record a shortcut, or leave it empty to turn it off."
+      htmlFor="b-hotkey"
+    >
+      <div className="w-[240px] max-w-full">
+        <div className="relative">
+          <Input
+            id="b-hotkey"
+            value={hotkey}
+            placeholder="Disabled"
+            onChange={(e) => setHotkey(e.target.value)}
+            onBlur={() => void commitHotkey(hotkey)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+              if (e.key === "Escape" && hotkeyError === null) setHotkey(settings.globalHotkey);
+            }}
+            aria-invalid={hotkeyError !== null}
+            aria-describedby={hotkeyError ? "b-hotkey-error" : undefined}
+            className={cn(
+              "peer h-8 pr-8 font-mono text-[12px]",
+              // The caps below stand in for the raw text until you edit it.
+              hotkeyCaps.length > 0 && !hotkeyError && "text-transparent focus:text-fg",
+              hotkeyError && "border-err/60 focus:border-err/60 focus:ring-err/15",
+            )}
+            spellCheck={false}
+          />
+          {hotkeyCaps.length > 0 && !hotkeyError && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-y-0 left-2.5 right-8 flex items-center gap-1 overflow-hidden peer-focus:hidden"
+            >
+              {hotkeyCaps.map((c, i) => (
+                <Kbd key={`${c}${i}`}>{c}</Kbd>
+              ))}
+            </span>
+          )}
+          {hotkeySaving ? (
+            <Spinner className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
+          ) : (
+            hotkey && (
+              <button
+                type="button"
+                aria-label="Clear hotkey (disable)"
+                title="Clear (disable)"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  setHotkey("");
+                  void commitHotkey("");
+                }}
+                className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-steel transition-colors hover:bg-raised hover:text-fg"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )
+          )}
+        </div>
+        <div className="mt-1.5">
+          <HotkeyRecorder
+            disabled={hotkeySaving}
+            onRecord={(acc) => {
+              setHotkey(acc);
+              void commitHotkey(acc);
+            }}
+          />
+        </div>
+        {hotkeyError && (
+          <p id="b-hotkey-error" role="alert" className="mt-1.5 text-[11.5px] leading-snug text-err">
+            {hotkeyError}
+          </p>
+        )}
+      </div>
+    </SettingRow>
+  );
+
   return (
     <>
-      <SectionHeader title="Behavior" description="How Kvistcode runs in the background and launches agents." />
+      <SectionHeader title="Behavior" description="How Kvistcode runs and how new agents start." />
       <div className="space-y-6">
-        <SettingGroup title="App">
+        <SettingGroup title="Window and startup">
           <SettingRow
             title="Close to tray"
             description="Closing the window keeps agents running and Kvistcode in the tray."
@@ -795,82 +929,9 @@ function Behavior({ settings }: { settings: Settings }) {
           >
             <Switch id="b-login" checked={settings.launchAtLogin} onCheckedChange={toggle("launchAtLogin")} />
           </SettingRow>
-          <SettingRow
-            title="Global hotkey"
-            description="Bring Kvistcode forward from anywhere. Record a shortcut, or leave it empty to turn it off."
-            htmlFor="b-hotkey"
-          >
-            <div className="w-[240px] max-w-full">
-              <div className="relative">
-                <Input
-                  id="b-hotkey"
-                  value={hotkey}
-                  placeholder="Disabled"
-                  onChange={(e) => setHotkey(e.target.value)}
-                  onBlur={() => void commitHotkey(hotkey)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
-                    if (e.key === "Escape" && hotkeyError === null) setHotkey(settings.globalHotkey);
-                  }}
-                  aria-invalid={hotkeyError !== null}
-                  aria-describedby={hotkeyError ? "b-hotkey-error" : undefined}
-                  className={cn(
-                    "peer h-8 pr-8 font-mono text-[12px]",
-                    // The caps below stand in for the raw text until you edit it.
-                    hotkeyCaps.length > 0 && !hotkeyError && "text-transparent focus:text-fg",
-                    hotkeyError && "border-err/60 focus:border-err/60 focus:ring-err/15",
-                  )}
-                  spellCheck={false}
-                />
-                {hotkeyCaps.length > 0 && !hotkeyError && (
-                  <span
-                    aria-hidden
-                    className="pointer-events-none absolute inset-y-0 left-2.5 right-8 flex items-center gap-1 overflow-hidden peer-focus:hidden"
-                  >
-                    {hotkeyCaps.map((c, i) => (
-                      <Kbd key={`${c}${i}`}>{c}</Kbd>
-                    ))}
-                  </span>
-                )}
-                {hotkeySaving ? (
-                  <Spinner className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
-                ) : (
-                  hotkey && (
-                    <button
-                      type="button"
-                      aria-label="Clear hotkey (disable)"
-                      title="Clear (disable)"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        setHotkey("");
-                        void commitHotkey("");
-                      }}
-                      className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-steel transition-colors hover:bg-raised hover:text-fg"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  )
-                )}
-              </div>
-              <div className="mt-1.5">
-                <HotkeyRecorder
-                  disabled={hotkeySaving}
-                  onRecord={(acc) => {
-                    setHotkey(acc);
-                    void commitHotkey(acc);
-                  }}
-                />
-              </div>
-              {hotkeyError && (
-                <p id="b-hotkey-error" role="alert" className="mt-1.5 text-[11.5px] leading-snug text-err">
-                  {hotkeyError}
-                </p>
-              )}
-            </div>
-          </SettingRow>
         </SettingGroup>
 
-        <SettingGroup title="Agents">
+        <SettingGroup title="New agents">
           <SettingRow
             stack
             title="Permission mode for new agents"
@@ -900,22 +961,11 @@ function Behavior({ settings }: { settings: Settings }) {
           >
             <Switch id="b-worktree" checked={settings.defaultWorktree} onCheckedChange={toggle("defaultWorktree")} />
           </SettingRow>
-          <SettingRow title="Re-ping pending approvals" description="If an approval waits this long, ping once more.">
-            <Select
-              aria-label="Re-ping pending approvals"
-              className="h-8 w-[140px]"
-              value={String(settings.escalateAfterMins)}
-              onValueChange={(v) => void save({ escalateAfterMins: Number(v) })}
-              options={ESCALATE_OPTIONS.map((m) => ({ value: String(m), label: m === 0 ? "Never" : `After ${m} min` }))}
-            />
-          </SettingRow>
         </SettingGroup>
 
         <ResponseStyleSettings settings={settings} />
 
         <TokenSavingSettings settings={settings} />
-
-        <HelperSettings settings={settings} />
 
         <SettingGroup title="Rate limits">
           <SettingRow
@@ -944,6 +994,25 @@ function Behavior({ settings }: { settings: Settings }) {
             />
           </SettingRow>
         </SettingGroup>
+
+        <Advanced description="Global hotkey, approval reminders and helper agents.">
+          <SettingGroup title="Shortcuts and reminders">
+            {hotkeyRow}
+            <SettingRow title="Re-ping pending approvals" description="If an approval waits this long, ping once more.">
+              <Select
+                aria-label="Re-ping pending approvals"
+                className="h-8 w-[140px]"
+                value={String(settings.escalateAfterMins)}
+                onValueChange={(v) => void save({ escalateAfterMins: Number(v) })}
+                options={ESCALATE_OPTIONS.map((m) => ({
+                  value: String(m),
+                  label: m === 0 ? "Never" : `After ${m} min`,
+                }))}
+              />
+            </SettingRow>
+          </SettingGroup>
+          <HelperSettings settings={settings} />
+        </Advanced>
       </div>
     </>
   );

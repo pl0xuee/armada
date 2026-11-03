@@ -74,6 +74,9 @@ export function connectVoiceAssistant(): () => void {
   };
 }
 
+/** Sends the current screen again, even if it was already sent (see `startVoiceAssistant`). */
+let resendScreen: () => void = () => {};
+
 /** While a session is live, tell the backend what the window shows (screen, open agent, highlighted text). */
 function reportScreen(): () => void {
   let last = "";
@@ -110,8 +113,13 @@ function reportScreen(): () => void {
     if (isLive(s) !== isLive(prev)) push();
   });
   document.addEventListener("selectionchange", soon);
+  resendScreen = () => {
+    last = "";
+    push();
+  };
   push();
   return () => {
+    resendScreen = () => {};
     clearTimeout(timer);
     clearTimeout(agentsTimer);
     offApp();
@@ -155,6 +163,9 @@ export async function startVoiceAssistant(): Promise<void> {
   useVa.setState({ ...beginVa(), visible: true });
   try {
     await api.vaStart();
+    // The panel went live (and sent the screen) before the session existed, and starting a session
+    // clears what the backend knew: send it again so the assistant sees the open agent right away.
+    resendScreen();
   } catch (e) {
     if (await backendActive()) {
       resyncLive();
