@@ -59,6 +59,22 @@ type ShipState =
   { kind: "shipped"; baseStatus: BaseBranchStatus | null } | { kind: "not_merged"; error: string; conflict: boolean };
 const shipStates = new Map<string, ShipState>();
 
+/** A long list of changed files would push the conversation away: this many show, the rest behind "+N more". */
+export const FILES_SHOWN = 5;
+/** Summaries whose full file list was opened this session (survives virtualized remounts, so heights stay put). */
+const expandedFiles = new Set<string>();
+
+/** The files to show as chips, and how many are folded away. */
+export function visibleFiles(
+  files: readonly string[],
+  expanded: boolean,
+): { shown: readonly string[]; hidden: number } {
+  // Folding a single file behind "+1 more" saves nothing.
+  if (expanded || files.length <= FILES_SHOWN) return { shown: files, hidden: 0 };
+  const shown = files.slice(0, FILES_SHOWN - 1);
+  return { shown, hidden: files.length - shown.length };
+}
+
 /** Ready-to-ship card after a turn that used tools: what changed, and what to do next. */
 export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { item: Summary; agent: Agent }) {
   const setReviewAgent = useUi((s) => s.setReviewAgent);
@@ -68,6 +84,13 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
   const shipped = shipState?.kind === "shipped";
   const [revertFile, setRevertFile] = useState<string | null>(null);
   const hasFiles = item.files.length > 0;
+  const [allFiles, setAllFiles] = useState(() => expandedFiles.has(item.id));
+  const { shown: files, hidden: hiddenFiles } = visibleFiles(item.files, allFiles);
+  const showAllFiles = (on: boolean) => {
+    if (on) expandedFiles.add(item.id);
+    else expandedFiles.delete(item.id);
+    setAllFiles(on);
+  };
   // Animate only when the card appears live, not when an old conversation is opened.
   const [fresh] = useState(() => Date.now() - item.ts < 10_000);
   const busyReason = gitBusyReason(agent);
@@ -172,7 +195,7 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
 
       {hasFiles && (
         <ul className="mt-2.5 flex flex-wrap gap-1.5" aria-label="Files changed">
-          {item.files.map((f) => (
+          {files.map((f) => (
             <li key={f} className="inline-flex items-center overflow-hidden rounded-md border border-line bg-card/40">
               <Tooltip content={`Open diff · ${f}`}>
                 <button
@@ -200,6 +223,19 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
               )}
             </li>
           ))}
+          {(hiddenFiles > 0 || (allFiles && item.files.length > FILES_SHOWN)) && (
+            <li className="inline-flex">
+              <button
+                type="button"
+                onClick={() => showAllFiles(!allFiles)}
+                aria-expanded={allFiles}
+                aria-label={allFiles ? "Show fewer files" : `Show ${pluralize(hiddenFiles, "more file")}`}
+                className="inline-flex h-6 items-center rounded-md px-2 text-[11.5px] font-medium text-muted transition-colors hover:bg-raised hover:text-fg"
+              >
+                {allFiles ? "Show fewer" : `+${hiddenFiles} more`}
+              </button>
+            </li>
+          )}
         </ul>
       )}
 
