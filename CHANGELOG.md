@@ -23,6 +23,9 @@ docs/RELEASING.md).
 - **Notifications say what finished and where.** The title now names the project too (“Fix tests · shop-app”), and the “everything finished” alert says what the workflow was or quotes the agent's last message instead of a bare “Its workflow is done”. A turn that ends with work still running also says what the agent last said. No alert is sent for an agent that was deleted.
 - **The voice assistant now sees an archived agent you have open**, which agents are shown side by side, and projects whose folder went missing (it can tell you to refresh or locate it instead of losing the project).
 - **The assistant is told again about your screen if a report didn't arrive**, and no longer reports an open agent that was deleted.
+- **No taskbar flash or dock bounce when notifications are off.** The flash now follows the same switches as desktop notifications.
+- **Phone pairing: a full device list no longer uses up the code.** After you remove a device, the same QR code still works.
+- **Phone: fixed “an Kvistcode pairing link”.**
 
 ## v0.4.1 — 2026-11-02
 
