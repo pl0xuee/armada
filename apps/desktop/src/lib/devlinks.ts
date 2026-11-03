@@ -1,7 +1,8 @@
 // Dev-only deep links for reviewing screens in the browser mock, e.g.
 //   ?view=mission&tab=needs   ?agent=a-token   ?dialog=new-agent|compare|palette|review|handoff|delete
-//   ?onboarding&step=2   ?section=providers   ?theme=titanium
+//   ?onboarding&step=2   ?section=providers   ?theme=titanium|paper|midnight…
 // Never active inside Tauri or in production builds.
+import { isThemeId } from "@/lib/themes";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { isTauri } from "./api";
@@ -20,7 +21,7 @@ export function applyDevLinks() {
   const p = new URLSearchParams(location.search);
   const theme = p.get("theme") as Settings["theme"] | null;
   const app = useApp.getState();
-  if (theme && app.settings && ["gunmetal", "carbon", "titanium"].includes(theme)) {
+  if (theme && app.settings && isThemeId(theme)) {
     useApp.setState({ settings: { ...app.settings, theme } });
   }
   const dialog = p.get("dialog");

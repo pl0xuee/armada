@@ -20,6 +20,7 @@ import { installBackgroundTracker } from "@/store/background";
 import { installCompletionTracker } from "@/store/completion";
 import { api } from "@/lib/api";
 import { applyDevLinks } from "@/lib/devlinks";
+import { isLightTheme } from "@/lib/themes";
 import { installNavigationGuard } from "@/lib/external";
 import { useApp } from "@/store/app";
 import { connectEvents } from "@/store/events";
@@ -202,7 +203,7 @@ export function App() {
             <LazyTerminal />
           </div>
           <Toaster
-            theme={theme === "titanium" ? "light" : "dark"}
+            theme={isLightTheme(theme) ? "light" : "dark"}
             position="bottom-right"
             offset={{ right: 16, bottom: "var(--composer-clear, 16px)" }}
             gap={8}

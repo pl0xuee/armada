@@ -47,7 +47,8 @@ import { VoiceAssistantSection } from "@/components/settings/VoiceAssistantSecti
 import { SectionHeader, SettingGroup, SettingRow } from "@/components/settings/SettingRow";
 import { ToolsSection } from "@/components/settings/ToolsSection";
 import { TemplatesSection } from "@/components/settings/TemplatesSection";
-import { ThemeCard, THEMES } from "@/components/settings/ThemeCard";
+import { ThemeCard } from "@/components/settings/ThemeCard";
+import { THEMES } from "@/lib/themes";
 import { Button } from "@/components/ui/button";
 import { fieldClass, Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
@@ -784,8 +785,9 @@ function Behavior({ settings }: { settings: Settings }) {
     if (hotkey.trim() !== (useApp.getState().settings?.globalHotkey ?? "") && !hotkeySaving) void commitHotkey(hotkey);
   });
 
-  const toggle = (key: "closeToTray" | "autoResume" | "resumeAfterLimit" | "defaultWorktree" | "launchAtLogin") => (v: boolean) =>
-    void save({ [key]: v } as Partial<Settings>);
+  const toggle =
+    (key: "closeToTray" | "autoResume" | "resumeAfterLimit" | "defaultWorktree" | "launchAtLogin") => (v: boolean) =>
+      void save({ [key]: v } as Partial<Settings>);
 
   return (
     <>
@@ -1172,7 +1174,10 @@ function About() {
       </SettingGroup>
 
       <SettingGroup title="Welcome" className="mb-8">
-        <SettingRow title="Show the tour again" description="A short look at agent grids, the pinned dock, search and spending limits.">
+        <SettingRow
+          title="Show the tour again"
+          description="A short look at agent grids, the pinned dock, search and spending limits."
+        >
           <Button size="sm" variant="secondary" onClick={openTour}>
             <Sparkles /> Show the tour
           </Button>

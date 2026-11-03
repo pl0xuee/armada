@@ -1,4 +1,5 @@
 // Seed data for the browser mock backend. Everything here is fictional.
+import { isThemeId } from "./themes";
 import { createTwoFilesPatch } from "diff";
 import type {
   Account,
@@ -222,11 +223,11 @@ export function seedProviders(): ProviderInfo[] {
 export function seedSettings(onboarded: boolean): Settings {
   return {
     onboarded,
-    // Review convenience: ?theme=titanium|carbon.
+    // Review convenience: ?theme=<any theme id>.
     theme: ((): Settings["theme"] => {
       try {
         const t = new URLSearchParams(location.search).get("theme");
-        return t === "titanium" || t === "carbon" ? t : "gunmetal";
+        return isThemeId(t) ? t : "gunmetal";
       } catch {
         return "gunmetal";
       }

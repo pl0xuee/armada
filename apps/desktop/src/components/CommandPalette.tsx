@@ -60,6 +60,7 @@ import {
 } from "@/lib/actions";
 import { orderedAgents } from "@/lib/agents";
 import { api } from "@/lib/api";
+import { isLightTheme, THEMES } from "@/lib/themes";
 import { openToolkit } from "@/store/toolkit";
 import type { Agent, SearchResults, Settings as SettingsT } from "@/lib/types";
 import { openSearchHit, searchTerm } from "@/lib/search";
@@ -651,12 +652,12 @@ function Palette({ onClose }: { onClose: () => void }) {
             {settings && (
               <Command.Group heading="Preferences" className={groupClass}>
                 <PaletteAction
-                  icon={settings.theme === "titanium" ? <Moon /> : <Sun />}
+                  icon={isLightTheme(settings.theme) ? <Moon /> : <Sun />}
                   label={
-                    settings.theme === "titanium" ? "Toggle theme: switch to dark" : "Toggle theme: switch to light"
+                    isLightTheme(settings.theme) ? "Toggle theme: switch to dark" : "Toggle theme: switch to light"
                   }
                   keywords={["theme", "toggle", "dark", "light", "appearance"]}
-                  onSelect={() => run(() => patch({ theme: settings.theme === "titanium" ? "gunmetal" : "titanium" }))}
+                  onSelect={() => run(() => patch({ theme: isLightTheme(settings.theme) ? "gunmetal" : "titanium" }))}
                 />
                 <PaletteAction
                   icon={settings.sounds.enabled ? <VolumeX /> : <Volume2 />}
@@ -676,17 +677,15 @@ function Palette({ onClose }: { onClose: () => void }) {
                     )
                   }
                 />
-                {(["gunmetal", "carbon", "titanium"] as const)
-                  .filter((t) => t !== settings.theme)
-                  .map((t) => (
-                    <PaletteAction
-                      key={t}
-                      icon={<PaletteIcon />}
-                      label={`Theme: ${t[0].toUpperCase()}${t.slice(1)}`}
-                      keywords={["theme", "appearance", t === "titanium" ? "light" : "dark"]}
-                      onSelect={() => run(() => patch({ theme: t }))}
-                    />
-                  ))}
+                {THEMES.filter((t) => t.id !== settings.theme).map((t) => (
+                  <PaletteAction
+                    key={t.id}
+                    icon={<PaletteIcon />}
+                    label={`Theme: ${t.name}`}
+                    keywords={["theme", "appearance", "colour", "color", t.light ? "light" : "dark"]}
+                    onSelect={() => run(() => patch({ theme: t.id }))}
+                  />
+                ))}
               </Command.Group>
             )}
 

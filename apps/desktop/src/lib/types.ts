@@ -577,7 +577,7 @@ export interface QuietHours {
 
 export interface Settings {
   onboarded: boolean;
-  theme: "gunmetal" | "carbon" | "titanium";
+  theme: "gunmetal" | "carbon" | "midnight" | "forest" | "dusk" | "ember" | "titanium" | "paper" | "lilac";
   /** Interface zoom in percent, 75-150. */
   interfaceScale: number;
   sounds: SoundSettings;

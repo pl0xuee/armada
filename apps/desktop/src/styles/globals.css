@@ -142,8 +142,274 @@
   --syntax-token-link: #0268a4;
 }
 
+[data-theme="midnight"] {
+  color-scheme: dark;
+  --bg-0: #080b18;
+  --bg-1: #0d1122;
+  --bg-2: #141a2e;
+  --bg-3: #1c2340;
+  --gunmetal: #262f50;
+  --border: #232b48;
+  --border-strong: #5f6b94;
+  --text-1: #e7ebfa;
+  --text-2: #9ea8cc;
+  --steel: #8590b8;
+  --accent: #7c9cff;
+  --accent-fg: #060a1c;
+  --warn: #f5b544;
+  --warn-fg: #1a1204;
+  --ok: #3ddc97;
+  --err: #ff6b7a;
+  --violet: #b59cff;
+  --claude: #d97757;
+  --openai: #10a37f;
+  --grok: #e5e7eb;
+  --edge: rgba(255, 255, 255, .05);
+  --edge-strong: rgba(255, 255, 255, 0.08);
+  --scrim: rgba(3,5,14,.66);
+  --texture-opacity: 0.45;
+  --code-bg: #0a0e1c;
+  --diff-add: rgba(61, 220, 151, 0.11);
+  --diff-del: rgba(255, 92, 108, 0.11);
+
+  /* Syntax highlighting (Shiki css-variables theme, see lib/highlight.ts). */
+  --syntax-foreground: currentColor;
+  --syntax-background: transparent;
+  --syntax-token-comment: #6c78a0;
+  --syntax-token-keyword: #c4a7ff;
+  --syntax-token-string: #8fdcb0;
+  --syntax-token-string-expression: #8fdcb0;
+  --syntax-token-constant: #f5b544;
+  --syntax-token-parameter: #e7ebfa;
+  --syntax-token-function: #7fb0ff;
+  --syntax-token-punctuation: #8590b8;
+  --syntax-token-link: #7c9cff;
+}
+
+[data-theme="forest"] {
+  color-scheme: dark;
+  --bg-0: #070d0a;
+  --bg-1: #0c1511;
+  --bg-2: #121e18;
+  --bg-3: #192920;
+  --gunmetal: #22362b;
+  --border: #1f3027;
+  --border-strong: #5c7a6a;
+  --text-1: #e4f0e8;
+  --text-2: #9bb5a5;
+  --steel: #84a08f;
+  --accent: #6fe0a8;
+  --accent-fg: #04140b;
+  --warn: #f5b544;
+  --warn-fg: #1a1204;
+  --ok: #9be564;
+  --err: #ff6b6b;
+  --violet: #b49cff;
+  --claude: #d97757;
+  --openai: #10a37f;
+  --grok: #e5e7eb;
+  --edge: rgba(255, 255, 255, .05);
+  --edge-strong: rgba(255, 255, 255, 0.08);
+  --scrim: rgba(2,8,5,.66);
+  --texture-opacity: 0.45;
+  --code-bg: #09120d;
+  --diff-add: rgba(61, 220, 151, 0.11);
+  --diff-del: rgba(255, 92, 108, 0.11);
+
+  /* Syntax highlighting (Shiki css-variables theme, see lib/highlight.ts). */
+  --syntax-foreground: currentColor;
+  --syntax-background: transparent;
+  --syntax-token-comment: #6a8576;
+  --syntax-token-keyword: #c4a7ff;
+  --syntax-token-string: #a8e6a1;
+  --syntax-token-string-expression: #a8e6a1;
+  --syntax-token-constant: #f5b544;
+  --syntax-token-parameter: #e4f0e8;
+  --syntax-token-function: #6fd6e8;
+  --syntax-token-punctuation: #84a08f;
+  --syntax-token-link: #6fe0a8;
+}
+
+[data-theme="dusk"] {
+  color-scheme: dark;
+  --bg-0: #0e0914;
+  --bg-1: #151020;
+  --bg-2: #1c162b;
+  --bg-3: #251d38;
+  --gunmetal: #312848;
+  --border: #2d2442;
+  --border-strong: #7a6a9e;
+  --text-1: #f0e9fa;
+  --text-2: #b3a5cf;
+  --steel: #9a8cb8;
+  --accent: #d58bff;
+  --accent-fg: #16061f;
+  --warn: #f5b544;
+  --warn-fg: #1a1204;
+  --ok: #3ddc97;
+  --err: #ff6b86;
+  --violet: #8fa7ff;
+  --claude: #d97757;
+  --openai: #10a37f;
+  --grok: #e5e7eb;
+  --edge: rgba(255, 255, 255, .05);
+  --edge-strong: rgba(255, 255, 255, 0.08);
+  --scrim: rgba(8,3,14,.68);
+  --texture-opacity: 0.45;
+  --code-bg: #0c0712;
+  --diff-add: rgba(61, 220, 151, 0.11);
+  --diff-del: rgba(255, 92, 108, 0.11);
+
+  /* Syntax highlighting (Shiki css-variables theme, see lib/highlight.ts). */
+  --syntax-foreground: currentColor;
+  --syntax-background: transparent;
+  --syntax-token-comment: #8a7aa8;
+  --syntax-token-keyword: #f0a0ff;
+  --syntax-token-string: #8fdcb0;
+  --syntax-token-string-expression: #8fdcb0;
+  --syntax-token-constant: #f5b544;
+  --syntax-token-parameter: #f0e9fa;
+  --syntax-token-function: #7fc8ff;
+  --syntax-token-punctuation: #9a8cb8;
+  --syntax-token-link: #d58bff;
+}
+
+[data-theme="ember"] {
+  color-scheme: dark;
+  --bg-0: #0e0a08;
+  --bg-1: #16100d;
+  --bg-2: #1e1713;
+  --bg-3: #271e18;
+  --gunmetal: #35291f;
+  --border: #31251d;
+  --border-strong: #82705f;
+  --text-1: #f3ebe4;
+  --text-2: #baa898;
+  --steel: #a08f7f;
+  --accent: #ff9a55;
+  --accent-fg: #1c0b02;
+  --warn: #f5d044;
+  --warn-fg: #1a1500;
+  --ok: #3ddc97;
+  --err: #ff6262;
+  --violet: #b49cff;
+  --claude: #d97757;
+  --openai: #10a37f;
+  --grok: #e5e7eb;
+  --edge: rgba(255, 255, 255, .05);
+  --edge-strong: rgba(255, 255, 255, 0.08);
+  --scrim: rgba(10,5,2,.68);
+  --texture-opacity: 0.45;
+  --code-bg: #0b0806;
+  --diff-add: rgba(61, 220, 151, 0.11);
+  --diff-del: rgba(255, 92, 108, 0.11);
+
+  /* Syntax highlighting (Shiki css-variables theme, see lib/highlight.ts). */
+  --syntax-foreground: currentColor;
+  --syntax-background: transparent;
+  --syntax-token-comment: #8a7868;
+  --syntax-token-keyword: #ffa0c0;
+  --syntax-token-string: #a8e0a0;
+  --syntax-token-string-expression: #a8e0a0;
+  --syntax-token-constant: #f5d044;
+  --syntax-token-parameter: #f3ebe4;
+  --syntax-token-function: #7fc8ff;
+  --syntax-token-punctuation: #a08f7f;
+  --syntax-token-link: #ff9a55;
+}
+
+[data-theme="paper"] {
+  color-scheme: light;
+  --bg-0: #ece7db;
+  --bg-1: #f3efe5;
+  --bg-2: #fbf9f4;
+  --bg-3: #e6e0d2;
+  --gunmetal: #dcd5c4;
+  --border: #d8d0be;
+  --border-strong: #776e5e;
+  --text-1: #1d1a14;
+  --text-2: #544c3f;
+  --steel: #5f5648;
+  --accent: #a8480f;
+  --accent-fg: #ffffff;
+  --warn: #7a4a06;
+  --warn-fg: #ffffff;
+  --ok: #0a6a49;
+  --err: #a81f35;
+  --violet: #6d4fd8;
+  --claude: #c25e3e;
+  --openai: #0d8a6b;
+  --grok: #39414c;
+  --edge: rgba(255,255,255,0.9);
+  --edge-strong: rgba(255, 255, 255, 1);
+  --scrim: rgba(48,40,28,.35);
+  --texture-opacity: 0.25;
+  --code-bg: #f4f0e6;
+  --diff-add: rgba(16, 133, 92, 0.1);
+  --diff-del: rgba(212, 47, 67, 0.09);
+
+  /* Syntax highlighting (Shiki css-variables theme, see lib/highlight.ts). */
+  --syntax-foreground: currentColor;
+  --syntax-background: transparent;
+  --syntax-token-comment: #6a6252;
+  --syntax-token-keyword: #6d4fd8;
+  --syntax-token-string: #0c7652;
+  --syntax-token-string-expression: #0c7652;
+  --syntax-token-constant: #8f5609;
+  --syntax-token-parameter: #1d1a14;
+  --syntax-token-function: #a8480f;
+  --syntax-token-punctuation: #5f5648;
+  --syntax-token-link: #a8480f;
+}
+
+[data-theme="lilac"] {
+  color-scheme: light;
+  --bg-0: #e9e6f3;
+  --bg-1: #f0eef8;
+  --bg-2: #faf9fe;
+  --bg-3: #e2dff0;
+  --gunmetal: #d5d1e6;
+  --border: #d3cfe4;
+  --border-strong: #74708a;
+  --text-1: #17142a;
+  --text-2: #4b4766;
+  --steel: #58546f;
+  --accent: #5a3fd0;
+  --accent-fg: #ffffff;
+  --warn: #7a4a06;
+  --warn-fg: #ffffff;
+  --ok: #0a6a49;
+  --err: #a81f35;
+  --violet: #8a3fd0;
+  --claude: #c25e3e;
+  --openai: #0d8a6b;
+  --grok: #39414c;
+  --edge: rgba(255,255,255,0.9);
+  --edge-strong: rgba(255, 255, 255, 1);
+  --scrim: rgba(36,30,60,.35);
+  --texture-opacity: 0.25;
+  --code-bg: #f1eff9;
+  --diff-add: rgba(16, 133, 92, 0.1);
+  --diff-del: rgba(212, 47, 67, 0.09);
+
+  /* Syntax highlighting (Shiki css-variables theme, see lib/highlight.ts). */
+  --syntax-foreground: currentColor;
+  --syntax-background: transparent;
+  --syntax-token-comment: #68647f;
+  --syntax-token-keyword: #8a3fd0;
+  --syntax-token-string: #0c7652;
+  --syntax-token-string-expression: #0c7652;
+  --syntax-token-constant: #8f5609;
+  --syntax-token-parameter: #17142a;
+  --syntax-token-function: #5a3fd0;
+  --syntax-token-punctuation: #58546f;
+  --syntax-token-link: #5a3fd0;
+}
+
 /* The warn text colour is a dark brown for contrast on light surfaces; as a button fill it reads muddy. */
-[data-theme="titanium"] button.bg-warn.text-warn-fg {
+[data-theme="titanium"] button.bg-warn.text-warn-fg,
+[data-theme="paper"] button.bg-warn.text-warn-fg,
+[data-theme="lilac"] button.bg-warn.text-warn-fg {
   background-color: #e9a42f;
   color: #2a1800;
 }

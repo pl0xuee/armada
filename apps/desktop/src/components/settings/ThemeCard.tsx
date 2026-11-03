@@ -1,14 +1,6 @@
 import { Check } from "lucide-react";
-import type { Settings } from "@/lib/types";
+import { THEMES, type ThemeId } from "@/lib/themes";
 import { cn } from "@/lib/utils";
-
-type ThemeId = Settings["theme"];
-
-export const THEMES: { id: ThemeId; name: string; description: string }[] = [
-  { id: "gunmetal", name: "Gunmetal", description: "Cool steel. The default." },
-  { id: "carbon", name: "Carbon", description: "Neutral, deepest blacks" },
-  { id: "titanium", name: "Titanium", description: "Light, brushed metal" },
-];
 
 export function ThemeCard({ id, active, onSelect }: { id: ThemeId; active: boolean; onSelect: () => void }) {
   const meta = THEMES.find((t) => t.id === id)!;
