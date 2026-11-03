@@ -114,7 +114,8 @@ def main() -> int:
         changelog = (ROOT / "CHANGELOG.md").read_text()
         m = re.search(rf"(?ms)^## {re.escape(tag)}\b.*?\n(.*?)(?=^## |\Z)", changelog)
         want = (m.group(1).strip() if m else "")
-        if want and want not in data.get("notes", ""):
+        # The Windows upload job may write the notes with CRLF line endings: the text is the same.
+        if want and want not in data.get("notes", "").replace("\r\n", "\n"):
             problems.append("latest.json notes differ from the CHANGELOG.md section (fix the changelog and push)")
         print(f"latest.json: version {data.get('version')}, {len(plat)} platform entries")
 

@@ -43,8 +43,16 @@ export const LiveStatus = memo(function LiveStatus({
   const mounted = useRef(Date.now());
   const offset = useRef(Math.floor(Math.random() * 8));
   useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 1000);
-    return () => clearInterval(id);
+    // A hidden page redraws nothing: it catches up as soon as it is visible again.
+    const bump = () => {
+      if (document.visibilityState === "visible") setTick((t) => t + 1);
+    };
+    const id = setInterval(bump, 1000);
+    document.addEventListener("visibilitychange", bump);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", bump);
+    };
   }, []);
   void tick;
   const now = Date.now();

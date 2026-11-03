@@ -1607,6 +1607,20 @@ pub(crate) async fn commit_all(
         let mut specs = vec![".".to_string()];
         specs.extend(exclude.iter().map(|p| format!(":(exclude,literal){p}")));
         git_with_pathspecs(cwd, &["add", "-A"], &specs).await?;
+        // `add` leaves a path alone but not out: one already staged (the agent ran `git add`) would
+        // still be committed, so take the excluded ones out of the index too.
+        let staged = git(
+            cwd,
+            &["diff", "--cached", "--no-renames", "--name-only", "-z"],
+        )
+        .await?;
+        let unstage: Vec<String> = nul_split(&staged)
+            .filter(|p| exclude.iter().any(|e| path_key(e) == path_key(p)))
+            .map(|p| format!(":(literal){p}"))
+            .collect();
+        if !unstage.is_empty() {
+            git_with_pathspecs(cwd, &["restore", "--staged"], &unstage).await?;
+        }
     }
     let files: Vec<String> = nul_split(
         &git(
@@ -3539,6 +3553,31 @@ mod tests {
         let status = repo.git(&["status", "--porcelain", "-uall"]);
         assert!(
             status.contains(".env") && status.contains("sub/id_rsa"),
+            "{status}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_file_left_out_of_the_commit_stays_out_even_when_it_was_already_staged() {
+        let repo = Repo::new();
+        repo.write("a.txt", "a");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        repo.write("b.txt", "b");
+        repo.write(".env", "TOKEN=1");
+        repo.write("a.txt", "changed");
+        // The agent already staged the secret (and a changed tracked file that is left out too).
+        repo.git(&["add", ".env", "a.txt"]);
+        let exclude = vec![".env".to_string(), "a.txt".to_string()];
+        let summary = commit_all(&repo.dir, "msg", &exclude).await.unwrap();
+        assert_eq!(summary.files, vec!["b.txt".to_string()]);
+        assert_eq!(
+            repo.lines(&["show", "--name-only", "--format=", "HEAD"]),
+            vec!["b.txt"]
+        );
+        let status = repo.git(&["status", "--porcelain", "-uall"]);
+        assert!(
+            status.contains(".env") && status.contains("a.txt"),
             "{status}"
         );
     }

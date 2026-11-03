@@ -1,5 +1,5 @@
 import { GitMerge, TriangleAlert } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { BRANCH_CHANGED_MESSAGE, isBranchChanged } from "@/lib/ghError";
@@ -62,11 +62,15 @@ function MergeBody({ agent, pr: opened, onClose }: { agent: Agent; pr: PrInfo; o
   const [error, setError] = useState<string | null>(null);
   const [moved, setMoved] = useState(false);
 
+  // Only the newest read counts: a slower, older one must not overwrite it.
+  const latest = useRef(0);
   const load = useCallback(async () => {
+    const mine = ++latest.current;
     const startedAt = Date.now();
     setPr(null);
     setLoadError(null);
     await refreshPr(agent.id, true);
+    if (mine !== latest.current) return;
     const status = usePr.getState().byAgent[agent.id];
     if (status?.state === "ok" && status.pr && status.fetchedAt >= startedAt - FRESH_SLACK_MS) setPr(status.pr);
     else
@@ -135,7 +139,9 @@ function MergeBody({ agent, pr: opened, onClose }: { agent: Agent; pr: PrInfo; o
               onClick={() => setMethod(o.value)}
               className={cn(
                 "flex w-full items-center gap-3 rounded-xl border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25",
-                method === o.value ? "border-accent/50 bg-accent/[0.07]" : "border-line bg-card/60 hover:border-line-strong",
+                method === o.value
+                  ? "border-accent/50 bg-accent/[0.07]"
+                  : "border-line bg-card/60 hover:border-line-strong",
               )}
             >
               <span

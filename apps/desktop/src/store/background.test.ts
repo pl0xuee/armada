@@ -16,7 +16,7 @@ vi.mock("@/lib/api", () => ({
 const { forgetAgentDerived } = await import("@/components/agent/derived");
 const { hasBackgroundWork, NO_BACKGROUND } = await import("@/lib/background");
 const { resetWorkflows, WORKFLOW_POLL_MS } = await import("@/lib/workflows");
-const { ALERT_SETTLE_MS } = await import("@/lib/finishedAlert");
+const { ALERT_RECHECK_RETRY_MS, ALERT_SETTLE_MS } = await import("@/lib/finishedAlert");
 const { SUBAGENT_ACTIVE_WINDOW_MS, SUBAGENT_LAUNCH_GRACE_MS, SUBAGENT_TICK_MS } = await import("@/lib/agents");
 const { useApp } = await import("./app");
 const { useUi } = await import("./ui");
@@ -53,7 +53,8 @@ const tool = (toolCallId: string, subagent: Record<string, unknown>, over: Recor
     subagent,
     ...over,
   });
-const workflowCall = (id = "wf") => tool(id, { kind: "workflow", background: true, workflow: { transcriptDir: "/x/wf_1" } });
+const workflowCall = (id = "wf") =>
+  tool(id, { kind: "workflow", background: true, workflow: { transcriptDir: "/x/wf_1" } });
 
 function setAgent(status: Agent["status"], items: TimelineItem[]) {
   useApp.setState({ agents: { [ID]: { ...base, status } }, items: { [ID]: items } });
@@ -275,5 +276,36 @@ describe("statusView", () => {
       done: false,
       pill: "Idle",
     });
+  });
+});
+
+describe("background tracker: the final look before announcing", () => {
+  it("tries again when that read fails, instead of dropping the alert", async () => {
+    progressFor.mockResolvedValue(prog("running", ["working"]));
+    setAgent("idle", [user(), workflowCall(), message()]);
+    off = installBackgroundTracker();
+    await settle();
+
+    progressFor.mockResolvedValue(prog("finished", ["finished"]));
+    await vi.advanceTimersByTimeAsync(WORKFLOW_POLL_MS);
+    // The look after the settle time fails once; a later one answers.
+    progressFor.mockRejectedValueOnce(new Error("offline"));
+    await vi.advanceTimersByTimeAsync(ALERT_SETTLE_MS);
+    expect(finishedAlert).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(ALERT_RECHECK_RETRY_MS);
+    expect(finishedAlert).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up after a few failed reads", async () => {
+    progressFor.mockResolvedValue(prog("running", ["working"]));
+    setAgent("idle", [user(), workflowCall(), message()]);
+    off = installBackgroundTracker();
+    await settle();
+
+    progressFor.mockResolvedValue(prog("finished", ["finished"]));
+    await vi.advanceTimersByTimeAsync(WORKFLOW_POLL_MS);
+    progressFor.mockRejectedValue(new Error("offline"));
+    await vi.advanceTimersByTimeAsync(ALERT_SETTLE_MS + ALERT_RECHECK_RETRY_MS * 5);
+    expect(finishedAlert).not.toHaveBeenCalled();
   });
 });

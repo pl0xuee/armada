@@ -422,7 +422,7 @@ pub struct BudgetStatus {
     pub daily_budget_tokens: Option<i64>,
     pub today_turns: i64,
     pub daily_budget_turns: Option<i64>,
-    /// The worse of the cost and token levels.
+    /// The worst of the cost, token and turn levels.
     pub level: BudgetLevel,
 }
 
@@ -518,6 +518,23 @@ impl Tracker {
             }
         }
         out
+    }
+
+    /// A project folder moved: what already fired for it follows, so the same limit does not
+    /// alert a second time just because its path changed. Anything already at `new` stays.
+    pub fn move_project(&mut self, old: &str, new: &str) {
+        let from = format!("project:{old}:");
+        let to = format!("project:{new}:");
+        let moved: Vec<(String, Fired)> = self
+            .fired
+            .iter()
+            .filter(|(k, _)| k.starts_with(&from))
+            .map(|(k, f)| (format!("{to}{}", &k[from.len()..]), *f))
+            .collect();
+        self.fired.retain(|k, _| !k.starts_with(&from));
+        for (key, fired) in moved {
+            self.fired.entry(key).or_insert(fired);
+        }
     }
 
     pub fn status(&self, today: NaiveDate, daily: &BudgetCap) -> BudgetStatus {
@@ -1101,5 +1118,18 @@ mod tests {
         assert_eq!(t.today(day(1)).turns, 0.0);
         let mut bad = turns(-2);
         assert!(bad.problem().is_some() && bad.sanitize() && bad.is_empty());
+    }
+
+    #[test]
+    fn a_moved_project_does_not_alert_again_for_a_limit_that_already_fired() {
+        let mut t = Tracker::default();
+        let c = caps(NONE, usd(20.0), NONE);
+        t.add_spend(day(1), 1.0, 0.0);
+        let r = readings(&c, spend(1.0, 0.0), spend(18.0, 0.0), t.today(day(1)));
+        assert_eq!(t.alerts(day(1), "a", "/work/app", &r).len(), 1);
+        t.move_project("/work/app", "/work/renamed");
+        assert!(t.alerts(day(1), "a", "/work/renamed", &r).is_empty());
+        // Other projects are untouched.
+        assert_eq!(t.alerts(day(1), "b", "/work/other", &r).len(), 1);
     }
 }

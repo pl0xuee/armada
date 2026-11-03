@@ -3,6 +3,9 @@
 
 /** How long a run must stay finished before it is announced (a quiet spell mid-run is not the end). */
 export const ALERT_SETTLE_MS = 60_000;
+/** The last look before announcing can fail to read: it is repeated this many times, this far apart. */
+export const ALERT_RECHECK_RETRIES = 2;
+export const ALERT_RECHECK_RETRY_MS = 15_000;
 
 const NOTIFIED_KEY = "kvistcode.bgfinished.v1";
 const NOTIFIED_MAX = 300;

@@ -56,7 +56,7 @@ export function PullModelDialog({
   const ranked = rankedCatalog(here ? hw : null);
 
   const cancel = () => {
-    if (pullId.current) void api.cancelLocalPull(pullId.current);
+    if (pullId.current) api.cancelLocalPull(pullId.current).catch(() => {});
   };
 
   // Leaving (or unmounting) mid-download stops it.

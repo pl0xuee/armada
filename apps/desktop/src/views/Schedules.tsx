@@ -89,7 +89,8 @@ export function SchedulesView() {
     try {
       upsert(await api.saveSchedule({ ...s, enabled }));
     } catch (e) {
-      upsert(s);
+      // Put back only the switch: the schedule may have been edited while this was saving.
+      setSchedules((list) => list?.map((x) => (x.id === s.id ? { ...x, enabled: s.enabled } : x)) ?? list);
       toast.error(`Couldn't ${enabled ? "enable" : "pause"} “${s.name}”`, { description: errorMessage(e) });
     } finally {
       setToggling((t) => ({ ...t, [s.id]: false }));

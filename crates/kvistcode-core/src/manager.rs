@@ -2640,7 +2640,7 @@ impl Core {
             let mut found = None;
             for w in agents
                 .iter()
-                .filter(|w| w.worktree && w.project_path.trim_end_matches(['/', '\\']) == old)
+                .filter(|w| w.worktree && same_project_folder(&w.project_path, &old))
             {
                 if let Some(p) = git::moved_project_path(Path::new(&w.cwd)).await {
                     if p.is_dir() {
@@ -2652,8 +2652,15 @@ impl Core {
             match found {
                 Some(new) => {
                     let to = new.to_string_lossy().into_owned();
-                    self.relocate_project(&old, &to).await?;
-                    out.moved.push(ProjectMove { from: old, to });
+                    // One project that can't be moved must not stop the others: it is reported as
+                    // not found, and "Locate…" on it shows the real reason.
+                    match self.relocate_project(&old, &to).await {
+                        Ok(_) => out.moved.push(ProjectMove { from: old, to }),
+                        Err(e) => {
+                            tracing::warn!("moving project {old}: {e:#}");
+                            out.missing.push(old);
+                        }
+                    }
                 }
                 None => out.missing.push(old),
             }
@@ -2680,7 +2687,7 @@ impl Core {
         let mut worktrees = Vec::new();
         let mut count = 0;
         for a in self.agents()? {
-            if trim(&a.project_path) != old {
+            if !same_project_folder(&a.project_path, &old) {
                 continue;
             }
             if a.worktree {
@@ -2704,7 +2711,7 @@ impl Core {
             count += 1;
         }
         for mut s in self.inner.db.schedules()? {
-            if trim(&s.project_path) == old {
+            if same_project_folder(&s.project_path, &old) {
                 s.project_path = new.clone();
                 self.inner.db.put_schedule_keeping_run(&mut s)?;
                 self.emit(KvistcodeEvent::ScheduleUpdated { schedule: s });
@@ -2764,6 +2771,10 @@ impl Core {
             crate::skill_prefs::project_key(Path::new(old)),
             crate::skill_prefs::project_key(Path::new(new)),
         );
+        self.inner
+            .budget
+            .lock()
+            .move_project(old, new, &self.inner.data_dir);
         let skills = crate::skill_prefs::update(&self.inner.data_dir, |prefs| {
             let keys: Vec<String> = prefs
                 .projects
@@ -3928,5 +3939,36 @@ mod tests {
         assert!(is_rate_limit("Error: rate_limit_error"));
         assert!(!is_rate_limit("error on line 429 of main.rs"));
         assert!(!is_rate_limit("Sign-in required: 401 Unauthorized"));
+    }
+}
+
+/// Two project folder paths are the same place: separators at the end do not count, and on
+/// Windows neither does letter case or `/` against `\`.
+fn same_project_folder(a: &str, b: &str) -> bool {
+    same_folder_text(a, b, cfg!(windows))
+}
+
+fn same_folder_text(a: &str, b: &str, windows: bool) -> bool {
+    let clean = |s: &str| {
+        let t = s.trim().trim_end_matches(['/', '\\']);
+        if windows {
+            t.replace('/', "\\").to_lowercase()
+        } else {
+            t.to_string()
+        }
+    };
+    clean(a) == clean(b)
+}
+
+#[cfg(test)]
+mod same_folder_tests {
+    use super::same_folder_text;
+
+    #[test]
+    fn folders_compare_ignoring_a_trailing_separator_and_on_windows_case() {
+        assert!(same_folder_text("/work/app/", "/work/app", false));
+        assert!(!same_folder_text("/work/App", "/work/app", false));
+        assert!(same_folder_text("C:/Work/App\\", "c:\\work\\app", true));
+        assert!(!same_folder_text("/work/app", "/work/other", true));
     }
 }

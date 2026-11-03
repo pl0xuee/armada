@@ -39,6 +39,12 @@ impl BudgetState {
         }
     }
 
+    /// A project folder moved: what already fired for it moves along (see `Tracker::move_project`).
+    pub(super) fn move_project(&mut self, old: &str, new: &str, data_dir: &Path) {
+        self.tracker.move_project(old, new);
+        self.save(data_dir, true);
+    }
+
     fn save(&mut self, data_dir: &Path, force: bool) {
         if !force && self.saved.is_some_and(|t| t.elapsed() < SAVE_EVERY) {
             return;

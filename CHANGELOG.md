@@ -5,6 +5,17 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## Unreleased
+
+### Fixed
+- **“Commit without these files” really leaves them out.** A file the agent had already staged (for example an `.env`) was still committed; now it stays out.
+- **Refresh projects carries on when one project can't be moved.** That one is listed as not found (use Locate… on it); the others are still refreshed.
+- **A moved project doesn't repeat its spending-limit alert.** A limit that had already warned stays quiet after the folder moves.
+- **“Workflow finished” alerts survive a failed last check.** If the final look at the run fails, Kvistcode tries again a few times before giving up.
+- **Moved projects on Windows** are matched whatever the letter case or slash direction.
+- **The phone stops its once-a-second timer while the page is hidden**, and unpairing also forgets the last project and groups it remembered.
+- **Smaller fixes:** cancelling a model download can't raise an unhandled error, a slow older pull-request check can't overwrite a newer one in the merge dialog, and a failed schedule switch only puts the switch back instead of an old copy of the schedule.
+
 ## v0.4.2 — 2026-11-02
 
 A voice assistant you can reach from any app and that keeps you posted, notifications that say what finished and where, a reply language, a Refresh button for moved projects, and a full review round of fixes.

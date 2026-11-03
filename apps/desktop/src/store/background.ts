@@ -1,7 +1,13 @@
 import { create } from "zustand";
 import { agentDerived } from "@/components/agent/derived";
 import { api } from "@/lib/api";
-import { ALERT_SETTLE_MS, NotifiedRuns, workflowFinishedDetail } from "@/lib/finishedAlert";
+import {
+  ALERT_RECHECK_RETRIES,
+  ALERT_RECHECK_RETRY_MS,
+  ALERT_SETTLE_MS,
+  NotifiedRuns,
+  workflowFinishedDetail,
+} from "@/lib/finishedAlert";
 import { isBusy, isSubagentLive, SUBAGENT_TICK_MS } from "@/lib/agents";
 import {
   backgroundActive,
@@ -179,7 +185,13 @@ export function installBackgroundTracker(): () => void {
     commit(id, computeBackground(id, d.workflows, entries, subs), agent, ended, endedCalls);
   }
 
-  function commit(id: string, next: BackgroundWork, agent: Agent | undefined, ended = false, endedCalls: WorkflowCall[] = []) {
+  function commit(
+    id: string,
+    next: BackgroundWork,
+    agent: Agent | undefined,
+    ended = false,
+    endedCalls: WorkflowCall[] = [],
+  ) {
     const st = useBackgroundStore.getState();
     const before = st.byAgent[id] ?? NO_BACKGROUND;
     const patch: Partial<ReturnType<typeof useBackgroundStore.getState>> = {};
@@ -212,26 +224,31 @@ export function installBackgroundTracker(): () => void {
   }
 
   /** Announces `call` once it has stayed finished for a minute, if the user isn't looking at the agent. */
-  function settleAlert(id: string, call: WorkflowCall) {
+  function settleAlert(id: string, call: WorkflowCall, retries = ALERT_RECHECK_RETRIES) {
     const key = workflowKey(id, call.toolCallId);
-    if (settling.has(key) || notified.has(key)) return;
+    if (retries === ALERT_RECHECK_RETRIES && (settling.has(key) || notified.has(key))) return;
     settling.set(
       key,
-      setTimeout(() => {
-        void (async () => {
-          // Finished is final for the poller, so ask afresh: a run that moved again is not the end.
-          const progress = await recheckWorkflow(id, call.toolCallId);
-          settling.delete(key);
-          const agent = useApp.getState().agents[id];
-          if (!agent || agent.status !== "idle" || progress?.state !== "finished" || notified.has(key)) return;
-          notified.add(key);
-          if (watching(id)) return;
-          const item = useApp.getState().items[id]?.find((i) => i.id === call.itemId);
-          const description = item?.kind === "tool_call" ? (item.subagent?.description ?? null) : null;
-          const detail = workflowFinishedDetail(description, progress.agents, agent.lastMessage);
-          api.backgroundFinished(id, progress.agents.length || null, detail).catch(() => {});
-        })();
-      }, ALERT_SETTLE_MS),
+      setTimeout(
+        () => {
+          void (async () => {
+            // Finished is final for the poller, so ask afresh: a run that moved again is not the end.
+            const progress = await recheckWorkflow(id, call.toolCallId);
+            settling.delete(key);
+            // The read itself failed (a hiccup, not an answer): try again a few times before giving up the alert.
+            if (!progress && retries > 0 && !notified.has(key)) return settleAlert(id, call, retries - 1);
+            const agent = useApp.getState().agents[id];
+            if (!agent || agent.status !== "idle" || progress?.state !== "finished" || notified.has(key)) return;
+            notified.add(key);
+            if (watching(id)) return;
+            const item = useApp.getState().items[id]?.find((i) => i.id === call.itemId);
+            const description = item?.kind === "tool_call" ? (item.subagent?.description ?? null) : null;
+            const detail = workflowFinishedDetail(description, progress.agents, agent.lastMessage);
+            api.backgroundFinished(id, progress.agents.length || null, detail).catch(() => {});
+          })();
+        },
+        retries === ALERT_RECHECK_RETRIES ? ALERT_SETTLE_MS : ALERT_RECHECK_RETRY_MS,
+      ),
     );
   }
 
