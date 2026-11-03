@@ -1,5 +1,9 @@
-import type { Account, Agent, TimelineItem } from "./types";
+import type { Account, Agent, ProjectLayout, TimelineItem } from "./types";
+import { arrange } from "./projectLayout";
+import { projectKey } from "./projectKey";
 import { basename } from "./utils";
+
+export { projectKey };
 
 /** Key of the group that holds archived agents (not a real project path). */
 export const ARCHIVED_KEY = "__archived__";
@@ -19,8 +23,6 @@ export interface ProjectGroup {
 
 const isWorking = (a: Agent, background?: ReadonlySet<string>) =>
   a.status === "working" || a.status === "starting" || (a.status === "idle" && !!background?.has(a.id));
-
-export const projectKey = (path: string) => path.trim().replace(/[\\/]+$/, "") || path;
 
 /**
  * The sidebar's projects: every folder that has agents, each with its agents, projects that
@@ -80,9 +82,15 @@ export function groupByProject(
   return { projects, archived };
 }
 
-/** Flat order used by ⌘1..9: the sidebar's order, project by project (archived excluded). */
-export function orderedAgents(agents: Agent[]): Agent[] {
-  return groupByProject(agents).projects.flatMap((p) => p.agents);
+/**
+ * Flat order used by ⌘1..9 and the voice assistant: the sidebar's order, project by project (archived excluded),
+ * following the user's sections and custom order when `layout` is given.
+ */
+export function orderedAgents(agents: Agent[], layout?: ProjectLayout): Agent[] {
+  const { projects } = groupByProject(agents);
+  if (!layout) return projects.flatMap((p) => p.agents);
+  const { loose, sections } = arrange(projects, layout);
+  return [...loose, ...sections.flatMap((g) => g.projects)].flatMap((p) => p.agents);
 }
 
 export function accountName(accounts: Account[], id: string): string {

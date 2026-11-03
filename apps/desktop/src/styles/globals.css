@@ -1269,3 +1269,10 @@ html[data-window="blurred"] ::after {
     animation: view-enter 170ms cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 }
+
+/* Dragging a project or a section in the sidebar: the grab cursor everywhere, and no text selection. */
+:root[data-dragging],
+:root[data-dragging] * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}

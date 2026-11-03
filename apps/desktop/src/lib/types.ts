@@ -633,6 +633,25 @@ export interface Settings {
   autoCompactWindow: number | null;
   /** The other "Save tokens" options. */
   tokenSaver: TokenSaverOptions;
+  /** How the sidebar lists projects: the user's own order and named sections. */
+  projectLayout: ProjectLayout;
+}
+
+/** How the sidebar lists projects. Paths are project folders as `projectKey` writes them. */
+export interface ProjectLayout {
+  /** Projects follow the lists below instead of recent activity. */
+  customOrder: boolean;
+  /** Projects outside any section, in the user's order (ones not listed lead, by activity). */
+  order: string[];
+  /** Named sections, in the user's order. */
+  sections: ProjectSection[];
+}
+
+export interface ProjectSection {
+  id: string;
+  name: string;
+  /** The section's projects, in order. */
+  projects: string[];
 }
 
 export interface TokenSaverOptions {

@@ -59,6 +59,7 @@ import {
   stopAgent,
 } from "@/lib/actions";
 import { orderedAgents } from "@/lib/agents";
+import { EMPTY_LAYOUT } from "@/lib/projectLayout";
 import { api } from "@/lib/api";
 import { isLightTheme, THEMES } from "@/lib/themes";
 import { openToolkit } from "@/store/toolkit";
@@ -185,7 +186,11 @@ function Palette({ onClose }: { onClose: () => void }) {
   // Nothing typed: a short list (what needs you, the latest agents, the main actions). Typing searches everything.
   const idle = !startMode && !searchMode && query.trim() === "";
 
-  const agents = useMemo(() => orderedAgents(Object.values(agentsMap)), [agentsMap]);
+  const projectLayout = useApp((s) => s.settings?.projectLayout);
+  const agents = useMemo(
+    () => orderedAgents(Object.values(agentsMap), projectLayout ?? EMPTY_LAYOUT),
+    [agentsMap, projectLayout],
+  );
   const archived = useMemo(() => Object.values(agentsMap).filter((a) => a.archived), [agentsMap]);
   const needsYou = useTriageQueue();
   const recent = useMemo(() => {

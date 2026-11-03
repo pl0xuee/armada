@@ -1115,6 +1115,135 @@ pub struct QuietHours {
     pub end: String,
 }
 
+/// How the sidebar lists projects: the user's own order and named sections.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ProjectLayout {
+    /// Projects follow the order below instead of recent activity.
+    pub custom_order: bool,
+    /// Project paths outside any section, in the user's order (projects not listed sort by activity).
+    pub order: Vec<String>,
+    /// Named sections in the user's order.
+    pub sections: Vec<ProjectSection>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ProjectSection {
+    pub id: String,
+    pub name: String,
+    /// Project paths in this section, in order.
+    pub projects: Vec<String>,
+}
+
+/// Most sections the sidebar can have.
+pub const MAX_PROJECT_SECTIONS: usize = 100;
+/// Most project paths `ProjectLayout` lists, in `order` and every section together.
+pub const MAX_LAYOUT_PROJECTS: usize = 2000;
+pub const MAX_SECTION_NAME_LEN: usize = 60;
+pub const MAX_SECTION_ID_LEN: usize = 64;
+pub const MAX_LAYOUT_PATH_LEN: usize = 4096;
+
+impl ProjectLayout {
+    /// Every path in the layout: `order` first, then each section in turn.
+    pub(crate) fn paths(&self) -> impl Iterator<Item = &String> {
+        self.order
+            .iter()
+            .chain(self.sections.iter().flat_map(|s| &s.projects))
+    }
+
+    /// What is wrong with the layout, in words for the user (None = fine).
+    pub fn problem(&self) -> Option<String> {
+        if self.sections.len() > MAX_PROJECT_SECTIONS {
+            return Some(format!(
+                "You can have up to {MAX_PROJECT_SECTIONS} sections."
+            ));
+        }
+        let mut ids = std::collections::HashSet::new();
+        for section in &self.sections {
+            if section.id.trim().is_empty() || section.id.chars().count() > MAX_SECTION_ID_LEN {
+                return Some(format!(
+                    "A section needs an id of up to {MAX_SECTION_ID_LEN} characters."
+                ));
+            }
+            if !ids.insert(section.id.as_str()) {
+                return Some("Two sections have the same id.".into());
+            }
+            if section.name.trim().is_empty() {
+                return Some("A section needs a name.".into());
+            }
+            if section.name.chars().count() > MAX_SECTION_NAME_LEN {
+                return Some(format!(
+                    "Section names can be up to {MAX_SECTION_NAME_LEN} characters."
+                ));
+            }
+        }
+        if self.paths().count() > MAX_LAYOUT_PROJECTS {
+            return Some(format!(
+                "The sidebar can list up to {MAX_LAYOUT_PROJECTS} projects in its order and sections."
+            ));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for path in self.paths() {
+            if path.trim().is_empty() {
+                return Some("A project in the sidebar order has no folder.".into());
+            }
+            if path.chars().count() > MAX_LAYOUT_PATH_LEN {
+                return Some(format!(
+                    "A project folder in the sidebar order is longer than {MAX_LAYOUT_PATH_LEN} characters."
+                ));
+            }
+            if !seen.insert(path.as_str()) {
+                return Some(format!("The sidebar lists {path} more than once."));
+            }
+        }
+        None
+    }
+
+    /// Repairs what `problem` rejects where that is simple: drops empty, over-long and repeated
+    /// paths (the first one stays), drops sections with a bad or repeated id, trims and shortens
+    /// names (an empty one becomes "Section") and cuts the counts to their limits. Returns whether
+    /// anything changed. Resets the whole layout only if something is left that can't be repaired.
+    pub fn sanitize(&mut self) -> bool {
+        let before = self.clone();
+        let mut ids = std::collections::HashSet::new();
+        self.sections.retain(|s| {
+            !s.id.trim().is_empty()
+                && s.id.chars().count() <= MAX_SECTION_ID_LEN
+                && ids.insert(s.id.clone())
+        });
+        self.sections.truncate(MAX_PROJECT_SECTIONS);
+        for section in &mut self.sections {
+            let name: String = section
+                .name
+                .trim()
+                .chars()
+                .take(MAX_SECTION_NAME_LEN)
+                .collect();
+            let name = name.trim_end();
+            section.name = if name.is_empty() { "Section" } else { name }.into();
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut room = MAX_LAYOUT_PROJECTS;
+        for list in std::iter::once(&mut self.order)
+            .chain(self.sections.iter_mut().map(|s| &mut s.projects))
+        {
+            list.retain(|p| {
+                let keep = !p.trim().is_empty()
+                    && p.chars().count() <= MAX_LAYOUT_PATH_LEN
+                    && room > 0
+                    && seen.insert(p.clone());
+                room -= usize::from(keep);
+                keep
+            });
+        }
+        if self.problem().is_some() {
+            *self = ProjectLayout::default();
+        }
+        *self != before
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -1183,6 +1312,8 @@ pub struct Settings {
     pub agent_budget_turns: Option<i64>,
     /// Caps on everything the agents of one project spend, by project folder.
     pub project_budgets: std::collections::BTreeMap<String, crate::budget::BudgetCap>,
+    /// The order of the sidebar's projects and the named sections they are filed under.
+    pub project_layout: ProjectLayout,
     /// Slack, Discord and generic webhook targets for alerts (ntfy has its own field).
     pub alert_targets: Vec<AlertTarget>,
     /// Claude agents summarize their conversation once it reaches this many tokens, instead of
@@ -1517,6 +1648,9 @@ impl Settings {
                 return Err(format!("Project budget for {project}: {problem}"));
             }
         }
+        if let Some(problem) = self.project_layout.problem() {
+            return Err(problem);
+        }
         crate::voice::validate_voice(&self.voice.model, &self.voice.language)?;
         if !crate::guidance::valid_language(&self.default_language) {
             return Err(format!(
@@ -1608,6 +1742,9 @@ impl Settings {
         self.project_budgets.retain(|_, cap| !cap.is_empty());
         if bad_project {
             reset.push("projectBudgets");
+        }
+        if self.project_layout.sanitize() {
+            reset.push("projectLayout");
         }
         if self.voice_assistant.hotkey.chars().count() > MAX_HOTKEY_LEN
             || self.voice_assistant_hotkey_clashes()
@@ -1708,6 +1845,7 @@ impl Default for Settings {
             daily_budget_turns: None,
             agent_budget_turns: None,
             project_budgets: Default::default(),
+            project_layout: ProjectLayout::default(),
             alert_targets: Vec::new(),
             // On by default: measured as the biggest saver (see docs/TOKEN-SAVING.md). Anyone who
             // chooses "Claude's default" in Settings saves an explicit null, which stays off.
@@ -2034,5 +2172,199 @@ mod voice_settings_tests {
             "lastMessage": null, "pendingPermissions": 0
         }))
         .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod project_layout_tests {
+    use super::*;
+
+    fn section(id: &str, name: &str, projects: &[&str]) -> ProjectSection {
+        ProjectSection {
+            id: id.into(),
+            name: name.into(),
+            projects: projects.iter().map(|p| p.to_string()).collect(),
+        }
+    }
+
+    fn layout(order: &[&str], sections: Vec<ProjectSection>) -> Settings {
+        Settings {
+            project_layout: ProjectLayout {
+                custom_order: true,
+                order: order.iter().map(|p| p.to_string()).collect(),
+                sections,
+            },
+            ..Settings::default()
+        }
+    }
+
+    #[test]
+    fn old_settings_load_without_a_layout_and_a_layout_round_trips() {
+        let old: Settings = serde_json::from_str(r#"{"theme":"gunmetal"}"#).unwrap();
+        assert_eq!(old.project_layout, ProjectLayout::default());
+        assert!(!old.project_layout.custom_order);
+        assert!(old.validate().is_ok());
+        // The shape the interface reads and writes.
+        let json = serde_json::to_value(&old).unwrap();
+        assert_eq!(
+            json["projectLayout"],
+            serde_json::json!({ "customOrder": false, "order": [], "sections": [] })
+        );
+
+        let s = layout(
+            &["/b", "/a"],
+            vec![
+                section("s1", "Websites", &["/c"]),
+                section("s2", "Games", &[]),
+            ],
+        );
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(
+            json["projectLayout"],
+            serde_json::json!({
+                "customOrder": true,
+                "order": ["/b", "/a"],
+                "sections": [
+                    { "id": "s1", "name": "Websites", "projects": ["/c"] },
+                    { "id": "s2", "name": "Games", "projects": [] },
+                ],
+            })
+        );
+        let back: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(back.project_layout, s.project_layout);
+        assert!(back.validate().is_ok());
+        // A section written without a project list still loads.
+        let sparse: Settings =
+            serde_json::from_str(r#"{"projectLayout":{"sections":[{"id":"s1","name":"Games"}]}}"#)
+                .unwrap();
+        assert!(sparse.project_layout.sections[0].projects.is_empty());
+        assert!(sparse.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_a_good_layout_and_names_each_problem() {
+        let good = layout(&["/b", "/a"], vec![section("s1", "Websites", &["/c"])]);
+        assert!(good.validate().is_ok());
+        let err = |s: Settings| s.validate().unwrap_err();
+
+        let nameless = layout(&[], vec![section("s1", "  ", &[])]);
+        assert_eq!(err(nameless), "A section needs a name.");
+        let long = layout(&[], vec![section("s1", &"é".repeat(61), &[])]);
+        assert_eq!(err(long), "Section names can be up to 60 characters.");
+        // Characters are counted, not bytes: 60 two-byte characters are fine.
+        assert!(layout(&[], vec![section("s1", &"é".repeat(60), &[])])
+            .validate()
+            .is_ok());
+
+        let no_id = layout(&[], vec![section("", "A", &[])]);
+        assert!(err(no_id).contains("id"));
+        let long_id = layout(&[], vec![section(&"i".repeat(65), "A", &[])]);
+        assert!(err(long_id).contains("id"));
+        assert!(layout(&[], vec![section(&"i".repeat(64), "A", &[])])
+            .validate()
+            .is_ok());
+        let same_id = layout(&[], vec![section("s", "A", &[]), section("s", "B", &[])]);
+        assert_eq!(err(same_id), "Two sections have the same id.");
+
+        let many: Vec<_> = (0..=MAX_PROJECT_SECTIONS)
+            .map(|i| section(&format!("s{i}"), "A", &[]))
+            .collect();
+        assert_eq!(err(layout(&[], many)), "You can have up to 100 sections.");
+        let many: Vec<_> = (0..MAX_PROJECT_SECTIONS)
+            .map(|i| section(&format!("s{i}"), "A", &[]))
+            .collect();
+        assert!(layout(&[], many).validate().is_ok());
+
+        let empty_path = layout(&["/a", " "], vec![]);
+        assert!(err(empty_path).contains("has no folder"));
+        let empty_in_section = layout(&[], vec![section("s", "A", &[""])]);
+        assert!(err(empty_in_section).contains("has no folder"));
+        let long_path = "/".repeat(MAX_LAYOUT_PATH_LEN + 1);
+        assert!(err(layout(&[&long_path], vec![])).contains("4096"));
+        let ok_path = "/".repeat(MAX_LAYOUT_PATH_LEN);
+        assert!(layout(&[&ok_path], vec![]).validate().is_ok());
+
+        // A path may be listed once across the order and every section.
+        assert!(err(layout(&["/a", "/a"], vec![])).contains("/a more than once"));
+        let across = layout(&["/a"], vec![section("s", "A", &["/b", "/a"])]);
+        assert!(err(across).contains("/a more than once"));
+        let two_sections = layout(
+            &[],
+            vec![section("s1", "A", &["/a"]), section("s2", "B", &["/a"])],
+        );
+        assert!(err(two_sections).contains("more than once"));
+
+        // At most 2000 paths in all.
+        let paths: Vec<String> = (0..MAX_LAYOUT_PROJECTS).map(|i| format!("/p{i}")).collect();
+        let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
+        assert!(layout(&refs, vec![]).validate().is_ok());
+        let over = layout(&refs, vec![section("s", "A", &["/one-more"])]);
+        assert!(err(over).contains("2000"));
+    }
+
+    #[test]
+    fn sanitize_repairs_what_it_can_and_leaves_a_good_layout_alone() {
+        let mut good = layout(&["/b", "/a"], vec![section("s1", "Websites", &["/c"])]);
+        let before = good.project_layout.clone();
+        assert!(good.sanitize().is_empty());
+        assert_eq!(good.project_layout, before);
+
+        let mut s = layout(
+            &[
+                "/a",
+                "",
+                "  ",
+                "/b",
+                "/a",
+                &"/".repeat(MAX_LAYOUT_PATH_LEN + 1),
+            ],
+            vec![
+                section("s1", "  Websites  ", &["/b", "/c", "/c", ""]),
+                section("", "No id", &["/x"]),
+                section("s1", "Same id", &["/y"]),
+                section("s2", "   ", &["/a", "/d"]),
+                section("s3", &"é".repeat(70), &[]),
+                section(&"i".repeat(65), "Long id", &["/z"]),
+            ],
+        );
+        assert!(s.validate().is_err());
+        assert_eq!(s.sanitize(), vec!["projectLayout"]);
+        assert!(s.validate().is_ok());
+        let l = &s.project_layout;
+        assert!(l.custom_order, "the switch is kept");
+        // Empty and over-long entries go and the first copy of a path stays.
+        assert_eq!(l.order, vec!["/a", "/b"]);
+        let ids: Vec<&str> = l.sections.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec!["s1", "s2", "s3"]);
+        assert_eq!(l.sections[0].name, "Websites");
+        assert_eq!(l.sections[0].projects, vec!["/c"]);
+        assert_eq!(l.sections[1].name, "Section");
+        assert_eq!(l.sections[1].projects, vec!["/d"]);
+        assert_eq!(l.sections[2].name, "é".repeat(60));
+        // Already repaired: nothing more to do.
+        assert!(s.sanitize().is_empty());
+
+        // Counts are cut to their limits.
+        let many: Vec<_> = (0..MAX_PROJECT_SECTIONS + 5)
+            .map(|i| section(&format!("s{i}"), "A", &[]))
+            .collect();
+        let mut s = layout(&[], many);
+        assert_eq!(s.sanitize(), vec!["projectLayout"]);
+        assert_eq!(s.project_layout.sections.len(), MAX_PROJECT_SECTIONS);
+        let paths: Vec<String> = (0..MAX_LAYOUT_PROJECTS + 10)
+            .map(|i| format!("/p{i}"))
+            .collect();
+        let (head, tail) = paths.split_at(MAX_LAYOUT_PROJECTS - 1);
+        let mut s = Settings::default();
+        s.project_layout.order = head.to_vec();
+        s.project_layout.sections = vec![ProjectSection {
+            id: "s".into(),
+            name: "A".into(),
+            projects: tail.to_vec(),
+        }];
+        assert_eq!(s.sanitize(), vec!["projectLayout"]);
+        assert_eq!(s.project_layout.order.len(), MAX_LAYOUT_PROJECTS - 1);
+        assert_eq!(s.project_layout.sections[0].projects, vec![tail[0].clone()]);
+        assert!(s.validate().is_ok());
     }
 }

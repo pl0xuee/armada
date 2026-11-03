@@ -2727,8 +2727,9 @@ impl Core {
     }
 
     /// What is filed under a project's folder follows it to `new`: its spending limit, its own
-    /// MCP servers, its place in the recent list and its switched-off skills. Best effort: the
-    /// agents and schedules have moved already, so a failure here is only logged.
+    /// MCP servers, its place in the recent list and the sidebar's order and sections, and its
+    /// switched-off skills. Best effort: the agents and schedules have moved already, so a
+    /// failure here is only logged.
     fn move_project_settings(&self, old: &str, new: &str) {
         let is_old = |p: &str| {
             providers::expand_home(p.trim())
@@ -2739,6 +2740,7 @@ impl Core {
             s.project_budgets.keys().any(|k| is_old(k))
                 || s.mcp_servers.iter().any(|m| is_old(&m.project_path))
                 || s.recent_projects.iter().any(|p| is_old(p))
+                || s.project_layout.paths().any(|p| is_old(p))
         };
         if filed(&self.inner.settings.lock()) {
             let moved = self.update_settings(|s| {
@@ -2762,6 +2764,18 @@ impl Core {
                 }
                 let mut seen = HashSet::new();
                 s.recent_projects.retain(|p| seen.insert(p.clone()));
+                // The sidebar's order and sections: the new path takes the old one's place, and
+                // a path ends up listed once (the first place it appears stays).
+                let layout = &mut s.project_layout;
+                let mut seen = HashSet::new();
+                for list in std::iter::once(&mut layout.order)
+                    .chain(layout.sections.iter_mut().map(|sec| &mut sec.projects))
+                {
+                    for path in list.iter_mut().filter(|p| is_old(p)) {
+                        *path = new.to_string();
+                    }
+                    list.retain(|p| seen.insert(p.clone()));
+                }
             });
             if let Err(e) = moved {
                 tracing::warn!("moving project settings: {e:#}");

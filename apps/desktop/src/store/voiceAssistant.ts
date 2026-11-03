@@ -5,6 +5,7 @@ import { beginVa, initialVa, isLive, reduceVa, type VaEvent, type VaState } from
 import { errorMessage } from "@/lib/utils";
 import { useApp } from "./app";
 import { orderedAgents } from "@/lib/agents";
+import { layoutOf } from "@/lib/projectLayout";
 import { tileIdsFor } from "@/lib/helpers";
 import { screenContextOf } from "@/lib/screenContext";
 import { useUi, type MissionTab, type SettingsSection, type View } from "./ui";
@@ -93,7 +94,7 @@ function reportScreen(): () => void {
       return;
     }
     const agents = useApp.getState().agents;
-    const order = orderedAgents(Object.values(agents)).map((a) => a.id);
+    const order = orderedAgents(Object.values(agents), layoutOf(useApp.getState().settings)).map((a) => a.id);
     const ui = useUi.getState();
     // An agent that no longer exists isn't on screen (the pane shows the welcome page instead).
     const open = ui.selectedAgentId && agents[ui.selectedAgentId] ? ui.selectedAgentId : null;
@@ -117,7 +118,8 @@ function reportScreen(): () => void {
   // must not postpone it for ever), and send only when it changed.
   let agentsTimer: ReturnType<typeof setTimeout> | undefined;
   const offApp = useApp.subscribe((s, prev) => {
-    if (s.agents === prev.agents || agentsTimer !== undefined || !isLive(useVa.getState())) return;
+    const moved = s.agents !== prev.agents || s.settings?.projectLayout !== prev.settings?.projectLayout;
+    if (!moved || agentsTimer !== undefined || !isLive(useVa.getState())) return;
     agentsTimer = setTimeout(() => {
       agentsTimer = undefined;
       push();

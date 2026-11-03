@@ -27,6 +27,7 @@ import {
 import { configDefaultsKey, isRememberableOption } from "./configMemory";
 import { BRANCH_CHANGED_MESSAGE } from "./ghError";
 import { isStressMode, STRESS_AGENTS, STRESS_TICK_MS, stressAgents, stressItems, stressWords } from "./mock-stress";
+import { EMPTY_LAYOUT, layoutProblem } from "./projectLayout";
 import {
   commandsFor,
   mockScreenshot,
@@ -3649,6 +3650,8 @@ function validateSettings(s: Settings): string | null {
     return `Unknown helper model “${ts.subagentModel}”`;
   if (sameAccelerator(s.voiceAssistant.hotkey, s.globalHotkey, isMac))
     return "The voice assistant hotkey must differ from the global hotkey (which brings Kvistcode forward)";
+  const layout = layoutProblem(s.projectLayout ?? EMPTY_LAYOUT);
+  if (layout) return layout;
   if (!["off", "ask", "auto"].includes(s.failover)) return `Unknown failover setting “${s.failover}”`;
   if (!["auto", "ask"].includes(s.defaultPermissionMode)) return `Unknown permission mode “${s.defaultPermissionMode}”`;
   if (!Number.isInteger(s.remote.port) || s.remote.port < 1 || s.remote.port > 65535) {

@@ -1,5 +1,6 @@
 //! A project that moved keeps what was filed under its folder: its spending limit, its own MCP
-//! servers, its place in the recent list and its switched-off skills.
+//! servers, its place in the recent list, in the sidebar's order and sections, and its
+//! switched-off skills.
 
 #![cfg(unix)]
 
@@ -114,4 +115,69 @@ async fn relocating_a_project_moves_its_limit_servers_recent_entry_and_skills() 
     let s = core.settings().unwrap();
     assert_eq!(s.project_budgets.get(&new).and_then(|c| c.usd), Some(7.0));
     assert!(!s.project_budgets.contains_key(&old));
+}
+
+#[tokio::test]
+async fn relocating_a_project_keeps_its_place_in_the_sidebar_order_and_sections() {
+    let (tx, rx) = mpsc::unbounded_channel();
+    std::mem::forget(rx);
+    let base = common::scratch("test-relocate-layout");
+    let core = Core::open(base.join("data"), Arc::new(Sink(tx))).unwrap();
+
+    let dir = |name: &str| base.join(name).to_string_lossy().into_owned();
+    let (old, other, third, old2) = (dir("old"), dir("other"), dir("third"), dir("old2"));
+    let canonical = |name: &str| {
+        let path = base.join(name);
+        std::fs::create_dir_all(&path).unwrap();
+        path.canonicalize().unwrap().to_string_lossy().into_owned()
+    };
+    let (new, new2) = (canonical("new"), canonical("new2"));
+
+    let section = |id: &str, name: &str, projects: Vec<String>| ProjectSection {
+        id: id.into(),
+        name: name.into(),
+        projects,
+    };
+    let layout = ProjectLayout {
+        custom_order: true,
+        order: vec![other.clone(), old.clone()],
+        sections: vec![
+            // The new folder is already filed here; the old one comes first in the order.
+            section("s1", "Websites", vec![third.clone(), new.clone()]),
+            // The same folder written with a trailing slash.
+            section("s2", "Games", vec![format!("{old}/"), old2.clone()]),
+            section("s3", "Empty", vec![]),
+        ],
+    };
+    core.update_settings(|s| s.project_layout = layout.clone())
+        .unwrap();
+
+    core.relocate_project(&old, &new).await.unwrap();
+
+    // The new path takes the old one's place and is listed once, at its first spot.
+    let moved = core.settings().unwrap().project_layout;
+    assert!(moved.custom_order);
+    assert_eq!(moved.order, vec![other.clone(), new.clone()]);
+    assert_eq!(moved.sections.len(), 3);
+    assert_eq!(moved.sections[0].projects, vec![third.clone()]);
+    assert_eq!(moved.sections[1].projects, vec![old2.clone()]);
+    assert_eq!(
+        moved
+            .sections
+            .iter()
+            .map(|s| (s.id.as_str(), s.name.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("s1", "Websites"), ("s2", "Games"), ("s3", "Empty")]
+    );
+
+    // A folder filed only inside a section keeps its position there.
+    core.relocate_project(&old2, &new2).await.unwrap();
+    let moved_again = core.settings().unwrap().project_layout;
+    assert_eq!(moved_again.sections[1].projects, vec![new2.clone()]);
+    assert_eq!(moved_again.order, moved.order);
+    assert_eq!(moved_again.sections[0], moved.sections[0]);
+
+    // Nothing left to move: a second call changes nothing.
+    core.relocate_project(&old, &new).await.unwrap();
+    assert_eq!(core.settings().unwrap().project_layout, moved_again);
 }

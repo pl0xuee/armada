@@ -1,7 +1,9 @@
 import {
   Archive,
   ArchiveRestore,
+  ArrowDown,
   ArrowRightLeft,
+  ArrowUp,
   CalendarClock,
   CircleDot,
   Download,
@@ -9,7 +11,9 @@ import {
   GitFork,
   Repeat,
   ChevronRight,
+  FolderInput,
   FolderOpen,
+  FolderPlus,
   LayoutGrid,
   PanelLeftClose,
   Pencil,
@@ -25,13 +29,29 @@ import {
 } from "lucide-react";
 import { m, AnimatePresence } from "motion/react";
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { toast } from "sonner";
 import { archiveAgent, exportConversation, refreshProjects, renameAgent, resumeAgent, stopAgent } from "@/lib/actions";
-import { ARCHIVED_KEY, groupByProject, orderedAgents, projectKey } from "@/lib/agents";
+import { ARCHIVED_KEY, groupByProject, orderedAgents, projectKey, type ProjectGroup } from "@/lib/agents";
+import {
+  addSection,
+  arrange,
+  EMPTY_LAYOUT,
+  layoutProblem,
+  moveProject,
+  moveSection,
+  nudgeProject,
+  placeProject,
+  removeSection,
+  renameSection,
+  spotOf,
+  withCustomOrder,
+} from "@/lib/projectLayout";
 import { MAX_TILES, nestHelpers, syncPresentation } from "@/lib/helpers";
 import { relativeTime, relativeTimeLong } from "@/lib/format";
 import { useBackgroundIds, useStatusView } from "@/store/background";
-import type { Account, Agent } from "@/lib/types";
-import { basename, cn, modKey } from "@/lib/utils";
+import type { Account, Agent, ProjectLayout } from "@/lib/types";
+import { basename, cn, errorMessage, modKey } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
 import { toggleAgentList } from "@/hooks/useAgentListLayout";
 import { useNow } from "@/hooks/useNow";
@@ -47,17 +67,24 @@ import { useAfterPaint } from "@/hooks/useAfterPaint";
 import { CiIcon } from "./PrChip";
 import { ResumesAt } from "./ResumesAt";
 import { StatusDot } from "../StatusDot";
+import { moveKeys, ProjectSectionHeader } from "./ProjectSectionHeader";
+import { useProjectDrag, type DragItem, type DropTarget } from "./useProjectDrag";
 import { Button } from "../ui/button";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
   DropdownMenu,
   DropdownMenuCheckItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../ui/menu";
 import { Kbd } from "../ui/kbd";
@@ -65,7 +92,7 @@ import { Tooltip } from "../ui/tooltip";
 
 const COLLAPSE_KEY = "armada.collapsedProjects";
 
-/** Which projects are folded, by folder path (archived agents are folded unless opened). */
+/** Which projects are folded, by folder path, and sections by `section:<id>` (archived agents are folded unless opened). */
 function readCollapsed(): Record<string, boolean> {
   try {
     const raw = localStorage.getItem(COLLAPSE_KEY);
@@ -160,6 +187,117 @@ export function AgentList({
     }
   };
 
+  // The user's order and named sections (settings saved by older versions have none).
+  const layout = useApp((s) => s.settings?.projectLayout) ?? EMPTY_LAYOUT;
+  const arranged = useMemo(() => arrange(projects, layout), [projects, layout]);
+  // Changes to the layout start from every project, not only the ones matching the filter.
+  const everything = useMemo(
+    () => (searchingNow ? arrange(groupByProject(agents, "", background).projects, layout) : arranged),
+    [searchingNow, agents, background, layout, arranged],
+  );
+  // While filtering, only sections with a match show.
+  const shownSections = searching ? arranged.sections.filter((g) => g.projects.length > 0) : arranged.sections;
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  // A menu that starts renaming keeps focus in the name field instead of returning it to the menu's button.
+  const keepFocus = useRef(false);
+  const closeAutoFocus = (e: Event) => {
+    if (keepFocus.current) e.preventDefault();
+    keepFocus.current = false;
+  };
+
+  const saveLayout = (next: ProjectLayout) => {
+    const problem = layoutProblem(next);
+    if (problem) {
+      toast.error("Couldn't arrange the projects", { description: problem });
+      return;
+    }
+    void useApp
+      .getState()
+      .patchSettings({ projectLayout: next })
+      .catch((e) => toast.error("Couldn't save the project order", { description: errorMessage(e) }));
+  };
+  const expand = (key: string) => {
+    if (collapsed[key]) toggle(key);
+  };
+  /** Focus a header again after it moved (it may have been remounted in another group). */
+  const refocus = (selector: string) =>
+    requestAnimationFrame(() => listRef.current?.querySelector<HTMLElement>(selector)?.focus());
+  const nudge = (path: string, delta: -1 | 1, focus = false) => {
+    const moved = nudgeProject(layout, everything, path, delta);
+    if (!moved) return;
+    saveLayout(moved.layout);
+    if (moved.spot.section) expand(`section:${moved.spot.section}`);
+    if (focus) refocus(`[data-project-block="${CSS.escape(path)}"] button[aria-expanded]`);
+  };
+  const place = (path: string, section: string | null) => {
+    saveLayout(placeProject(layout, everything, path, section));
+    if (section) expand(`section:${section}`);
+  };
+  const newSection = (path?: string) => {
+    keepFocus.current = true;
+    const added = addSection(layout, "New section", path ? everything : undefined, path);
+    saveLayout(added.layout);
+    setRenaming(added.id);
+  };
+  const renamed = (id: string, name: string | null) => {
+    setRenaming(null);
+    const current = layout.sections.find((s) => s.id === id);
+    if (name === null || !current || name.trim() === current.name) return;
+    saveLayout(renameSection(layout, id, name));
+  };
+  const moveSectionBy = (id: string, delta: -1 | 1, focus = false) => {
+    const i = layout.sections.findIndex((s) => s.id === id);
+    if (i < 0 || i + delta < 0 || i + delta >= layout.sections.length) return;
+    saveLayout(moveSection(layout, id, i + delta));
+    if (focus) refocus(`[data-section-header="${CSS.escape(id)}"] button[aria-expanded]`);
+  };
+  const deleteSection = (id: string) => {
+    const at = layout.sections.findIndex((s) => s.id === id);
+    const gone = layout.sections[at];
+    if (!gone) return;
+    saveLayout(removeSection(layout, id));
+    toast(`Deleted the “${gone.name}” section`, {
+      description: gone.projects.length > 0 ? "Its projects are back outside any section." : undefined,
+      action: {
+        label: "Undo",
+        // Put it back as it was, into whatever the layout is by then.
+        onClick: () => {
+          const cur = useApp.getState().settings?.projectLayout ?? EMPTY_LAYOUT;
+          if (cur.sections.some((s) => s.id === id)) return;
+          const sections = [...cur.sections];
+          sections.splice(Math.min(at, sections.length), 0, gone);
+          const back = new Set(gone.projects);
+          saveLayout({
+            ...cur,
+            order: cur.order.filter((p) => !back.has(p)),
+            sections: sections.map((s) =>
+              s.id === id ? s : { ...s, projects: s.projects.filter((p) => !back.has(p)) },
+            ),
+          });
+        },
+      },
+    });
+  };
+
+  /** Dropping where it already is changes nothing (and doesn't switch to the custom order). */
+  const dropIsNoop = (item: DragItem, t: DropTarget) => {
+    if (item.kind === "section") return layout.sections.findIndex((s) => s.id === item.id) === t.index;
+    const at = spotOf(arranged, item.id);
+    const group =
+      t.section === null ? arranged.loose : arranged.sections.find((g) => g.section.id === t.section)?.projects;
+    const size = (group ?? []).filter((p) => p.path !== item.id).length;
+    return !!at && at.section === t.section && at.index === Math.min(t.index, size);
+  };
+  const { drag, chipRef, handle } = useProjectDrag(listRef, !searching && rowsReady, (item, t) => {
+    if (dropIsNoop(item, t)) return;
+    if (item.kind === "section") saveLayout(moveSection(layout, item.id, t.index));
+    else saveLayout(moveProject(layout, arranged, item.id, { section: t.section, index: t.index }));
+  });
+  const draggingProject = drag?.item.kind === "project" ? drag.item.id : null;
+  const draggingSection = drag?.item.kind === "section" ? drag.item.id : null;
+  const showLine = !!drag?.target && drag.target.line !== null && !dropIsNoop(drag.item, drag.target);
+
   // "/" focuses the search when nothing else is focused.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -175,22 +313,180 @@ export function AgentList({
   // ⌘1–9 targets come from the same ordering the shortcut uses (not the visible rows).
   const hotkeys = useMemo(() => {
     const m = new Map<string, number>();
-    orderedAgents(agents)
+    orderedAgents(agents, layout)
       .slice(0, 9)
       .forEach((a, i) => m.set(a.id, i + 1));
     return m;
-  }, [agents]);
+  }, [agents, layout]);
   // "Agent 2" to the voice assistant is the 2nd agent in this same order (it lists the first 25). Shown only
   // while it is on. It numbers projects from its own list (recent and found folders), which this list isn't.
   const vaOn = useVa((s) => isLive(s));
   const voiceNumbers = useMemo(() => {
     const m = new Map<string, number>();
     if (vaOn)
-      orderedAgents(agents)
+      orderedAgents(agents, layout)
         .slice(0, 25)
         .forEach((a, i) => m.set(a.id, i + 1));
     return m;
-  }, [agents, vaOn]);
+  }, [agents, vaOn, layout]);
+
+  const renderProject = (p: ProjectGroup, section: string | null) => {
+    const isCollapsed = collapsed[p.path] && !searching;
+    // The open agent lives in this project (as one of its agents or a helper under one).
+    const holdsOpen = p.agents.some(
+      (a) => a.id === selected || nesting?.children.get(a.id)?.some((h) => h.id === selected),
+    );
+    const together = p.agents.length >= 2;
+    return (
+      // One flat block per project: a quiet header, then its agents. No boxes, so the list reads as one column.
+      <div key={p.path} data-project-block={p.path} className={cn("mb-3", draggingProject === p.path && "opacity-40")}>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div className="group/project @container/proj relative flex h-8 items-center rounded-lg pr-1 transition-colors hover:bg-raised/60">
+              <button
+                type="button"
+                onClick={() => toggle(p.path)}
+                onPointerDown={handle({ kind: "project", id: p.path, name: p.name })}
+                onKeyDown={(e) => {
+                  if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+                  e.preventDefault();
+                  nudge(p.path, e.key === "ArrowUp" ? -1 : 1, true);
+                }}
+                aria-expanded={!isCollapsed}
+                title={p.path}
+                className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md pl-1 pr-1 text-[12.5px] font-semibold tracking-tight text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+              >
+                <ChevronRight
+                  className={cn(
+                    "h-3 w-3 shrink-0 text-muted transition-transform duration-150",
+                    !isCollapsed && "rotate-90",
+                  )}
+                />
+                <FolderOpen className={cn("h-4 w-4 shrink-0", holdsOpen ? "text-accent" : "text-muted")} />
+                <span className="truncate">{p.name}</span>
+                <span className="shrink-0 text-[11.5px] font-medium tabular text-steel">{p.agents.length}</span>
+                {p.needs > 0 && (
+                  <span
+                    className="flex shrink-0 items-center gap-1 rounded-full bg-warn/20 px-1.5 py-px text-[11px] font-semibold text-warn ring-1 ring-warn/40 tabular"
+                    title={`${p.needs} need${p.needs === 1 ? "s" : ""} you`}
+                  >
+                    <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-warn" />
+                    {p.needs}
+                    <span className="hidden @[286px]/proj:inline">need{p.needs === 1 ? "s" : ""} you</span>
+                    <span className="sr-only @[286px]/proj:hidden">need{p.needs === 1 ? "s" : ""} you</span>
+                  </span>
+                )}
+                {p.needs === 0 && p.working > 0 && (
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent animate-breathe"
+                    aria-label={`${p.working} working`}
+                  />
+                )}
+              </button>
+              {/* Rests hidden so the name keeps its room; fades in over the header's right edge. */}
+              <div className="absolute inset-y-0 right-1 flex items-center gap-1 rounded-r-lg bg-gradient-to-l from-raised from-70% to-transparent pl-4 pointer-events-none opacity-0 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/project:pointer-events-auto group-hover/project:opacity-100">
+                {together && (
+                  <Tooltip content="Show these together">
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      className="shrink-0 text-muted hover:text-accent"
+                      aria-label={`Show ${p.name}'s agents together`}
+                      onClick={() => {
+                        const ids = [...p.agents]
+                          .sort((x, y) => x.createdAt - y.createdAt || x.id.localeCompare(y.id))
+                          .slice(0, MAX_TILES)
+                          .map((a) => a.id);
+                        openAgents(ids, selected && ids.includes(selected) ? selected : ids[0]);
+                        onNavigate?.();
+                      }}
+                    >
+                      <LayoutGrid className="!h-3.5 !w-3.5" />
+                    </Button>
+                  </Tooltip>
+                )}
+                <Tooltip content="GitHub issues">
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    className="shrink-0 text-muted hover:text-accent"
+                    aria-label={`GitHub issues of ${p.name}`}
+                    onClick={() => openIssues(p.path)}
+                  >
+                    <CircleDot className="!h-3.5 !w-3.5" />
+                  </Button>
+                </Tooltip>
+                <Tooltip content={`New agent in ${p.name}`}>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    className="shrink-0 border border-line-strong/70 text-muted hover:border-accent/50 hover:text-accent"
+                    aria-label={`New agent in ${p.name}`}
+                    onClick={() => openNewAgent({ projectPath: p.path })}
+                  >
+                    <Plus className="!h-3.5 !w-3.5" />
+                  </Button>
+                </Tooltip>
+              </div>
+            </div>
+          </ContextMenuTrigger>
+          <ProjectMenu
+            project={p}
+            section={section}
+            layout={layout}
+            everything={everything}
+            onNudge={(delta) => nudge(p.path, delta)}
+            onPlace={(to) => place(p.path, to)}
+            onNewSection={() => newSection(p.path)}
+            onNewAgent={() => openNewAgent({ projectPath: p.path })}
+            onCloseAutoFocus={closeAutoFocus}
+          />
+        </ContextMenu>
+        <AnimatePresence initial={false}>
+          {!isCollapsed && (
+            <m.ul
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
+              className="space-y-0.5"
+            >
+              {p.agents.map((a) => (
+                <Fragment key={a.id}>
+                  <AgentRow
+                    agent={a}
+                    account={accountMap.get(a.accountId)}
+                    showAccount={a.provider === "custom" || multiAccount.has(a.provider)}
+                    selected={a.id === selected}
+                    now={now}
+                    hotkey={hotkeys.get(a.id) ?? null}
+                    voiceNumber={voiceNumbers.get(a.id) ?? null}
+                    density={density}
+                    onNavigate={onNavigate}
+                  />
+                  {nesting?.children.get(a.id)?.map((h) => (
+                    <AgentRow
+                      key={h.id}
+                      nested
+                      agent={h}
+                      account={accountMap.get(h.accountId)}
+                      showAccount={h.provider === "custom" || multiAccount.has(h.provider)}
+                      selected={h.id === selected}
+                      now={now}
+                      hotkey={hotkeys.get(h.id) ?? null}
+                      voiceNumber={voiceNumbers.get(h.id) ?? null}
+                      density={density}
+                      onNavigate={onNavigate}
+                    />
+                  ))}
+                </Fragment>
+              ))}
+            </m.ul>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  };
 
   return (
     <aside
@@ -241,14 +537,33 @@ export function AgentList({
             </Button>
           </Tooltip>
           <DropdownMenu>
-            <Tooltip content="Row density">
+            <Tooltip content="List options">
               <DropdownMenuTrigger asChild>
-                <Button size="icon-xs" variant="ghost" aria-label="Row density">
+                <Button size="icon-xs" variant="ghost" aria-label="List options">
                   <Rows3 className="!h-3.5 !w-3.5" />
                 </Button>
               </DropdownMenuTrigger>
             </Tooltip>
-            <DropdownMenuContent align="end" className="min-w-[170px]">
+            <DropdownMenuContent align="end" className="min-w-[220px]" onCloseAutoFocus={closeAutoFocus}>
+              <DropdownMenuLabel>Order projects by</DropdownMenuLabel>
+              <DropdownMenuCheckItem
+                checked={!layout.customOrder}
+                onSelect={() => layout.customOrder && saveLayout({ ...layout, customOrder: false })}
+                description="Projects that need you, then the latest"
+              >
+                Recent activity
+              </DropdownMenuCheckItem>
+              <DropdownMenuCheckItem
+                checked={layout.customOrder}
+                onSelect={() => !layout.customOrder && saveLayout(withCustomOrder(layout, everything))}
+                description="Drag projects to arrange them"
+              >
+                Your order
+              </DropdownMenuCheckItem>
+              <DropdownMenuItem onSelect={() => newSection()}>
+                <FolderPlus /> New section
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuLabel>Row density</DropdownMenuLabel>
               <DropdownMenuCheckItem checked={density === "comfortable"} onSelect={() => chooseDensity("comfortable")}>
                 Comfortable
@@ -302,143 +617,63 @@ export function AgentList({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-          {(rowsReady ? projects : NO_PROJECTS).map((p) => {
-            const isCollapsed = collapsed[p.path] && !searching;
-            // The open agent lives in this project (as one of its agents or a helper under one).
-            const holdsOpen = p.agents.some(
-              (a) => a.id === selected || nesting?.children.get(a.id)?.some((h) => h.id === selected),
-            );
-            const together = p.agents.length >= 2;
-            return (
-              // One flat section per project: a quiet header, then its agents. No boxes, so the list reads as one column.
-              <div key={p.path} className="mb-3">
-                <div className="group/project @container/proj relative flex h-8 items-center rounded-lg pr-1 transition-colors hover:bg-raised/60">
-                  <button
-                    type="button"
-                    onClick={() => toggle(p.path)}
-                    aria-expanded={!isCollapsed}
-                    title={p.path}
-                    className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md pl-1 pr-1 text-[12.5px] font-semibold tracking-tight text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                  >
-                    <ChevronRight
-                      className={cn(
-                        "h-3 w-3 shrink-0 text-muted transition-transform duration-150",
-                        !isCollapsed && "rotate-90",
+        <div ref={listRef} className="relative min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+          {showLine && (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-x-2 top-0 z-10 flex h-0.5 items-center"
+              style={{ transform: `translateY(${Math.round(drag!.target!.line!)}px)` }}
+            >
+              <span className="h-2 w-2 shrink-0 rounded-full border-2 border-accent bg-panel" />
+              <span className="h-0.5 flex-1 rounded-full bg-accent" />
+            </div>
+          )}
+          <div data-drop-group="">
+            {(rowsReady ? arranged.loose : NO_PROJECTS).map((p) => renderProject(p, null))}
+            {draggingProject && arranged.loose.length === 0 && (
+              <DropZone highlight={drag?.target?.highlight === "group:"}>
+                Drop here to take it out of its section
+              </DropZone>
+            )}
+          </div>
+          {rowsReady &&
+            shownSections.map(({ section, projects: list }) => {
+              const key = `section:${section.id}`;
+              const folded = !!collapsed[key] && !searching;
+              const at = layout.sections.findIndex((x) => x.id === section.id);
+              return (
+                <div key={section.id} data-section-block={section.id} className="pt-1">
+                  <ProjectSectionHeader
+                    section={section}
+                    count={list.length}
+                    needs={list.reduce((n, p) => n + p.needs, 0)}
+                    working={list.reduce((n, p) => n + p.working, 0)}
+                    collapsed={folded}
+                    renaming={renaming === section.id}
+                    highlight={drag?.target?.highlight === `header:${section.id}`}
+                    dragging={draggingSection === section.id}
+                    canMoveUp={at > 0}
+                    canMoveDown={at < layout.sections.length - 1}
+                    onToggle={() => toggle(key)}
+                    onPointerDown={handle({ kind: "section", id: section.id, name: section.name })}
+                    onStartRename={() => setRenaming(section.id)}
+                    onRenamed={(name) => renamed(section.id, name)}
+                    onMove={(delta) => moveSectionBy(section.id, delta, true)}
+                    onDelete={() => deleteSection(section.id)}
+                  />
+                  {!folded && (
+                    <div data-drop-group={section.id} className={cn(draggingSection === section.id && "opacity-40")}>
+                      {list.map((p) => renderProject(p, section.id))}
+                      {list.length === 0 && (
+                        <DropZone highlight={drag?.target?.highlight === `group:${section.id}`}>
+                          Drag projects here
+                        </DropZone>
                       )}
-                    />
-                    <FolderOpen className={cn("h-4 w-4 shrink-0", holdsOpen ? "text-accent" : "text-muted")} />
-                    <span className="truncate">{p.name}</span>
-                    <span className="shrink-0 text-[11.5px] font-medium tabular text-steel">{p.agents.length}</span>
-                    {p.needs > 0 && (
-                      <span
-                        className="flex shrink-0 items-center gap-1 rounded-full bg-warn/20 px-1.5 py-px text-[11px] font-semibold text-warn ring-1 ring-warn/40 tabular"
-                        title={`${p.needs} need${p.needs === 1 ? "s" : ""} you`}
-                      >
-                        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-warn" />
-                        {p.needs}
-                        <span className="hidden @[286px]/proj:inline">need{p.needs === 1 ? "s" : ""} you</span>
-                        <span className="sr-only @[286px]/proj:hidden">need{p.needs === 1 ? "s" : ""} you</span>
-                      </span>
-                    )}
-                    {p.needs === 0 && p.working > 0 && (
-                      <span
-                        className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent animate-breathe"
-                        aria-label={`${p.working} working`}
-                      />
-                    )}
-                  </button>
-                  {/* Rests hidden so the name keeps its room; fades in over the header's right edge. */}
-                  <div className="absolute inset-y-0 right-1 flex items-center gap-1 rounded-r-lg bg-gradient-to-l from-raised from-70% to-transparent pl-4 pointer-events-none opacity-0 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/project:pointer-events-auto group-hover/project:opacity-100">
-                    {together && (
-                      <Tooltip content="Show these together">
-                        <Button
-                          size="icon-sm"
-                          variant="ghost"
-                          className="shrink-0 text-muted hover:text-accent"
-                          aria-label={`Show ${p.name}'s agents together`}
-                          onClick={() => {
-                            const ids = [...p.agents]
-                              .sort((x, y) => x.createdAt - y.createdAt || x.id.localeCompare(y.id))
-                              .slice(0, MAX_TILES)
-                              .map((a) => a.id);
-                            openAgents(ids, selected && ids.includes(selected) ? selected : ids[0]);
-                            onNavigate?.();
-                          }}
-                        >
-                          <LayoutGrid className="!h-3.5 !w-3.5" />
-                        </Button>
-                      </Tooltip>
-                    )}
-                    <Tooltip content="GitHub issues">
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        className="shrink-0 text-muted hover:text-accent"
-                        aria-label={`GitHub issues of ${p.name}`}
-                        onClick={() => openIssues(p.path)}
-                      >
-                        <CircleDot className="!h-3.5 !w-3.5" />
-                      </Button>
-                    </Tooltip>
-                    <Tooltip content={`New agent in ${p.name}`}>
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        className="shrink-0 border border-line-strong/70 text-muted hover:border-accent/50 hover:text-accent"
-                        aria-label={`New agent in ${p.name}`}
-                        onClick={() => openNewAgent({ projectPath: p.path })}
-                      >
-                        <Plus className="!h-3.5 !w-3.5" />
-                      </Button>
-                    </Tooltip>
-                  </div>
-                </div>
-                <AnimatePresence initial={false}>
-                  {!isCollapsed && (
-                    <m.ul
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.12 }}
-                      className="space-y-0.5"
-                    >
-                      {p.agents.map((a) => (
-                        <Fragment key={a.id}>
-                          <AgentRow
-                            agent={a}
-                            account={accountMap.get(a.accountId)}
-                            showAccount={a.provider === "custom" || multiAccount.has(a.provider)}
-                            selected={a.id === selected}
-                            now={now}
-                            hotkey={hotkeys.get(a.id) ?? null}
-                            voiceNumber={voiceNumbers.get(a.id) ?? null}
-                            density={density}
-                            onNavigate={onNavigate}
-                          />
-                          {nesting?.children.get(a.id)?.map((h) => (
-                            <AgentRow
-                              key={h.id}
-                              nested
-                              agent={h}
-                              account={accountMap.get(h.accountId)}
-                              showAccount={h.provider === "custom" || multiAccount.has(h.provider)}
-                              selected={h.id === selected}
-                              now={now}
-                              hotkey={hotkeys.get(h.id) ?? null}
-                              voiceNumber={voiceNumbers.get(h.id) ?? null}
-                              density={density}
-                              onNavigate={onNavigate}
-                            />
-                          ))}
-                        </Fragment>
-                      ))}
-                    </m.ul>
+                    </div>
                   )}
-                </AnimatePresence>
-              </div>
-            );
-          })}
+                </div>
+              );
+            })}
           {rowsReady && archived.length > 0 && (
             <div className="mb-1">
               <button
@@ -497,7 +732,111 @@ export function AgentList({
           )}
         </div>
       </div>
+      {drag &&
+        createPortal(
+          <div
+            ref={chipRef}
+            aria-hidden
+            className="pointer-events-none fixed left-0 top-0 z-[100] flex max-w-[240px] items-center gap-1.5 rounded-lg border border-line-strong bg-raised px-2.5 py-1.5 text-[12px] font-semibold text-fg shadow-xl"
+            style={{ transform: `translate3d(${drag.x + 14}px, ${drag.y + 10}px, 0)` }}
+          >
+            {drag.item.kind === "project" ? (
+              <FolderOpen className="h-3.5 w-3.5 shrink-0 text-accent" />
+            ) : (
+              <Rows3 className="h-3.5 w-3.5 shrink-0 text-accent" />
+            )}
+            <span className="truncate">{drag.item.name}</span>
+          </div>,
+          document.body,
+        )}
     </aside>
+  );
+}
+
+/** A place to drop a project where a group has none (an empty section, or no section while all are in one). */
+function DropZone({ highlight, children }: { highlight: boolean; children: React.ReactNode }) {
+  return (
+    <div
+      className={cn(
+        "mb-3 flex h-9 items-center justify-center rounded-lg border border-dashed border-line px-2 text-center text-[11.5px] text-steel transition-colors",
+        highlight && "border-accent/60 bg-accent/5 text-accent",
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** Right-click on a project's header: move it up or down, into a section, or start an agent there. */
+function ProjectMenu({ onCloseAutoFocus, ...rest }: ProjectMenuProps & { onCloseAutoFocus: (e: Event) => void }) {
+  // The items render only while the menu is open, so a closed menu costs nothing as agents update.
+  return (
+    <ContextMenuContent onCloseAutoFocus={onCloseAutoFocus}>
+      <ProjectMenuItems {...rest} />
+    </ContextMenuContent>
+  );
+}
+
+interface ProjectMenuProps {
+  project: ProjectGroup;
+  section: string | null;
+  layout: ProjectLayout;
+  everything: ReturnType<typeof arrange<ProjectGroup>>;
+  onNudge: (delta: -1 | 1) => void;
+  onPlace: (section: string | null) => void;
+  onNewSection: () => void;
+  onNewAgent: () => void;
+}
+
+function ProjectMenuItems({
+  project,
+  section,
+  layout,
+  everything,
+  onNudge,
+  onPlace,
+  onNewSection,
+  onNewAgent,
+}: ProjectMenuProps) {
+  const at = spotOf(everything, project.path);
+  const groups = [everything.loose.length, ...everything.sections.map((g) => g.projects.length)];
+  const gi = at
+    ? at.section === null
+      ? 0
+      : 1 + everything.sections.findIndex((g) => g.section.id === at.section)
+    : -1;
+  const canUp = !!at && (at.index > 0 || gi > 0);
+  const canDown = !!at && (at.index < groups[gi] - 1 || gi < groups.length - 1);
+  return (
+    <>
+      <ContextMenuItem onSelect={() => onNudge(-1)} disabled={!canUp} shortcut={moveKeys.up}>
+        <ArrowUp /> Move up
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={() => onNudge(1)} disabled={!canDown} shortcut={moveKeys.down}>
+        <ArrowDown /> Move down
+      </ContextMenuItem>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>
+          <FolderInput /> Move to section
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent>
+          {layout.sections.map((s) => (
+            <ContextMenuItem key={s.id} disabled={s.id === section} onSelect={() => onPlace(s.id)}>
+              <span className="max-w-[220px] truncate">{s.name}</span>
+            </ContextMenuItem>
+          ))}
+          {section !== null && <ContextMenuItem onSelect={() => onPlace(null)}>No section</ContextMenuItem>}
+          {(layout.sections.length > 0 || section !== null) && <ContextMenuSeparator />}
+          <ContextMenuItem onSelect={onNewSection}>
+            <FolderPlus /> New section…
+          </ContextMenuItem>
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+      <ContextMenuSeparator />
+      <ContextMenuItem onSelect={onNewAgent}>
+        <Plus /> New agent in {project.name}
+      </ContextMenuItem>
+    </>
   );
 }
 

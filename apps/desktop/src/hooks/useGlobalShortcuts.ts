@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { orderedAgents } from "@/lib/agents";
+import { layoutOf } from "@/lib/projectLayout";
 import { onVaHotkey } from "@/lib/api";
 import { LIST_DOCK_QUERY } from "@/lib/layout";
 import { selectNextTriage, triageQueueNow } from "@/components/triage/useTriage";
@@ -137,7 +138,8 @@ export function useGlobalShortcuts(enabled: boolean) {
         return;
       }
       if (/^[1-9]$/.test(e.key) && !e.shiftKey) {
-        const list = orderedAgents(Object.values(useApp.getState().agents));
+        const app = useApp.getState();
+        const list = orderedAgents(Object.values(app.agents), layoutOf(app.settings));
         const target = list[Number(e.key) - 1];
         if (target) {
           e.preventDefault();

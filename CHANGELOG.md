@@ -7,6 +7,9 @@ docs/RELEASING.md).
 
 ## Unreleased
 
+### New
+- **Arrange your projects, and group them into sections.** Drag a project in the sidebar to put it where you want it. To group projects under names like “Websites” or “Games”, choose New section in the list options menu (next to New), or right-click a project and pick Move to section. Sections fold, can be renamed (double-click or F2) and dragged like projects. A folded section still shows when something inside needs you. ⌘1–9 (Ctrl+1–9) follows your order. Choose Recent activity in the same menu to go back to the automatic order.
+
 ### Fixed
 - **The message box's buttons stay inside it at any width.** When the window or a tile is narrow, the agent's settings (model, effort and the rest) move one at a time into the ⚙ menu, then Stop and Send become icons, so nothing spills past the edge or overlaps any more.
 
