@@ -18,6 +18,7 @@ import { useWindowActivity } from "@/hooks/useWindowActivity";
 import { useWindowTitle } from "@/hooks/useWindowTitle";
 import { installBackgroundTracker } from "@/store/background";
 import { installCompletionTracker } from "@/store/completion";
+import { installNavHistory } from "@/store/navHistory";
 import { api } from "@/lib/api";
 import { applyDevLinks } from "@/lib/devlinks";
 import { isLightTheme } from "@/lib/themes";
@@ -116,6 +117,8 @@ export function App() {
   useEffect(() => installCompletionTracker(), []);
   // Workflow runs and background agents still going after a turn ended (for every agent, not only the open one).
   useEffect(() => installBackgroundTracker(), []);
+  // Back / Forward history, from the first screen the user sees.
+  useEffect(() => (booted ? installNavHistory() : undefined), [booted]);
   useWindowTitle(booted);
   useWindowActivity();
 

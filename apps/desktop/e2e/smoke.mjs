@@ -181,6 +181,19 @@ try {
     await assertHealthy(label);
   }
 
+  // ---- Back / Forward in the title bar (the walk above ended Accounts -> Projects) ------
+  const railCurrent = async (label) =>
+    (await browser.$(`nav[aria-label="Primary"] button[aria-label^="${label}"]`)).getAttribute("aria-current");
+  for (const [button, label] of [["Back", "Accounts"], ["Forward", "Projects"]]) {
+    log(`title bar: ${button}`);
+    await (await browser.$(`header button[aria-label="${button}"]`)).click();
+    await browser.waitUntil(async () => (await railCurrent(label)) === "page", {
+      timeout: 5_000,
+      timeoutMsg: `${button} did not return to "${label}"`,
+    });
+    await assertHealthy(`${button.toLowerCase()} to ${label}`);
+  }
+
   // ---- Mission Control tabs (the queue of agents that need you, and every agent) -----
   await goRail("Mission Control");
   for (const tab of ["Needs you", "All agents"]) {

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { APPROVAL_KEYS } from "@/lib/approvalKeys";
-import { modKey } from "@/lib/utils";
+import { isMac, modKey } from "@/lib/utils";
 import { Dialog, DialogBody, DialogContent } from "../ui/dialog";
 import { Kbd } from "../ui/kbd";
 
@@ -27,6 +27,8 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
       { keys: [modKey, "K"], label: "Command palette (type > to start an agent)" },
       { keys: [modKey, "⇧", "F"], label: "Search every conversation (type ? in the palette)" },
       { keys: [modKey, "N"], label: "New agent" },
+      { keys: isMac ? ["⌘", "["] : ["Alt", "←"], label: "Back (also the mouse's back button)" },
+      { keys: isMac ? ["⌘", "]"] : ["Alt", "→"], label: "Forward" },
       { keys: [modKey, "J"], label: "Needs you (press again for the next one)" },
       { keys: [modKey, "⇧", "M"], label: "Mission Control: All agents" },
       { keys: [modKey, "⇧", "A"], label: "Voice assistant: start, end or unmute (Esc ends)" },

@@ -1,8 +1,9 @@
-import { Minus, RotateCw, Search, Square, Unplug, Users, Workflow, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Minus, RotateCw, Search, Square, Unplug, Users, Workflow, X } from "lucide-react";
 import { PROVIDERS } from "@/lib/providers";
 import type { Account } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, isMac } from "@/lib/utils";
 import { useApp } from "@/store/app";
+import { goBack, goForward, placeLabel, useNav } from "@/store/navHistory";
 import { useUi, type View } from "@/store/ui";
 import { modKey } from "@/lib/utils";
 import { windowAction } from "@/lib/window";
@@ -18,14 +19,17 @@ import { UsageMeters } from "./UsageMeter";
 import { UpdatePill } from "./UpdatePill";
 import { ProviderGlyph } from "./ProviderGlyph";
 import { SubagentList } from "./agent/SubagentList";
+import { SupportMenu } from "./shell/SupportMenu";
 import { VoiceAssistantButton } from "./voice/VoiceAssistantButton";
 import { useSubagentOverview } from "./agent/useSubagents";
 
 /** Below this the right-hand cluster would crowd the search box, so the sub-agents chip drops its label. */
 const NARROW_TITLEBAR_QUERY = "(max-width: 1499px)";
+/** Below this the Support button is just its icon (the tooltip names it). */
+const SUPPORT_LABEL_QUERY = "(min-width: 1360px)";
 
 const VIEW_LABEL: Record<View, string> = {
-  agents: "Agents",
+  agents: "Projects",
   mission: "Mission Control",
   compare: "Compare",
   schedules: "Schedules",
@@ -42,6 +46,7 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
   const mac = platform === "macos";
   const compact = useMediaQuery(COMPACT_TITLEBAR_QUERY);
   const narrow = useMediaQuery(NARROW_TITLEBAR_QUERY);
+  const supportLabel = useMediaQuery(SUPPORT_LABEL_QUERY);
   const connectionLost = useApp((s) => s.connectionLost);
   // With an update pill on top of the sub-agents chip and accounts, the right side crowds out the breadcrumb.
   const crowded = useApp((s) => s.update !== null && !s.updateDismissed);
@@ -66,16 +71,21 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
             <>
               <span
                 data-tauri-drag-region
-                className={cn("text-line-strong max-[999px]:hidden", crowded && "max-[1119px]:hidden")}
+                className={cn("text-line-strong max-[1199px]:hidden", crowded && "max-[1319px]:hidden")}
               >
                 /
               </span>
               <span
                 data-tauri-drag-region
-                className={cn("truncate text-[12.5px] text-muted max-[999px]:hidden", crowded && "max-[1119px]:hidden")}
+                className={cn(
+                  "truncate text-[12.5px] text-muted max-[1199px]:hidden",
+                  crowded && "max-[1319px]:hidden",
+                )}
               >
                 {VIEW_LABEL[view]}
               </span>
+              <span data-tauri-drag-region className="min-w-2 flex-1" />
+              <NavButtons />
             </>
           )}
         </div>
@@ -116,6 +126,7 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
           {!minimal && <VoiceAssistantButton compact={narrow} />}
           {!minimal && <SubagentsIndicator compact={narrow} />}
           {!minimal && <UpdatePill />}
+          {!minimal && <SupportMenu compact={!supportLabel || crowded} />}
           {!minimal && accounts.length > 0 && <AccountsPopover accounts={accounts} stacked={compact} />}
           {!mac && <WindowControls />}
         </div>
@@ -137,7 +148,7 @@ function SubagentsIndicator({ compact }: { compact: boolean }) {
           <button
             type="button"
             aria-label={label}
-            className="flex h-6 items-center gap-1.5 rounded-full border border-accent/30 bg-accent/[0.08] px-2 text-[11.5px] text-accent transition-colors hover:border-accent/50 hover:bg-accent/15"
+            className="flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-accent/30 bg-accent/[0.08] px-2 text-[11.5px] text-accent transition-colors hover:border-accent/50 hover:bg-accent/15"
           >
             <Workflow className="h-3 w-3" />
             <span className="tabular">{total}</span>
@@ -163,6 +174,30 @@ function SubagentsIndicator({ compact }: { compact: boolean }) {
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** Back and Forward through the views and agents visited, like a browser. */
+function NavButtons() {
+  const back = useNav((s) => s.back.at(-1) ?? null);
+  const forward = useNav((s) => s.forward.at(-1) ?? null);
+  const btn =
+    "flex h-6 w-6 items-center justify-center rounded-md text-steel transition-colors hover:bg-raised hover:text-fg disabled:pointer-events-none disabled:opacity-35 [&_svg]:h-4 [&_svg]:w-4";
+  const backKeys = isMac ? ["⌘", "["] : ["Alt", "←"];
+  const forwardKeys = isMac ? ["⌘", "]"] : ["Alt", "→"];
+  return (
+    <div className="mr-1 flex shrink-0 items-center gap-0.5">
+      <Tooltip content={back ? `Back to ${placeLabel(back)}` : "Back"} shortcut={backKeys} side="bottom">
+        <button type="button" aria-label="Back" className={btn} disabled={!back} onClick={() => goBack()}>
+          <ArrowLeft />
+        </button>
+      </Tooltip>
+      <Tooltip content={forward ? `Forward to ${placeLabel(forward)}` : "Forward"} shortcut={forwardKeys} side="bottom">
+        <button type="button" aria-label="Forward" className={btn} disabled={!forward} onClick={() => goForward()}>
+          <ArrowRight />
+        </button>
+      </Tooltip>
+    </div>
   );
 }
 
@@ -221,7 +256,7 @@ function AccountsPopover({ accounts, stacked }: { accounts: Account[]; stacked: 
             className="flex items-center rounded-full pl-1 transition-transform active:scale-[0.97]"
             aria-label={`Accounts: ${signedIn} of ${accounts.length} signed in`}
           >
-            {(stacked ? accounts.slice(0, 1) : accounts.slice(0, 5)).map((a, i) => (
+            {(stacked ? accounts.slice(0, 1) : accounts.slice(0, 3)).map((a, i) => (
               <span key={a.id} className="-ml-1 first:ml-0" style={{ zIndex: 10 - i }}>
                 <AccountAvatar account={a} size={22} showProvider={false} compact />
               </span>
@@ -231,9 +266,9 @@ function AccountsPopover({ accounts, stacked }: { accounts: Account[]; stacked: 
                 +{accounts.length - 1}
               </span>
             )}
-            {!stacked && accounts.length > 5 && (
+            {!stacked && accounts.length > 3 && (
               <span className="-ml-1 flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-raised px-1 text-[10px] text-muted ring-2 ring-panel">
-                +{accounts.length - 5}
+                +{accounts.length - 3}
               </span>
             )}
           </button>

@@ -8,6 +8,7 @@ import { isEditableTarget, isMac } from "@/lib/utils";
 import { openShortcutHelp, toggleShortcutHelp } from "@/components/shell/ShortcutHelp";
 import { stepInterfaceScale } from "@/lib/zoom";
 import { useApp } from "@/store/app";
+import { goBack, goForward } from "@/store/navHistory";
 import { togglePreview } from "@/store/preview";
 import { useUi } from "@/store/ui";
 import { toggleVoiceAssistant } from "@/store/voiceAssistant";
@@ -23,6 +24,13 @@ export function useGlobalShortcuts(enabled: boolean) {
       if (!mod && e.key === "?" && !e.altKey && !e.repeat && !isEditableTarget(e.target) && !dialogOpen()) {
         e.preventDefault();
         openShortcutHelp();
+        return;
+      }
+      const nav = navKey(e);
+      if (nav && !e.repeat && !dialogOpen() && !inTerminal(e.target)) {
+        e.preventDefault();
+        if (nav === "back") goBack();
+        else goForward();
         return;
       }
       if (!mod || e.altKey) return;
@@ -141,6 +149,20 @@ export function useGlobalShortcuts(enabled: boolean) {
     return () => window.removeEventListener("keydown", onKey);
   }, [enabled]);
 
+  // The mouse's back and forward side buttons.
+  useEffect(() => {
+    if (!enabled) return;
+    const onUp = (e: MouseEvent) => {
+      if (e.button !== 3 && e.button !== 4) return;
+      e.preventDefault();
+      if (dialogOpen()) return;
+      if (e.button === 3) goBack();
+      else goForward();
+    };
+    window.addEventListener("mouseup", onUp);
+    return () => window.removeEventListener("mouseup", onUp);
+  }, [enabled]);
+
   // The system-wide voice assistant hotkey (works while the window is in the background):
   // the shell sends an event, and it does what the in-app shortcut does.
   useEffect(() => {
@@ -156,6 +178,22 @@ export function useGlobalShortcuts(enabled: boolean) {
       off?.();
     };
   }, [enabled]);
+}
+
+/** Back / Forward: ⌘[ and ⌘] on macOS, Alt+← and Alt+→ elsewhere (as in browsers). */
+export function navKey(e: KeyboardEvent): "back" | "forward" | null {
+  if (e.shiftKey) return null;
+  if (isMac) {
+    if (!e.metaKey || e.ctrlKey || e.altKey) return null;
+    return e.key === "[" ? "back" : e.key === "]" ? "forward" : null;
+  }
+  if (!e.altKey || e.ctrlKey || e.metaKey) return null;
+  return e.key === "ArrowLeft" ? "back" : e.key === "ArrowRight" ? "forward" : null;
+}
+
+/** A shell uses Alt+arrows itself (word moves). */
+function inTerminal(t: EventTarget | null): boolean {
+  return t instanceof Element && t.closest(".xterm") !== null;
 }
 
 function dialogOpen(): boolean {

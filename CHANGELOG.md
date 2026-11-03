@@ -7,6 +7,14 @@ docs/RELEASING.md).
 
 ## Unreleased
 
+### New
+- **Back and Forward.** Arrows next to the search box step back and forward through the pages and agents you opened, like a browser. Alt+← and Alt+→ (⌘[ and ⌘] on a Mac) and the mouse's side buttons do the same. Hover an arrow to see where it goes.
+- **A Support button in the title bar.** It gathers help in one place: report a problem (the version and system are filled in for you), see what's new, keyboard shortcuts, the tour, and ways to support Kvistcode.
+
+### Improved
+- **The sidebar names its buttons.** Projects, Mission, Compare, Schedules, Usage, Accounts and Settings now have a label under the icon, so nothing needs a guess or a hover. The title bar and the command palette say “Projects” too, matching the sidebar.
+- **A calmer title bar.** The sub-agents chip no longer wraps onto two lines, and the account strip shows three faces plus a count.
+
 ### Fixed
 - **“Commit without these files” really leaves them out.** A file the agent had already staged (for example an `.env`) was still committed; now it stays out.
 - **Refresh projects carries on when one project can't be moved.** That one is listed as not found (use Locate… on it); the others are still refreshed.

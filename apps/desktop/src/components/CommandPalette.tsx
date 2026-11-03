@@ -623,7 +623,8 @@ function Palette({ onClose }: { onClose: () => void }) {
               />
               <PaletteAction
                 icon={<MessagesSquare />}
-                label="Go to Agents"
+                label="Go to Projects"
+                keywords={["agents", "home", "list"]}
                 onSelect={() => run(() => ui.setView("agents"))}
               />
               <PaletteAction
