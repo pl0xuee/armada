@@ -992,8 +992,9 @@ impl Remote {
         (url, qr_svg, expires_at_ms)
     }
 
-    /// Spends `code` if it is the live pairing code (single use, constant time).
-    fn redeem_pairing(&self, code: &str) -> bool {
+    /// Spends `code` if it is the live pairing code (single use, constant time). The spent
+    /// code is handed back so it can be restored.
+    fn take_pairing(&self, code: &str) -> Option<PairingCode> {
         let mut slot = self.pairing.lock();
         let given = hash_token(code.trim());
         let ok = slot.as_ref().is_some_and(|c| {
@@ -1001,9 +1002,17 @@ impl Remote {
             same && c.expires > Instant::now()
         });
         if ok || slot.as_ref().is_some_and(|c| c.expires <= Instant::now()) {
-            *slot = None;
+            return slot.take().filter(|_| ok);
         }
-        ok
+        None
+    }
+
+    /// Gives back a code `take_pairing` spent, unless a newer one has been minted since.
+    fn restore_pairing(&self, code: PairingCode) {
+        let mut slot = self.pairing.lock();
+        if slot.is_none() {
+            *slot = Some(code);
+        }
     }
 
     /// Registers a device and returns its token (shown to the phone once).
@@ -2198,13 +2207,20 @@ async fn pair(
             "That isn't a pairing request.".into(),
         )
     })?;
-    if !remote.redeem_pairing(&body.code) {
+    let Some(spent) = remote.take_pairing(&body.code) else {
         return Err(remote.record_failure(
             ip,
             "That pairing code didn't work or has expired. Show a fresh QR code in Kvistcode.",
         ));
-    }
-    let token = remote.add_device(&body.device_name)?;
+    };
+    let token = match remote.add_device(&body.device_name) {
+        Ok(token) => token,
+        Err(e) => {
+            // A full device list says so; the code stays good once a device is removed.
+            remote.restore_pairing(spent);
+            return Err(e);
+        }
+    };
     remote.limiter.trust(ip);
     Ok(Json(json!({ "token": token, "scope": "owner" })))
 }
@@ -4516,6 +4532,60 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// With the device list full, pairing says so and keeps the code: after removing a device,
+    /// scanning the same QR code again works.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_full_device_list_keeps_the_pairing_code() {
+        let dir = temp_dir();
+        let (remote, core) = test_remote(&dir);
+        let mut port = 0;
+        for _ in 0..5 {
+            port = std::net::TcpListener::bind("127.0.0.1:0")
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            remote
+                .apply(&RemoteSettings {
+                    enabled: true,
+                    lan: false,
+                    port,
+                    ..Default::default()
+                })
+                .await;
+            if remote.status().running {
+                break;
+            }
+        }
+        assert!(remote.status().running, "{:?}", remote.status().error);
+        let base = format!("http://127.0.0.1:{port}");
+        for i in 0..MAX_DEVICES {
+            remote.add_device(&format!("Phone {i}")).unwrap();
+        }
+        let url = remote.status().pairing_url.unwrap();
+        let code = url.rsplit("#pair=").next().unwrap().to_string();
+        let pair = |code: String| {
+            call(
+                "POST",
+                format!("{base}/api/pair"),
+                None,
+                Some(json!({ "code": code, "deviceName": "One too many" })),
+            )
+        };
+        let (status, body) = pair(code.clone()).await;
+        assert_eq!(status, 409, "{body}");
+        assert_eq!(remote.status().pairing_url.as_deref(), Some(url.as_str()));
+        // Room again: the same code still pairs, once.
+        let first = remote.status().devices[0].id.clone();
+        remote.revoke_device(&first);
+        let (status, body) = pair(code.clone()).await;
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(pair(code).await.0, 401, "single use");
+        remote.shutdown().await;
+        core.shutdown().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn pairing_codes_are_single_use_and_expire() {
         let dir = temp_dir();
@@ -4531,9 +4601,9 @@ mod tests {
         assert!(expires_at > now_ms() && expires_at <= now_ms() + 5 * 60 * 1000 + 1000);
         // Same code is shown until used.
         assert_eq!(remote.pairing_for(base).0, url);
-        assert!(!remote.redeem_pairing("wrong"));
-        assert!(remote.redeem_pairing(&code));
-        assert!(!remote.redeem_pairing(&code), "single use");
+        assert!(remote.take_pairing("wrong").is_none());
+        assert!(remote.take_pairing(&code).is_some());
+        assert!(remote.take_pairing(&code).is_none(), "single use");
         let (next, _, _) = remote.pairing_for(base);
         assert_ne!(next, url);
         // A different server address gets a different code.
@@ -4543,7 +4613,7 @@ mod tests {
         let (url, _, _) = remote.pairing_for(base);
         let code = url.rsplit("#pair=").next().unwrap().to_string();
         remote.pairing.lock().as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1);
-        assert!(!remote.redeem_pairing(&code), "expired");
+        assert!(remote.take_pairing(&code).is_none(), "expired");
         assert!(remote.pairing.lock().is_none());
         core.shutdown().await;
         let _ = std::fs::remove_dir_all(&dir);
