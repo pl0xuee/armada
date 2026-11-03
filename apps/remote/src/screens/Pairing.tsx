@@ -111,7 +111,7 @@ export function Pairing() {
   const submit = async () => {
     const parsed = parsePasted(value);
     if (parsed.kind === "invalid") {
-      setError("That doesn't look like an Kvistcode pairing link.");
+      setError("That doesn't look like a Kvistcode pairing link.");
       return;
     }
     setError(null);
