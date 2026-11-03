@@ -23,16 +23,34 @@ describe("workflowFinishedDetail", () => {
     );
   });
   it("copes with no description, no agents, one agent and an unclear ending", () => {
-    expect(workflowFinishedDetail(null, [])).toBe("Workflow finished: its workflow.");
+    // Nothing known: no text, so the backend says what it knows (with the agent's last message).
+    expect(workflowFinishedDetail(null, [])).toBeNull();
+    expect(workflowFinishedDetail("  ", [], "  ")).toBeNull();
+    expect(workflowFinishedDetail(null, [ok, ok])).toBe("Workflow finished. All 2 agents completed.");
     expect(workflowFinishedDetail("x", [ok])).toBe("Workflow finished: “x”. The agent completed.");
     expect(workflowFinishedDetail("x", [ok, { status: "unknown" }])).toBe(
       "Workflow finished: “x”. 1 of 2 agents reported completing.",
     );
   });
   it("shortens a long description to one line", () => {
-    const text = workflowFinishedDetail(`${"long ".repeat(60)}\nend`, [ok]);
+    const text = workflowFinishedDetail(`${"long ".repeat(60)}\nend`, [ok]) ?? "";
     expect(text).not.toContain("\n");
     expect(text.length).toBeLessThan(160);
+  });
+  it("quotes what the agent last said when the run has no description", () => {
+    expect(workflowFinishedDetail(null, [ok, ok], "Launched two reviewers\non the login flow.")).toBe(
+      "Workflow finished. All 2 agents completed. Last message: “Launched two reviewers on the login flow.”",
+    );
+    expect(workflowFinishedDetail(null, [], "Checking the build.")).toBe(
+      "Workflow finished. Last message: “Checking the build.”",
+    );
+    expect(workflowFinishedDetail(null, [ok, { status: "failed" }], "Fixing tests")).toBe(
+      "Workflow finished with problems. 1 of 2 agents completed, 1 failed. Last message: “Fixing tests”",
+    );
+    // A description says what the run was: the last message is left out.
+    expect(workflowFinishedDetail("Review", [ok], "Launched it")).toBe("Workflow finished: “Review”. The agent completed.");
+    const long = workflowFinishedDetail(null, [ok], "word ".repeat(100)) ?? "";
+    expect(long.length).toBeLessThan(200);
   });
 });
 

@@ -1713,13 +1713,16 @@ impl AgentCtx {
                     a.last_activity_at = now_ms();
                 });
                 // A workflow the agent launched may outlive its turn: then the alert says so
-                // instead of reading as "everything is done".
-                let body = self
+                // instead of reading as "everything is done", and still says what the agent did.
+                let said = agent.and_then(|a| a.last_message);
+                let body = match self
                     .core
                     .upgrade()
                     .and_then(|core| core.turn_end_note(&self.agent_id, &launches))
-                    .or_else(|| agent.and_then(|a| a.last_message))
-                    .unwrap_or_else(|| "Finished".into());
+                {
+                    Some(note) => crate::workflow::turn_end_alert_body(&note, said.as_deref()),
+                    None => said.unwrap_or_else(|| "Finished".into()),
+                };
                 // A held agent already asked for you; "finished" on top would be noise.
                 if hold.is_none() {
                     self.attention(AttentionReason::Done, body, None);

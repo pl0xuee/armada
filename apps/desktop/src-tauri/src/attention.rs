@@ -161,17 +161,25 @@ impl Attention {
     /// asks when the user isn't looking at that agent; the usual switches, quiet hours and smart
     /// mute still apply, and the sound is softer.
     pub fn background_finished(&self, agent_id: &str, agents: Option<u32>, detail: Option<&str>) {
-        let agent = self.core().agent(agent_id).ok();
-        let title = agent
-            .as_ref()
-            .map_or_else(|| "Kvistcode".into(), |a| a.title.clone());
+        // An agent that is gone (deleted meanwhile): an alert could only say "something finished".
+        let Ok(agent) = self.core().agent(agent_id) else {
+            debug!(%agent_id, "finished alert skipped: the agent is gone");
+            return;
+        };
         // No summary from the interface: say what the agent last said rather than a bare "done".
-        let said = agent
-            .as_ref()
-            .and_then(|a| a.last_message.as_deref())
-            .filter(|_| detail.is_none_or(|d| d.trim().is_empty()));
-        let body = kvistcode_core::workflow::finished_alert_body(agents, detail.or(said));
-        self.alert_scaled(agent_id, AttentionReason::Done, &title, &body, None, 0.45);
+        let body = kvistcode_core::workflow::finished_alert_body(
+            agents,
+            detail,
+            agent.last_message.as_deref(),
+        );
+        self.alert_scaled(
+            agent_id,
+            AttentionReason::Done,
+            &agent.title,
+            &body,
+            None,
+            0.45,
+        );
     }
 
     /// Plays/shows/pushes the alert. Returns false if it was suppressed (quiet hours,
@@ -206,9 +214,16 @@ impl Attention {
             return false;
         }
 
+        let agent = self.core().agent(agent_id).ok();
+        let project = agent
+            .as_ref()
+            .map(|a| project_name(&a.project_path))
+            .unwrap_or_default();
         // Chat and webhook targets choose their own events, so they ignore the desktop's
         // per-reason switches and window focus; quiet hours (above) still silence them.
-        self.alert_webhooks(&settings, agent_id, reason, title, body);
+        self.alert_webhooks(&settings, agent.as_ref(), &project, reason, title, body);
+        // Which agent in which project: titles alone repeat across projects ("Fix tests").
+        let shown_title = title_with_project(title, &project);
 
         if !window_focused {
             // Taskbar flash (Windows) / dock bounce (macOS) / urgency hint (Linux).
@@ -246,7 +261,7 @@ impl Attention {
                     agent_id: Some(agent_id.to_string()),
                     reason: Some(reason),
                     request_id: request_id.map(str::to_string),
-                    title: title.to_string(),
+                    title: shown_title.clone(),
                     body: body.to_string(),
                 },
             );
@@ -256,7 +271,14 @@ impl Attention {
         if settings.notifications.enabled && notify_reason_on && !window_focused {
             if let Some(url) = settings.ntfy_url.as_deref().map(str::trim) {
                 if !url.is_empty() {
-                    let (ptitle, pbody) = push_text(&settings.ntfy_detail, reason, title, body);
+                    // "Minimal" pushes keep to the agent's title: the ntfy server is third-party.
+                    let push_title = if settings.ntfy_detail == "full" {
+                        &shown_title
+                    } else {
+                        title
+                    };
+                    let (ptitle, pbody) =
+                        push_text(&settings.ntfy_detail, reason, push_title, body);
                     push_ntfy(url.to_string(), reason, ptitle, pbody);
                 }
             }
@@ -268,7 +290,8 @@ impl Attention {
     fn alert_webhooks(
         &self,
         settings: &Settings,
-        agent_id: &str,
+        agent: Option<&kvistcode_core::Agent>,
+        project: &str,
         reason: AttentionReason,
         title: &str,
         body: &str,
@@ -276,20 +299,11 @@ impl Attention {
         if settings.alert_targets.iter().all(|t| !t.enabled) {
             return;
         }
-        let agent = self.core().agent(agent_id).ok();
-        let held = agent.as_ref().is_some_and(|a| a.budget_hold.is_some());
-        let project = agent
-            .as_ref()
-            .and_then(|a| {
-                std::path::Path::new(&a.project_path)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-            })
-            .unwrap_or_default();
+        let held = agent.is_some_and(|a| a.budget_hold.is_some());
         let event = webhooks::AlertEvent::new(
             webhooks::Event::from_attention(reason, held),
             title,
-            &project,
+            project,
             body,
         );
         self.webhooks.dispatch(&settings.alert_targets, &event);
@@ -447,6 +461,23 @@ impl Attention {
             }
         }
     }
+}
+
+/// The project's folder name ("" when there is none).
+fn project_name(project_path: &str) -> String {
+    std::path::Path::new(project_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// "Fix tests · shop-app": the agent's title with its project, unless the title already names it.
+fn title_with_project(title: &str, project: &str) -> String {
+    let project = project.trim();
+    if project.is_empty() || title.to_lowercase().contains(&project.to_lowercase()) {
+        return title.to_string();
+    }
+    format!("{title} · {project}")
 }
 
 fn latest_pending_request(core: &Core, agent_id: &str) -> Option<String> {
@@ -804,6 +835,23 @@ mod tests {
         assert_eq!(b, "Finished its turn; work is still running");
         let (_, b) = push_text("minimal", AttentionReason::Done, "x", "All 6 tests pass");
         assert_eq!(b, "Finished");
+    }
+
+    #[test]
+    fn alert_titles_name_the_project_once() {
+        assert_eq!(project_name("/home/me/Projects/shop-app"), "shop-app");
+        assert_eq!(project_name(""), "");
+        assert_eq!(
+            title_with_project("Fix tests", "shop-app"),
+            "Fix tests · shop-app"
+        );
+        // Already named (any case), or no project: the title as it is.
+        assert_eq!(title_with_project("KvistCode", "Kvistcode"), "KvistCode");
+        assert_eq!(
+            title_with_project("Review shop-app login", "Shop-App"),
+            "Review shop-app login"
+        );
+        assert_eq!(title_with_project("Fix tests", "  "), "Fix tests");
     }
 
     fn t(s: &str) -> NaiveTime {

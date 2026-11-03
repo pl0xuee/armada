@@ -228,9 +228,8 @@ export function installBackgroundTracker(): () => void {
           if (watching(id)) return;
           const item = useApp.getState().items[id]?.find((i) => i.id === call.itemId);
           const description = item?.kind === "tool_call" ? (item.subagent?.description ?? null) : null;
-          api
-            .backgroundFinished(id, progress.agents.length || null, workflowFinishedDetail(description, progress.agents))
-            .catch(() => {});
+          const detail = workflowFinishedDetail(description, progress.agents, agent.lastMessage);
+          api.backgroundFinished(id, progress.agents.length || null, detail).catch(() => {});
         })();
       }, ALERT_SETTLE_MS),
     );

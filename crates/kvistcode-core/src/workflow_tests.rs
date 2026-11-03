@@ -594,17 +594,53 @@ fn the_finished_alert_says_what_finished_and_is_one_short_clean_line() {
     let said = finished_alert_body(
         Some(5),
         Some("Workflow finished: “Review”.\n All 5 agents completed."),
+        Some("ignored: the interface already said what finished"),
     );
     assert_eq!(said, "Workflow finished: “Review”. All 5 agents completed.");
-    // No detail (an older interface): the generic line, as before.
+    // No detail and nothing said: the generic line.
     assert_eq!(
-        finished_alert_body(Some(5), None),
+        finished_alert_body(Some(5), None, None),
         "Everything finished. Its workflow (5 agents) is done."
     );
     assert_eq!(
-        finished_alert_body(None, Some("   ")),
+        finished_alert_body(None, Some("   "), Some("  ")),
         "Everything finished. Its workflow is done."
     );
-    let long = finished_alert_body(None, Some(&"word ".repeat(200)));
+    let long = finished_alert_body(None, Some(&"word ".repeat(200)), None);
     assert!(long.chars().count() <= 240 && long.ends_with('…'));
+}
+
+#[test]
+fn a_finished_alert_without_a_summary_says_what_the_agent_last_said() {
+    assert_eq!(
+        finished_alert_body(
+            None,
+            None,
+            Some("Launched five reviewers\non the login flow.")
+        ),
+        "Everything finished. Its workflow is done. Last message: “Launched five reviewers on the login flow.”"
+    );
+    // Long messages are cut, and secrets never reach the alert.
+    let long = finished_alert_body(Some(2), None, Some(&"step ".repeat(100)));
+    assert!(long.chars().count() <= 240, "{long}");
+    assert!(long.contains("…”"), "{long}");
+    let secret = finished_alert_body(
+        None,
+        None,
+        Some("Pushed with token ghp_abcdefghijklmnopqrstuvwxyz0123456789"),
+    );
+    assert!(!secret.contains("ghp_abcdefghij"), "{secret}");
+}
+
+#[test]
+fn the_turn_end_alert_with_work_still_running_says_what_the_agent_last_said() {
+    let note = "Finished its turn. A workflow is still running (5 agents).";
+    assert_eq!(turn_end_alert_body(note, None), note);
+    assert_eq!(turn_end_alert_body(note, Some("   ")), note);
+    let body = turn_end_alert_body(note, Some("Started the review of\nthe login flow."));
+    assert_eq!(
+        body,
+        "Finished its turn. A workflow is still running (5 agents). Last message: “Started the review of the login flow.”"
+    );
+    assert!(body.starts_with(TURN_ONLY_PREFIX));
 }

@@ -822,22 +822,62 @@ pub fn turn_end_body(runs: &[LaunchedRun]) -> Option<String> {
     })
 }
 
+/// Longest alert body built here (a notification is a nudge; the details are in the app).
+const ALERT_BODY_CHARS: usize = 240;
+/// Longest quote of the agent's last message inside an alert body.
+const LAST_SAID_CHARS: usize = 160;
+
+/// `text` on one line: runs of whitespace (newlines included) become one space.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// At most `max` characters, ending in "…" when cut.
+fn shorten(text: &str, max: usize) -> String {
+    if text.chars().count() > max {
+        format!("{}…", text.chars().take(max - 1).collect::<String>())
+    } else {
+        text.to_string()
+    }
+}
+
+/// `Last message: “…”`: what the agent last said, so an alert says what it did. None when it said nothing.
+fn last_said(said: Option<&str>) -> Option<String> {
+    let line = one_line(said?);
+    (!line.is_empty()).then(|| format!("Last message: “{}”", shorten(&line, LAST_SAID_CHARS)))
+}
+
+/// One clean alert line: secrets removed, shortened.
+fn alert_line(text: &str) -> String {
+    shorten(
+        &crate::redact::redact_secrets(&one_line(text)),
+        ALERT_BODY_CHARS,
+    )
+}
+
 /// The body of the "work finished" alert: the interface's own one-line summary of the run (what it
-/// was and how it ended) when it sent one, else the generic line. One line, shortened, secrets removed.
-pub fn finished_alert_body(agents: Option<u32>, detail: Option<&str>) -> String {
-    let line = detail
-        .map(|d| d.split_whitespace().collect::<Vec<_>>().join(" "))
-        .filter(|d| !d.is_empty());
-    match line {
-        Some(d) => {
-            let d = crate::redact::redact_secrets(&d).into_owned();
-            if d.chars().count() > 240 {
-                format!("{}…", d.chars().take(239).collect::<String>())
-            } else {
-                d
-            }
-        }
-        None => everything_finished_body(agents),
+/// was and how it ended) when it sent one; else the generic line followed by what the agent last
+/// said (`said`), so the alert never reads as a bare "done". One line, shortened, secrets removed.
+pub fn finished_alert_body(
+    agents: Option<u32>,
+    detail: Option<&str>,
+    said: Option<&str>,
+) -> String {
+    match detail.map(one_line).filter(|d| !d.is_empty()) {
+        Some(d) => alert_line(&d),
+        None => match last_said(said) {
+            Some(s) => alert_line(&format!("{} {s}", everything_finished_body(agents))),
+            None => everything_finished_body(agents),
+        },
+    }
+}
+
+/// The body of the alert at the end of a turn whose launched work is still running: the note
+/// ("Finished its turn. A workflow is still running…") followed by what the agent last said.
+pub fn turn_end_alert_body(note: &str, said: Option<&str>) -> String {
+    match last_said(said) {
+        Some(s) => alert_line(&format!("{note} {s}")),
+        None => note.to_string(),
     }
 }
 

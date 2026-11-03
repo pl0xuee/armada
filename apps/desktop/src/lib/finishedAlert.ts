@@ -45,18 +45,31 @@ interface AgentLike {
   status: "working" | "finished" | "failed" | "unknown";
 }
 
-/** "Workflow finished: “Five parallel agents…”. All 5 agents completed." (one line, no secrets). */
-export function workflowFinishedDetail(description: string | null | undefined, agents: AgentLike[]): string {
-  const clean = (description ?? "").replace(/\s+/g, " ").trim();
-  const what = clean ? `“${clean.length > 90 ? `${clean.slice(0, 89)}…` : clean}”` : "its workflow";
+const oneLine = (text: string | null | undefined) => (text ?? "").replace(/\s+/g, " ").trim();
+const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
+/**
+ * "Workflow finished: “Five parallel agents…”. All 5 agents completed." (one line; the backend
+ * removes secrets). Without a description it quotes what the agent last said (`said`) instead, so
+ * the alert says what the work was. Null when nothing at all is known (the backend then says it).
+ */
+export function workflowFinishedDetail(
+  description: string | null | undefined,
+  agents: AgentLike[],
+  said?: string | null,
+): string | null {
+  const clean = oneLine(description);
+  const what = clean ? `: “${cut(clean, 90)}”` : "";
+  const lastSaid = oneLine(said);
+  const tail = !clean && lastSaid ? ` Last message: “${cut(lastSaid, 120)}”` : "";
   const n = agents.length;
-  if (n === 0) return `Workflow finished: ${what}.`;
+  if (n === 0) return clean || lastSaid ? `Workflow finished${what}.${tail}` : null;
   const failed = agents.filter((a) => a.status === "failed").length;
   const done = agents.filter((a) => a.status === "finished").length;
   const noun = n === 1 ? "agent" : "agents";
   if (failed > 0) {
-    return `Workflow finished with problems: ${what}. ${done} of ${n} ${noun} completed, ${failed} failed.`;
+    return `Workflow finished with problems${what}. ${done} of ${n} ${noun} completed, ${failed} failed.${tail}`;
   }
-  if (done === n) return `Workflow finished: ${what}. ${n === 1 ? "The agent" : `All ${n} agents`} completed.`;
-  return `Workflow finished: ${what}. ${done} of ${n} ${noun} reported completing.`;
+  if (done === n) return `Workflow finished${what}. ${n === 1 ? "The agent" : `All ${n} agents`} completed.${tail}`;
+  return `Workflow finished${what}. ${done} of ${n} ${noun} reported completing.${tail}`;
 }

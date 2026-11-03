@@ -14,6 +14,7 @@ docs/RELEASING.md).
 - **Voice assistant: run actions without asking.** Settings → Voice assistant has an option to skip the Confirm card, so starting an agent, sending a message or renaming one happens as soon as you say it. It is off by default, and agents you start still ask before changing files or running commands.
 
 ### Fixed
+- **Notifications say what finished and where.** The title now names the project too (“Fix tests · shop-app”), and the “everything finished” alert says what the workflow was or quotes the agent's last message instead of a bare “Its workflow is done”. A turn that ends with work still running also says what the agent last said. No alert is sent for an agent that was deleted.
 - **The voice assistant now sees an archived agent you have open**, which agents are shown side by side, and projects whose folder went missing (it can tell you to refresh or locate it instead of losing the project).
 - **The assistant is told again about your screen if a report didn't arrive**, and no longer reports an open agent that was deleted.
 
