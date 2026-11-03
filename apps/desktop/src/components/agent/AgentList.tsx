@@ -124,6 +124,12 @@ export function AgentList({
     [nesting, agents, query, background],
   );
   const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
+  // Name the account on a row only for providers that have more than one, so it tells agents apart.
+  const multiAccount = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const a of accounts) seen.set(a.provider, (seen.get(a.provider) ?? 0) + 1);
+    return new Set([...seen].filter(([, n]) => n > 1).map(([provider]) => provider));
+  }, [accounts]);
   const searching = query.trim().length > 0;
   // Counts every project that has agents, not only the ones matching the filter.
   const total = useMemo(
@@ -274,21 +280,15 @@ export function AgentList({
             );
             const together = p.agents.length >= 2;
             return (
-              // One card per project: its header and its agents together, the agents hanging off a line.
-              <div
-                key={p.path}
-                className={cn(
-                  "mb-2.5 rounded-xl border bg-base/40 p-1 transition-colors",
-                  holdsOpen ? "border-accent/30" : "border-line",
-                )}
-              >
-                <div className="group/project @container/proj relative mb-0.5 flex h-9 items-center rounded-lg pr-1 transition-colors hover:bg-raised/60">
+              // One flat section per project: a quiet header, then its agents. No boxes, so the list reads as one column.
+              <div key={p.path} className="mb-3">
+                <div className="group/project @container/proj relative flex h-8 items-center rounded-lg pr-1 transition-colors hover:bg-raised/60">
                   <button
                     type="button"
                     onClick={() => toggle(p.path)}
                     aria-expanded={!isCollapsed}
                     title={p.path}
-                    className="flex h-9 min-w-0 flex-1 items-center gap-1.5 rounded-md pl-1.5 pr-1 text-[13px] font-semibold tracking-tight text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                    className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md pl-1 pr-1 text-[12.5px] font-semibold tracking-tight text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                   >
                     <ChevronRight
                       className={cn(
@@ -298,9 +298,7 @@ export function AgentList({
                     />
                     <FolderOpen className={cn("h-4 w-4 shrink-0", holdsOpen ? "text-accent" : "text-muted")} />
                     <span className="truncate">{p.name}</span>
-                    <span className="shrink-0 rounded-md bg-raised px-1.5 text-[11px] font-medium tabular text-muted">
-                      {p.agents.length}
-                    </span>
+                    <span className="shrink-0 text-[11.5px] font-medium tabular text-steel">{p.agents.length}</span>
                     {p.needs > 0 && (
                       <span
                         className="flex shrink-0 items-center gap-1 rounded-full bg-warn/20 px-1.5 py-px text-[11px] font-semibold text-warn ring-1 ring-warn/40 tabular"
@@ -372,16 +370,14 @@ export function AgentList({
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
                       transition={{ duration: 0.12 }}
-                      className={cn(
-                        "mb-0.5 ml-3 space-y-px border-l-2 pl-1",
-                        holdsOpen ? "border-accent/45" : "border-line-strong/70",
-                      )}
+                      className="space-y-0.5"
                     >
                       {p.agents.map((a) => (
                         <Fragment key={a.id}>
                           <AgentRow
                             agent={a}
                             account={accountMap.get(a.accountId)}
+                            showAccount={a.provider === "custom" || multiAccount.has(a.provider)}
                             selected={a.id === selected}
                             now={now}
                             hotkey={hotkeys.get(a.id) ?? null}
@@ -394,6 +390,7 @@ export function AgentList({
                               nested
                               agent={h}
                               account={accountMap.get(h.accountId)}
+                              showAccount={h.provider === "custom" || multiAccount.has(h.provider)}
                               selected={h.id === selected}
                               now={now}
                               hotkey={hotkeys.get(h.id) ?? null}
@@ -433,6 +430,7 @@ export function AgentList({
                       key={a.id}
                       agent={a}
                       account={accountMap.get(a.accountId)}
+                      showAccount={a.provider === "custom" || multiAccount.has(a.provider)}
                       selected={a.id === selected}
                       now={now}
                       hotkey={null}
@@ -521,7 +519,10 @@ const AgentRow = memo(function AgentRow({
   onNavigate,
   nested = false,
   showProject = false,
+  showAccount = true,
 }: {
+  /** False when this provider has a single account, so naming it on every row is noise. */
+  showAccount?: boolean;
   nested?: boolean;
   /** Archived rows sit outside a project card, so they name their project. */
   showProject?: boolean;
@@ -542,8 +543,6 @@ const AgentRow = memo(function AgentRow({
   const { done, meta: status } = view;
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const resumable = agent.status === "interrupted" || agent.status === "stopped";
-  const live =
-    agent.status === "working" || agent.status === "needs_permission" || agent.status === "starting" || view.background;
 
   const inputRef = useRef<HTMLInputElement>(null);
   /** Always start from the current title (it may have changed since the row mounted). */
@@ -604,9 +603,9 @@ const AgentRow = memo(function AgentRow({
               if (e.key === "F2") startRename();
             }}
             className={cn(
-              "group relative flex gap-2.5 rounded-xl px-2.5 outline-none transition-colors duration-100",
+              "group relative flex gap-2.5 rounded-lg px-2 outline-none transition-colors duration-100",
               density === "compact" ? "py-1.5" : "py-2",
-              selected ? "bg-gunmetal/70 shadow-[inset_0_0_0_1px_var(--border-strong)] edge" : "hover:bg-raised/60",
+              selected ? "bg-accent/[0.11]" : "hover:bg-raised/60",
               "focus-visible:shadow-[inset_0_0_0_1.5px_color-mix(in_srgb,var(--accent)_70%,transparent)]",
             )}
           >
@@ -614,17 +613,10 @@ const AgentRow = memo(function AgentRow({
               <m.span
                 layoutId="agent-row-active"
                 transition={{ type: "spring", stiffness: 600, damping: 42 }}
-                className="absolute -left-2 top-3 h-6 w-[3px] rounded-r-full bg-accent shadow-[0_0_8px_var(--accent)]"
+                className="absolute -left-1 top-2.5 h-[22px] w-[3px] rounded-r-full bg-accent"
               />
             )}
             <div className="relative mt-0.5 self-start">
-              {live && (
-                <span
-                  className="pointer-events-none absolute inset-0 rounded-[8px] animate-breathe"
-                  style={{ boxShadow: `0 0 12px 1px color-mix(in srgb, ${status.colorVar} 45%, transparent)` }}
-                  aria-hidden
-                />
-              )}
               <ProviderGlyph
                 provider={agent.provider}
                 customAgentId={agent.customAgentId}
@@ -730,11 +722,16 @@ const AgentRow = memo(function AgentRow({
                 {agent.helperSync && <SyncHint sync={agent.helperSync} />}
                 <SubagentBadge agentId={agent.id} />
                 <PrIndicator agentId={agent.id} />
-                <span className="text-line-strong">·</span>
-                <span className="truncate">
-                  {agent.provider === "custom" ? identity.name : (account?.name ?? "—")}
-                  {showProject && ` · ${basename(agent.projectPath)}`}
-                </span>
+                {(showAccount || showProject) && (
+                  <>
+                    <span className="text-line-strong">·</span>
+                    <span className="truncate">
+                      {showAccount && (agent.provider === "custom" ? identity.name : (account?.name ?? "—"))}
+                      {showAccount && showProject && " · "}
+                      {showProject && basename(agent.projectPath)}
+                    </span>
+                  </>
+                )}
               </div>
               {agent.lastMessage &&
                 !nested &&
