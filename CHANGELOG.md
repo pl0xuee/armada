@@ -5,6 +5,11 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## Unreleased
+
+### New
+- **Change an agent's account from the agent itself.** The account the agent runs on now sits in its header: click it to pick another account of the same provider (for example Personal or Work) and the agent carries on there with its history. It waits for the current turn to finish first.
+
 ## v0.4.0 — 2026-11-02
 
 The assistant now follows you around the app, understands “agent 2” and “project 3”, and lives in a panel you can move.

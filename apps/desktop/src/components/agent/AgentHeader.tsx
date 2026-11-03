@@ -44,6 +44,7 @@ import { openToolkit } from "@/store/toolkit";
 import { useUi } from "@/store/ui";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { StatusDot, StatusPill } from "../StatusDot";
+import { AccountSwitcher } from "./AccountSwitcher";
 import { AddAgents } from "./AddAgents";
 import { BudgetChip } from "./BudgetChip";
 import { STATUS } from "@/lib/providers";
@@ -211,7 +212,7 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
                     {agent.baseBranch && <span className="font-mono text-[11px]"> → {agent.baseBranch}</span>}
                   </>
                 )}
-                {account && agent.provider !== "custom" && (
+                {account && agent.provider !== "custom" && tile && !tile.focused && (
                   <>
                     <span className="mx-1.5 text-line-strong">·</span>
                     {account.name}
@@ -247,6 +248,9 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
               <Gauge className="h-3 w-3" />
               <ResumesAt agent={agent} fallback={tier === "compact" ? "Limit" : "Rate limit"} />
             </Chip>
+          )}
+          {agent.provider !== "custom" && (!tile || tile.focused) && (
+            <AccountSwitcher agent={agent} showName={tier === "full"} />
           )}
           <BudgetChip agent={agent} compact={tier === "compact"} always />
           {!tile && tier !== "compact" && <PrChip agent={agent} compact={tier !== "full"} />}
