@@ -8,6 +8,7 @@ docs/RELEASING.md).
 ## Unreleased
 
 ### New
+- **Talk to Kvistcode is front and centre.** The voice assistant is now a labelled “Talk to Kvistcode” button in the title bar and a big card on the home screen, and the mic button in every composer is in the accent colour. If it isn't set up yet, pressing it takes you straight to the setting.
 - **Change an agent's account from the agent itself.** The account the agent runs on now sits in its header: click it to pick another account of the same provider (for example Personal or Work) and the agent carries on there with its history. It waits for the current turn to finish first.
 
 ## v0.4.0 — 2026-11-02

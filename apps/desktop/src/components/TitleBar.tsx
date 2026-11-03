@@ -113,7 +113,7 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
         </div>
 
         <div data-tauri-drag-region className="flex h-full items-center justify-end gap-3">
-          {!minimal && <VoiceAssistantButton />}
+          {!minimal && <VoiceAssistantButton compact={narrow} />}
           {!minimal && <SubagentsIndicator compact={narrow} />}
           {!minimal && <UpdatePill />}
           {!minimal && accounts.length > 0 && <AccountSwitcher accounts={accounts} stacked={compact} />}

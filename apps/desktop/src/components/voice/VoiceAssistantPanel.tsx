@@ -219,7 +219,12 @@ function PanelBody() {
                     Cancel
                     {i === 0 && <Kbd>Esc</Kbd>}
                   </Button>
-                  <Button variant="primary" size="lg" className="flex-[1.4]" onClick={() => answerVaConfirm(c.id, true)}>
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    className="flex-[1.4]"
+                    onClick={() => answerVaConfirm(c.id, true)}
+                  >
                     <Check /> Confirm
                     {i === 0 && <Kbd dim>Enter</Kbd>}
                   </Button>
@@ -229,7 +234,10 @@ function PanelBody() {
           </div>
         )}
         {notice && live && (
-          <p role="status" className="border-t border-warn/25 bg-warn/[0.06] px-4 py-2 text-[12px] leading-[18px] text-warn">
+          <p
+            role="status"
+            className="border-t border-warn/25 bg-warn/[0.06] px-4 py-2 text-[12px] leading-[18px] text-warn"
+          >
             {notice}
           </p>
         )}
@@ -243,7 +251,10 @@ function PanelBody() {
               const mine = c.role === "user";
               const first = i === 0 || captions[i - 1].role !== c.role;
               return (
-                <div key={`${c.role}-${c.itemId}`} className={cn("flex flex-col", mine ? "items-end" : "items-start", first && i > 0 && "pt-1.5")}>
+                <div
+                  key={`${c.role}-${c.itemId}`}
+                  className={cn("flex flex-col", mine ? "items-end" : "items-start", first && i > 0 && "pt-1.5")}
+                >
                   {first && (
                     <span className="mb-0.5 px-1 text-[10.5px] font-medium uppercase leading-[14px] tracking-wide text-steel">
                       {mine ? "You" : "Kvistcode"}
@@ -276,7 +287,11 @@ function PanelBody() {
                         a.ok ? "bg-ok/15 text-ok" : "bg-err/15 text-err",
                       )}
                     >
-                      {a.ok ? <Check className="size-2.5" strokeWidth={3} /> : <X className="size-2.5" strokeWidth={3} />}
+                      {a.ok ? (
+                        <Check className="size-2.5" strokeWidth={3} />
+                      ) : (
+                        <X className="size-2.5" strokeWidth={3} />
+                      )}
                       <span className="sr-only">{a.ok ? "Done" : "Failed"}</span>
                     </span>
                     <span className="min-w-0 flex-1 break-words">{a.summary}</span>

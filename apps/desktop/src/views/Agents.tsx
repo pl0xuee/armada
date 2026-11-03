@@ -1,3 +1,4 @@
+import { TalkHero } from "@/components/voice/VoiceAssistantButton";
 import {
   Columns3,
   LayoutGrid,
@@ -112,7 +113,10 @@ export function AgentsView() {
 /** Shown in place of an agent's pane when drawing it failed: the list and the rest of the app keep working. */
 function PaneFailed({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
-    <div role="alert" className="flex min-w-0 flex-1 flex-col items-center justify-center gap-2 bg-base p-8 text-center">
+    <div
+      role="alert"
+      className="flex min-w-0 flex-1 flex-col items-center justify-center gap-2 bg-base p-8 text-center"
+    >
       <p className="text-[14px] font-semibold">This conversation couldn't be displayed</p>
       <p className="selectable max-w-md break-words font-mono text-[11.5px] text-muted">{error}</p>
       <Button size="sm" variant="secondary" className="mt-2" onClick={onRetry}>
@@ -489,6 +493,10 @@ function Welcome() {
         </div>
 
         <HomeComposer />
+
+        <div className="mt-3 flex">
+          <TalkHero />
+        </div>
 
         <div className="mt-3 flex flex-wrap gap-1.5">
           <QuickAction icon={<SlidersHorizontal />} label="All options" onClick={() => openNewAgent()} />

@@ -58,9 +58,11 @@ function VoiceAssistantComposerButton() {
     "relative inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
     live
       ? "bg-accent/15 text-accent shadow-[0_0_12px_-2px_color-mix(in_srgb,var(--accent)_70%,transparent)]"
-      : "text-muted hover:bg-raised hover:text-fg",
+      : "text-accent hover:bg-accent/15",
   );
-  const icon = <AudioLines className={cn("h-3.5 w-3.5", live && "animate-pulse motion-reduce:animate-none")} aria-hidden />;
+  const icon = (
+    <AudioLines className={cn("h-3.5 w-3.5", live && "animate-pulse motion-reduce:animate-none")} aria-hidden />
+  );
   const shortcut = [modKey, "⇧", "A"];
   const label = paused ? "Unmute voice assistant" : live ? "End voice assistant" : "Talk to Kvistcode · GPT voice";
 
@@ -109,7 +111,13 @@ function VoiceAssistantComposerButton() {
         type="button"
         onClick={toggleVoiceAssistant}
         className={cls}
-        aria-label={paused ? "Unmute voice assistant" : live ? "End voice assistant" : `Talk to Kvistcode, GPT voice (${modKey}+Shift+A)`}
+        aria-label={
+          paused
+            ? "Unmute voice assistant"
+            : live
+              ? "End voice assistant"
+              : `Talk to Kvistcode, GPT voice (${modKey}+Shift+A)`
+        }
         aria-pressed={live}
         aria-keyshortcuts={isMac ? "Meta+Shift+A" : "Control+Shift+A"}
       >
