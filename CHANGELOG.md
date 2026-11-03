@@ -26,6 +26,9 @@ docs/RELEASING.md).
 - **No taskbar flash or dock bounce when notifications are off.** The flash now follows the same switches as desktop notifications.
 - **Phone pairing: a full device list no longer uses up the code.** After you remove a device, the same QR code still works.
 - **Phone: fixed “an Kvistcode pairing link”.**
+- **A second click on Commit can't commit twice.** The button shows it is busy while Kvistcode checks for secret-looking files, not only after.
+- **New agents start in the right folder after a project moves.** Refresh or Locate now updates the folder Kvistcode remembers for the next launch.
+- **Times are right the moment a view opens.** “2m ago” and countdowns no longer show an old time for up to 30 seconds after you come back to a view.
 
 ## v0.4.1 — 2026-11-02
 
