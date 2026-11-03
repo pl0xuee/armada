@@ -6,6 +6,7 @@ import { copyText } from "@/components/CopyButton";
 import { api } from "./api";
 import { detailsText, splitDetails } from "./ghError";
 import { tileNeighbour } from "./helpers";
+import { followProjectMove } from "./launchDefaults";
 import { PROVIDERS } from "./providers";
 import type {
   Account,
@@ -150,6 +151,7 @@ async function locateProject(from: string) {
   if (!to) return;
   try {
     await api.relocateProject(from, to);
+    followProjectMove(from, to);
     toast.success(`${basename(from)} now points to ${basename(to)}`);
   } catch (e) {
     toast.error("Couldn't use that folder", { description: errorMessage(e) });
@@ -160,7 +162,10 @@ async function locateProject(from: string) {
 export async function refreshProjects() {
   try {
     const { moved, missing } = await api.refreshProjects();
-    for (const m of moved) toast.success(`${basename(m.from)} is now ${basename(m.to)}`, { description: m.to });
+    for (const m of moved) {
+      followProjectMove(m.from, m.to);
+      toast.success(`${basename(m.from)} is now ${basename(m.to)}`, { description: m.to });
+    }
     for (const from of missing)
       toast.warning(`Can't find the folder "${basename(from)}"`, {
         description: from,

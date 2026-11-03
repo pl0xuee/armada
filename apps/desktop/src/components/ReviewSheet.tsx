@@ -251,14 +251,18 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   // New files whose names look like credentials: ask before a commit takes them.
   const [secrets, setSecrets] = useState<{ files: string[]; then: "commit" | "ship" } | null>(null);
   const checkSecrets = async (then: "commit" | "ship", go: (exclude: string[]) => void) => {
+    // The look at the repo can take a while: show the spinner now so a second click can't start a second commit.
+    setBusy(then);
     let files: string[] = [];
     try {
       files = await api.secretLookingFiles(agent.id);
     } catch {
       // The commit itself reports git problems.
     }
-    if (files.length > 0) setSecrets({ files, then });
-    else go([]);
+    if (files.length > 0) {
+      setBusy(null);
+      setSecrets({ files, then });
+    } else go([]);
   };
 
   const doCommit = (exclude: string[]) =>

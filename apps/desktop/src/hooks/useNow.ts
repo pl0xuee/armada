@@ -7,6 +7,8 @@ const subs = new Set<() => void>();
 let stopTimer: (() => void) | null = null;
 
 function subscribe(cb: () => void) {
+  // The ticker stops with the last subscriber, so `now` is as old as that stop: refresh it for the first one back.
+  if (subs.size === 0) now = Date.now();
   subs.add(cb);
   stopTimer ??= setVisibleInterval(() => {
     now = Date.now();

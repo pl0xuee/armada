@@ -47,6 +47,13 @@ export function saveLaunchDefaults(patch: Partial<LaunchDefaults>) {
   }
 }
 
+/** A project folder moved on disk: if it is the remembered launch folder, the next launch uses the new place. */
+export function followProjectMove(from: string, to: string) {
+  const bare = (p: string) => p.replace(/[\\/]+$/, "");
+  const folder = readLaunchDefaults().folder;
+  if (folder && bare(folder) === bare(from)) saveLaunchDefaults({ folder: to });
+}
+
 export function choiceKey(provider: Provider, customAgentId: string | null): LaunchChoice {
   return provider === "custom" && customAgentId ? `custom:${customAgentId}` : provider;
 }
