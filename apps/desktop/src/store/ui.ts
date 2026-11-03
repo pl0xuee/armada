@@ -233,6 +233,38 @@ export function saveTileWeights(mainId: string, weights: Record<string, number>)
   tileWeightsWriter.set(mainId, weights);
 }
 
+/**
+ * Drop saved tile weights of agents `keep` says are gone: their own group and their slot in another's.
+ * (Called from store/app.ts, which imports this file and so can't be imported here.)
+ */
+export function pruneTileWeights(keep: (agentId: string) => boolean) {
+  tileWeightsWriter.flush(); // a save still waiting for its 150 ms must not bring a pruned entry back
+  try {
+    const all = readAllTileWeights();
+    let changed = false;
+    for (const [mainId, weights] of Object.entries(all)) {
+      if (!keep(mainId)) {
+        delete all[mainId];
+        changed = true;
+        continue;
+      }
+      if (!weights || typeof weights !== "object") continue;
+      for (const id of Object.keys(weights)) {
+        if (keep(id)) continue;
+        delete weights[id];
+        changed = true;
+      }
+      if (Object.keys(weights).length === 0) {
+        delete all[mainId];
+        changed = true;
+      }
+    }
+    if (changed) localStorage.setItem(TILE_WEIGHTS_KEY, JSON.stringify(all));
+  } catch {
+    /* ignore */
+  }
+}
+
 const INSPECTOR_KEY = "armada.inspectorOpen";
 const LIST_KEY = "armada.agentList";
 

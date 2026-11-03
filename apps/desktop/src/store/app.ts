@@ -15,7 +15,7 @@ import type {
 } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 import { forgetAgentDerived } from "@/components/agent/derived";
-import { useUi } from "./ui";
+import { pruneTileWeights, useUi } from "./ui";
 
 export interface AppStore {
   booted: boolean;
@@ -188,6 +188,9 @@ export function onAgentRemoved(fn: (id: string) => void): () => void {
   return () => removedListeners.delete(fn);
 }
 
+// A deleted agent's tile divider positions (kept in localStorage by store/ui.ts) go with it.
+onAgentRemoved((id) => pruneTileWeights((k) => k !== id));
+
 /** True while an undoable delete is pending for the agent. */
 export function isSuppressed(id: string): boolean {
   return suppressed.has(id);
@@ -290,6 +293,8 @@ export const useApp = create<AppStore>((set, get) => ({
         providers: s.providers,
         settings: s.settings,
       });
+      // Divider positions saved for agents that were deleted in an earlier session.
+      if (s.agents.length > 0) pruneTileWeights((id) => id in agents);
       // Agents with pending approvals are always loaded so Needs you can list them.
       for (const a of s.agents) {
         if (a.pendingPermissions > 0) void get().ensureItems(a.id);

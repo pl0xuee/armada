@@ -65,91 +65,98 @@ export const AgentRowCompact = memo(function AgentRowCompact({
   };
 
   return (
+    // The row opens the agent when clicked anywhere. For the keyboard and screen readers the text part is the one
+    // button; the approval, answer and recovery buttons on the right sit beside it, not inside it.
     <div
       data-agent-id={agent.id}
       role="listitem"
-      tabIndex={0}
-      aria-label={`${agent.title}, ${meta.label}`}
       onClick={() => onOpen(agent.id)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpen(agent.id);
-        }
-      }}
       className={cn(
-        "group relative grid min-h-11 cursor-default items-center gap-x-3 border-b border-line/70 px-3 py-1.5 transition-colors last:border-b-0 hover:bg-raised/50 focus-visible:bg-raised/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60",
-        "grid-cols-[auto_minmax(0,1fr)_auto] @3xl:grid-cols-[auto_minmax(160px,1.1fr)_minmax(0,1.6fr)_auto]",
+        "group relative flex min-h-11 cursor-default items-center gap-x-3 border-b border-line/70 px-3 py-1.5 transition-colors last:border-b-0 hover:bg-raised/50",
+        "has-[[role=button]:focus-visible]:bg-raised/60 has-[[role=button]:focus-visible]:ring-2 has-[[role=button]:focus-visible]:ring-inset has-[[role=button]:focus-visible]:ring-accent/60",
         agent.status === "stopped" && "opacity-75",
       )}
     >
       {working && (
         <span aria-hidden className="absolute inset-y-0 left-0 w-[2px] bg-accent shadow-[0_0_8px_var(--accent)]" />
       )}
-      <div className="flex items-center gap-2">
-        <span className="flex w-3 shrink-0 justify-center">
-          <StatusDot status={view.dot} size={7} done={done} />
-        </span>
-        <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="sm" />
-      </div>
-
-      <div className="min-w-0">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span
-            className={cn("truncate text-[13px]", agent.unread ? "font-semibold text-fg" : "font-medium text-fg/90")}
-          >
-            {agent.title}
-          </span>
-          {agent.unread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-label="Unread" />}
-          {agent.rateLimited && (
-            <Tooltip content="Hit its rate limit">
-              <span className="flex min-w-0 shrink-[2] items-center gap-1 text-warn" aria-label="Rate limit">
-                <Gauge className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate text-[11px]">
-                  <ResumesAt agent={agent} />
-                </span>
-              </span>
-            </Tooltip>
-          )}
-          {summary.subagents > 0 && (
-            <Tooltip content={`${summary.subagents} sub-agent${summary.subagents === 1 ? "" : "s"} running`}>
-              <span className="flex shrink-0 items-center gap-0.5 text-[11px] text-accent">
-                <Workflow className="h-3 w-3" />
-                {summary.subagents}
-              </span>
-            </Tooltip>
-          )}
-        </div>
-        <div className="truncate text-[11.5px] text-steel">
-          {account?.name ?? identity.short} · {basename(agent.projectPath)}
-          <span className="@3xl:hidden">
-            {line && (
-              <>
-                {" · "}
-                <span className={cn(pending || asking ? "text-warn" : working ? "text-fg/80" : "")}>{line}</span>
-              </>
-            )}
-          </span>
-        </div>
-      </div>
-
       <div
-        className={cn(
-          "hidden min-w-0 items-center gap-1.5 font-mono text-[11.5px] @3xl:flex",
-          pending || asking ? "text-warn" : working ? "text-fg/85" : "text-muted",
-        )}
+        role="button"
+        tabIndex={0}
+        aria-label={`${agent.title}, ${meta.label}`}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onOpen(agent.id);
+          }
+        }}
+        className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 outline-none @3xl:grid-cols-[auto_minmax(160px,1.1fr)_minmax(0,1.6fr)]"
       >
-        {pending ? (
-          <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
-        ) : asking ? (
-          <MessageCircleQuestion className="h-3.5 w-3.5 shrink-0" />
-        ) : working ? (
-          <span className="h-1 w-1 shrink-0 rounded-full bg-accent animate-breathe" />
-        ) : null}
-        <span className={cn("truncate", !pending && !asking && !working && "font-sans")}>{line}</span>
+        <div className="flex items-center gap-2">
+          <span className="flex w-3 shrink-0 justify-center">
+            <StatusDot status={view.dot} size={7} done={done} />
+          </span>
+          <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="sm" />
+        </div>
+
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span
+              className={cn("truncate text-[13px]", agent.unread ? "font-semibold text-fg" : "font-medium text-fg/90")}
+            >
+              {agent.title}
+            </span>
+            {agent.unread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-label="Unread" />}
+            {agent.rateLimited && (
+              <Tooltip content="Hit its rate limit">
+                <span className="flex min-w-0 shrink-[2] items-center gap-1 text-warn" aria-label="Rate limit">
+                  <Gauge className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate text-[11px]">
+                    <ResumesAt agent={agent} />
+                  </span>
+                </span>
+              </Tooltip>
+            )}
+            {summary.subagents > 0 && (
+              <Tooltip content={`${summary.subagents} sub-agent${summary.subagents === 1 ? "" : "s"} running`}>
+                <span className="flex shrink-0 items-center gap-0.5 text-[11px] text-accent">
+                  <Workflow className="h-3 w-3" />
+                  {summary.subagents}
+                </span>
+              </Tooltip>
+            )}
+          </div>
+          <div className="truncate text-[11.5px] text-steel">
+            {account?.name ?? identity.short} · {basename(agent.projectPath)}
+            <span className="@3xl:hidden">
+              {line && (
+                <>
+                  {" · "}
+                  <span className={cn(pending || asking ? "text-warn" : working ? "text-fg/80" : "")}>{line}</span>
+                </>
+              )}
+            </span>
+          </div>
+        </div>
+
+        <div
+          className={cn(
+            "hidden min-w-0 items-center gap-1.5 font-mono text-[11.5px] @3xl:flex",
+            pending || asking ? "text-warn" : working ? "text-fg/85" : "text-muted",
+          )}
+        >
+          {pending ? (
+            <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+          ) : asking ? (
+            <MessageCircleQuestion className="h-3.5 w-3.5 shrink-0" />
+          ) : working ? (
+            <span className="h-1 w-1 shrink-0 rounded-full bg-accent animate-breathe" />
+          ) : null}
+          <span className={cn("truncate", !pending && !asking && !working && "font-sans")}>{line}</span>
+        </div>
       </div>
 
-      <div className="flex items-center justify-end gap-2.5">
+      <div className="flex shrink-0 items-center justify-end gap-2.5">
         {pending ? (
           <div
             className="flex items-center gap-1"

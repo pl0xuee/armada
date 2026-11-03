@@ -80,20 +80,14 @@ export const AgentTile = memo(function AgentTile({
   };
 
   return (
+    // The card opens the agent when clicked anywhere. For the keyboard and screen readers the top part is the one
+    // button; the approval, answer and recovery buttons below sit beside it, not inside it.
     <div
       data-agent-id={agent.id}
-      role="button"
-      tabIndex={0}
-      aria-label={`${agent.title}, ${meta.label}`}
       onClick={() => onOpen(agent.id)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpen(agent.id);
-        }
-      }}
       className={cn(
         "group relative flex h-full min-h-[208px] flex-col overflow-hidden rounded-xl border bg-card transition-[transform,border-color] duration-150 hover:-translate-y-0.5 active:scale-[0.99]",
+        "has-[[role=button]:focus-visible]:outline-2 has-[[role=button]:focus-visible]:outline-offset-2 has-[[role=button]:focus-visible]:outline-accent/80",
         live ? "border-transparent" : "border-line hover:border-line-strong",
         agent.status === "stopped" && "opacity-75",
       )}
@@ -117,94 +111,111 @@ export const AgentTile = memo(function AgentTile({
         <div aria-hidden className="shimmer-bar shimmer-calm absolute inset-x-0 top-0 h-[2px] bg-accent/15" />
       )}
 
-      <div className="relative flex items-center gap-1.5 px-3.5 pt-3">
-        {/* A rate limit is shown once, by its own chip (not also as "Error"). */}
-        {!(agent.rateLimited && agent.status === "error") && (
-          <span
-            title={view.detail ?? undefined}
-            className="flex h-5 min-w-0 items-center gap-1.5 rounded-full border px-1.5 text-[10.5px] font-medium"
-            style={{
-              color:
-                !done && !background && (agent.status === "idle" || agent.status === "stopped")
-                  ? "var(--text-2)"
-                  : color,
-              borderColor: `color-mix(in srgb, ${color} 30%, var(--border))`,
-              background: `color-mix(in srgb, ${color} 8%, transparent)`,
-            }}
-          >
-            <StatusDot status={view.dot} size={6} done={done} />
-            <span className="truncate">{meta.label}</span>
-          </span>
-        )}
-        {agent.rateLimited && (
-          <span className="flex h-5 min-w-0 shrink items-center gap-1 rounded-full border border-warn/35 bg-warn/10 px-1.5 text-[10.5px] font-medium text-warn">
-            <Gauge className="h-3 w-3 shrink-0" />
-            <span className="truncate">
-              <ResumesAt agent={agent} fallback="Rate limited" />
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={`${agent.title}, ${meta.label}`}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onOpen(agent.id);
+          }
+        }}
+        className="flex min-h-0 flex-1 flex-col outline-none"
+      >
+        <div className="relative flex items-center gap-1.5 px-3.5 pt-3">
+          {/* A rate limit is shown once, by its own chip (not also as "Error"). */}
+          {!(agent.rateLimited && agent.status === "error") && (
+            <span
+              title={view.detail ?? undefined}
+              className="flex h-5 min-w-0 items-center gap-1.5 rounded-full border px-1.5 text-[10.5px] font-medium"
+              style={{
+                color:
+                  !done && !background && (agent.status === "idle" || agent.status === "stopped")
+                    ? "var(--text-2)"
+                    : color,
+                borderColor: `color-mix(in srgb, ${color} 30%, var(--border))`,
+                background: `color-mix(in srgb, ${color} 8%, transparent)`,
+              }}
+            >
+              <StatusDot status={view.dot} size={6} done={done} />
+              <span className="truncate">{meta.label}</span>
             </span>
-          </span>
-        )}
-        {agent.scheduleId && (
-          <span
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line text-steel"
-            title="Started by a schedule"
-            aria-label="Scheduled"
-          >
-            <CalendarClock className="h-3 w-3" />
-          </span>
-        )}
-        {summary.subagents > 0 && (
-          <span
-            title={`${summary.subagents} sub-agent${summary.subagents === 1 ? "" : "s"} running`}
-            className="flex h-5 shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-1.5 text-[10.5px] font-medium text-accent"
-          >
-            <Workflow className="h-3 w-3" />
-            {background ? summary.subagents : `${summary.subagents} sub-agent${summary.subagents === 1 ? "" : "s"}`}
-          </span>
-        )}
-        <span className="ml-auto flex items-center gap-1.5 text-[11px] text-steel">
-          {agent.unread && <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-label="Unread" />}
-          <RelTime ts={agent.lastActivityAt} />
-        </span>
-      </div>
-
-      <div className="relative mt-2.5 flex items-start gap-2.5 px-3.5">
-        <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="md" className="mt-0.5" />
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-[13.5px] font-medium tracking-[-0.005em] text-fg">{agent.title}</h3>
-          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11.5px] text-steel">
-            {account && <AccountAvatar account={account} size={13} showProvider={false} />}
-            <span className="shrink-0">{account?.name ?? identity.short}</span>
-            <span className="text-line-strong">·</span>
-            <span className="truncate">{basename(agent.projectPath)}</span>
-            {agent.branch && (
-              <span className="flex min-w-0 items-center gap-1">
-                <GitBranch className="h-3 w-3 shrink-0" />
-                <span className="truncate font-mono text-[10.5px]">{agent.branch.replace(/^kvistcode\//, "")}</span>
+          )}
+          {agent.rateLimited && (
+            <span className="flex h-5 min-w-0 shrink items-center gap-1 rounded-full border border-warn/35 bg-warn/10 px-1.5 text-[10.5px] font-medium text-warn">
+              <Gauge className="h-3 w-3 shrink-0" />
+              <span className="truncate">
+                <ResumesAt agent={agent} fallback="Rate limited" />
               </span>
-            )}
+            </span>
+          )}
+          {agent.scheduleId && (
+            <span
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line text-steel"
+              title="Started by a schedule"
+              aria-label="Scheduled"
+            >
+              <CalendarClock className="h-3 w-3" />
+            </span>
+          )}
+          {summary.subagents > 0 && (
+            <span
+              title={`${summary.subagents} sub-agent${summary.subagents === 1 ? "" : "s"} running`}
+              className="flex h-5 shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-1.5 text-[10.5px] font-medium text-accent"
+            >
+              <Workflow className="h-3 w-3" />
+              {background ? summary.subagents : `${summary.subagents} sub-agent${summary.subagents === 1 ? "" : "s"}`}
+            </span>
+          )}
+          <span className="ml-auto flex items-center gap-1.5 text-[11px] text-steel">
+            {agent.unread && <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-label="Unread" />}
+            <RelTime ts={agent.lastActivityAt} />
+          </span>
+        </div>
+
+        <div className="relative mt-2.5 flex items-start gap-2.5 px-3.5">
+          <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="md" className="mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-[13.5px] font-medium tracking-[-0.005em] text-fg">{agent.title}</h3>
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11.5px] text-steel">
+              {account && <AccountAvatar account={account} size={13} showProvider={false} />}
+              <span className="shrink-0">{account?.name ?? identity.short}</span>
+              <span className="text-line-strong">·</span>
+              <span className="truncate">{basename(agent.projectPath)}</span>
+              {agent.branch && (
+                <span className="flex min-w-0 items-center gap-1">
+                  <GitBranch className="h-3 w-3 shrink-0" />
+                  <span className="truncate font-mono text-[10.5px]">{agent.branch.replace(/^kvistcode\//, "")}</span>
+                </span>
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      <div className="relative mt-3 flex min-h-0 flex-1 flex-col gap-2 px-3.5">
-        {(tail ?? action) && !pending && !question && (
-          <div
-            className={cn(
-              "flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[11px]",
-              tail ? "border-accent/25 bg-accent/[0.06] text-fg/85" : "border-line/70 bg-base/50 text-muted",
-            )}
-            aria-live={tail ? "off" : undefined}
-          >
-            <span className={cn("h-1 w-1 shrink-0 rounded-full", working ? "bg-accent animate-breathe" : "bg-steel")} />
-            <span className="truncate">{tail ?? action}</span>
-          </div>
-        )}
-        {message ? (
-          <p className={cn("line-clamp-3 text-[12.5px] leading-relaxed text-muted", streaming && "caret")}>{message}</p>
-        ) : (
-          <p className="text-[12.5px] italic text-steel/70">No messages yet</p>
-        )}
+        <div className="relative mt-3 flex min-h-0 flex-1 flex-col gap-2 px-3.5">
+          {(tail ?? action) && !pending && !question && (
+            <div
+              className={cn(
+                "flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[11px]",
+                tail ? "border-accent/25 bg-accent/[0.06] text-fg/85" : "border-line/70 bg-base/50 text-muted",
+              )}
+              aria-live={tail ? "off" : undefined}
+            >
+              <span
+                className={cn("h-1 w-1 shrink-0 rounded-full", working ? "bg-accent animate-breathe" : "bg-steel")}
+              />
+              <span className="truncate">{tail ?? action}</span>
+            </div>
+          )}
+          {message ? (
+            <p className={cn("line-clamp-3 text-[12.5px] leading-relaxed text-muted", streaming && "caret")}>
+              {message}
+            </p>
+          ) : (
+            <p className="text-[12.5px] italic text-steel/70">No messages yet</p>
+          )}
+        </div>
       </div>
 
       {pending && (
