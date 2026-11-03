@@ -5,7 +5,7 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
-## Unreleased
+## v0.4.4 — 2026-11-03
 
 ### New
 - **Arrange your projects, and group them into sections.** Drag a project in the sidebar to put it where you want it. To group projects under names like “Websites” or “Games”, choose New section in the list options menu (next to New), or right-click a project and pick Move to section. Sections fold, can be renamed (double-click or F2) and dragged like projects. A folded section still shows when something inside needs you. ⌘1–9 (Ctrl+1–9) follows your order. Choose Recent activity in the same menu to go back to the automatic order.
