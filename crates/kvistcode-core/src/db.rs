@@ -840,6 +840,35 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn settings_backup_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp("settings-private");
+        let db = Db::open(&dir.join("armada.db")).unwrap();
+        db.conn
+            .lock()
+            .execute(
+                "INSERT INTO settings (id, data) VALUES (1, ?1)",
+                params![r#"{"onboarded":true,"theme":7,"apiKey":"sk-secret"}"#],
+            )
+            .unwrap();
+        db.settings().unwrap();
+        let backup = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .find(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("settings-unreadable-")
+            })
+            .expect("a backup")
+            .path();
+        let mode = std::fs::metadata(&backup).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn corrupt_database_is_moved_aside() {
         let dir = temp("corrupt");

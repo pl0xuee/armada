@@ -1,7 +1,8 @@
-import { Download, Plus, RefreshCw, ShieldCheck, UserPlus, Users } from "lucide-react";
+import { CircleAlert, Download, Plus, RefreshCw, ShieldCheck, UserPlus, Users } from "lucide-react";
 import { useState } from "react";
 import { AccountRow } from "@/components/accounts/AccountRow";
 import { AddAccountDialog } from "@/components/accounts/AddAccountDialog";
+import { FailoverRow } from "@/components/accounts/FailoverRow";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
 import { providerReady } from "@/components/settings/ProviderCard";
 import { Button } from "@/components/ui/button";
@@ -80,6 +81,7 @@ export function AccountsView() {
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[880px] px-4 pb-10 pt-4 @2xl:px-6 @2xl:pb-16 @2xl:pt-6">
+          <FailoverRow />
           <div className="space-y-4 @2xl:space-y-5">
             {PROVIDER_ORDER.map((p) => {
               const meta = PROVIDERS[p];
@@ -121,7 +123,7 @@ export function AccountsView() {
                             : "Runs through the Codex CLI, which is not installed"
                           : info?.installed
                             ? `${meta.tagline}${info.version ? ` v${info.version}` : ""}${
-                                info.adapterRequired && !info.adapterInstalled ? " · ACP adapter needs an update" : ""
+                                info.adapterRequired && !info.adapterInstalled ? " · helper needs an update" : ""
                               }`
                             : `${meta.tagline} is not installed`}
                       </p>
@@ -134,9 +136,14 @@ export function AccountsView() {
                       >
                         <Download /> {info.installed ? "Update" : "Install"}
                       </Button>
+                    ) : // Describes the install; sign-in is per account.
+                    list.length > 0 && !list.some((a) => a.status?.loggedIn) ? (
+                      <Badge tone="warn">
+                        <CircleAlert /> Not signed in
+                      </Badge>
                     ) : (
-                      <Badge tone="ok">
-                        <ShieldCheck /> Ready
+                      <Badge>
+                        <ShieldCheck /> Installed
                       </Badge>
                     )}
                   </div>
@@ -164,8 +171,8 @@ export function AccountsView() {
           </div>
 
           <p className="mx-auto mt-6 max-w-[560px] text-center text-[12px] leading-relaxed text-steel">
-            Kvistcode drives each vendor's official CLI. Subscriptions sign in through the vendor's own browser flow; API
-            keys live in your OS keychain.
+            Kvistcode drives each vendor's official CLI. Subscriptions sign in through the vendor's own browser flow;
+            API keys live in your OS keychain.
           </p>
         </div>
 

@@ -24,6 +24,7 @@ import { Spinner } from "@/components/ui/misc";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useNow } from "@/hooks/useNow";
+import { useVisibleInterval } from "@/hooks/useVisibleInterval";
 import { api } from "@/lib/api";
 import { openExternal } from "@/lib/external";
 import { relativeTimeLong } from "@/lib/format";
@@ -123,11 +124,7 @@ export function RemoteSection({ settings }: { settings: Settings }) {
 
   // The pairing code is single use: keep the QR, the code's expiry and the device list current.
   const live = !!status?.running;
-  useEffect(() => {
-    if (!live) return;
-    const id = setInterval(() => void refresh(), 5000);
-    return () => clearInterval(id);
-  }, [live, refresh]);
+  useVisibleInterval(() => void refresh(), 5000, live);
 
   /** Persist remote settings (the backend starts/stops/restarts the server), then re-read status. */
   const apply = async (patch: Partial<RemoteSettings>) => {
@@ -371,8 +368,8 @@ function FirewallCard({ firewall }: { firewall: NonNullable<RemoteStatus["firewa
       <div className="min-w-0 flex-1">
         <div className="text-[13px] font-medium">This computer's firewall may block your phone</div>
         <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted">
-          {firewall.name} is on and doesn't allow Kvistcode's port, so a phone that scans the code waits on a blank page.
-          Allow devices on your network by running this in a terminal:
+          {firewall.name} is on and doesn't allow Kvistcode's port, so a phone that scans the code waits on a blank
+          page. Allow devices on your network by running this in a terminal:
         </p>
         <div className="mt-2 flex items-center gap-2">
           <code className="selectable min-w-0 flex-1 truncate rounded-lg border border-line bg-base/60 px-2.5 py-1.5 font-mono text-[12px] text-fg/90">

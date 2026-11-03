@@ -1,11 +1,12 @@
 import { Bot, ChevronRight } from "lucide-react";
 import { m, AnimatePresence } from "motion/react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import type { Agent, TimelineItem } from "@/lib/types";
 import { pluralize } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useHeld, WAITING_HOLD_MS } from "@/hooks/useHeld";
 import { useIdentity } from "@/hooks/useIdentity";
+import { useVisibleInterval } from "@/hooks/useVisibleInterval";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { useRunningSubagentCount, useSubagentRuns } from "../agent/useSubagents";
 import {
@@ -76,14 +77,8 @@ export function LiveStatus({
   const offset = useRef(Math.floor(Math.random() * THINKING_VERBS.length));
   const listId = useId();
 
-  useEffect(() => {
-    const t = setInterval(() => setVerb((v) => v + 1), VERB_MS);
-    const c = setInterval(() => setNow(Date.now()), 1000);
-    return () => {
-      clearInterval(t);
-      clearInterval(c);
-    };
-  }, []);
+  useVisibleInterval(() => setVerb((v) => v + 1), VERB_MS);
+  useVisibleInterval(() => setNow(Date.now()), 1000);
 
   const step = starting || subagents > 0 ? null : liveStep(items, messageSettled);
   const cycling = !starting && subagents === 0 && !step;

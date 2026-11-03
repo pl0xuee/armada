@@ -283,7 +283,15 @@ export async function installUpdate(): Promise<void> {
 export const CONTINUE_PROMPT = "Please continue where you left off.";
 
 /** Move an agent to another account of the same provider; optionally nudge it to continue. */
-export async function switchAccount(agent: Agent, account: Account, continueAfter: boolean): Promise<boolean> {
+export async function switchAccount(
+  agent: Agent,
+  account: Account,
+  continueAfter: boolean,
+  /** false for the move an Undo makes, so the toast doesn't offer an Undo of an Undo. */
+  undoable = true,
+): Promise<boolean> {
+  const previous = useApp.getState().accounts.find((a) => a.id === agent.accountId);
+  let undone = false;
   const id = toast.loading(`Moving to ${account.name}…`);
   try {
     const updated = await api.switchAccount(agent.id, account.id);
@@ -307,6 +315,19 @@ export async function switchAccount(agent: Agent, account: Account, continueAfte
   toast.success(`Now running on ${account.name}`, {
     id,
     description: continueAfter ? "Continuing where it left off." : "Send a message whenever you're ready.",
+    ...(undoable && previous && previous.id !== account.id
+      ? {
+          duration: 10000,
+          action: {
+            label: "Undo",
+            onClick: () => {
+              if (undone) return;
+              undone = true;
+              void switchAccount(agent, previous, false, false);
+            },
+          },
+        }
+      : {}),
   });
   return true;
 }

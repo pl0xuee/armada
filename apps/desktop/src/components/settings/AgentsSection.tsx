@@ -150,7 +150,7 @@ export function AgentsSection({ agents }: { agents: CustomAgent[] }) {
   return (
     <>
       <SectionHeader
-        title="Agents"
+        title="Custom agents"
         description="Kvistcode can run any agent that speaks the Agent Client Protocol, side by side with Claude, Codex and Grok."
         right={<AddMenu onPick={(p) => setEditing(fromPreset(p))} />}
       />

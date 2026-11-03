@@ -97,6 +97,8 @@ const MIN_PORT: u16 = 1024;
 /// Request-body cap for prompts with attachments (4 phone photos at core's 5 MB
 /// per-image limit, base64-encoded, plus JSON).
 const MAX_REMOTE_UPLOAD: usize = 28 * 1024 * 1024;
+/// Every other request body (matches the router's `DefaultBodyLimit`).
+const MAX_REMOTE_BODY: usize = 256 * 1024;
 /// A request body must arrive within this time (stops slow-drip uploads holding
 /// connection slots).
 const BODY_READ_TIMEOUT: Duration = Duration::from_secs(150);
@@ -1481,7 +1483,7 @@ impl Remote {
             .route("/api/response-style", post(phone::set_response_style))
             .route("/api/permissions", get(permissions))
             .route("/api/events", get(events))
-            .layer(DefaultBodyLimit::max(256 * 1024))
+            .layer(DefaultBodyLimit::max(MAX_REMOTE_BODY))
             // Prompts may carry photos/screenshots from the phone.
             .merge(
                 Router::new()
@@ -1870,6 +1872,27 @@ async fn no_store(mut res: Response) -> Response {
     res
 }
 
+/// How much body a request may carry, or None when its scope can't make the request
+/// at all (every write is owner-only). Only the routes that take photos get the
+/// large limit; the rest match the router's `DefaultBodyLimit`.
+fn body_limit(method: &axum::http::Method, path: &str, scope: &Scope) -> Option<usize> {
+    use axum::http::Method;
+    if matches!(scope, Scope::Viewer(_)) && !matches!(*method, Method::GET | Method::HEAD) {
+        return None;
+    }
+    let upload = *method == Method::POST
+        && (path == "/api/agents"
+            || path
+                .strip_prefix("/api/agents/")
+                .and_then(|rest| rest.strip_suffix("/prompt"))
+                .is_some_and(|id| !id.is_empty() && !id.contains('/')));
+    Some(if upload {
+        MAX_REMOTE_UPLOAD
+    } else {
+        MAX_REMOTE_BODY
+    })
+}
+
 /// Every API request: check the token (and Host/origin) before reading the body,
 /// then read the body within `BODY_READ_TIMEOUT`.
 async fn guard(
@@ -1880,32 +1903,33 @@ async fn guard(
     let Some(ConnectInfo(peer)) = req.extensions().get::<ConnectInfo<SocketAddr>>().cloned() else {
         return ApiError(StatusCode::BAD_REQUEST, "No peer address".into()).into_response();
     };
-    if let Err(e) = c.auth(&peer, req.headers()) {
-        return e.into_response();
-    }
-    let (parts, body) = req.into_parts();
-    let bytes = match tokio::time::timeout(
-        BODY_READ_TIMEOUT,
-        axum::body::to_bytes(body, MAX_REMOTE_UPLOAD),
-    )
-    .await
-    {
-        Ok(Ok(bytes)) => bytes,
-        Ok(Err(_)) => {
-            return ApiError(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "That request is too large.".into(),
-            )
-            .into_response()
-        }
-        Err(_) => {
-            return ApiError(
-                StatusCode::REQUEST_TIMEOUT,
-                "The upload took too long.".into(),
-            )
-            .into_response()
-        }
+    let scope = match c.auth(&peer, req.headers()) {
+        Ok(scope) => scope,
+        Err(e) => return e.into_response(),
     };
+    // Rejected before any body is read; only the upload routes may be large.
+    let Some(limit) = body_limit(req.method(), req.uri().path(), &scope) else {
+        return ApiError(StatusCode::FORBIDDEN, "This is a read-only link.".into()).into_response();
+    };
+    let (parts, body) = req.into_parts();
+    let bytes =
+        match tokio::time::timeout(BODY_READ_TIMEOUT, axum::body::to_bytes(body, limit)).await {
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(_)) => {
+                return ApiError(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "That request is too large.".into(),
+                )
+                .into_response()
+            }
+            Err(_) => {
+                return ApiError(
+                    StatusCode::REQUEST_TIMEOUT,
+                    "The upload took too long.".into(),
+                )
+                .into_response()
+            }
+        };
     next.run(axum::extract::Request::from_parts(
         parts,
         axum::body::Body::from(bytes),
@@ -4541,6 +4565,53 @@ mod tests {
         for ip in no {
             assert!(!is_private_address(ip.parse().unwrap()), "{ip}");
         }
+    }
+
+    #[test]
+    fn body_limit_is_large_only_for_owner_uploads() {
+        use axum::http::Method;
+        let owner = Scope::Owner;
+        let viewer = Scope::Viewer("a1".into());
+        assert_eq!(
+            body_limit(&Method::POST, "/api/agents", &owner),
+            Some(MAX_REMOTE_UPLOAD)
+        );
+        assert_eq!(
+            body_limit(&Method::POST, "/api/agents/a1/prompt", &owner),
+            Some(MAX_REMOTE_UPLOAD)
+        );
+        for path in [
+            "/api/agents/a1/config",
+            "/api/agents/a1/stop",
+            "/api/agents//prompt",
+            "/api/agents/a/b/prompt",
+            "/api/response-style",
+        ] {
+            assert_eq!(
+                body_limit(&Method::POST, path, &owner),
+                Some(MAX_REMOTE_BODY),
+                "{path}"
+            );
+        }
+        assert_eq!(
+            body_limit(&Method::GET, "/api/agents/a1/prompt", &owner),
+            Some(MAX_REMOTE_BODY)
+        );
+        assert_eq!(
+            body_limit(&Method::GET, "/api/state", &viewer),
+            Some(MAX_REMOTE_BODY)
+        );
+        for path in [
+            "/api/agents/a1/prompt",
+            "/api/agents",
+            "/api/agents/a1/stop",
+        ] {
+            assert_eq!(body_limit(&Method::POST, path, &viewer), None, "{path}");
+        }
+        assert_eq!(
+            body_limit(&Method::DELETE, "/api/agents/a1/queue", &viewer),
+            None
+        );
     }
 
     #[test]

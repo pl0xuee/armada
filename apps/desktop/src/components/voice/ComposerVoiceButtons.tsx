@@ -64,7 +64,11 @@ function VoiceAssistantComposerButton() {
     <AudioLines className={cn("h-3.5 w-3.5", live && "animate-pulse motion-reduce:animate-none")} aria-hidden />
   );
   const shortcut = [modKey, "⇧", "A"];
-  const label = paused ? "Unmute voice assistant" : live ? "End voice assistant" : "Talk to Kvistcode · GPT voice";
+  const label = paused
+    ? "Unmute voice assistant"
+    : live
+      ? "End voice assistant"
+      : "Talk to Kvistcode out loud (GPT voice). To type by voice, use the microphone.";
 
   if (!ready && !live) {
     return (

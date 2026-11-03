@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { BudgetStatus } from "@/lib/types";
+import { setVisibleInterval } from "./useVisibleInterval";
 
 const REFRESH_MS = 30_000;
 
@@ -19,11 +20,11 @@ export function useBudgetStatus(signal: number): BudgetStatus | null {
         .catch(() => {});
     // A burst of cost updates is read once.
     const soon = setTimeout(read, 400);
-    const every = setInterval(read, REFRESH_MS);
+    const stopEvery = setVisibleInterval(read, REFRESH_MS);
     return () => {
       live = false;
       clearTimeout(soon);
-      clearInterval(every);
+      stopEvery();
     };
   }, [signal]);
   return status;

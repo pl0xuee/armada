@@ -45,7 +45,9 @@ impl BudgetState {
         }
         self.saved = Some(std::time::Instant::now());
         if let Ok(json) = serde_json::to_string(&self.tracker) {
-            if let Err(e) = std::fs::write(data_dir.join(FILE), json) {
+            // Through a temp file, so a crash never leaves a truncated tracker (which
+            // would reset the day's spend and fire the alerts again).
+            if let Err(e) = crate::project_config::write_atomic(&data_dir.join(FILE), &json) {
                 tracing::warn!("couldn't save the budget tracker: {e}");
             }
         }
@@ -172,6 +174,11 @@ impl Core {
                 .add_turns(Local::now().date_naive(), 1);
         }
         self.budget_check(agent_id, false);
+    }
+
+    /// Writes the tracker now (the throttled saves may be up to `SAVE_EVERY` behind).
+    pub(super) fn budget_flush(&self) {
+        self.inner.budget.lock().save(&self.inner.data_dir, true);
     }
 
     /// Raises the notices for limits `agent_id` newly crossed. With `hold_idle`, a hit
@@ -393,4 +400,38 @@ fn basename(path: &str) -> String {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string())
+}
+
+#[cfg(test)]
+mod save_tests {
+    use super::*;
+
+    #[test]
+    fn save_replaces_the_file_whole_and_leaves_no_temp_file() {
+        let dir =
+            std::env::temp_dir().join(format!("kvistcode-budget-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(FILE), "old").unwrap();
+        let mut state = BudgetState::load(&dir);
+        state.tracker.add_turns(Local::now().date_naive(), 3);
+        state.save(&dir, true);
+        // Throttled: a second, unforced save inside SAVE_EVERY writes nothing.
+        std::fs::remove_file(dir.join(FILE)).unwrap();
+        state.save(&dir, false);
+        assert!(!dir.join(FILE).exists());
+        state.save(&dir, true);
+        let reloaded = BudgetState::load(&dir);
+        assert_eq!(
+            serde_json::to_string(&reloaded.tracker).unwrap(),
+            serde_json::to_string(&state.tracker).unwrap()
+        );
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(leftovers, vec![FILE.to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

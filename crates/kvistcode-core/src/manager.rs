@@ -633,6 +633,7 @@ impl Core {
         for ctx in self.inner.ctxs.lock().values() {
             ctx.flush();
         }
+        self.budget_flush();
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -689,8 +690,14 @@ impl Core {
             .ok_or_else(|| anyhow!("Agent not found"))?;
         f(&mut row.agent);
         row.agent.updated_at = now_ms();
-        self.inner.db.put_agent(&row.agent)?;
+        let saved = self.inner.db.put_agent(&row.agent);
         let agent = row.agent.clone();
+        if let Err(e) = saved {
+            // Memory stays the truth for a live agent; show it, and say the disk is behind.
+            tracing::warn!("couldn't save agent {agent_id}: {e:#}");
+            self.emit(KvistcodeEvent::AgentUpdated { agent });
+            return Err(e);
+        }
         // Emitted under the lock so concurrent updates reach the UI in order
         // (the sink only queues the event).
         self.emit(KvistcodeEvent::AgentUpdated {
@@ -2574,7 +2581,18 @@ impl Core {
         }
         // Only now that nothing was refused: the checkpoints went with the agent.
         crate::checkpoints::forget_agent(&agent).await;
-        self.inner.db.delete_agent(agent_id)?;
+        if let Err(e) = self.inner.db.delete_agent(agent_id) {
+            // Its process is gone: settle it like a stop, so it isn't left "working".
+            ctx.end_turn_early(ExitIntent::Stop);
+            let _ = self.update_agent(agent_id, |a| {
+                a.running = false;
+                a.pending_permissions = 0;
+                if a.status.is_busy() {
+                    a.status = AgentStatus::Stopped;
+                }
+            });
+            return Err(e);
+        }
         self.inner.agents.lock().remove(agent_id);
         self.helper_deleted(&agent).await;
         self.inner.ctxs.lock().remove(agent_id);
@@ -2870,6 +2888,11 @@ impl Core {
         // starts its process on the new account, after the old one is gone.
         let lock = self.start_lock(agent_id);
         let _guard = lock.lock().await;
+        // A prompt or schedule may have started a turn while this waited for the lock;
+        // killing its process now would leave the turn never ended.
+        if ctx.is_turn_active() {
+            bail!("Wait for the current turn to finish (or cancel it) before switching accounts");
+        }
         let driver = self.inner.live.lock().remove(agent_id);
         if let Some(d) = driver {
             ctx.set_exit_intent(ExitIntent::Stop);

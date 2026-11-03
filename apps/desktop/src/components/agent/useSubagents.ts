@@ -5,25 +5,26 @@ import { useSyncExternalStore } from "react";
 import { isBusy, isSubagentLive, SUBAGENT_TICK_MS, type SubagentRun } from "@/lib/agents";
 import type { Agent } from "@/lib/types";
 import { useApp, type AppStore } from "@/store/app";
+import { setVisibleInterval } from "@/hooks/useVisibleInterval";
 import { agentDerived } from "./derived";
 
 // One shared slow ticker for the time-based background sub-agent rules. It only runs while a
 // component is subscribed, and a subscriber re-renders only when its derived value changes.
 const tickSubs = new Set<() => void>();
-let tickTimer: ReturnType<typeof setInterval> | null = null;
+let stopTick: (() => void) | null = null;
 
 function subscribeTicked(cb: () => void) {
   tickSubs.add(cb);
   const unsub = useApp.subscribe(cb);
-  tickTimer ??= setInterval(() => {
+  stopTick ??= setVisibleInterval(() => {
     for (const s of tickSubs) s();
   }, SUBAGENT_TICK_MS);
   return () => {
     unsub();
     tickSubs.delete(cb);
-    if (tickSubs.size === 0 && tickTimer) {
-      clearInterval(tickTimer);
-      tickTimer = null;
+    if (tickSubs.size === 0 && stopTick) {
+      stopTick();
+      stopTick = null;
     }
   };
 }

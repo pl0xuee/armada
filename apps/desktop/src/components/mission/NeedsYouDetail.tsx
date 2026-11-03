@@ -130,7 +130,7 @@ export function NeedsYouDetail({
           </div>
         ) : reason === "permission" ? (
           pending ? (
-            <PermissionPanel agentId={agent.id} item={pending} provider={identity.short} alwaysArmed={alwaysArmed} />
+            <PermissionPanel item={pending} provider={identity.short} alwaysArmed={alwaysArmed} />
           ) : question ? (
             <QuestionCard item={question} agent={agent} compact />
           ) : (
@@ -194,6 +194,8 @@ export function NeedsYouDetail({
         )}
       </div>
 
+      {reason === "permission" && pending && <PermissionActions agentId={agent.id} item={pending} />}
+
       <footer className="flex flex-wrap items-center gap-2 border-t border-line bg-panel/50 px-5 py-3">
         <Button size="sm" variant="secondary" onClick={() => openAgent(agent.id)}>
           <ArrowUpRight className="!h-3.5 !w-3.5" /> Open
@@ -241,34 +243,16 @@ export function NeedsYouDetail({
 }
 
 function PermissionPanel({
-  agentId,
   item,
   provider,
   alwaysArmed,
 }: {
-  agentId: string;
   item: Permission;
   provider: string;
   alwaysArmed: boolean;
 }) {
-  const [busy, setBusy] = useState(false);
   const parsed = useMemo(() => item.diffs.flatMap(parseFileDiff), [item.diffs]);
-  const options = useMemo(
-    () => [...item.options].sort((a, b) => OPTION_ORDER[a.kind] - OPTION_ORDER[b.kind]),
-    [item.options],
-  );
-  const once = findOption(item, ["allow_once"]);
   const always = findOption(item, ["allow_always"]);
-  const deny = findOption(item, ["reject_once", "reject_always"]);
-  const answer = async (o: PermissionOption) => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await respondPermission(agentId, item, o);
-    } finally {
-      setBusy(false);
-    }
-  };
   return (
     <div className="space-y-3">
       <div className="flex items-start gap-2.5">
@@ -294,7 +278,7 @@ function PermissionPanel({
         </pre>
       )}
       {parsed.map((f, i) => (
-        <FileDiffView key={i} file={f} maxHeight={260} />
+        <FileDiffView key={i} file={f} defaultOpen={false} maxHeight={220} />
       ))}
       {alwaysArmed && always && (
         <p role="status" className="rounded-lg border border-warn/35 bg-warn/10 px-3 py-2 text-[12px] text-warn">
@@ -302,31 +286,54 @@ function PermissionPanel({
           <Kbd>A</Kbd> again to always allow “{always.name}”. This can't be undone from here.
         </p>
       )}
-      <div className="flex flex-wrap gap-2 pt-1">
-        {options.map((o) => {
-          const allow = o.kind.startsWith("allow");
-          return (
-            <Button
-              key={o.id}
-              size="sm"
-              disabled={busy}
-              variant={o.kind === "allow_once" ? "warn" : allow ? "secondary" : "danger"}
-              onClick={() => void answer(o)}
-            >
-              {allow ? <ShieldCheck className="!h-3.5 !w-3.5" /> : <ShieldX className="!h-3.5 !w-3.5" />}
-              {o.name}
-              {o === once && <Kbd className="ml-1 border-warn-fg/30 bg-transparent text-warn-fg/80">A</Kbd>}
-              {o === always && (
-                <span className="ml-1 flex gap-0.5">
-                  <Kbd className="bg-transparent">⇧</Kbd>
-                  <Kbd className="bg-transparent">A</Kbd>
-                </span>
-              )}
-              {o === deny && <Kbd className="ml-1 bg-transparent">D</Kbd>}
-            </Button>
-          );
-        })}
-      </div>
+    </div>
+  );
+}
+
+/** The approval buttons, pinned above the footer so they never scroll away or sit under a long diff. */
+function PermissionActions({ agentId, item }: { agentId: string; item: Permission }) {
+  const [busy, setBusy] = useState(false);
+  const options = useMemo(
+    () => [...item.options].sort((a, b) => OPTION_ORDER[a.kind] - OPTION_ORDER[b.kind]),
+    [item.options],
+  );
+  const once = findOption(item, ["allow_once"]);
+  const always = findOption(item, ["allow_always"]);
+  const deny = findOption(item, ["reject_once", "reject_always"]);
+  const answer = async (o: PermissionOption) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await respondPermission(agentId, item, o);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex flex-wrap gap-2 border-t border-line bg-panel px-5 py-3" role="group" aria-label="Approval">
+      {options.map((o) => {
+        const allow = o.kind.startsWith("allow");
+        return (
+          <Button
+            key={o.id}
+            size="sm"
+            disabled={busy}
+            variant={o.kind === "allow_once" ? "warn" : allow ? "secondary" : "danger"}
+            onClick={() => void answer(o)}
+          >
+            {allow ? <ShieldCheck className="!h-3.5 !w-3.5" /> : <ShieldX className="!h-3.5 !w-3.5" />}
+            {o.name}
+            {o === once && <Kbd className="ml-1 border-warn-fg/30 bg-transparent text-warn-fg/80">A</Kbd>}
+            {o === always && (
+              <span className="ml-1 flex gap-0.5">
+                <Kbd className="bg-transparent">⇧</Kbd>
+                <Kbd className="bg-transparent">A</Kbd>
+              </span>
+            )}
+            {o === deny && <Kbd className="ml-1 bg-transparent">D</Kbd>}
+          </Button>
+        );
+      })}
     </div>
   );
 }

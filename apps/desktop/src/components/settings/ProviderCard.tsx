@@ -64,13 +64,13 @@ export function ProviderCard({
             {info.managed && <Badge tone="accent">Bundled</Badge>}
             {info.adapterRequired && (
               <Badge tone={info.adapterInstalled ? "neutral" : "warn"}>
-                ACP adapter {info.adapterInstalled ? "ready" : info.installed ? "needs update" : "missing"}
+                Helper {info.adapterInstalled ? "ready" : info.installed ? "needs update" : "missing"}
               </Badge>
             )}
             {!ready && !info.nodeAvailable && <Badge>Node.js will be downloaded privately</Badge>}
           </div>
           {needsAdapter && (
-            <p className="mt-2 text-[12px] text-muted">The ACP adapter needs updating to the pinned version.</p>
+            <p className="mt-2 text-[12px] text-muted">Its helper needs an update.</p>
           )}
           {!compact && info.path && (
             <p className="selectable mt-2 truncate font-mono text-[11.5px] text-steel">{info.path}</p>
@@ -90,7 +90,7 @@ export function ProviderCard({
               variant="secondary"
               size="sm"
               onClick={() => void startInstall(info.provider)}
-              title={needsAdapter ? "The ACP adapter needs updating to the pinned version" : undefined}
+              title={needsAdapter ? "Its helper needs an update" : undefined}
             >
               {needsAdapter ? <RefreshCw /> : <Download />} {needsAdapter ? "Update" : "Install"}
             </Button>

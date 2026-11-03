@@ -161,12 +161,16 @@ impl Attention {
     /// asks when the user isn't looking at that agent; the usual switches, quiet hours and smart
     /// mute still apply, and the sound is softer.
     pub fn background_finished(&self, agent_id: &str, agents: Option<u32>, detail: Option<&str>) {
-        let title = self
-            .core()
-            .agent(agent_id)
-            .map(|a| a.title)
-            .unwrap_or_else(|_| "Kvistcode".into());
-        let body = kvistcode_core::workflow::finished_alert_body(agents, detail);
+        let agent = self.core().agent(agent_id).ok();
+        let title = agent
+            .as_ref()
+            .map_or_else(|| "Kvistcode".into(), |a| a.title.clone());
+        // No summary from the interface: say what the agent last said rather than a bare "done".
+        let said = agent
+            .as_ref()
+            .and_then(|a| a.last_message.as_deref())
+            .filter(|_| detail.is_none_or(|d| d.trim().is_empty()));
+        let body = kvistcode_core::workflow::finished_alert_body(agents, detail.or(said));
         self.alert_scaled(agent_id, AttentionReason::Done, &title, &body, None, 0.45);
     }
 

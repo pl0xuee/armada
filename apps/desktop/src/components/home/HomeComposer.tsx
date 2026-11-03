@@ -20,6 +20,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../ui/menu";
+import { Kbd } from "../ui/kbd";
 import { Spinner } from "../ui/misc";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Switch } from "../ui/switch";
@@ -48,6 +49,7 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
   /** The agents already started for this prompt when some failed, so a retry joins them. */
   const batchRef = useRef<{ groupId: string; ids: string[] } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [focused, setFocused] = useState(false);
   const busyRef = useRef(false);
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -153,6 +155,8 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
         value={prompt}
         rows={compact ? 2 : 3}
         onChange={(e) => setPrompt(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing && e.keyCode !== 229) {
             e.preventDefault();
@@ -188,11 +192,17 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
           </label>
         </Tooltip>
         <AgentCount value={count} onChange={setCount} compact={compact} disabled={busy} />
-        {!compact && <PermissionModeChip value={mode} onChange={setMode} className="h-7 rounded-lg" />}
+        <PermissionModeChip value={mode} onChange={setMode} compact={compact} className="h-7 rounded-lg" />
         <div className="ml-auto flex items-center gap-2">
           <ComposerVoiceButtons onText={insertDictation} />
           {missing && prompt.trim() && <span className="text-[11.5px] text-warn">{missing}</span>}
-          <Tooltip content="Start agent" shortcut={[modKey, "⏎"]}>
+          {/* Enter adds a new line here, so say how to start. */}
+          {canStart && focused && (
+            <span className="text-[11.5px] text-steel">
+              <Kbd>{modKey}</Kbd> <Kbd>⏎</Kbd> to start
+            </span>
+          )}
+          <Tooltip content="Start agent. Enter alone adds a new line." shortcut={[modKey, "⏎"]}>
             <Button
               variant="primary"
               size={compact ? "icon-sm" : "sm"}

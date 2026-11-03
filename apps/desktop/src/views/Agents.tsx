@@ -465,7 +465,8 @@ function Welcome() {
             "radial-gradient(700px 320px at 50% 22%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%)",
         }}
       />
-      <div className="relative mx-auto my-auto w-full max-w-[720px] px-5 py-10 @2xl:px-8">
+      {/* Anchored near the top, not centred: content that loads later (voice card, resume list) must not move the composer. */}
+      <div className="relative mx-auto w-full max-w-[720px] px-5 pb-10 pt-[clamp(24px,12vh,120px)] @2xl:px-8">
         <div className="mb-5 flex items-center gap-3.5">
           <div className="relative">
             <div className="absolute inset-0 -m-3 rounded-full bg-accent/20 blur-2xl" aria-hidden />
@@ -475,7 +476,7 @@ function Welcome() {
           </div>
           <div className="min-w-0">
             <h1 className="text-[20px] font-semibold tracking-[-0.02em]">Every coding agent, one calm place</h1>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <div className="mt-1 flex min-h-[24px] flex-wrap items-center gap-1.5">
               {live === 0 && needs === 0 && <span className="text-[12.5px] text-muted">All quiet</span>}
               {live > 0 && <PulseChip tone="accent" label={`${live} working`} onClick={() => openMission("all")} />}
               {needs > 0 && (

@@ -250,7 +250,7 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
             </Chip>
           )}
           {agent.provider !== "custom" && (!tile || tile.focused) && (
-            <AccountSwitcher agent={agent} showName={tier === "full"} />
+            <AccountSwitcher agent={agent} showName={tier !== "compact"} />
           )}
           <BudgetChip agent={agent} compact={tier === "compact"} always />
           {!tile && tier !== "compact" && <PrChip agent={agent} compact={tier !== "full"} />}

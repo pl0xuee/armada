@@ -28,7 +28,6 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
       { keys: [modKey, "⇧", "F"], label: "Search every conversation (type ? in the palette)" },
       { keys: [modKey, "N"], label: "New agent" },
       { keys: [modKey, "J"], label: "Needs you (press again for the next one)" },
-      { keys: [modKey, "I"], label: "Needs you (same as J)" },
       { keys: [modKey, "⇧", "M"], label: "Mission Control: All agents" },
       { keys: [modKey, "⇧", "A"], label: "Voice assistant: start, end or unmute (Esc ends)" },
       { keys: [modKey, "B"], label: "Show or hide the agent list" },

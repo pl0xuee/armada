@@ -151,8 +151,15 @@ export function CompareColumn({
         <Button size="sm" variant="ghost" onClick={onOpen}>
           Open <ArrowUpRight />
         </Button>
-        <Button size="sm" variant="secondary" className="ml-auto" onClick={onKeep} disabled={keeping}>
-          <Crown /> Keep this one
+        <Button
+          size="sm"
+          variant="secondary"
+          className="ml-auto"
+          onClick={onKeep}
+          disabled={keeping}
+          title="Keep this answer. The other agents stop and are archived (you can undo right after)."
+        >
+          <Crown /> Keep this &amp; archive others
         </Button>
       </footer>
     </section>

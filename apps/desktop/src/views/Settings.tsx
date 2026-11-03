@@ -34,6 +34,7 @@ import { HelperSettings } from "@/components/settings/HelperSettings";
 import { ResponseStyleSettings } from "@/components/settings/ResponseStyleSettings";
 import { TokenSavingSettings } from "@/components/settings/TokenSavingSettings";
 import { RememberedChoicesRow } from "@/components/settings/RememberedChoicesRow";
+import { FAILOVER } from "@/components/accounts/FailoverRow";
 import { AgentsSection } from "@/components/settings/AgentsSection";
 import { AlertTargets } from "@/components/settings/AlertTargets";
 import { BudgetsSection } from "@/components/settings/BudgetsSection";
@@ -166,7 +167,7 @@ function SettingsNav({ section, onSelect }: { section: SettingsSection; onSelect
     <nav
       aria-label="Settings sections"
       className={cn(
-        "flex w-[208px] shrink-0 flex-col border-r border-line bg-panel/50 px-2.5 pt-7",
+        "flex w-[208px] shrink-0 flex-col border-r border-line bg-panel/50 px-2.5 pb-3 pt-7 min-[861px]:min-h-0 min-[861px]:overflow-y-auto",
         "max-[860px]:w-full max-[860px]:border-b max-[860px]:border-r-0 max-[860px]:px-0 max-[860px]:pt-4",
       )}
     >
@@ -225,7 +226,7 @@ function Appearance({ settings }: { settings: Settings }) {
   const shownScale = dragScale ?? settings.interfaceScale;
   return (
     <>
-      <SectionHeader title="Appearance" description="Pick the finish for your command deck." />
+      <SectionHeader title="Appearance" description="Choose a look." />
       <div role="radiogroup" aria-label="Theme" className="grid grid-cols-1 gap-3 @md:grid-cols-3">
         {THEMES.map((t) => (
           <ThemeCard
@@ -733,20 +734,6 @@ const PERMISSION_MODES: {
   },
 ];
 
-const FAILOVER: { value: Settings["failover"]; label: string; description: string }[] = [
-  { value: "off", label: "Off", description: "The agent stops with an error. You decide what to do next." },
-  {
-    value: "ask",
-    label: "Ask me",
-    description: "Kvistcode shows a banner on the agent offering your other signed-in accounts of the same provider.",
-  },
-  {
-    value: "auto",
-    label: "Switch automatically",
-    description: "Kvistcode moves the agent to another signed-in account of the same provider and keeps going.",
-  },
-];
-
 function Behavior({ settings }: { settings: Settings }) {
   const [hotkey, setHotkey] = useState(settings.globalHotkey);
   const [hotkeyError, setHotkeyError] = useState<string | null>(null);
@@ -810,7 +797,7 @@ function Behavior({ settings }: { settings: Settings }) {
           </SettingRow>
           <SettingRow
             title="Global hotkey"
-            description="Bring Kvistcode forward from anywhere. Record a shortcut, or type Tauri accelerator syntax; leave empty to disable."
+            description="Bring Kvistcode forward from anywhere. Record a shortcut, or leave it empty to turn it off."
             htmlFor="b-hotkey"
           >
             <div className="w-[240px] max-w-full">

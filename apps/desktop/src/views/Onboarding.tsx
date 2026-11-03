@@ -135,7 +135,7 @@ export function Onboarding() {
           <button
             type="button"
             onClick={finish}
-            className="h-6 shrink-0 whitespace-nowrap rounded-md px-2 text-[12px] text-steel transition-colors hover:text-fg"
+            className="h-6 shrink-0 whitespace-nowrap rounded-md px-2 text-[12px] text-muted transition-colors hover:text-fg"
           >
             Skip setup
           </button>
@@ -215,15 +215,15 @@ function Welcome({ onNext }: { onNext: () => void }) {
         </div>
       </div>
       <h1 className="text-[34px] font-semibold leading-tight tracking-[-0.035em]">
-        Command your{" "}
+        Many agents,{" "}
         <span className="bg-gradient-to-r from-[color-mix(in_srgb,var(--accent)_45%,white)] via-accent to-[color-mix(in_srgb,var(--accent)_65%,black)] bg-clip-text text-transparent">
-          fleet
+          you in control
         </span>
         .
       </h1>
       <p className="mt-3 max-w-[460px] text-[14px] leading-relaxed text-muted">
-        Run Claude, Codex and Grok agents side by side, across every account you own. Approve, review and ship from one
-        command deck.
+        Run several AI coding agents at once, and stay in control. Use Claude, Codex and Grok side by side, on all your
+        accounts. Approve, review and ship from one place.
       </p>
       <div className="mt-7 flex items-center gap-2.5">
         {PROVIDER_ORDER.map((p, i) => (
@@ -272,8 +272,8 @@ function ProvidersStep() {
   return (
     <>
       <StepHeader
-        title="Your agent runtimes"
-        description="Kvistcode drives each vendor's official CLI, so you get their newest features the day they ship. One click installs anything that's missing."
+        title="Your AI tools"
+        description="Kvistcode uses the official command-line tool from each provider, so you get new features as soon as they ship. One click installs anything that's missing."
       />
       <div className="mb-3 flex items-center justify-between">
         <span className="text-[12.5px] text-muted">
@@ -400,7 +400,7 @@ function PrefsStep() {
         <PrefCard
           icon={<BellOff />}
           title="Smart mute"
-          description="Stay silent about the agent you're already looking at."
+          description="No alerts for the agent you're already looking at."
           control={
             <Switch
               aria-label="Smart mute"

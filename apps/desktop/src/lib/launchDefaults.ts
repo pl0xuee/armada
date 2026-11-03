@@ -250,7 +250,7 @@ export function preflight(p: {
     } else if (p.providerInfo?.adapterRequired && !p.providerInfo.adapterInstalled) {
       out.push({
         id: "no_adapter",
-        text: `${p.providerInfo.displayName} needs its ACP adapter. Install it from Settings → Providers.`,
+        text: `${p.providerInfo.displayName} needs a helper install. Install it from Settings → Providers.`,
       });
     }
   }

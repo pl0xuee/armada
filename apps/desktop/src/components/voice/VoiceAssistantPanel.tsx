@@ -170,24 +170,19 @@ function PanelBody() {
                   </Button>
                 ) : (
                   <Tooltip content="Mute (pause listening)" side="top">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Mute microphone"
-                      onClick={() => setVaMuted(true)}
-                    >
-                      <Mic />
+                    <Button variant="ghost" size="sm" aria-label="Mute microphone" onClick={() => setVaMuted(true)}>
+                      <Mic /> Mute
                     </Button>
                   </Tooltip>
                 )}
                 <Tooltip content="End (Esc)" side="top">
                   <Button
                     variant="danger"
-                    size="icon-sm"
+                    size="sm"
                     aria-label="End voice assistant"
                     onClick={() => void stopVoiceAssistant()}
                   >
-                    <Square className="!size-3 fill-current" />
+                    <Square className="!size-3 fill-current" /> End
                   </Button>
                 </Tooltip>
               </div>

@@ -116,7 +116,7 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
           {!minimal && <VoiceAssistantButton compact={narrow} />}
           {!minimal && <SubagentsIndicator compact={narrow} />}
           {!minimal && <UpdatePill />}
-          {!minimal && accounts.length > 0 && <AccountSwitcher accounts={accounts} stacked={compact} />}
+          {!minimal && accounts.length > 0 && <AccountsPopover accounts={accounts} stacked={compact} />}
           {!mac && <WindowControls />}
         </div>
       </header>
@@ -208,34 +208,37 @@ function WindowControls() {
   );
 }
 
-function AccountSwitcher({ accounts, stacked }: { accounts: Account[]; stacked: boolean }) {
+/** Read-only usage for every account (the per-agent switcher lives in the agent header). */
+function AccountsPopover({ accounts, stacked }: { accounts: Account[]; stacked: boolean }) {
   const setView = useUi((s) => s.setView);
   const signedIn = accounts.filter((a) => a.status?.loggedIn).length;
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="flex items-center rounded-full pl-1 transition-transform active:scale-[0.97]"
-          aria-label={`Accounts: ${signedIn} of ${accounts.length} signed in`}
-        >
-          {(stacked ? accounts.slice(0, 1) : accounts.slice(0, 5)).map((a, i) => (
-            <span key={a.id} className="-ml-1 first:ml-0" style={{ zIndex: 10 - i }}>
-              <AccountAvatar account={a} size={22} showProvider={false} compact />
-            </span>
-          ))}
-          {stacked && accounts.length > 1 && (
-            <span className="relative z-20 -ml-1 flex h-[22px] min-w-[22px] items-center justify-center rounded-full border border-line-strong bg-raised px-1.5 text-[10px] font-medium text-muted tabular ring-2 ring-panel">
-              +{accounts.length - 1}
-            </span>
-          )}
-          {!stacked && accounts.length > 5 && (
-            <span className="-ml-1 flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-raised px-1 text-[10px] text-muted ring-2 ring-panel">
-              +{accounts.length - 5}
-            </span>
-          )}
-        </button>
-      </PopoverTrigger>
+      <Tooltip content="Accounts">
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className="flex items-center rounded-full pl-1 transition-transform active:scale-[0.97]"
+            aria-label={`Accounts: ${signedIn} of ${accounts.length} signed in`}
+          >
+            {(stacked ? accounts.slice(0, 1) : accounts.slice(0, 5)).map((a, i) => (
+              <span key={a.id} className="-ml-1 first:ml-0" style={{ zIndex: 10 - i }}>
+                <AccountAvatar account={a} size={22} showProvider={false} compact />
+              </span>
+            ))}
+            {stacked && accounts.length > 1 && (
+              <span className="relative z-20 -ml-1 flex h-[22px] min-w-[22px] items-center justify-center rounded-full border border-line-strong bg-raised px-1.5 text-[10px] font-medium text-muted tabular ring-2 ring-panel">
+                +{accounts.length - 1}
+              </span>
+            )}
+            {!stacked && accounts.length > 5 && (
+              <span className="-ml-1 flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-raised px-1 text-[10px] text-muted ring-2 ring-panel">
+                +{accounts.length - 5}
+              </span>
+            )}
+          </button>
+        </PopoverTrigger>
+      </Tooltip>
       <PopoverContent align="end" className="w-[320px] p-0">
         <div className="flex items-center justify-between border-b border-line px-3.5 py-2.5">
           <span className="text-[12.5px] font-semibold">Accounts</span>

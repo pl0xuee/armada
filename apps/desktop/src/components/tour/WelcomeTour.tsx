@@ -26,22 +26,22 @@ interface TourStep {
 const STEPS: TourStep[] = [
   {
     id: "grid",
-    title: "Many agents, one deck",
-    body: "Start up to 8 agents on the same project and watch them side by side in a grid. Mission Control gathers every agent, across all your projects, in one place.",
+    title: "Many agents, one place",
+    body: "Start up to 8 agents on the same project and watch them side by side in a grid. Mission Control shows every agent from all your projects together.",
     hint: { keys: [modKey, "⇧", "M"], label: "Open Mission Control" },
     art: GridArt,
   },
   {
     id: "dock",
     title: "What needs you stays in view",
-    body: "Approvals, questions and the live plan pin above the message box, wherever you've scrolled, so nothing waits unnoticed.",
+    body: "Approvals, questions and the live plan stay above the message box, wherever you've scrolled, so nothing waits unnoticed.",
     hint: { keys: [modKey, "J"], label: "Jump to what needs you" },
     art: DockArt,
   },
   {
     id: "find",
     title: "Find anything, spend on your terms",
-    body: "Search every conversation, archived agents included. Set a spending limit per agent, project or day; an agent that reaches it finishes its turn and waits for you.",
+    body: "Search every conversation, archived agents included. Set a spending limit per agent, project or day. An agent that reaches it finishes its turn and waits for you.",
     hint: { keys: [modKey, "⇧", "F"], label: "Search every conversation" },
     art: FindArt,
   },
@@ -166,10 +166,7 @@ export function WelcomeTour() {
 
 function Stage({ children }: { children: ReactNode }) {
   return (
-    <div
-      aria-hidden
-      className="relative h-[176px] overflow-hidden rounded-xl border border-line bg-base/70 edge"
-    >
+    <div aria-hidden className="relative h-[176px] overflow-hidden rounded-xl border border-line bg-base/70 edge">
       <div
         className="absolute inset-0 opacity-[0.35]"
         style={{
@@ -214,8 +211,13 @@ function GridArt() {
         <MiniTile provider="codex" name="Codex #3" delay={100} />
         <MiniTile provider="grok" name="Grok #4" delay={150} />
       </div>
-      <div className="tour-rise flex-1 rounded-lg border border-line-strong bg-card/90 p-2 edge-strong" style={{ animationDelay: "200ms" }}>
-        <div className="text-[10.5px] font-semibold uppercase leading-[14px] tracking-[0.06em] text-steel">Mission Control</div>
+      <div
+        className="tour-rise flex-1 rounded-lg border border-line-strong bg-card/90 p-2 edge-strong"
+        style={{ animationDelay: "200ms" }}
+      >
+        <div className="text-[10.5px] font-semibold uppercase leading-[14px] tracking-[0.06em] text-steel">
+          Mission Control
+        </div>
         {[
           ["atlas-api", "bg-warn"],
           ["web-app", "bg-accent"],
@@ -238,7 +240,10 @@ function DockArt() {
         <div className={cn(line, "w-[80%]")} />
         <div className={cn(line, "mt-1.5 w-[50%]")} />
       </div>
-      <div className="tour-rise rounded-lg border border-accent/30 bg-card px-2.5 py-2 edge" style={{ animationDelay: "60ms" }}>
+      <div
+        className="tour-rise rounded-lg border border-accent/30 bg-card px-2.5 py-2 edge"
+        style={{ animationDelay: "60ms" }}
+      >
         <div className="flex items-center justify-between text-[11px] leading-[14px]">
           <span className="font-medium text-fg">Plan</span>
           <span className="text-steel tabular">3 of 5</span>
@@ -249,13 +254,25 @@ function DockArt() {
           ))}
         </div>
       </div>
-      <div className="tour-rise flex items-center gap-2 rounded-lg border border-warn/30 bg-card px-2.5 py-1.5 edge" style={{ animationDelay: "120ms" }}>
+      <div
+        className="tour-rise flex items-center gap-2 rounded-lg border border-warn/30 bg-card px-2.5 py-1.5 edge"
+        style={{ animationDelay: "120ms" }}
+      >
         <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />
-        <span className="min-w-0 flex-1 truncate text-[11px] leading-[14px] text-fg">Keep validation in the handler?</span>
-        <span className="rounded-md border border-line-strong bg-raised px-1.5 text-[10.5px] leading-[16px] text-muted">Yes</span>
-        <span className="rounded-md border border-line-strong bg-raised px-1.5 text-[10.5px] leading-[16px] text-muted">No</span>
+        <span className="min-w-0 flex-1 truncate text-[11px] leading-[14px] text-fg">
+          Keep validation in the handler?
+        </span>
+        <span className="rounded-md border border-line-strong bg-raised px-1.5 text-[10.5px] leading-[16px] text-muted">
+          Yes
+        </span>
+        <span className="rounded-md border border-line-strong bg-raised px-1.5 text-[10.5px] leading-[16px] text-muted">
+          No
+        </span>
       </div>
-      <div className="tour-rise flex h-7 items-center rounded-lg border border-line-strong bg-panel px-2.5 text-[11px] leading-[14px] text-steel" style={{ animationDelay: "180ms" }}>
+      <div
+        className="tour-rise flex h-7 items-center rounded-lg border border-line-strong bg-panel px-2.5 text-[11px] leading-[14px] text-steel"
+        style={{ animationDelay: "180ms" }}
+      >
         Message Claude…
       </div>
     </div>
@@ -289,8 +306,13 @@ function FindArt() {
           </div>
         ))}
       </div>
-      <div className="tour-rise flex-1 rounded-lg border border-line bg-card p-2.5 edge" style={{ animationDelay: "100ms" }}>
-        <div className="text-[10.5px] font-semibold uppercase leading-[14px] tracking-[0.06em] text-steel">Spending limit</div>
+      <div
+        className="tour-rise flex-1 rounded-lg border border-line bg-card p-2.5 edge"
+        style={{ animationDelay: "100ms" }}
+      >
+        <div className="text-[10.5px] font-semibold uppercase leading-[14px] tracking-[0.06em] text-steel">
+          Spending limit
+        </div>
         <div className="mt-1.5 text-[15px] font-semibold leading-[20px] tracking-tight text-fg tabular">
           $3.20 <span className="text-[11px] font-normal text-steel">of $5.00</span>
         </div>

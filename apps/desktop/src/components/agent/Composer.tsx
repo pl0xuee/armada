@@ -5,6 +5,7 @@ import { cancelTurn, resumeAgent } from "@/lib/actions";
 import { api } from "@/lib/api";
 import { MAX_ATTACHMENTS } from "@/lib/attachments";
 import { canStartHelper, decideBusySend, type BusyIntent } from "@/lib/helpers";
+import { restoreDraft } from "@/lib/draftRestore";
 import { isSlashCommand } from "@/lib/sendNow";
 import { commandRank, expandCommandShortcut } from "@/lib/slashCommands";
 import type { Agent, SlashCommand, Attachment } from "@/lib/types";
@@ -408,7 +409,7 @@ function ComposerImpl({
     try {
       await api.sendPrompt(agent.id, value, images, deliver);
     } catch (e) {
-      update(value);
+      update(restoreDraft(textRef.current, value));
       attach.setAttachments(images);
       toast.error("Couldn't send prompt", { description: errorMessage(e) });
     } finally {
@@ -432,7 +433,7 @@ function ComposerImpl({
         action: { label: "Open", onClick: () => useUi.getState().openAgent(helper.id) },
       });
     } catch (e) {
-      update(value);
+      update(restoreDraft(textRef.current, value));
       attach.setAttachments(images);
       toast.error("Couldn't start a helper", { description: errorMessage(e) });
     } finally {
@@ -555,9 +556,9 @@ function ComposerImpl({
         ? `Turn finished. ${bgNote}. Reply, or start something new…`
         : justDone
           ? `Done. Reply, or start something new…`
-        : agent.availableCommands.length > 0
-          ? `Message ${name}…  / for commands, @ for files`
-          : `Message ${name}…  @ to mention files`;
+          : agent.availableCommands.length > 0
+            ? `Message ${name}…  / for commands, @ for files`
+            : `Message ${name}…  @ to mention files`;
 
   return (
     <div ref={wrapRef} data-dictation-scope className={cn("shrink-0 pb-4 pt-1", tight ? "px-3" : "px-6")}>

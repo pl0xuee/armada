@@ -1,21 +1,22 @@
 import { useSyncExternalStore } from "react";
+import { setVisibleInterval } from "./useVisibleInterval";
 
 // One shared ticker for all relative timestamps.
 let now = Date.now();
 const subs = new Set<() => void>();
-let timer: ReturnType<typeof setInterval> | null = null;
+let stopTimer: (() => void) | null = null;
 
 function subscribe(cb: () => void) {
   subs.add(cb);
-  timer ??= setInterval(() => {
+  stopTimer ??= setVisibleInterval(() => {
     now = Date.now();
     for (const s of subs) s();
   }, 30_000);
   return () => {
     subs.delete(cb);
-    if (subs.size === 0 && timer) {
-      clearInterval(timer);
-      timer = null;
+    if (subs.size === 0 && stopTimer) {
+      stopTimer();
+      stopTimer = null;
     }
   };
 }

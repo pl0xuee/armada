@@ -1,3 +1,4 @@
+import { Info } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useBudgetStatus } from "@/hooks/useBudgetStatus";
 import { api } from "@/lib/api";
@@ -115,7 +116,12 @@ export function BillingSummary({
   return (
     <div className={className} data-billing={billing.mode}>
       <div className="flex items-center gap-2">
-        <span className={cn("shrink-0 whitespace-nowrap rounded-full border px-2 py-px text-[10.5px] font-medium", PILL[billing.mode])}>
+        <span
+          className={cn(
+            "shrink-0 whitespace-nowrap rounded-full border px-2 py-px text-[10.5px] font-medium",
+            PILL[billing.mode],
+          )}
+        >
           {billing.label}
         </span>
         <span className="min-w-0 truncate text-[11.5px] text-steel" title={billing.detail}>
@@ -144,6 +150,7 @@ export function BillingSummary({
 /** The voice assistant runs on an OpenAI API key: what it has cost this month is the real charge (an estimate). */
 export function AssistantBilling({ className }: { className?: string }) {
   const [month, setMonth] = useState<VoiceAssistantUsage | null>(null);
+  const [open, setOpen] = useState(false);
   useEffect(() => {
     let live = true;
     api
@@ -156,23 +163,36 @@ export function AssistantBilling({ className }: { className?: string }) {
   }, []);
   return (
     <div className={className} data-billing="api">
-      <div className="flex items-center gap-2">
-        <span className={cn("shrink-0 whitespace-nowrap rounded-full border px-2 py-px text-[10.5px] font-medium", PILL.api)}>
-          API billing
+      <div className="flex items-center gap-1.5 text-[11.5px] leading-4 text-steel">
+        <span className="min-w-0 truncate">
+          OpenAI API
+          {month ? (
+            <>
+              {" "}
+              · <span className="font-medium tabular text-fg">~{formatCost(month.costUsd)}</span> this month
+            </>
+          ) : (
+            " · billed per token"
+          )}
         </span>
-        <span className="min-w-0 truncate text-[11.5px] text-steel">Billed per token on your OpenAI key.</span>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label="About this charge"
+          title="About this charge"
+          onClick={() => setOpen((v) => !v)}
+          className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-steel transition-colors hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/70"
+        >
+          <Info className="size-3.5" />
+        </button>
       </div>
-      {month && (
-        <div className="mt-2 flex items-baseline justify-between gap-2 text-[11.5px]">
-          <span className="text-steel">
-            Assistant this month · {month.sessions} {month.sessions === 1 ? "session" : "sessions"}
-          </span>
-          <span className="font-medium tabular text-fg">~{formatCost(month.costUsd)} est.</span>
-        </div>
+      {open && (
+        <p className="mt-1.5 text-[11.5px] leading-snug text-steel">
+          Billed per token on your OpenAI key
+          {month ? `, ${month.sessions} ${month.sessions === 1 ? "session" : "sessions"} so far` : ""}. The amount is an
+          estimate. Your OpenAI balance can&rsquo;t be read with an API key; check it at platform.openai.com.
+        </p>
       )}
-      <p className="mt-1.5 text-[11.5px] leading-snug text-steel">
-        Your OpenAI balance can&rsquo;t be read with an API key. Check it at platform.openai.com.
-      </p>
     </div>
   );
 }

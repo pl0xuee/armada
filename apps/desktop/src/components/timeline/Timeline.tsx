@@ -100,6 +100,7 @@ export function Timeline({
   const lastTotal = useRef(0);
   const hasOlder = useApp((s) => s.hasOlder[agent.id] ?? false);
   const olderLoading = useApp((s) => s.olderLoading[agent.id] ?? false);
+  const olderError = useApp((s) => s.olderError[agent.id]);
 
   // Only re-render rows when fields they actually use change (not on every cost/token bump).
   const stableAgent = useStableAgent(agent);
@@ -263,14 +264,35 @@ export function Timeline({
 
   // Paging up: remember the first visible row and keep it in place once older items land.
   const anchor = useRef<{ id: string; offset: number } | null>(null);
-  const requestOlder = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el || !hasOlder || olderLoading) return;
-    const first = virtualizer.getVirtualItems().find((v) => v.end > el.scrollTop);
-    const id = first ? list[rows[first.index]]?.id : undefined;
-    if (id && first) anchor.current = { id, offset: first.start - el.scrollTop };
-    void useApp.getState().loadOlder(agent.id);
-  }, [agent.id, hasOlder, olderLoading, list, rows, virtualizer]);
+  const requestOlder = useCallback(
+    (retry = false) => {
+      const el = scrollRef.current;
+      // After a failure the scroll handler stays quiet; the retry row is the way back in.
+      if (!el || !hasOlder || olderLoading || (olderError && !retry)) return;
+      const first = virtualizer.getVirtualItems().find((v) => v.end > el.scrollTop);
+      const id = first ? list[rows[first.index]]?.id : undefined;
+      if (id && first) anchor.current = { id, offset: first.start - el.scrollTop };
+      void useApp.getState().loadOlder(agent.id);
+    },
+    [agent.id, hasOlder, olderLoading, olderError, list, rows, virtualizer],
+  );
+
+  // A loaded page that doesn't fill the viewport can't be scrolled, so no scroll event would ask for
+  // more: keep paging in until the content overflows. Once per oldest item, so a page that adds
+  // nothing (or a failure, which sets olderError) can't loop.
+  const filledFor = useRef<string | undefined>(undefined);
+  const firstId = list[0]?.id;
+  useEffect(() => {
+    if (!hasOlder || olderLoading || olderError || !firstId || filledFor.current === firstId) return;
+    const frame = requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (!el || el.scrollHeight > el.clientHeight) return;
+      filledFor.current = firstId;
+      anchor.current = null;
+      void useApp.getState().loadOlder(agent.id);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [agent.id, hasOlder, olderLoading, olderError, firstId, rows.length]);
 
   useLayoutEffect(() => {
     const a = anchor.current;
@@ -440,6 +462,17 @@ export function Timeline({
   return (
     <div data-agent-id={agent.id} className="@container relative flex min-h-0 flex-1 flex-col">
       <LiveAnnouncer agent={agent} items={items} />
+      {olderError && !olderLoading && (
+        <div
+          role="alert"
+          className="glass absolute left-1/2 top-2 z-10 flex h-7 -translate-x-1/2 items-center gap-2 rounded-full border border-line-strong px-3 text-[11.5px] text-muted shadow-md"
+        >
+          Couldn't load earlier messages.
+          <button type="button" onClick={() => requestOlder(true)} className="font-medium text-accent hover:underline">
+            Retry
+          </button>
+        </div>
+      )}
       {olderLoading && (
         <div
           role="status"
@@ -493,34 +526,34 @@ export function Timeline({
                     style={{ transform: `translateY(${v.start}px)` }}
                   >
                     <ErrorBoundary resetKey={group ?? it} fallback={() => <RowFailed />}>
-                    {turnStart && <TurnHeader agent={stableAgent} ts={it.ts} />}
-                    {group ? (
-                      <ActivityGroup
-                        groupId={it.id}
-                        items={group}
-                        agent={stableAgent}
-                        live={live && !waiting && group[group.length - 1].id === lastId}
-                        agentLive={stableAgent.running && stableAgent.status !== "interrupted"}
-                        open={openGroups.has(it.id)}
-                        onToggle={toggleGroup}
-                      />
-                    ) : (
-                      renderItem(it, {
-                        agent: stableAgent,
-                        prev,
-                        liveTail: live && tailId === lastId,
-                        parts: run,
-                        view,
-                        childrenOf,
-                        bgRunningIds,
-                        lastPrompt: lastPrompt?.kind === "user_message" ? lastPrompt : null,
-                        midTurnWaiting,
-                        pendingId,
-                        questionId,
-                        reasonFor,
-                        reasonHandler,
-                      })
-                    )}
+                      {turnStart && <TurnHeader agent={stableAgent} ts={it.ts} />}
+                      {group ? (
+                        <ActivityGroup
+                          groupId={it.id}
+                          items={group}
+                          agent={stableAgent}
+                          live={live && !waiting && group[group.length - 1].id === lastId}
+                          agentLive={stableAgent.running && stableAgent.status !== "interrupted"}
+                          open={openGroups.has(it.id)}
+                          onToggle={toggleGroup}
+                        />
+                      ) : (
+                        renderItem(it, {
+                          agent: stableAgent,
+                          prev,
+                          liveTail: live && tailId === lastId,
+                          parts: run,
+                          view,
+                          childrenOf,
+                          bgRunningIds,
+                          lastPrompt: lastPrompt?.kind === "user_message" ? lastPrompt : null,
+                          midTurnWaiting,
+                          pendingId,
+                          questionId,
+                          reasonFor,
+                          reasonHandler,
+                        })
+                      )}
                     </ErrorBoundary>
                   </div>
                 );
@@ -1031,11 +1064,7 @@ function LiveAnnouncer({ agent, items }: { agent: Agent; items: TimelineItem[] |
   const lastKind = items?.[items.length - 1]?.kind;
   const lastTitle = (() => {
     const it = items?.[items.length - 1];
-    return it && it.kind === "permission"
-      ? it.title
-      : it?.kind === "question"
-        ? it.message
-        : "";
+    return it && it.kind === "permission" ? it.title : it?.kind === "question" ? it.message : "";
   })();
   const seen = useRef<string | undefined>(lastId);
   const status = useRef(agent.status);

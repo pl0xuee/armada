@@ -101,7 +101,11 @@ export function SchedulesView() {
     try {
       const agent = await api.runSchedule(s.id);
       useApp.getState().upsertAgent(agent);
-      upsert({ ...s, lastRunAt: Date.now(), lastAgentId: agent.id });
+      // Merge into the current copy (it may have been edited or toggled while the run started).
+      setSchedules(
+        (list) =>
+          list?.map((x) => (x.id === s.id ? { ...x, lastRunAt: Date.now(), lastAgentId: agent.id } : x)) ?? list,
+      );
       toast.success(`Started “${s.name}”`, {
         description: agent.title,
         action: { label: "Open", onClick: () => openAgent(agent.id) },

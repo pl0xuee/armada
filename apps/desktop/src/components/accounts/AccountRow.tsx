@@ -1,10 +1,22 @@
-import { CircleAlert, Coins, Download, KeyRound, LogIn, Pencil, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import {
+  CircleAlert,
+  Coins,
+  Download,
+  Ellipsis,
+  KeyRound,
+  LogIn,
+  Pencil,
+  RefreshCw,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AccountAvatar } from "@/components/AccountAvatar";
 import { UsageMeters } from "@/components/UsageMeter";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/menu";
 import { Badge } from "@/components/ui/misc";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useFreshNow } from "@/components/schedules/useFreshNow";
@@ -62,6 +74,7 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
   const remote = local && !!account.local && !isLoopbackUrl(account.local.baseUrl);
   const [replacingKey, setReplacingKey] = useState(false);
   const everSignedIn = !!st?.email || !!st?.label;
+  const canSignIn = !apiKey && !local;
 
   const onDelete = async () => {
     setDeleting(true);
@@ -144,7 +157,14 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
             ) : (
               <>
                 <CircleAlert className="h-3.5 w-3.5 shrink-0 text-warn" />
-                <span className="truncate text-warn/90">{st.error ?? "Not signed in"}</span>
+                <span className="truncate text-warn/90" title={st.error ?? undefined}>
+                  {/* A shell command in the message is jargon here: the Sign in button is the way. */}
+                  {!st.error || (canSignIn && st.error.includes("`"))
+                    ? canSignIn
+                      ? "Not signed in. Press Sign in."
+                      : "Not signed in"
+                    : st.error}
+                </span>
               </>
             )}
             {!compact && st && (
@@ -205,23 +225,35 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5 @lg/acct:gap-1">
-          {(!loggedIn || !compact) && !apiKey && !local && (
-            <Tooltip
-              content={loggedIn ? "Sign in again" : everSignedIn ? "Your session expired. Sign in again." : "Sign in"}
-            >
+          {!loggedIn && !apiKey && !local && (
+            <Tooltip content={everSignedIn ? "Your session expired. Sign in again." : "Sign in"}>
               <Button
                 size="sm"
-                variant={loggedIn ? "ghost" : "primary"}
+                variant="primary"
                 onClick={() => void startLogin(account)}
-                aria-label={`${loggedIn ? "Sign in again to" : "Sign in to"} ${account.name}`}
-                className={cn(loggedIn && "w-8 px-0 @2xl/acct:w-auto @2xl/acct:px-2.5")}
+                aria-label={`Sign in to ${account.name}`}
               >
                 <LogIn />
-                <span className={cn(loggedIn && "hidden @2xl/acct:inline")}>
-                  {loggedIn ? "Re-sign in" : everSignedIn ? "Sign in again" : "Sign in"}
-                </span>
+                {everSignedIn ? "Sign in again" : "Sign in"}
               </Button>
             </Tooltip>
+          )}
+          {/* A healthy account rarely needs this, so it stays out of the way. */}
+          {loggedIn && !compact && !apiKey && !local && (
+            <DropdownMenu>
+              <Tooltip content="More">
+                <DropdownMenuTrigger asChild>
+                  <Button size="icon-sm" variant="ghost" aria-label={`More actions for ${account.name}`}>
+                    <Ellipsis />
+                  </Button>
+                </DropdownMenuTrigger>
+              </Tooltip>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => void startLogin(account)}>
+                  <LogIn /> Sign in again
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
           {/* Takes the place a sign-in button would have, so check, edit and remove line up across rows. */}
           {!compact && apiKey && (

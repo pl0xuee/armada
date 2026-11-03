@@ -1,5 +1,6 @@
 import { ChevronUp, CircleCheck, CircleX } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useVisibleInterval } from "@/hooks/useVisibleInterval";
 import { subagentStrip, type SubagentRun, type SubagentStrip as StripData } from "@/lib/agents";
 import { cn } from "@/lib/utils";
 import { useUi } from "@/store/ui";
@@ -14,11 +15,7 @@ const LINGER_MS = 3000;
 /** Ticks on its own, so the once-a-second render stays inside this one text node. */
 export function Elapsed({ since }: { since: number }) {
   const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
+  useVisibleInterval(() => setNow(Date.now()), 1000);
   return <span className="shrink-0 text-[11.5px] text-steel tabular">{formatElapsed(now - since)}</span>;
 }
 
@@ -88,9 +85,9 @@ export function SubagentRow({
               {kind}
             </span>
           )}
-          <span className="min-w-0 truncate text-[12px] font-medium text-fg">{strip.headline}</span>
+          <span className="min-w-0 shrink-0 truncate text-[12px] font-medium text-fg">{strip.headline}</span>
           {active && strip.step && !compact && (
-            <span className="min-w-0 truncate text-[11.5px] text-steel" title={strip.step}>
+            <span className="min-w-0 flex-1 truncate text-[11.5px] text-steel" title={strip.step}>
               <span aria-hidden className="mr-2 text-line-strong">
                 ·
               </span>

@@ -1,6 +1,7 @@
 import * as D from "@radix-ui/react-dialog";
 import {
   Archive,
+  Ellipsis,
   GitBranch,
   GitCommitHorizontal,
   GitMerge,
@@ -46,7 +47,14 @@ import { Input, Label, Textarea } from "./ui/input";
 import { Spinner } from "./ui/misc";
 import { Select } from "./ui/select";
 import { Switch } from "./ui/switch";
-import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "./ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/menu";
+import { Popover, PopoverAnchor, PopoverContent } from "./ui/popover";
 import { FilePicker } from "./review/FilePicker";
 import { Skeleton } from "./ui/skeleton";
 
@@ -109,6 +117,10 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   const [commitMsg, setCommitMsg] = useState("");
   const [busy, setBusy] = useState<BusyKind | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [confirmMerge, setConfirmMerge] = useState(false);
+  const [confirmShip, setConfirmShip] = useState(false);
+  const [prOpen, setPrOpen] = useState(false);
+  const prAfterMenu = useRef(false);
   const [githubOpen, setGithubOpen] = useState(false);
   const [editing, setEditing] = useState<{ key: string; commentId: string | null } | null>(null);
   const [revertTarget, setRevertTarget] = useState<{ path: string; hunk: number | null } | null>(null);
@@ -271,6 +283,35 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   const diffPending = loading && !diff;
   const PENDING_REASON = "Waiting for the diff to load";
   const message = commitMsg.trim() || agent.title;
+  // With no changes and no commits ahead there is nothing to ship, merge or open a pull request for.
+  const nothingToShip = !hasChanges && (diff?.ahead ?? 0) === 0;
+  const prReason = diffPending
+    ? PENDING_REASON
+    : !agent.branch
+      ? "This agent has no branch to open a pull request from"
+      : nothingToShip
+        ? "Nothing to open a pull request for yet"
+        : null;
+  const mergeReason = diffPending
+    ? PENDING_REASON
+    : lfsBlocked
+      ? lfsBlocked
+      : gitBlocked
+        ? gitBlocked
+        : !agent.worktree
+          ? "Only agents running in their own worktree can be merged"
+          : uncommitted > 0
+            ? "Commit first, or use Commit & merge"
+            : (diff?.ahead ?? 0) === 0
+              ? "No commits to merge yet"
+              : null;
+  const shipReason =
+    (diffPending ? PENDING_REASON : null) ?? lfsBlocked ?? gitBlocked ?? (nothingToShip ? "Nothing to ship yet" : null);
+  const discardReason = !agent.worktree
+    ? "Only agents running in their own worktree have one to discard"
+    : diffPending
+      ? PENDING_REASON
+      : gitBlocked;
 
   const doShip = (exclude: string[]) =>
     void run(
@@ -801,37 +842,25 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
           </Button>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2 max-[900px]:w-full">
-          <Button
-            variant="ghost"
-            className="text-err hover:bg-err/12 hover:text-err"
-            disabled={busy !== null || !agent.worktree || !!gitBlocked || diffPending}
-            title={
-              !agent.worktree
-                ? "Only agents running in their own worktree have one to discard"
-                : diffPending
-                  ? PENDING_REASON
-                  : (gitBlocked ?? undefined)
-            }
-            onClick={() => setConfirmDiscard(true)}
-          >
-            <Trash2 />
-            Discard
-          </Button>
-          <Button
-            variant="secondary"
-            disabled={diffPending}
-            onClick={() => setGithubOpen(true)}
-            title="Sign in to GitHub, push this branch, or put the project on GitHub"
-          >
-            <GithubGlyph className="h-3.5 w-3.5" />
-            GitHub
-          </Button>
+          {/* One main action that follows the state of the work; everything else lives in More. */}
+          {agent.worktree && !nothingToShip && (
+            <Button
+              variant="primary"
+              disabled={busy !== null || !!shipReason}
+              title={shipReason ?? undefined}
+              onClick={() => (uncommitted > 0 ? setConfirmShip(true) : setConfirmMerge(true))}
+            >
+              {busy === "ship" || busy === "merge" ? <Spinner className="h-3.5 w-3.5 text-current" /> : <Rocket />}
+              {uncommitted > 0 ? "Commit & merge" : "Merge"}
+            </Button>
+          )}
           <PrPopover
             agent={agent}
+            open={prOpen}
+            setOpen={setPrOpen}
             autoOpen={prIntent && !!diff}
             files={diff?.files ?? null}
-            busy={busy === "pr"}
-            disabled={busy !== null || diffPending}
+            disabled={busy !== null || prReason !== null}
             onSubmit={async (t, b, base, draft) => {
               // Errors stay inline in the form (the popover keeps what you wrote).
               setBusy("pr");
@@ -845,61 +874,99 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
                 setBusy(null);
               }
             }}
-          />
-          <MergePopover
-            agent={agent}
-            busy={busy === "merge"}
-            disabled={
-              busy !== null ||
-              diffPending ||
-              !agent.worktree ||
-              uncommitted > 0 ||
-              (diff?.ahead ?? 0) === 0 ||
-              !!gitBlocked ||
-              !!lfsBlocked
-            }
-            disabledReason={
-              diffPending
-                ? PENDING_REASON
-                : lfsBlocked
-                  ? lfsBlocked
-                  : gitBlocked
-                    ? gitBlocked
-                    : !agent.worktree
-                      ? "Only agents running in their own worktree can be merged"
-                      : uncommitted > 0
-                        ? "Commit first, or use Commit & merge"
-                        : (diff?.ahead ?? 0) === 0
-                          ? "No commits to merge yet"
-                          : undefined
-            }
-            onConfirm={merge}
-          />
-          {agent.worktree && (
-            <ShipPopover
-              agent={agent}
-              uncommitted={uncommitted}
-              message={message}
-              busy={busy === "ship"}
-              disabled={
-                busy !== null ||
-                diffPending ||
-                (!hasChanges && (diff?.ahead ?? 0) === 0) ||
-                !!gitBlocked ||
-                !!lfsBlocked
-              }
-              disabledReason={
-                (diffPending ? PENDING_REASON : null) ??
-                lfsBlocked ??
-                gitBlocked ??
-                (!hasChanges && (diff?.ahead ?? 0) === 0 ? "Nothing to ship yet" : undefined)
-              }
-              onConfirm={ship}
-            />
-          )}
+          >
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="secondary" aria-label="More actions">
+                  {busy === "pr" ? <Spinner className="h-3.5 w-3.5" /> : <Ellipsis />}
+                  More
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                side="top"
+                className="w-[300px]"
+                // The form opens once the menu has closed, and takes focus itself (not the More button).
+                onCloseAutoFocus={(e) => {
+                  if (!prAfterMenu.current) return;
+                  prAfterMenu.current = false;
+                  e.preventDefault();
+                  setPrOpen(true);
+                }}
+              >
+                <MoreItem
+                  icon={<GitPullRequest />}
+                  label="Open pull request…"
+                  reason={busy !== null ? null : prReason}
+                  disabled={busy !== null || prReason !== null}
+                  onSelect={() => (prAfterMenu.current = true)}
+                />
+                <MoreItem
+                  icon={<GithubGlyph className="h-3.5 w-3.5" />}
+                  label="GitHub…"
+                  reason={diffPending ? PENDING_REASON : null}
+                  disabled={diffPending}
+                  onSelect={() => setGithubOpen(true)}
+                />
+                {agent.worktree && uncommitted > 0 && (
+                  <MoreItem
+                    icon={<GitMerge />}
+                    label="Merge only"
+                    reason={mergeReason}
+                    disabled={busy !== null || mergeReason !== null}
+                    onSelect={() => setConfirmMerge(true)}
+                  />
+                )}
+                <DropdownMenuSeparator />
+                <MoreItem
+                  icon={<Trash2 />}
+                  label="Discard worktree…"
+                  danger
+                  reason={discardReason}
+                  disabled={busy !== null || !!discardReason}
+                  onSelect={() => setConfirmDiscard(true)}
+                />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </PrPopover>
         </div>
       </footer>
 
+      <ConfirmDialog
+        open={confirmShip}
+        onOpenChange={setConfirmShip}
+        title="Ship these changes?"
+        description={
+          <>
+            Commit {pluralize(uncommitted, "uncommitted file")} as{" "}
+            <span className="font-medium text-fg">“{message}”</span>, then merge{" "}
+            <span className="font-mono text-[12px] text-fg">{agent.branch ?? "this branch"}</span> into{" "}
+            <span className="font-mono text-[12px] text-fg">{agent.baseBranch ?? "the base branch"}</span>.
+          </>
+        }
+        confirmLabel="Commit & merge"
+        onConfirm={() => {
+          setConfirmShip(false);
+          ship();
+        }}
+      />
+      <ConfirmDialog
+        open={confirmMerge}
+        onOpenChange={setConfirmMerge}
+        title={`Merge into ${agent.baseBranch ?? "the base branch"}?`}
+        description={
+          <>
+            Merges <span className="font-mono text-[12px] text-fg">{agent.branch ?? "this branch"}</span> into{" "}
+            <span className="font-mono text-[12px] text-fg">{agent.baseBranch ?? "the base branch"}</span> in your
+            project folder.
+          </>
+        }
+        confirmLabel="Merge"
+        onConfirm={() => {
+          setConfirmMerge(false);
+          merge();
+        }}
+      />
       <GithubDialog
         agent={agent}
         open={githubOpen}
@@ -1012,127 +1079,55 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   );
 }
 
-/** Primary path for worktree agents: commit what's left, then merge into the base branch. */
-function ShipPopover({
-  agent,
-  uncommitted,
-  message,
-  busy,
+function MoreItem({
+  icon,
+  label,
+  reason,
+  danger,
   disabled,
-  disabledReason,
-  onConfirm,
+  onSelect,
 }: {
-  agent: Agent;
-  uncommitted: number;
-  message: string;
-  busy: boolean;
-  disabled: boolean;
-  disabledReason?: string;
-  onConfirm: () => void;
+  icon: React.ReactNode;
+  label: string;
+  /** Why it can't be used right now, shown under the label. */
+  reason?: string | null;
+  danger?: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
 }) {
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="primary" disabled={disabled} title={disabled ? disabledReason : undefined}>
-          {busy ? <Spinner className="h-3.5 w-3.5 text-current" /> : <Rocket />}
-          Commit & merge
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent side="top" align="end" className="w-[340px]">
-        <p className="text-[13px] font-semibold">Ship these changes?</p>
-        <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted">
-          {uncommitted > 0 ? (
-            <>
-              Commit {pluralize(uncommitted, "uncommitted file")} as{" "}
-              <span className="font-medium text-fg">“{message}”</span>, then merge{" "}
-            </>
-          ) : (
-            <>Merge </>
-          )}
-          <span className="font-mono text-[12px] text-fg">{agent.branch ?? "this branch"}</span> into{" "}
-          <span className="font-mono text-[12px] text-fg">{agent.baseBranch ?? "the base branch"}</span>.
-        </p>
-        <div className="mt-3 flex justify-end gap-2">
-          <PopoverClose asChild>
-            <Button size="sm" variant="ghost">
-              Cancel
-            </Button>
-          </PopoverClose>
-          <PopoverClose asChild>
-            <Button size="sm" variant="primary" onClick={onConfirm} autoFocus>
-              <Rocket /> {uncommitted > 0 ? "Commit & merge" : "Merge"}
-            </Button>
-          </PopoverClose>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-/** Plain merge (everything already committed), with a confirm. */
-function MergePopover({
-  agent,
-  busy,
-  disabled,
-  disabledReason,
-  onConfirm,
-}: {
-  agent: Agent;
-  busy: boolean;
-  disabled: boolean;
-  disabledReason?: string;
-  onConfirm: () => void;
-}) {
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="secondary" disabled={disabled} title={disabled ? disabledReason : undefined}>
-          {busy ? <Spinner className="h-3.5 w-3.5" /> : <GitMerge />}
-          Merge
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent side="top" align="end" className="w-[320px]">
-        <p className="text-[13px] font-semibold">Merge into {agent.baseBranch ?? "the base branch"}?</p>
-        <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted">
-          Merges <span className="font-mono text-[12px] text-fg">{agent.branch ?? "this branch"}</span> into{" "}
-          <span className="font-mono text-[12px] text-fg">{agent.baseBranch ?? "the base branch"}</span> in your project
-          folder.
-        </p>
-        <div className="mt-3 flex justify-end gap-2">
-          <PopoverClose asChild>
-            <Button size="sm" variant="ghost">
-              Cancel
-            </Button>
-          </PopoverClose>
-          <PopoverClose asChild>
-            <Button size="sm" variant="primary" onClick={onConfirm} autoFocus>
-              <GitMerge /> Merge
-            </Button>
-          </PopoverClose>
-        </div>
-      </PopoverContent>
-    </Popover>
+    <DropdownMenuItem danger={danger} disabled={disabled} onSelect={onSelect} className="h-auto min-h-8 py-1.5">
+      {icon}
+      <span className="flex min-w-0 flex-col">
+        <span>{label}</span>
+        {reason && <span className="whitespace-normal text-[11.5px] leading-snug text-steel">{reason}</span>}
+      </span>
+    </DropdownMenuItem>
   );
 }
 
 function PrPopover({
   agent,
   files,
-  busy,
   disabled,
   onSubmit,
+  open,
+  setOpen,
+  children,
   autoOpen = false,
 }: {
   autoOpen?: boolean;
   agent: Agent;
   /** The agent's changed files, for the size line in the description. */
   files: ChangedFile[] | null;
-  busy: boolean;
   disabled: boolean;
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  /** The button the form hangs from. */
+  children: React.ReactNode;
   /** Resolves to an error message to show inline, or null on success. */
   onSubmit: (title: string, body: string, base: string | undefined, draft: boolean) => Promise<string | null>;
 }) {
-  const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -1140,10 +1135,14 @@ function PrPopover({
   const [draft, setDraft] = useState(false);
   const [base, setBase] = useState(agent.baseBranch ?? "");
   const [branches, setBranches] = useState<string[] | null>(null);
-  // Fresh defaults each time the form opens (the agent may have been renamed or said more since).
   const onOpenChange = (next: boolean) => {
     if (!next && submitting) return;
-    if (next) {
+    setOpen(next);
+  };
+  // Fresh defaults each time the form opens (the agent may have been renamed or said more since).
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open && !wasOpen.current) {
       setFormError(null);
       const fill = prefillPr(agent, files);
       setTitle(fill.title);
@@ -1157,27 +1156,22 @@ function PrPopover({
         .then(setBranches)
         .catch(() => setBranches(null));
     }
-    setOpen(next);
-  };
+    wasOpen.current = open;
+    // Seeds from the agent once per opening.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
   const autoOpened = useRef(false);
   useEffect(() => {
     if (!autoOpen || autoOpened.current || disabled || !agent.branch) return;
     autoOpened.current = true;
-    onOpenChange(true);
-    // onOpenChange only seeds the form from the agent; it's stable enough for a one-shot open.
+    setOpen(true);
+    // A one-shot open.
   }, [autoOpen, disabled, agent.branch]);
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="secondary"
-          disabled={disabled || !agent.branch}
-          title={!agent.branch ? "This agent has no branch to open a pull request from" : undefined}
-        >
-          {busy ? <Spinner className="h-3.5 w-3.5" /> : <GitPullRequest />}
-          Open PR
-        </Button>
-      </PopoverTrigger>
+      <PopoverAnchor asChild>
+        <span className="inline-flex">{children}</span>
+      </PopoverAnchor>
       <PopoverContent side="top" align="end" className="w-[380px]">
         <form
           onSubmit={async (e) => {

@@ -137,16 +137,31 @@ export const ScheduleRow = memo(function ScheduleRow({
               {schedule.prompt}
             </p>
             {schedule.lastError && (
-              <Tooltip content={<span className="block max-w-[340px] break-words">{schedule.lastError}</span>}>
-                <p
-                  role="note"
-                  className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] text-warn"
-                  aria-label={`Last run failed: ${schedule.lastError}`}
-                >
-                  <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">Last run failed: {schedule.lastError}</span>
-                </p>
-              </Tooltip>
+              <div
+                role="note"
+                className="mt-1 flex min-w-0 items-start gap-1.5 text-[12px] leading-4 text-warn"
+                aria-label={`Last run failed: ${schedule.lastError}`}
+              >
+                <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <Tooltip content={<span className="block max-w-[340px] break-words">{schedule.lastError}</span>}>
+                  <span className="line-clamp-2 min-w-0 break-words" title={schedule.lastError}>
+                    Last run failed: {schedule.lastError}
+                  </span>
+                </Tooltip>
+                <span className="flex shrink-0 items-center gap-2.5 whitespace-nowrap font-medium">
+                  <button
+                    type="button"
+                    disabled={running}
+                    onClick={onRun}
+                    className="underline-offset-2 hover:underline disabled:opacity-50"
+                  >
+                    Run now
+                  </button>
+                  <button type="button" onClick={onEdit} className="underline-offset-2 hover:underline">
+                    Edit
+                  </button>
+                </span>
+              </div>
             )}
           </div>
         </div>

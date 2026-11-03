@@ -128,7 +128,12 @@ export function UpdatePill() {
       </Popover>
 
       <Dialog open={notesOpen} onOpenChange={setNotesOpen}>
-        <DialogContent title={`What's new in ${update.version}`} description={update.url}>
+        <DialogContent
+          title={`What's new in ${update.version}`}
+          description={
+            update.date ? `Released ${new Date(update.date).toLocaleDateString()}` : `Version ${update.version}`
+          }
+        >
           <DialogBody>
             <Markdown text={update.notes ?? "No release notes."} />
           </DialogBody>

@@ -13,6 +13,23 @@ docs/RELEASING.md).
 - **Talk to Kvistcode is front and centre.** The voice assistant is now a labelled “Talk to Kvistcode” button in the title bar and a big card on the home screen, and the mic button in every composer is in the accent colour. If it isn't set up yet, pressing it takes you straight to the setting.
 - **Change an agent's account from the agent itself.** The account the agent runs on now sits in its header: click it to pick another account of the same provider (for example Personal or Work) and the agent carries on there with its history. It waits for the current turn to finish first.
 
+### Improved
+- **Review is simpler.** One main button (Commit & merge, or Merge) with the rest under More; actions that can't do anything are disabled, and merging asks first.
+- **Mission Control: Allow / Deny always visible**, long diffs are collapsed, and rate-limited or failed agents have Switch account / Retry / Resume right on their card.
+- **Plainer wording.** “Ask before changes” and “Run without asking” everywhere, simpler first-run and tour text, a hint that Ctrl+Enter starts an agent, and “Keep this & archive others” in Compare.
+- **A tidier command palette** opens on what needs you, recent agents and top actions.
+- **Accounts:** clear “Not signed in” state with a Sign in button, a fail-over setting at the top, and Undo after switching an agent's account.
+- **Voice assistant:** the home card no longer shifts the screen, the panel has labelled Mute and End buttons, and billing is one line.
+- **Quieter when hidden:** clocks and status polling pause while the window is in the background.
+
+### Fixed
+- “Everything finished” alerts say what the agent last reported instead of a bare “done”.
+- The “3 sub-agents” label is no longer cut off.
+- Long chats load earlier history when the screen isn't full, and a failed load shows a Retry.
+- A message that fails to send comes back into the box without losing newer text.
+- Safer saving of budgets, no half-written files, and the phone link refuses oversized or read-only requests.
+- Switching an agent's account no longer interrupts a turn that started a moment earlier.
+
 ## v0.4.0 — 2026-11-02
 
 The assistant now follows you around the app, understands “agent 2” and “project 3”, and lives in a panel you can move.

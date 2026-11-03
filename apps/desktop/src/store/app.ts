@@ -42,6 +42,8 @@ export interface AppStore {
   /** True when older items exist before the loaded tail (paged in by loadOlder). */
   hasOlder: Record<string, boolean>;
   olderLoading: Record<string, boolean>;
+  /** Last failed older-page load per agent (cleared on retry); the timeline offers a retry. */
+  olderError: Record<string, string>;
   /** Set when the event stream from the core couldn't be established/was lost. */
   connectionLost: string | null;
 
@@ -218,7 +220,12 @@ function evictTimelines(items: Record<string, TimelineItem[]>, agents: Record<st
   let out: Record<string, TimelineItem[]> | null = null;
   for (const id of Object.keys(items)) {
     const a = agents[id];
-    if (keep.has(id) || id === selected || (a && (LIVE.has(a.status) || a.pendingPermissions > 0)) || hasBackgroundWork(id))
+    if (
+      keep.has(id) ||
+      id === selected ||
+      (a && (LIVE.has(a.status) || a.pendingPermissions > 0)) ||
+      hasBackgroundWork(id)
+    )
       continue;
     out ??= { ...items };
     delete out[id];
@@ -251,6 +258,7 @@ export const useApp = create<AppStore>((set, get) => ({
   itemsError: {},
   hasOlder: {},
   olderLoading: {},
+  olderError: {},
   connectionLost: null,
 
   boot: async () => {
@@ -348,7 +356,8 @@ export const useApp = create<AppStore>((set, get) => ({
     if (!list || !hasOlder[agentId] || olderLoading[agentId]) return;
     const first = list[0]?.seq;
     if (first === undefined) return;
-    set({ olderLoading: { ...olderLoading, [agentId]: true } });
+    const { [agentId]: _cleared, ...errors } = get().olderError;
+    set({ olderLoading: { ...olderLoading, [agentId]: true }, olderError: errors });
     try {
       const page = await api.listItems(agentId, { beforeSeq: first, limit });
       const cur = get().items[agentId];
@@ -360,7 +369,9 @@ export const useApp = create<AppStore>((set, get) => ({
         hasOlder: { ...get().hasOlder, [agentId]: page.length >= limit },
       });
     } catch (e) {
-      set({ itemsError: { ...get().itemsError, [agentId]: errorMessage(e) } });
+      if (get().agents[agentId] && !removed.has(agentId)) {
+        set({ olderError: { ...get().olderError, [agentId]: errorMessage(e) } });
+      }
     } finally {
       const loading = { ...get().olderLoading };
       delete loading[agentId];
@@ -462,6 +473,10 @@ export const useApp = create<AppStore>((set, get) => ({
           if (st.hasOlder[e.agentId] !== undefined) {
             patch.hasOlder = { ...(patch.hasOlder ?? st.hasOlder) };
             delete patch.hasOlder[e.agentId];
+          }
+          if (st.olderError[e.agentId] !== undefined) {
+            patch.olderError = { ...(patch.olderError ?? st.olderError) };
+            delete patch.olderError[e.agentId];
           }
           if (st.itemsError[e.agentId] !== undefined) {
             patch.itemsError = { ...(patch.itemsError ?? st.itemsError) };

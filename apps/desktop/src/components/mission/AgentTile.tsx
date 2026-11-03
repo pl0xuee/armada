@@ -12,6 +12,7 @@ import type { QuestionItem } from "@/lib/question";
 import { useStatusView } from "@/store/background";
 import type { Account, Agent, PermissionOption, TimelineItem } from "@/lib/types";
 import { ResumesAt } from "../agent/ResumesAt";
+import { RecoveryActions, needsRecovery } from "./RecoveryActions";
 import type { TileSummary } from "./useTileSummaries";
 import { basename, cn } from "@/lib/utils";
 
@@ -121,7 +122,8 @@ export const AgentTile = memo(function AgentTile({
           title={view.detail ?? undefined}
           className="flex h-5 min-w-0 items-center gap-1.5 rounded-full border px-1.5 text-[10.5px] font-medium"
           style={{
-            color: !done && !background && (agent.status === "idle" || agent.status === "stopped") ? "var(--text-2)" : color,
+            color:
+              !done && !background && (agent.status === "idle" || agent.status === "stopped") ? "var(--text-2)" : color,
             borderColor: `color-mix(in srgb, ${color} 30%, var(--border))`,
             background: `color-mix(in srgb, ${color} 8%, transparent)`,
           }}
@@ -238,6 +240,12 @@ export const AgentTile = memo(function AgentTile({
               </Button>
             )}
           </div>
+        </div>
+      )}
+
+      {!pending && !question && needsRecovery(agent) && (
+        <div className="relative mx-3 mt-3">
+          <RecoveryActions agent={agent} />
         </div>
       )}
 

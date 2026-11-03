@@ -446,6 +446,11 @@ export function AgentList({
           {searching && projects.length === 0 && archived.length === 0 && (
             <div className="px-4 py-10 text-center text-[12.5px] text-steel">
               No projects or agents match “{query}”.
+              <div className="mt-3">
+                <Button size="sm" variant="secondary" onClick={() => setQuery("")}>
+                  Clear filter
+                </Button>
+              </div>
             </div>
           )}
           {!searching && agents.length === 0 && (

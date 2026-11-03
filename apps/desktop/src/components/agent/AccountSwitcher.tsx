@@ -40,7 +40,7 @@ export function AccountSwitcher({ agent, showName }: { agent: Agent; showName: b
             )}
           >
             <AccountAvatar account={current} size={16} showProvider={false} compact />
-            {showName && <span className="min-w-0 truncate">{current.name}</span>}
+            {showName && <span className="max-w-[12ch] min-w-0 truncate">{current.name}</span>}
             <ChevronDown className="h-3 w-3 shrink-0 text-steel" />
           </button>
         </DropdownMenuTrigger>

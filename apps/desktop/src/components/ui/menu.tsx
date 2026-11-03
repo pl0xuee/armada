@@ -21,16 +21,25 @@ export function DropdownMenuContent({
   align = "start",
   side,
   sideOffset = 6,
+  onCloseAutoFocus,
 }: {
   children: ReactNode;
   className?: string;
   align?: "start" | "center" | "end";
   side?: "top" | "right" | "bottom" | "left";
   sideOffset?: number;
+  /** Call `e.preventDefault()` to keep focus off the trigger on close (a popover is opening instead). */
+  onCloseAutoFocus?: (e: Event) => void;
 }) {
   return (
     <DM.Portal>
-      <DM.Content align={align} side={side} sideOffset={sideOffset} className={cn(contentClass, className)}>
+      <DM.Content
+        align={align}
+        side={side}
+        sideOffset={sideOffset}
+        onCloseAutoFocus={onCloseAutoFocus}
+        className={cn(contentClass, className)}
+      >
         {children}
       </DM.Content>
     </DM.Portal>

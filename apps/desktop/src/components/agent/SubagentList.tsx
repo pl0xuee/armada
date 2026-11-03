@@ -1,5 +1,6 @@
 import { Bot, CircleCheck, CircleX } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useVisibleInterval } from "@/hooks/useVisibleInterval";
 import type { SubagentRun } from "@/lib/agents";
 import { cn } from "@/lib/utils";
 import { formatElapsed } from "../timeline/thinking";
@@ -9,11 +10,9 @@ import { Spinner } from "../ui/misc";
 function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!active) return;
-    setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    if (active) setNow(Date.now());
   }, [active]);
+  useVisibleInterval(() => setNow(Date.now()), 1000, active);
   return now;
 }
 

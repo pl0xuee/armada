@@ -81,6 +81,8 @@ import { openShortcutHelp } from "./shell/ShortcutHelp";
 import { openTour } from "@/store/tour";
 import { ProviderGlyph } from "./ProviderGlyph";
 import { StatusDot } from "./StatusDot";
+import { reasonLabel, useTriageQueue } from "./triage/useTriage";
+import { PERMISSION_LABEL } from "./home/PermissionModeChip";
 import { Kbd } from "./ui/kbd";
 import { Spinner } from "./ui/misc";
 import { useReturnFocus } from "./ui/returnFocus";
@@ -180,9 +182,19 @@ function Palette({ onClose }: { onClose: () => void }) {
   const term = searchTerm(query);
   const task = (startMode ? query.trimStart().slice(1) : query).trim();
   const ui = useUi.getState();
+  // Nothing typed: a short list (what needs you, the latest agents, the main actions). Typing searches everything.
+  const idle = !startMode && !searchMode && query.trim() === "";
 
   const agents = useMemo(() => orderedAgents(Object.values(agentsMap)), [agentsMap]);
   const archived = useMemo(() => Object.values(agentsMap).filter((a) => a.archived), [agentsMap]);
+  const needsYou = useTriageQueue();
+  const recent = useMemo(() => {
+    const waiting = new Set(needsYou.map((e) => e.agent.id));
+    return agents
+      .filter((a) => !waiting.has(a.id))
+      .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
+      .slice(0, 3);
+  }, [agents, needsYou]);
   const pending = usePendingPermissions();
   const questions = usePendingQuestions();
   const current = ui.view === "agents" && ui.selectedAgentId ? agentsMap[ui.selectedAgentId] : undefined;
@@ -323,7 +335,7 @@ function Palette({ onClose }: { onClose: () => void }) {
                   </IconBox>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">
-                      Start agent{m === defaultMode ? "" : ` in ${m === "auto" ? "Auto" : "Ask"}`}:{" "}
+                      Start agent{m === defaultMode ? "" : ` (${PERMISSION_LABEL[m].toLowerCase()})`}:{" "}
                       <span className="text-fg">“{task}”</span>
                     </span>
                     <span className="flex min-w-0 items-center gap-1 text-[11px] text-steel">
@@ -333,7 +345,7 @@ function Palette({ onClose }: { onClose: () => void }) {
                         {launchAccount ? ` · ${launchAccount.name}` : ""}
                         {launch.folder ? ` · ${basename(launch.folder)}` : " · choose a folder"}
                         {launch.worktree ? " · worktree" : ""}
-                        {` · ${m === "auto" ? "Auto" : "Ask"}`}
+                        {` · ${PERMISSION_LABEL[m]}`}
                       </span>
                     </span>
                   </span>
@@ -343,7 +355,77 @@ function Palette({ onClose }: { onClose: () => void }) {
           </Command.Group>
         )}
 
-        {!startMode && !searchMode && (
+        {idle && (
+          <>
+            {needsYou.length > 0 && (
+              <Command.Group heading="Needs you" className={groupClass}>
+                {needsYou.slice(0, 3).map(({ agent: a, reason }) => (
+                  <AgentRow
+                    key={a.id}
+                    agent={a}
+                    value={`needs:${a.id}`}
+                    note={reasonLabel(reason)}
+                    onSelect={() => run(() => ui.openAgent(a.id))}
+                  />
+                ))}
+              </Command.Group>
+            )}
+            {recent.length > 0 && (
+              <Command.Group heading="Recent agents" className={groupClass}>
+                {recent.map((a) => (
+                  <AgentRow
+                    key={a.id}
+                    agent={a}
+                    value={`agent:${a.id}`}
+                    kbd={agents.indexOf(a) < 9 ? agents.indexOf(a) + 1 : undefined}
+                    onSelect={() => run(() => ui.openAgent(a.id))}
+                  />
+                ))}
+              </Command.Group>
+            )}
+            <Command.Group heading="Actions" className={groupClass}>
+              <PaletteAction
+                icon={<Plus />}
+                label="New agent"
+                shortcut={[modKey, "N"]}
+                onSelect={() => run(() => ui.openNewAgent())}
+              />
+              <PaletteAction
+                icon={<Search />}
+                label="Search conversations…"
+                shortcut={[modKey, "⇧", "F"]}
+                keywords={["find", "history", "messages", "grep", "files", "tools"]}
+                onSelect={() => setQuery("? ")}
+              />
+              <PaletteAction
+                icon={<ListTodo />}
+                label="Go to Mission Control: Needs you"
+                shortcut={[modKey, "J"]}
+                onSelect={() => run(() => ui.openMission("needs"))}
+              />
+              <PaletteAction
+                icon={<LayoutGrid />}
+                label="Go to Mission Control: All agents"
+                shortcut={[modKey, "⇧", "M"]}
+                onSelect={() => run(() => ui.openMission("all"))}
+              />
+              <PaletteAction
+                icon={<Settings />}
+                label="Open Settings"
+                shortcut={[modKey, ","]}
+                onSelect={() => run(() => ui.openSettings())}
+              />
+              <PaletteAction
+                icon={<Keyboard />}
+                label="Keyboard shortcuts"
+                shortcut={[modKey, "/"]}
+                onSelect={() => run(() => openShortcutHelp())}
+              />
+            </Command.Group>
+          </>
+        )}
+
+        {!startMode && !searchMode && !idle && (
           <>
             <Command.Group heading="Agents" className={groupClass}>
               {[...agents, ...archived].map((a, i) => (
@@ -688,7 +770,11 @@ function Palette({ onClose }: { onClose: () => void }) {
                 ))}
               </Command.Group>
             )}
+          </>
+        )}
 
+        {!startMode && !searchMode && (
+          <>
             {/* Approvals come last: cmdk auto-selects the first item, and Enter must never approve by accident. */}
             {pending.length > 0 && (
               <Command.Group heading="Waiting for approval" className={groupClass}>
@@ -788,11 +874,59 @@ function Palette({ onClose }: { onClose: () => void }) {
               ? "Enter starts the agent"
               : searchMode
                 ? "Searched on this computer only · archived agents included"
-                : "Type > to start an agent · ? to search every conversation"}
+                : idle
+                  ? "Type to search everything · > start an agent · ? chats"
+                  : "Type > to start an agent · ? to search every conversation"}
           </span>
         )}
       </div>
     </Command>
+  );
+}
+
+function AgentRow({
+  agent: a,
+  value,
+  note,
+  kbd,
+  onSelect,
+}: {
+  agent: Agent;
+  value: string;
+  /** Why it is listed (for example "Needs approval"). */
+  note?: string;
+  kbd?: number;
+  onSelect: () => void;
+}) {
+  return (
+    <Command.Item
+      value={value}
+      keywords={[a.title, a.provider, basename(a.projectPath), a.branch ?? ""]}
+      onSelect={onSelect}
+      className={itemClass}
+    >
+      <ProviderGlyph provider={a.provider} customAgentId={a.customAgentId} size="sm" />
+      <span className="min-w-0 flex-1 truncate">{a.title}</span>
+      {note ? (
+        <span className="shrink-0 text-[11.5px] text-warn">{note}</span>
+      ) : (
+        <>
+          <StatusDot status={a.status} size={6} />
+          <span className="w-24 truncate text-right text-[11.5px] text-steel max-[480px]:hidden">
+            {basename(a.projectPath)}
+          </span>
+        </>
+      )}
+      {/* Always reserve the badge's width so rows don't shift when one is selected. */}
+      <span className="invisible flex w-[52px] shrink-0 justify-end gap-0.5 group-data-[selected=true]:visible max-[480px]:hidden">
+        {kbd !== undefined && (
+          <>
+            <Kbd>{modKey}</Kbd>
+            <Kbd>{kbd}</Kbd>
+          </>
+        )}
+      </span>
+    </Command.Item>
   );
 }
 

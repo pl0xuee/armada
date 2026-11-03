@@ -14,6 +14,7 @@ import { useStatusView } from "@/store/background";
 import type { Account, Agent, PermissionOption, TimelineItem } from "@/lib/types";
 import { basename, cn } from "@/lib/utils";
 import { ResumesAt } from "../agent/ResumesAt";
+import { RecoveryActions, needsRecovery } from "./RecoveryActions";
 import type { TileSummary } from "./useTileSummaries";
 
 type PermissionItem = Extract<TimelineItem, { kind: "permission" }>;
@@ -195,6 +196,8 @@ export const AgentRowCompact = memo(function AgentRowCompact({
           >
             Answer
           </Button>
+        ) : needsRecovery(agent) ? (
+          <RecoveryActions agent={agent} compact />
         ) : (
           <span className="hidden items-center justify-end gap-1.5 text-right text-[11.5px] tabular text-steel @xl:inline-flex">
             <BudgetChip agent={agent} compact />
