@@ -11,6 +11,7 @@ import { Icon, Spinner, type IconName } from "../Icon";
 import { ImageStrip } from "../Images";
 import { LocalImage } from "../LocalImage";
 import { isLocalImagePath } from "@/lib/localImages";
+import { hasPicture } from "@shared/inlineImage";
 import { Markdown } from "../Markdown";
 import { MessageFold } from "../MessageFold";
 import type { MessageRole } from "@/lib/collapse";
@@ -150,7 +151,7 @@ export const AgentMessage = memo(function AgentMessage({
     <div className="min-w-0">
       {images.length > 0 && <ImageStrip images={images} large className={item.text ? "mb-2" : undefined} />}
       {item.text && (
-        <MessageFold id={item.id} role={role} streaming={streaming}>
+        <MessageFold id={item.id} role={role} streaming={streaming} canFold={!hasPicture(item.text)}>
           <Markdown text={item.text} caret={streaming} interim={role === "narration"} />
         </MessageFold>
       )}

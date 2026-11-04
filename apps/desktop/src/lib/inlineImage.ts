@@ -7,6 +7,14 @@ const INLINE_IMAGE_RE = /^data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/
  * A reply's `![alt](data:image/png;base64,…)` picture, when it is a small raster image. Shown directly:
  * nothing is fetched. SVG is left out on purpose.
  */
+/**
+ * Whether a reply shows a picture (`![alt](…)`). Such a reply never folds: the screenshots an agent
+ * sends must not hide behind "Show more".
+ */
+export function hasPicture(text: string): boolean {
+  return text.includes("![") && /!\[[^\]\n]{0,1000}\]\(/.test(text);
+}
+
 export function inlineImageSrc(url: string): string | null {
   const s = url.trim();
   return s.length <= MAX_INLINE_IMAGE_CHARS && INLINE_IMAGE_RE.test(s) ? s : null;

@@ -22,11 +22,14 @@ export function MessageFold({
   id,
   role,
   streaming,
+  canFold = true,
   children,
 }: {
   id: string;
   role: MessageRole;
   streaming: boolean;
+  /** False: always shown in full (a reply with pictures). */
+  canFold?: boolean;
   children: ReactNode;
 }) {
   const bodyId = useId();
@@ -57,7 +60,7 @@ export function MessageFold({
   if (height !== null && limitRole.current === null) limitRole.current = role;
   const foldRole = limitRole.current ?? role;
 
-  const foldable = height !== null && shouldCollapse(height, foldRole, { streaming, watched: watched.current });
+  const foldable = canFold && height !== null && shouldCollapse(height, foldRole, { streaming, watched: watched.current });
   const collapsed = foldable && !expanded;
 
   // After folding back up, keep the message's top in view instead of leaving the reader below it.

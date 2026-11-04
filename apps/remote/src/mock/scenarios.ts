@@ -1,9 +1,10 @@
 /**
- * Optional dev-mock scenarios for the newer features (`?quick=1&plan=1&group=1&md=1&dock=1`), kept out of the
+ * Optional dev-mock scenarios for the newer features (`?quick=1&plan=1&group=1&md=1&dock=1&pics=1`), kept out of the
  * default fleet so the other screenshots and tests stay stable. Dev-only; never bundled in production.
  */
 import type { Agent, TimelineItem } from "@/lib/types";
 import { agent, base, MIN, tool } from "./data";
+import { CHECKOUT_PNG } from "./images";
 
 export interface Extras {
   agents: Agent[];
@@ -228,6 +229,35 @@ export function buildExtras(now: number, flags: ReadonlySet<string>): Extras {
     timelines.h2 = [
       { ...base("h2", at(30)), kind: "user_message", text: "Find out why the e2e suite is flaky." },
       { ...base("h2", at(9)), kind: "agent_message", text: "Three of the five flaky specs share a race in the cart fixture." },
+    ];
+  }
+
+  if (flags.has("pics")) {
+    // Screenshots an agent sends mid-turn: by path in a long working note (must not fold away), inline as
+    // data cut in two by a sub-agent's call (must rejoin whole), and as SendUserFile's reply.
+    agents.push(agent(now, "x1", "Show the game's progress", "claude", "acc-work", "working", { agoMin: 0, projectPath: WEB }));
+    const pic = `data:image/png;base64,${CHECKOUT_PNG}`;
+    const cut = 1_800;
+    timelines.x1 = [
+      { ...base("x1", at(12)), kind: "user_message", text: "Show me where the game stands, with screenshots." },
+      {
+        ...base("x1", at(11)),
+        kind: "agent_message",
+        text: "Here's where the game stands, from captures the agents made over the last few hours.\n\n**Title screen**\n![Title screen](/tmp/flow_title.png)\n\n**Hollowmere, the first region:** the opening walk in the rain.\n![Hollowmere opening walk](/tmp/flow_walk.png)\n\n**The checkout,** for comparison.\n![Checkout](/tmp/checkout.png)\n\nSay the word and I'll capture fresh shots of something specific.",
+      },
+      tool("x1", at(10), "execute", "Run godot --headless --script capture.gd", { command: "godot --headless --script capture.gd" }),
+      tool("x1", at(9.5), "read", "Read /tmp/fens_boar.png", { locations: ["/tmp/fens_boar.png"] }),
+      tool("x1", at(9), "other", "Task: Finish the Fens pass", {
+        toolCallId: "x1-sa",
+        status: "in_progress",
+        subagent: { kind: "general-purpose", description: "Finish the Fens pass", prompt: "Dress the Fens rooms.", background: true },
+      }),
+      { ...base("x1", at(4)), kind: "agent_message", text: `Test image, embedded directly in the message:\n\n![Checkout, test](${pic.slice(0, cut)}` },
+      tool("x1", at(3.9), "execute", "Run ls rooms/", { parentToolCallId: "x1-sa", command: "ls rooms/" }),
+      { ...base("x1", at(3.8)), kind: "agent_message", text: `${pic.slice(cut)})\n\nIf this one shows on your phone, tell me and I'll send the rest the same way.` },
+      tool("x1", at(3), "other", "SendUserFile", { output: "1 file delivered to user.\n  /tmp/flow_title.png → file_uuid: 4947eb24" }),
+      { ...base("x1", at(2.9)), kind: "agent_message", text: "The title screen, as a file card.\n\n![flow_title.png](/tmp/flow_title.png)" },
+      tool("x1", at(1), "edit", "Edit game/fens/stilt_market.tscn", { status: "in_progress" }),
     ];
   }
 

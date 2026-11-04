@@ -13,8 +13,12 @@
  * Performance: agent output is untrusted and can be huge, so every pattern
  * is either linear or bounded. Block structure is detected with string
  * operations; inline regexes only ever see a WINDOW-sized slice; over-long
- * lines and paragraphs are rendered as plain text.
+ * lines and paragraphs are rendered as plain text. Inline `data:` pictures are
+ * the exception: they are found with string operations however long they are,
+ * and don't count toward the length limit.
  */
+
+import { inlineImageSrc, MAX_INLINE_IMAGE_CHARS } from "@shared/inlineImage";
 
 export type Align = "left" | "center" | "right" | null;
 
@@ -53,6 +57,22 @@ export const MAX_FORMATTED = 10_000;
 /** Inline patterns never look further ahead than this. */
 const WINDOW = 2_000;
 const MAX_DEPTH = 6;
+
+/** An inline picture's address, `](data:image/png;base64,…)`. Linear: the base64 run can only end one way. */
+const DATA_PICTURE = /\]\(data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}\)/gi;
+const DATA_PICTURE_SRC = /data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}(?=\))/iy;
+
+/**
+ * Length as far as MAX_FORMATTED is concerned: an inline picture's data counts as nothing, so a
+ * reply that carries a screenshot (thousands of characters of base64) still renders as markdown.
+ */
+function formattedLength(s: string): number {
+  if (s.length <= MAX_FORMATTED || !s.includes("](data:image/")) return s.length;
+  let n = s.length;
+  // One too large to show stays text, and counts.
+  for (const m of s.matchAll(DATA_PICTURE)) if (m[0].length <= MAX_INLINE_IMAGE_CHARS + 3) n -= m[0].length;
+  return n;
+}
 
 // ---------------------------------------------------------------------------
 // Block-level detection (string operations, no backtracking)
@@ -218,7 +238,7 @@ export function parseBlocks(src: string, depth = 0): Block[] {
       i++;
       continue;
     }
-    if (line.length > MAX_FORMATTED) {
+    if (formattedLength(line) > MAX_FORMATTED) {
       blocks.push({ t: "p", text: line, plain: true });
       i++;
       continue;
@@ -370,11 +390,11 @@ export function parseBlocks(src: string, depth = 0): Block[] {
         }
         if (interruptsParagraph(cur)) break;
         if (cur.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])) break;
-        if (cur.length > MAX_FORMATTED) break;
+        if (formattedLength(cur) > MAX_FORMATTED) break;
       }
       // Trailing spaces stay (two of them are a hard line break); the final line is trimmed below.
       para.push(cur.trimStart());
-      size += cur.length;
+      size += formattedLength(cur);
       i++;
     }
     const text = para.join("\n").trimEnd();
@@ -502,8 +522,24 @@ function trimUrl(url: string): string {
 
 const isWord = (ch: string | undefined) => !!ch && /\w/.test(ch);
 
+/**
+ * `![alt](data:image/…;base64,…)` starting at `at`, however long the data is: the link pattern only
+ * looks WINDOW characters ahead, and a screenshot is far longer than that.
+ */
+function dataPicture(text: string, at: number): { alt: string; src: string; end: number } | null {
+  const head = text.slice(at + 2, at + 2 + WINDOW);
+  const close = head.indexOf("](data:image/");
+  if (close < 0) return null;
+  const alt = head.slice(0, close);
+  if (/[[\]\n]/.test(alt.replace(/\\./g, ""))) return null;
+  DATA_PICTURE_SRC.lastIndex = at + 2 + close + 2;
+  const m = DATA_PICTURE_SRC.exec(text);
+  const src = m && inlineImageSrc(m[0]);
+  return src ? { alt, src, end: DATA_PICTURE_SRC.lastIndex + 1 } : null;
+}
+
 export function parseInline(text: string, depth = 0, inLink = false): Inline[] {
-  if (text.length > MAX_FORMATTED) return [text.split(CARET).join(""), ...(text.includes(CARET) ? [{ t: "caret" } as const] : [])];
+  if (formattedLength(text) > MAX_FORMATTED) return [text.split(CARET).join(""), ...(text.includes(CARET) ? [{ t: "caret" } as const] : [])];
   const out: Inline[] = [];
   let closers: number[] | undefined; // strikethrough closers, found on first use
   let buf = "";
@@ -577,6 +613,14 @@ export function parseInline(text: string, depth = 0, inLink = false): Inline[] {
         i = n;
       }
       continue;
+    }
+    if (ch === "!" && text[i + 1] === "[") {
+      const pic = dataPicture(text, i);
+      if (pic) {
+        push({ t: "image", src: pic.src, alt: inlineText(inner(pic.alt, true)) });
+        i = pic.end;
+        continue;
+      }
     }
     if ((ch === "[" || (ch === "!" && text[i + 1] === "[")) && (m = match(LINK, text, i))) {
       const dest = (m[2] ?? m[3] ?? "").trim();

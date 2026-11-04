@@ -34,7 +34,7 @@ describe("lastAnswer", () => {
       user("u", 1),
       msg("m1", "The root cause is in the", 2),
       call("sub-child", 3, "sub"),
-      msg("m2", "retry path, which never resets.", 4),
+      msg("m2", " retry path, which never resets.", 4), // the stream carries its own spaces
     ]);
     expect(r.text).toBe("The root cause is in the retry path, which never resets.");
   });

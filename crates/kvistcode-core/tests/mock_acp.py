@@ -91,6 +91,22 @@ while True:
             update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Done with the sub-agent"}})
             send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
             continue
+        if "SENDFILE" in text:
+            # Claude Code's SendUserFile: the files come in rawInput; the completion carries none.
+            meta = {"claudeCode": {"toolName": "SendUserFile"}}
+            update(sid, {"sessionUpdate": "tool_call", "toolCallId": "send1", "title": "SendUserFile", "kind": "other",
+                         "status": "pending", "_meta": meta,
+                         "rawInput": {"files": ["/tmp/my shot [1].png", "notes.txt"], "caption": "Here they are.",
+                                      "display": "attach"}})
+            update(sid, {"sessionUpdate": "tool_call_update", "toolCallId": "send1", "status": "completed", "_meta": meta,
+                         "content": [{"type": "content", "content": {"type": "text", "text": "2 files delivered to user."}}]})
+            # One that fails shows nothing.
+            update(sid, {"sessionUpdate": "tool_call", "toolCallId": "send2", "title": "SendUserFile", "kind": "other",
+                         "status": "pending", "_meta": meta, "rawInput": {"files": ["/tmp/gone.png"]}})
+            update(sid, {"sessionUpdate": "tool_call_update", "toolCallId": "send2", "status": "failed", "_meta": meta})
+            update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Sent."}})
+            send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+            continue
         update(sid, {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "thinking"}})
         update(sid, {"sessionUpdate": "plan", "entries": [
             {"content": "Look around", "status": "completed", "priority": "high"},

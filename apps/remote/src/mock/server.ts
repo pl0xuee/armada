@@ -46,7 +46,7 @@ export function scenarioFromParams(p: URLSearchParams): Scenario {
     stressItems: p.get("stress") === "1" ? Math.max(10, Number(p.get("items") ?? 3000) || 3000) : 0,
     stressRate: Math.max(1, Number(p.get("rate") ?? 60) || 60),
     workflowSecs: Math.max(0, Number(p.get("wf") ?? 0) || 0),
-    extras: new Set(["quick", "plan", "group", "md", "dock", "hold"].filter((k) => p.get(k) === "1")),
+    extras: new Set(["quick", "plan", "group", "md", "dock", "hold", "pics"].filter((k) => p.get(k) === "1")),
   };
 }
 

@@ -84,6 +84,8 @@ pub struct AcpDriver {
     config_src: Mutex<HashMap<String, ConfigSource>>,
     /// Kvistcode's note to the agent went in as the new session's system prompt.
     guided: std::sync::atomic::AtomicBool,
+    /// SendUserFile calls still running → the reply that shows their files (see `show_sent_files`).
+    sent_files: Mutex<HashMap<String, String>>,
 }
 
 pub struct StartOptions<'a> {
@@ -173,6 +175,7 @@ impl AcpDriver {
             next_barrier: std::sync::atomic::AtomicU64::new(FIRST_SYNC_BARRIER),
             config_src: Mutex::default(),
             guided: std::sync::atomic::AtomicBool::new(false),
+            sent_files: Mutex::default(),
         });
         tokio::spawn(event_loop(
             Arc::downgrade(&driver),
@@ -855,6 +858,7 @@ impl AcpDriver {
                     return;
                 };
                 ctx.tool_call(id, |b| apply_tool_fields(b, u));
+                self.show_sent_files(id, u);
             }
             "plan" => {
                 let entries = u["entries"]
@@ -916,6 +920,36 @@ impl AcpDriver {
     /// (no choices offered); the caller then declines it.
     /// A form elicitation: Claude's AskUserQuestion (via claude-agent-acp) or an MCP
     /// server's form. Returns false when it can't be shown (the caller declines it).
+    /// Claude Code's SendUserFile hands files to the person (as cards in Claude's own apps), and
+    /// nothing in Kvistcode would show them. Once the call succeeds they appear as a reply: the
+    /// caption, then each picture (loaded from disk like any screenshot in a reply) or file path.
+    fn show_sent_files(&self, id: &str, u: &Value) {
+        let mut pending = self.sent_files.lock();
+        let tool = u["_meta"]["claudeCode"]["toolName"]
+            .as_str()
+            .or_else(|| u["title"].as_str());
+        if tool == Some("SendUserFile") {
+            if let Some(text) = sent_files_text(&u["rawInput"]) {
+                pending.insert(id.to_string(), text);
+            }
+        }
+        match u["status"].as_str() {
+            Some("completed") => {
+                if let Some(text) = pending.remove(id) {
+                    drop(pending);
+                    self.ctx.push(ItemBody::AgentMessage {
+                        text,
+                        images: Vec::new(),
+                    });
+                }
+            }
+            Some("failed") => {
+                pending.remove(id);
+            }
+            _ => {}
+        }
+    }
+
     fn on_question(&self, rpc_id: Value, params: &Value) -> bool {
         // Only forms were advertised; a URL elicitation has no fields to show.
         if params["mode"].as_str().is_some_and(|m| m != "form") {
@@ -1020,6 +1054,54 @@ impl AcpDriver {
         );
         true
     }
+}
+
+/// The reply that shows a SendUserFile call's files (`{"files": [paths], "caption": …}`), or None
+/// when it names none. Paths are percent-encoded: the apps decode them, and nothing in a file name
+/// can break the markdown.
+fn sent_files_text(input: &Value) -> Option<String> {
+    let files: Vec<&str> = input["files"]
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|f| !f.is_empty())
+        .collect();
+    if files.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if let Some(caption) = input["caption"].as_str().map(str::trim) {
+        if !caption.is_empty() {
+            parts.push(caption.to_string());
+        }
+    }
+    for f in files {
+        let path = Path::new(f);
+        if crate::files::image_mime(path).is_some() {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let mut alt = String::new();
+            for c in name.chars() {
+                match c {
+                    '[' | ']' | '\\' => {
+                        alt.push('\\');
+                        alt.push(c);
+                    }
+                    '\n' | '\r' => alt.push(' '),
+                    c => alt.push(c),
+                }
+            }
+            parts.push(format!("![{alt}]({})", crate::files::percent_encode(f)));
+        } else if f.contains(['`', '\n', '\r']) {
+            parts.push(f.replace(['\n', '\r'], " "));
+        } else {
+            parts.push(format!("`{f}`"));
+        }
+    }
+    Some(parts.join("\n\n"))
 }
 
 async fn event_loop(
@@ -1605,6 +1687,28 @@ mod subagent_tests {
             ItemBody::ToolCall { subagent, .. } => subagent.as_ref(),
             _ => None,
         }
+    }
+
+    #[test]
+    fn sent_files_become_a_reply_with_their_pictures() {
+        let text = sent_files_text(&json!({
+            "files": ["/tmp/flow_title.png", " build/shots/a b.JPG ", "/tmp/report.pdf", ""],
+            "caption": " Progress so far. ",
+            "display": "attach"
+        }))
+        .unwrap();
+        assert_eq!(
+            text,
+            "Progress so far.\n\n![flow_title.png](/tmp/flow_title.png)\n\n![a b.JPG](build/shots/a%20b.JPG)\n\n`/tmp/report.pdf`"
+        );
+        // No caption: just the pictures. No files: nothing to show.
+        assert_eq!(
+            sent_files_text(&json!({"files": ["/tmp/x.webp"]})).as_deref(),
+            Some("![x.webp](/tmp/x.webp)")
+        );
+        assert_eq!(sent_files_text(&json!({"files": []})), None);
+        assert_eq!(sent_files_text(&json!({"caption": "hi"})), None);
+        assert_eq!(sent_files_text(&Value::Null), None);
     }
 
     #[test]

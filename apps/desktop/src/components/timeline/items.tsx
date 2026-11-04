@@ -48,6 +48,7 @@ import { usePinnedUi } from "@/store/pinnedUi";
 const NO_PARSED: ParsedFileDiff[] = [];
 import { attachmentSrc } from "@/lib/attachments";
 import { isImagePath } from "@/lib/images";
+import { hasPicture } from "@/lib/inlineImage";
 import { stripOutputFence } from "@/lib/terminalOutput";
 import { ImageLightbox } from "../ImageLightbox";
 import { LocationThumb } from "../LocalImage";
@@ -194,7 +195,7 @@ export const AgentMessage = memo(function AgentMessage({
     <div className={cn("group relative", text && "-mb-3 pb-5")}>
       {images.length > 0 && <MessageImages images={images} />}
       {text ? (
-        <MessageFold id={item.id} role={role} streaming={streaming}>
+        <MessageFold id={item.id} role={role} streaming={streaming} canFold={!hasPicture(text)}>
           <Markdown
             text={text}
             streaming={streaming}

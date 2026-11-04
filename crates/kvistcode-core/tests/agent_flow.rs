@@ -1268,3 +1268,59 @@ async fn agents_are_told_they_can_show_pictures() {
         core.shutdown().await;
     }
 }
+
+/// Claude Code's SendUserFile (files for the person, as cards in Claude's own apps) shows up as a
+/// reply once the call succeeds: the caption, then each picture by path, then other files' paths.
+#[tokio::test]
+async fn sent_files_show_as_a_reply() {
+    let (core, mut rx, account, project) = custom_mock_core("sentfiles").await;
+    let agent = core
+        .create_agent(CreateAgentRequest {
+            provider: Provider::Custom,
+            account_id: account,
+            project_path: project.to_string_lossy().into_owned(),
+            prompt: "SENDFILE please".into(),
+            title: None,
+            worktree: false,
+            model: None,
+            group_id: None,
+            custom_agent_id: Some("mock".into()),
+            permission_mode: None,
+            attachments: vec![],
+        })
+        .await
+        .unwrap();
+    next_matching(&mut rx, |e| {
+        matches!(
+            e,
+            KvistcodeEvent::Attention {
+                reason: AttentionReason::Done,
+                ..
+            }
+        )
+    })
+    .await;
+    let shown: Vec<String> = core
+        .items(&agent.id)
+        .unwrap()
+        .iter()
+        .filter_map(|i| match &i.body {
+            ItemBody::ToolCall {
+                tool_call_id,
+                status,
+                ..
+            } => Some(format!("{tool_call_id} {status:?}")),
+            ItemBody::AgentMessage { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            "send1 Completed",
+            "Here they are.\n\n![my shot \\[1\\].png](/tmp/my%20shot%20%5B1%5D.png)\n\n`notes.txt`",
+            "send2 Failed",
+            "Sent.",
+        ]
+    );
+}

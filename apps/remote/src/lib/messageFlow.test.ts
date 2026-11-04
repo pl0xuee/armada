@@ -25,7 +25,7 @@ const pic = () => msg("", [{ name: "a.png", mimeType: "image/png", data: "AAAA" 
 
 describe("joinMessageText", () => {
   it("joins a sentence cut in two without a paragraph break", () => {
-    expect(joinMessageText("the machine were busy with my compiling", "and testing would distort its numbers.")).toBe(
+    expect(joinMessageText("the machine were busy with my compiling", " and testing would distort its numbers.")).toBe(
       "the machine were busy with my compiling and testing would distort its numbers.",
     );
   });
@@ -54,7 +54,27 @@ describe("joinMessageText", () => {
   });
 
   it("joins a list item cut mid-sentence", () => {
-    expect(joinMessageText("- rounds each line before", "tax is applied")).toBe("- rounds each line before tax is applied");
+    expect(joinMessageText("- rounds each line before", " tax is applied")).toBe("- rounds each line before tax is applied");
+  });
+
+  it("joins a cut inside a word as is: the stream carries its own spaces", () => {
+    // Real cuts from Claude Code replies split by sub-agent calls.
+    expect(joinMessageText("Quick look at them in the brow", "ser mock.")).toBe("Quick look at them in the browser mock.");
+    expect(joinMessageText("If it doesn't, the phone app is", "n't loading images")).toBe("If it doesn't, the phone app isn't loading images");
+    expect(joinMessageText("a `priority` property. F", "ixing the contract now.")).toBe("a `priority` property. Fixing the contract now.");
+    expect(joinMessageText("go into the next commit", ".")).toBe("go into the next commit.");
+  });
+
+  it("keeps a picture whole when the cut falls inside its data", () => {
+    const pic = "![shot](data:image/webp;base64,UklGRpoMAABXRUJQ" + "A".repeat(3000) + "Qv8zQ";
+    expect(joinMessageText("Test image:\n\n" + pic.slice(0, 2000), pic.slice(2000) + ")")).toBe("Test image:\n\n" + pic + ")");
+    // Even where the rest starts like a new sentence.
+    expect(joinMessageText("![a](data:image/png;base64,iVBOR", "Kgo=)")).toBe("![a](data:image/png;base64,iVBORKgo=)");
+    expect(joinMessageText("See [the guide](https://example.com/Get", "Started) first.")).toBe("See [the guide](https://example.com/GetStarted) first.");
+  });
+
+  it("still adds a space before what starts like a new sentence", () => {
+    expect(joinMessageText("![Fens](/tmp/fens.png)", "The art set is finished.")).toBe("![Fens](/tmp/fens.png) The art set is finished.");
   });
 
   it("ignores empty sides", () => {
@@ -88,7 +108,7 @@ describe("stitchMessages", () => {
   });
 
   it("merges across rows that are not shown (sub-agent calls, held calls)", () => {
-    const items = [msg("the numbers would be misleading with my compiling"), tool({ parentToolCallId: "p" }), msg("and testing.")];
+    const items = [msg("the numbers would be misleading with my compiling"), tool({ parentToolCallId: "p" }), msg(" and testing.")];
     // The hidden call is not a top-level row, so the two messages touch.
     const top = [0, 2];
     const r = stitchMessages(items, top);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inlineImageSrc, MAX_INLINE_IMAGE_CHARS } from "./inlineImage";
+import { hasPicture, inlineImageSrc, MAX_INLINE_IMAGE_CHARS } from "./inlineImage";
 
 describe("inlineImageSrc", () => {
   it("accepts small raster data URIs", () => {
@@ -12,5 +12,14 @@ describe("inlineImageSrc", () => {
     expect(inlineImageSrc("data:image/png;base64,abc def")).toBeNull();
     expect(inlineImageSrc("https://example.com/a.png")).toBeNull();
     expect(inlineImageSrc("data:image/png;base64," + "A".repeat(MAX_INLINE_IMAGE_CHARS))).toBeNull();
+  });
+});
+
+describe("hasPicture", () => {
+  it("spots a markdown picture of any kind", () => {
+    expect(hasPicture("Here:\n\n![Title screen](/tmp/flow_title.png)")).toBe(true);
+    expect(hasPicture("![](data:image/png;base64,iVBORw0KGgo=)")).toBe(true);
+    expect(hasPicture("a [link](https://example.com) and ! [not] (a picture)")).toBe(false);
+    expect(hasPicture("![unclosed alt")).toBe(false);
   });
 });

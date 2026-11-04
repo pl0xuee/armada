@@ -13,7 +13,20 @@ const watchedIds = new Set<string>();
  * `MessageFold`, with a 44px tap target). The content is measured once it stops streaming; a message that
  * streamed while it was on screen is never folded under the reader, and nothing folds while it grows.
  */
-export function MessageFold({ id, role, streaming, children }: { id: string; role: MessageRole; streaming: boolean; children: ReactNode }) {
+export function MessageFold({
+  id,
+  role,
+  streaming,
+  canFold = true,
+  children,
+}: {
+  id: string;
+  role: MessageRole;
+  streaming: boolean;
+  /** False: always shown in full (a reply with pictures). */
+  canFold?: boolean;
+  children: ReactNode;
+}) {
   const bodyId = useId();
   const innerRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState<number | null>(null);
@@ -35,7 +48,7 @@ export function MessageFold({ id, role, streaming, children }: { id: string; rol
     return () => ro.disconnect();
   }, [streaming, watched]);
 
-  const foldable = height !== null && shouldCollapse(height, role, { streaming, watched });
+  const foldable = canFold && height !== null && shouldCollapse(height, role, { streaming, watched });
   const collapsed = foldable && !expanded;
 
   const toggle = useCallback(() => {

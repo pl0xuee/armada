@@ -30,11 +30,17 @@ export function joinMessageText(prev: string, next: string): string {
   const continues = CONTINUES_RE.test(tail);
   const blockEnd = BLOCK_LINE_RE.test(lastLine) && !continues;
   if (blockEnd || SENTENCE_END_RE.test(head)) return `${head}\n\n${tail}`;
-  // Cut mid-sentence: one flow. Keep whatever whitespace the stream already carried.
-  if (/\s$/.test(prev) || /^\s/.test(next)) return prev + next;
-  // A cut inside a word is only possible when both sides are letters; the writer never splits a token
-  // across two items, so assume a missing word break.
+  // Cut mid-sentence: one flow. The stream carries its own spaces (" and"), so a cut with none on either
+  // side fell inside a word ("brow|ser", "is|n't") or inside a picture's or link's address: joined as is.
+  // A space is added only before what starts like a new sentence.
+  if (/\s$/.test(prev) || /^\s/.test(next) || continues || insideAddress(prev)) return prev + next;
   return `${prev} ${next}`;
+}
+
+/** `text` ends inside a markdown link or picture address: `](` with no closing `)` yet. */
+function insideAddress(text: string): boolean {
+  const k = text.lastIndexOf("](");
+  return k >= 0 && !/[\s)]/.test(text.slice(k + 2));
 }
 
 export interface MessageRuns {

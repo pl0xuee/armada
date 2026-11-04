@@ -118,3 +118,12 @@ describe("inline data: pictures", () => {
     expect(out).not.toContain('src="data:image/svg+xml');
   });
 });
+
+describe("inline data pictures (rendered)", () => {
+  it("shows a screenshot sent inline, however long its data", () => {
+    const src = "data:image/webp;base64," + "UklG".repeat(1_100);
+    const out = html(`Test image, embedded directly in the message:\n\n![Fens stilt market, test](${src})\n\nDid it show?`);
+    expect(out).toContain(`<img class="md-inline-img" src="${src}" alt="Fens stilt market, test"`);
+    expect(out).toContain("<p>Did it show?</p>");
+  });
+});

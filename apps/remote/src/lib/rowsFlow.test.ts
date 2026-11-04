@@ -31,7 +31,7 @@ describe("buildRows stitches adjacent messages", () => {
   });
   it("merges messages that touch, with the first one's id as the row key", () => {
     const a = msg("first half of a sentence");
-    const b = msg("and the second half.");
+    const b = msg(" and the second half."); // the stream carries its own spaces
     const rows = buildRows([user(), a, b]);
     expect(rows).toHaveLength(2);
     const row = rows[1];
