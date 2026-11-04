@@ -5,6 +5,11 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.4.6 — 2026-11-04
+
+### Fixed
+- **Screenshots an agent sends show on your phone.** A reply with pictures is no longer folded behind “Show more”. Large pictures placed right in a message now show instead of a long run of text. A reply split by a sub-agent's work no longer breaks a picture or a word in two. Files Claude sends you, such as screenshots it took, now show as a reply with their pictures and note, on the phone and on the computer.
+
 ## v0.4.5 — 2026-11-03
 
 ### New
