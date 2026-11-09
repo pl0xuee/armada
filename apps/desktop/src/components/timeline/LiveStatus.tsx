@@ -22,6 +22,24 @@ import {
 
 const VERB_MS = 3000;
 
+/** Time since `since`, ticking on its own so the once-a-second render stays inside this one text node. */
+function useElapsed(since: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useVisibleInterval(() => setNow(Date.now()), 1000);
+  return now - since;
+}
+
+/** "· 12s" beside the status, once it has been going for a few seconds. */
+function ElapsedText({ since }: { since: number }) {
+  const elapsed = useElapsed(since);
+  if (elapsed < 3000) return null;
+  return <span className="tabular shrink-0 text-2xs text-steel">· {formatElapsed(elapsed)}</span>;
+}
+
+function Elapsed({ since }: { since: number }) {
+  return <>{formatElapsed(useElapsed(since))}</>;
+}
+
 /** Model / effort chips, muted when they are only inherited from the main agent. */
 export function SubagentChips({ chips, className }: { chips: SubagentChip[]; className?: string }) {
   if (chips.length === 0) return null;
@@ -32,7 +50,7 @@ export function SubagentChips({ chips, className }: { chips: SubagentChip[]; cla
           key={c.key}
           title={c.key === "model" ? "Model" : "Reasoning effort"}
           className={cn(
-            "inline-flex h-4 shrink-0 items-center rounded border px-1 text-[11px] font-medium",
+            "inline-flex h-4 shrink-0 items-center rounded border px-1 text-micro font-medium",
             c.inherited ? "border-line text-steel" : "border-line-strong bg-raised/60 text-muted",
             className,
           )}
@@ -73,12 +91,10 @@ export function LiveStatus({
   const inherited = useMemo(() => inheritedOf(agent.configOptions), [agent.configOptions]);
   const starting = agent.status === "starting";
   const [verb, setVerb] = useState(0);
-  const [now, setNow] = useState(() => Date.now());
   const offset = useRef(Math.floor(Math.random() * THINKING_VERBS.length));
   const listId = useId();
 
   useVisibleInterval(() => setVerb((v) => v + 1), VERB_MS);
-  useVisibleInterval(() => setNow(Date.now()), 1000);
 
   const step = starting || subagents > 0 ? null : liveStep(items, messageSettled);
   const cycling = !starting && subagents === 0 && !step;
@@ -89,7 +105,6 @@ export function LiveStatus({
       : step
         ? stepText(step)
         : THINKING_VERBS[(verb + offset.current) % THINKING_VERBS.length];
-  const elapsed = now - since;
   const expandable = subagents > 0 && running.length > 0;
   const expanded = expandable && open;
 
@@ -97,7 +112,7 @@ export function LiveStatus({
     <span key={label} className="think-text min-w-0 truncate">
       {step?.mono && step.detail ? (
         <>
-          {step.lead} <span className="font-mono text-[12px]">{step.detail}</span>
+          {step.lead} <span className="font-mono text-caption">{step.detail}</span>
         </>
       ) : (
         label
@@ -112,7 +127,7 @@ export function LiveStatus({
         {/* The ring around it spins: one moving thing is enough to say "working". */}
         <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="xs" className="opacity-80" />
       </span>
-      <span className="flex min-w-0 items-baseline gap-1.5 text-[12.5px]" title={label}>
+      <span className="flex min-w-0 items-baseline gap-1.5 text-small" title={label}>
         {text}
         {cycling && (
           // One layer breathing as a group (three staggered dots are three layers per tile).
@@ -122,7 +137,7 @@ export function LiveStatus({
             ))}
           </span>
         )}
-        {elapsed >= 3000 && <span className="tabular shrink-0 text-2xs text-steel">· {formatElapsed(elapsed)}</span>}
+        <ElapsedText since={since} />
       </span>
       {expandable && (
         <ChevronRight
@@ -163,8 +178,8 @@ export function LiveStatus({
             className="ml-[11px] mt-1 space-y-0.5 border-l border-line pl-3"
           >
             {running.map((r) => (
-              <li key={r.itemId} className="flex h-6 items-center gap-1.5 text-[12px]">
-                <span className="inline-flex h-4 shrink-0 items-center gap-1 rounded border border-violet/30 bg-violet/10 px-1 text-[11px] font-semibold uppercase tracking-[0.05em] text-violet">
+              <li key={r.itemId} className="flex h-6 items-center gap-1.5 text-caption">
+                <span className="inline-flex h-4 shrink-0 items-center gap-1 rounded border border-violet/30 bg-violet/10 px-1 eyebrow text-violet">
                   <Bot className="h-2.5 w-2.5" aria-hidden />
                   {r.kind ?? "Sub-agent"}
                 </span>
@@ -172,8 +187,8 @@ export function LiveStatus({
                   {r.description}
                 </span>
                 <SubagentChips chips={subagentChips(r, inherited)} />
-                <span className="tabular shrink-0 text-[11px] text-steel">
-                  {formatElapsed(now - r.startedAt)} · {pluralize(r.calls, "call")}
+                <span className="tabular shrink-0 text-micro text-steel">
+                  <Elapsed since={r.startedAt} /> · {pluralize(r.calls, "call")}
                 </span>
               </li>
             ))}

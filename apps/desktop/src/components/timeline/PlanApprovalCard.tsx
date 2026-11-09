@@ -79,7 +79,7 @@ export const PlanApprovalCard = memo(function PlanApprovalCard({
           type="button"
           aria-expanded={expanded}
           onClick={() => setExpanded((v) => !v)}
-          className="flex h-9 w-full items-center gap-2 rounded-xl px-2.5 text-left text-[12.5px] hover:bg-raised/50"
+          className="flex h-9 w-full items-center gap-2 rounded-xl px-2.5 text-left text-small hover:bg-raised/50"
         >
           <ChevronRight
             className={cn("h-3.5 w-3.5 shrink-0 text-steel transition-transform", expanded && "rotate-90")}
@@ -88,7 +88,7 @@ export const PlanApprovalCard = memo(function PlanApprovalCard({
           <span className="min-w-0 flex-1 truncate text-muted">{planTitle(plan)}</span>
           <span
             className={cn(
-              "shrink-0 text-[11.5px] font-medium",
+              "shrink-0 text-meta font-medium",
               outcome === "approved" ? "text-ok" : outcome === "kept_planning" ? "text-warn" : "text-steel",
             )}
           >
@@ -149,9 +149,7 @@ export const PlanApprovalCard = memo(function PlanApprovalCard({
           <ListChecks className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-warn">
-            {identity.short} has a plan for your approval
-          </div>
+          <div className="eyebrow text-warn">{identity.short} has a plan for your approval</div>
           <div className="mt-0.5 break-words text-[14px] font-medium text-fg">
             Review the plan, then choose how it goes ahead
           </div>
@@ -214,7 +212,7 @@ export const PlanApprovalCard = memo(function PlanApprovalCard({
             void keepPlanningWithFeedback();
           }}
         >
-          <label htmlFor={`feedback-${item.id}`} className="mb-1.5 block text-[12px] font-medium text-muted">
+          <label htmlFor={`feedback-${item.id}`} className="mb-1.5 block text-caption font-medium text-muted">
             What should {identity.short} change in the plan?
           </label>
           <Textarea
@@ -236,7 +234,7 @@ export const PlanApprovalCard = memo(function PlanApprovalCard({
             className="min-h-16"
           />
           <div className="mt-2 flex items-center justify-end gap-2">
-            <span className="mr-auto text-[11px] text-steel">
+            <span className="mr-auto text-micro text-steel">
               Sends the plan back, then your note as the next message.
             </span>
             <Button size="sm" variant="ghost" type="button" onClick={() => setShowReason(false)}>

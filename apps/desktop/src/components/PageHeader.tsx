@@ -41,7 +41,7 @@ export function PageHeader({
             <h1 className="truncate text-[18px] font-semibold leading-tight tracking-tight text-fg @2xl/ph:text-[20px]">
               {title}
             </h1>
-            {subtitle && <p className="mt-0.5 truncate text-[12.5px] text-muted">{subtitle}</p>}
+            {subtitle && <p className="mt-0.5 truncate text-small text-muted">{subtitle}</p>}
           </div>
         </div>
         {right && <div className="flex shrink-0 items-center gap-1.5 @xl/ph:gap-2">{right}</div>}
@@ -96,7 +96,7 @@ export function HeaderAction({
       >
         {icon}
         <span className="hidden @xl/ph:inline">{label}</span>
-        {hint && <span className="ml-1 hidden text-[10.5px] opacity-70 @3xl/ph:inline">{hint}</span>}
+        {hint && <span className="ml-1 hidden text-micro opacity-70 @3xl/ph:inline">{hint}</span>}
       </Button>
     </Tooltip>
   );

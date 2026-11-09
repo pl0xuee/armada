@@ -96,7 +96,7 @@ export function CompareColumn({
               {identity.name}
               {badge && <span className="ml-1.5 font-medium text-steel">{badge}</span>}
             </div>
-            <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-steel">
+            <div className="mt-0.5 flex items-center gap-1.5 text-meta text-steel">
               {account && <AccountAvatar account={account} size={13} showProvider={false} />}
               <span className="truncate">
                 {account?.name ?? (agent.provider === "custom" ? "Custom ACP agent" : "Unknown account")}
@@ -107,10 +107,10 @@ export function CompareColumn({
           </div>
           <StatusPill status={agent.status} done={done} />
         </div>
-        <div className="relative mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-muted tabular">
+        <div className="relative mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-muted tabular">
           <span className={cn("flex items-center gap-1", cheapest && "text-ok")}>
             {agentCostText(agent)}
-            {cheapest && <span className="text-[11px] uppercase tracking-wider">cheapest</span>}
+            {cheapest && <span className="text-micro uppercase tracking-wider">cheapest</span>}
           </span>
           <span>{formatTokens(agent.tokensUsed)} tokens</span>
           {files > 0 && (
@@ -134,7 +134,7 @@ export function CompareColumn({
         ) : message ? (
           <Markdown text={message} streaming={working && streaming} />
         ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-2 py-10 text-center text-[12.5px] text-steel">
+          <div className="flex h-full flex-col items-center justify-center gap-2 py-10 text-center text-small text-steel">
             {working ? (
               <>
                 <span className="h-1 w-24 overflow-hidden rounded-full bg-raised shimmer-bar" />

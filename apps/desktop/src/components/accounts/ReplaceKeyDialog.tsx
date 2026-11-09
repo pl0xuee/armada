@@ -91,7 +91,7 @@ export function ReplaceKeyDialog({
                   onChange={(e) => setKey(e.target.value)}
                   aria-invalid={!!error}
                   aria-describedby={error ? "replace-key-error" : undefined}
-                  className="pr-9 font-mono text-[12.5px]"
+                  className="pr-9 font-mono text-small"
                 />
                 <button
                   type="button"
@@ -103,13 +103,13 @@ export function ReplaceKeyDialog({
                 </button>
               </div>
               {error && (
-                <p id="replace-key-error" role="alert" className="mt-1.5 text-[12px] text-err">
+                <p id="replace-key-error" role="alert" className="mt-1.5 text-caption text-err">
                   {error}
                 </p>
               )}
             </div>
             {runningAgents > 0 && (
-              <p className="rounded-lg border border-line bg-base/40 px-3 py-2 text-[12px] text-muted">
+              <p className="rounded-lg border border-line bg-base/40 px-3 py-2 text-caption text-muted">
                 {runningAgents === 1
                   ? "1 running agent on this account keeps using the old key until it restarts."
                   : `${runningAgents} running agents on this account keep using the old key until they restart.`}

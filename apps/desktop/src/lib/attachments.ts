@@ -7,7 +7,7 @@ export const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "im
 export const ACCEPTED_IMAGE_LABEL = "PNG, JPEG, GIF or WebP";
 
 export function attachmentSrc(a: Attachment): string {
-  return `data:${a.mimeType};base64,${a.data}`;
+  return `data:${a.mimeType};base64,${a.data ?? ""}`;
 }
 
 function readAsBase64(file: File): Promise<string> {

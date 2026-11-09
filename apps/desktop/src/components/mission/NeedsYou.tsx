@@ -20,12 +20,13 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { RecoveryActions, needsRecovery } from "@/components/mission/RecoveryActions";
 import { archiveAgent, findOption, respondPermission, attempt } from "@/lib/actions";
 import { api } from "@/lib/api";
-import { approvalActionFor, createArm, shouldIgnoreApprovalKey } from "@/lib/approvalKeys";
+import { approvalActionFor, createArm, shouldIgnoreApprovalKey, singleKeyShortcutsOn } from "@/lib/approvalKeys";
 import type { NeedsReason } from "@/lib/agents";
 import { backgroundActive } from "@/lib/background";
 import { useBackground } from "@/store/background";
 import type { Agent } from "@/lib/types";
 import { cn, isEditableTarget, modKey } from "@/lib/utils";
+import { useSingleKeys } from "@/hooks/useSingleKeys";
 import { collectPending, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 
@@ -74,7 +75,9 @@ export function NeedsYouPane({ hasAgents }: { hasAgents: boolean }) {
           });
         } else {
           toast("Answer the request first", {
-            description: "Approve or deny it (A / D), or open the agent to decide there.",
+            description: singleKeyShortcutsOn()
+              ? "Approve or deny it (A / D), or open the agent to decide there."
+              : "Approve or deny it, or open the agent to decide there.",
           });
         }
         return;
@@ -140,6 +143,7 @@ export function NeedsYouPane({ hasAgents }: { hasAgents: boolean }) {
       if (isEditableTarget(e.target)) return;
       if (document.querySelector('[role="dialog"][data-state="open"], [role="menu"][data-state="open"]')) return;
       const k = e.key;
+      if (!singleKeyShortcutsOn() && k !== "Enter") return;
       if (k === "j") {
         e.preventDefault();
         step(1);
@@ -208,7 +212,7 @@ export function NeedsYouPane({ hasAgents }: { hasAgents: boolean }) {
               <Button size="icon-xs" variant="ghost" aria-label="Previous" onClick={() => step(-1)}>
                 <ChevronLeft className="!h-3.5 !w-3.5" />
               </Button>
-              <span className="text-[12px] text-muted tabular" aria-live="polite">
+              <span className="text-caption text-muted tabular" aria-live="polite">
                 {index + 1} of {queue.length}
               </span>
               <Button size="icon-xs" variant="ghost" aria-label="Next" onClick={() => step(1)}>
@@ -261,11 +265,7 @@ const QueueRow = memo(function QueueRow({
   }, [active]);
   return (
     <li ref={ref}>
-      {heading && (
-        <p className="px-2.5 pb-1 pt-2.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-steel">
-          {heading}
-        </p>
-      )}
+      {heading && <p className="px-2.5 pb-1 pt-2.5 eyebrow text-steel">{heading}</p>}
       {/* The row is a div so the recovery buttons below can sit beside the open-agent button, not inside it. */}
       <div
         className={cn(
@@ -284,16 +284,16 @@ const QueueRow = memo(function QueueRow({
         >
           <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="sm" className="mt-0.5" />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[12.5px] font-medium text-fg">{agent.title}</span>
+            <span className="block truncate text-small font-medium text-fg">{agent.title}</span>
             <span className="mt-1 flex items-center gap-1.5">
-              <span className={cn("rounded-full border px-1.5 text-[10.5px] font-medium", REASON_TONE[reason])}>
+              <span className={cn("rounded-full border px-1.5 text-micro font-medium", REASON_TONE[reason])}>
                 {reason === "rate_limited" ? (
                   <ResumesAt agent={agent} fallback={reasonLabel(reason, asking, backgroundRunning)} />
                 ) : (
                   reasonLabel(reason, asking, backgroundRunning)
                 )}
               </span>
-              <span className="text-[11px] text-steel">
+              <span className="text-micro text-steel">
                 <RelTime ts={agent.lastActivityAt} side="right" />
               </span>
             </span>
@@ -338,7 +338,7 @@ function AllClear({ hasAgents }: { hasAgents: boolean }) {
         </span>
       </div>
       <h2 className="text-[17px] font-semibold tracking-tight">All clear</h2>
-      <p className="mt-1.5 max-w-sm text-[13px] leading-relaxed text-muted">
+      <p className="mt-1.5 max-w-sm text-body leading-relaxed text-muted">
         No approvals, errors or unread results. Agents that need you will line up here, most urgent first.
       </p>
       <div className="mt-5 flex flex-wrap justify-center gap-2">
@@ -355,8 +355,11 @@ function AllClear({ hasAgents }: { hasAgents: boolean }) {
 
 /** The keys that do something for the selected agent: Allow / Deny only exist for an approval. */
 function KeyHints({ reason, asking }: { reason: NeedsReason; asking: boolean }) {
+  // With one-letter shortcuts off only Enter still works, so there is nothing else to hint.
+  const letterKeys = useSingleKeys();
+  if (!letterKeys) return null;
   return (
-    <div className="texture flex h-10 shrink-0 items-center justify-center gap-4 border-t border-line bg-panel px-3 text-[11.5px] text-steel @3xl:gap-5">
+    <div className="texture flex h-10 shrink-0 items-center justify-center gap-4 border-t border-line bg-panel px-3 text-meta text-steel @3xl:gap-5">
       <Hint keys={["J", "K"]} label="Move" />
       <Hint keys={["E"]} label="Done" />
       {asking ? (
@@ -395,7 +398,7 @@ function KeyHints({ reason, asking }: { reason: NeedsReason; asking: boolean }) 
         <button
           type="button"
           aria-label="All keyboard shortcuts"
-          className="flex h-6 w-6 items-center justify-center rounded-md border border-line-strong text-[11px] font-medium text-muted transition-colors hover:text-fg @3xl:hidden"
+          className="flex h-6 w-6 items-center justify-center rounded-md border border-line-strong text-micro font-medium text-muted transition-colors hover:text-fg @3xl:hidden"
         >
           ?
         </button>

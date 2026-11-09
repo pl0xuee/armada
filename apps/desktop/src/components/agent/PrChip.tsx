@@ -64,13 +64,13 @@ function CheckRow({ check }: { check: PrCheck }) {
         disabled={!check.url}
         onClick={() => check.url && void openExternal(check.url)}
         title={check.url ? "Open check on GitHub" : undefined}
-        className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-[12px] transition-colors enabled:hover:bg-raised/60 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25"
+        className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-caption transition-colors enabled:hover:bg-raised/60 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25"
       >
         <span className="flex w-4 shrink-0 justify-center" aria-label={check.status}>
           {icon}
         </span>
         <span className="min-w-0 flex-1 truncate text-fg/90">{label}</span>
-        {dur && <span className="shrink-0 text-[11px] text-steel tabular">{dur}</span>}
+        {dur && <span className="shrink-0 text-micro text-steel tabular">{dur}</span>}
       </button>
     </li>
   );
@@ -124,7 +124,7 @@ export function PrChip({ agent, compact = false }: { agent: Agent; compact?: boo
           <button
             type="button"
             aria-label={`Pull request #${pr.number}, ${PR_STATE_LABEL[pr.state]}, ${ciSummary(pr)}${review ? `, ${PR_REVIEW_LABEL[review]}` : ""}`}
-            className="inline-flex h-6 min-w-0 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-full border border-line bg-card/60 px-2 text-[11.5px] transition-colors hover:bg-raised/60 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25"
+            className="inline-flex h-6 min-w-0 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-full border border-line bg-card/60 px-2 text-meta transition-colors hover:bg-raised/60 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25"
           >
             <StateIcon state={pr.state} />
             <span className="shrink-0 tabular text-fg/90">#{pr.number}</span>
@@ -147,10 +147,8 @@ export function PrChip({ agent, compact = false }: { agent: Agent; compact?: boo
         <PopoverContent align="start" className="w-96 max-w-[calc(100vw-16px)]">
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[12.5px] font-medium text-fg">
-                {pr.title || `Pull request #${pr.number}`}
-              </div>
-              <div className="mt-0.5 truncate text-[11.5px] text-steel">
+              <div className="truncate text-small font-medium text-fg">{pr.title || `Pull request #${pr.number}`}</div>
+              <div className="mt-0.5 truncate text-meta text-steel">
                 #{pr.number}
                 {pr.base ? ` into ${pr.base}` : ""}
                 {review ? ` · ${PR_REVIEW_LABEL[review]}` : ""}
@@ -179,16 +177,14 @@ export function PrChip({ agent, compact = false }: { agent: Agent; compact?: boo
               <RefreshCw className={cn("!h-3 !w-3", loading === "refresh" && "animate-spin")} />
             </Button>
           </div>
-          <div className={cn("mt-2 flex items-center gap-1.5 text-[12px] font-medium", READY_TONE[ready.tone])}>
+          <div className={cn("mt-2 flex items-center gap-1.5 text-caption font-medium", READY_TONE[ready.tone])}>
             <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current" />
             {ready.text}
             {open && unresolved > 0 && ready.text !== "Unresolved comments" && (
-              <span className="font-normal text-steel">
-                · {unresolved} unresolved
-              </span>
+              <span className="font-normal text-steel">· {unresolved} unresolved</span>
             )}
           </div>
-          <div className="mt-2 text-[11px] font-medium uppercase tracking-wide text-steel">{ciSummary(pr)}</div>
+          <div className="mt-2 eyebrow text-steel">{ciSummary(pr)}</div>
           {pr.checks.length > 0 && (
             <ul className="-mx-1.5 mt-1 max-h-56 overflow-y-auto">
               {pr.checks.map((c, i) => (
@@ -303,11 +299,11 @@ function SendPromptBody({
       className="w-[min(720px,calc(100vw-32px))]"
     >
       <DialogBody>
-        <p className="mb-2 text-[12px] text-muted">
+        <p className="mb-2 text-caption text-muted">
           This message includes text written by other people. Review it before sending.
         </p>
         {omitted > 0 && (
-          <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-warn/30 bg-warn/[0.07] px-3 py-2 text-[12px]">
+          <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-warn/30 bg-warn/[0.07] px-3 py-2 text-caption">
             <span>
               {omitted} {omitted === 1 ? "comment" : "comments"} from people outside the project{" "}
               {omitted === 1 ? "was" : "were"} left out.
@@ -323,9 +319,9 @@ function SendPromptBody({
           onChange={(e) => setText(e.target.value)}
           aria-label="Prompt to send"
           spellCheck={false}
-          className="h-[min(50vh,420px)] w-full resize-y font-mono text-[12px]"
+          className="h-[min(50vh,420px)] w-full resize-y font-mono text-caption"
         />
-        <div className="mt-1.5 text-[11px] text-steel tabular">{text.length.toLocaleString()} characters</div>
+        <div className="mt-1.5 text-micro text-steel tabular">{text.length.toLocaleString()} characters</div>
       </DialogBody>
       <DialogFooter>
         <Button variant="ghost" onClick={onClose}>

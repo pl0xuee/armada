@@ -118,7 +118,7 @@ export function AddAgents({ agent, showLabel }: { agent: Agent; showLabel: boole
             }
           }}
         >
-          <div className="text-[13px] font-semibold">Add agents to {project}</div>
+          <div className="text-body font-semibold">Add agents to {project}</div>
           <Textarea
             autoFocus
             value={prompt}
@@ -128,19 +128,19 @@ export function AddAgents({ agent, showLabel }: { agent: Agent; showLabel: boole
             className="min-h-[72px]"
           />
           <AgentCount value={count} onChange={setWanted} max={room} disabled={busy} className="w-full" />
-          <p className="text-[12px] leading-snug text-steel">
+          <p className="text-caption leading-snug text-steel">
             Same agent as this one ({via}). Each starts in{" "}
             <span className="font-mono">{prettyPath(agent.projectPath)}</span> in its own worktree.
           </p>
           {isGit === false && (
-            <p className="flex items-start gap-1.5 text-[12px] leading-snug text-warn">
+            <p className="flex items-start gap-1.5 text-caption leading-snug text-warn">
               <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
               This folder isn't a git repository with a commit, so worktrees can't be made and the agents will share it
               and can overwrite each other's files.
             </p>
           )}
           {failures.length > 0 && (
-            <ul role="alert" className="space-y-0.5 text-[12px] leading-snug text-err">
+            <ul role="alert" className="space-y-0.5 text-caption leading-snug text-err">
               {failures.map((f) => (
                 <li key={f} className="selectable break-words">
                   {f}
@@ -151,7 +151,7 @@ export function AddAgents({ agent, showLabel }: { agent: Agent; showLabel: boole
           <Button variant="primary" size="sm" className="w-full" disabled={busy} onClick={() => void start()}>
             {busy && <Spinner className="h-3.5 w-3.5 text-current" />}
             Start {count} {count === 1 ? "agent" : "agents"}
-            <span className="ml-1 text-[11px] opacity-70">{modKey}⏎</span>
+            <span className="ml-1 text-micro opacity-70">{modKey}⏎</span>
           </Button>
         </div>
       </PopoverContent>

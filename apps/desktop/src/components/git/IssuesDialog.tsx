@@ -143,7 +143,12 @@ function IssuesBody({ projectPath, onClose }: { projectPath: string; onClose: ()
       {labels.length > 0 && (
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by label">
           {labels.map((l) => (
-            <LabelChip key={l.name} label={l} active={label === l.name} onClick={() => setLabel(label === l.name ? null : l.name)} />
+            <LabelChip
+              key={l.name}
+              label={l}
+              active={label === l.name}
+              onClick={() => setLabel(label === l.name ? null : l.name)}
+            />
           ))}
         </div>
       )}
@@ -151,11 +156,11 @@ function IssuesBody({ projectPath, onClose }: { projectPath: string; onClose: ()
       {error ? (
         <GhError text={error} context={`Reading the open issues of ${basename(projectPath)}`} />
       ) : !list ? (
-        <div className="flex items-center gap-2 py-8 text-[13px] text-muted">
+        <div className="flex items-center gap-2 py-8 text-body text-muted">
           <Spinner className="h-4 w-4" /> Loading issues…
         </div>
       ) : shown.length === 0 ? (
-        <p className="py-8 text-center text-[13px] text-muted">
+        <p className="py-8 text-center text-body text-muted">
           {list.issues.length === 0 ? "No open issues." : searching ? "Searching GitHub…" : "No issues match."}
         </p>
       ) : (
@@ -173,7 +178,7 @@ function IssuesBody({ projectPath, onClose }: { projectPath: string; onClose: ()
       )}
 
       {list?.truncated && (
-        <p className="text-[11.5px] text-steel">Showing the 100 most recently updated. Search asks GitHub for the rest.</p>
+        <p className="text-meta text-steel">Showing the 100 most recently updated. Search asks GitHub for the rest.</p>
       )}
     </DialogBody>
   );
@@ -186,11 +191,17 @@ function LabelChip({ label, active, onClick }: { label: IssueLabel; active: bool
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "inline-flex h-6 max-w-[160px] items-center gap-1.5 rounded-full border px-2 text-[11.5px] transition-colors focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25",
-        active ? "border-accent/50 bg-accent/[0.09] text-fg" : "border-line bg-card/60 text-muted hover:border-line-strong hover:text-fg",
+        "inline-flex h-6 max-w-[160px] items-center gap-1.5 rounded-full border px-2 text-meta transition-colors focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25",
+        active
+          ? "border-accent/50 bg-accent/[0.09] text-fg"
+          : "border-line bg-card/60 text-muted hover:border-line-strong hover:text-fg",
       )}
     >
-      <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: `#${label.color || "8b949e"}` }} />
+      <span
+        aria-hidden
+        className="h-2 w-2 shrink-0 rounded-full"
+        style={{ background: `#${label.color || "8b949e"}` }}
+      />
       <span className="truncate">{label.name}</span>
     </button>
   );
@@ -210,15 +221,19 @@ function IssueRow({
   const ts = Date.parse(issue.updatedAt);
   return (
     <li className="group flex items-start gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-raised/60">
-      <span className="mt-[3px] w-10 shrink-0 text-right font-mono text-[11.5px] text-steel tabular">#{issue.number}</span>
+      <span className="mt-[3px] w-10 shrink-0 text-right font-mono text-meta text-steel tabular">#{issue.number}</span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] text-fg" title={issue.title}>
+        <div className="truncate text-body text-fg" title={issue.title}>
           {issue.title}
         </div>
-        <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[11.5px] text-steel">
+        <div className="mt-0.5 flex min-w-0 items-center gap-2 text-meta text-steel">
           {issue.labels.slice(0, 3).map((l) => (
             <span key={l.name} className="inline-flex min-w-0 items-center gap-1">
-              <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: `#${l.color || "8b949e"}` }} />
+              <span
+                aria-hidden
+                className="h-1.5 w-1.5 shrink-0 rounded-full"
+                style={{ background: `#${l.color || "8b949e"}` }}
+              />
               <span className="truncate">{l.name}</span>
             </span>
           ))}
@@ -236,7 +251,13 @@ function IssueRow({
         >
           <ExternalLink className="!h-3 !w-3" />
         </Button>
-        <Button size="sm" variant="secondary" disabled={disabled} onClick={onStart} aria-label={`Start an agent on #${issue.number}`}>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={disabled}
+          onClick={onStart}
+          aria-label={`Start an agent on #${issue.number}`}
+        >
           {busy ? <Spinner className="h-3.5 w-3.5 text-current" /> : <Rocket />}
           Start
         </Button>

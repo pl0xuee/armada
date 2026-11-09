@@ -46,13 +46,13 @@ export function fromDataUrl(url: string): { mimeType: string; data: string } | n
 }
 
 export function base64Size(atts: Pick<Attachment, "data">[]): number {
-  return atts.reduce((n, a) => n + a.data.length, 0);
+  return atts.reduce((n, a) => n + (a.data?.length ?? 0), 0);
 }
 
 /** Why another image can't be added, or null if it can. */
 export function attachError(current: Pick<Attachment, "data">[], next: Pick<Attachment, "data">): string | null {
   if (current.length >= MAX_ATTACHMENTS) return `You can attach up to ${MAX_ATTACHMENTS} images.`;
-  if (base64Size(current) + next.data.length > MAX_TOTAL_BASE64) return "These images are too large to send together.";
+  if (base64Size(current) + (next.data?.length ?? 0) > MAX_TOTAL_BASE64) return "These images are too large to send together.";
   return null;
 }
 

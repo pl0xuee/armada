@@ -16,7 +16,7 @@ export function MoreRows({ label = "More options", children }: { label?: string;
         aria-expanded={open}
         aria-controls={id}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 px-4 py-2.5 text-left text-[12.5px] text-muted transition-colors hover:bg-raised/40 hover:text-fg"
+        className="flex w-full items-center gap-1.5 px-4 py-2.5 text-left text-small text-muted transition-colors hover:bg-raised/40 hover:text-fg"
       >
         <ChevronRight className={cn("h-3.5 w-3.5 transition-transform duration-150", open && "rotate-90")} />
         {open ? "Fewer options" : label}
@@ -53,8 +53,8 @@ export function Advanced({
           className={cn("h-4 w-4 shrink-0 text-steel transition-transform duration-150", open && "rotate-90")}
         />
         <span className="min-w-0">
-          <span className="block text-[13px] font-medium text-fg">{title}</span>
-          {description && <span className="block text-[12px] text-muted">{description}</span>}
+          <span className="block text-body font-medium text-fg">{title}</span>
+          {description && <span className="block text-caption text-muted">{description}</span>}
         </span>
       </button>
       <div id={id} hidden={!open} className={cn(open && "mt-6 space-y-6")}>

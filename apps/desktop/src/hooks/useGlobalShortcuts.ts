@@ -11,6 +11,7 @@ import { stepInterfaceScale } from "@/lib/zoom";
 import { useApp } from "@/store/app";
 import { goBack, goForward } from "@/store/navHistory";
 import { togglePreview } from "@/store/preview";
+import { closeTour, useTour } from "@/store/tour";
 import { useUi } from "@/store/ui";
 import { toggleVoiceAssistant, wakeVoiceAssistant } from "@/store/voiceAssistant";
 
@@ -32,6 +33,29 @@ export function useGlobalShortcuts(enabled: boolean) {
         e.preventDefault();
         if (nav === "back") goBack();
         else goForward();
+        return;
+      }
+      // Alt+↑ / Alt+↓ (⌥ on a Mac) step to the previous / next agent in list order. Text fields,
+      // terminals and the project header's own Alt+arrow nudge keep their keys.
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === "ArrowUp" || e.key === "ArrowDown") &&
+        !e.defaultPrevented &&
+        !isEditableTarget(e.target) &&
+        !inTerminal(e.target) &&
+        !dialogOpen()
+      ) {
+        const app = useApp.getState();
+        const list = orderedAgents(Object.values(app.agents), layoutOf(app.settings));
+        if (list.length === 0) return;
+        const step = e.key === "ArrowUp" ? -1 : 1;
+        const at = list.findIndex((a) => a.id === useUi.getState().selectedAgentId);
+        const next = at < 0 ? (step > 0 ? 0 : list.length - 1) : (at + step + list.length) % list.length;
+        e.preventDefault();
+        useUi.getState().openAgent(list[next].id);
         return;
       }
       if (!mod || e.altKey) return;
@@ -68,16 +92,21 @@ export function useGlobalShortcuts(enabled: boolean) {
         ui.setPaletteOpen(!ui.paletteOpen);
         return;
       }
+      // The welcome tour teaches these two shortcuts, so they step it aside instead of being blocked by it.
+      const tourOpen = useTour.getState().open;
       if (key === "f" && e.shiftKey) {
         // Search every conversation (the palette's "?" mode); pressed again, it closes.
-        if (!ui.paletteOpen && dialogOpen()) return;
+        if (!ui.paletteOpen && dialogOpen() && !tourOpen) return;
+        if (tourOpen) closeTour();
         e.preventDefault();
         if (ui.paletteOpen) ui.setPaletteOpen(false);
         else ui.openSearch();
         return;
       }
+      const newOverTour = key === "n" && !e.shiftKey && tourOpen;
+      if (newOverTour) closeTour();
       // Never navigate out from under an open dialog, sheet or menu.
-      if (dialogOpen()) return;
+      if (dialogOpen() && !newOverTour) return;
       if (key === "n" && !e.shiftKey) {
         e.preventDefault();
         ui.setPaletteOpen(false);
@@ -107,6 +136,16 @@ export function useGlobalShortcuts(enabled: boolean) {
         if (ui.view !== "agents" || !ui.selectedAgentId) return;
         e.preventDefault();
         togglePreview(ui.selectedAgentId);
+        return;
+      }
+      if (key === "r" && e.shiftKey) {
+        // Review the open agent's diff (agents with their own worktree).
+        // Always handled: Ctrl+Shift+R is the webview's hard reload on Windows.
+        e.preventDefault();
+        const app = useApp.getState();
+        const open = ui.selectedAgentId ? app.agents[ui.selectedAgentId] : undefined;
+        if (ui.view !== "agents" || !open?.worktree) return;
+        ui.setReviewAgent(open.id);
         return;
       }
       if (key === "j" && !e.shiftKey) {

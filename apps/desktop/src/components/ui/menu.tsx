@@ -6,9 +6,9 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 const contentClass =
-  "anim-pop z-[70] min-w-[200px] overflow-hidden rounded-xl border border-line-strong bg-raised/95 p-1 text-[13px] text-fg shadow-[0_16px_48px_-8px_rgba(0,0,0,0.55)] backdrop-blur-xl edge";
+  "anim-pop z-[70] min-w-[200px] overflow-hidden rounded-xl border border-line-strong bg-raised/95 p-1 text-body text-fg shadow-[0_16px_48px_-8px_rgba(0,0,0,0.55)] backdrop-blur-xl edge";
 const itemClass =
-  "relative flex h-8 cursor-default select-none items-center gap-2 rounded-lg px-2 outline-none transition-colors data-[highlighted]:bg-gunmetal data-[disabled]:opacity-40 [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 [&_svg]:text-steel data-[highlighted]:[&_svg]:text-fg";
+  "relative flex h-8 cursor-default select-none items-center gap-2 rounded-lg px-2 outline-none transition-colors data-[highlighted]:bg-gunmetal data-[disabled]:opacity-45 [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 [&_svg]:text-steel data-[highlighted]:[&_svg]:text-fg";
 const dangerClass = "text-err data-[highlighted]:bg-err/15 [&_svg]:!text-err";
 
 export const DropdownMenu = DM.Root;
@@ -64,7 +64,7 @@ export function DropdownMenuItem({
   return (
     <DM.Item onSelect={onSelect} disabled={disabled} className={cn(itemClass, danger && dangerClass, className)}>
       {children}
-      {shortcut && <span className="ml-auto pl-4 text-[11px] text-steel">{shortcut}</span>}
+      {shortcut && <span className="ml-auto pl-4 text-micro text-steel">{shortcut}</span>}
     </DM.Item>
   );
 }
@@ -85,18 +85,14 @@ export function DropdownMenuCheckItem({
       <span className="flex w-4 justify-center">{checked && <Check className="!text-accent" />}</span>
       <span className="flex min-w-0 flex-col">
         <span>{children}</span>
-        {description && <span className="text-[11.5px] text-steel">{description}</span>}
+        {description && <span className="text-meta text-steel">{description}</span>}
       </span>
     </DM.Item>
   );
 }
 
 export function DropdownMenuLabel({ children }: { children: ReactNode }) {
-  return (
-    <DM.Label className="px-2 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wider text-steel">
-      {children}
-    </DM.Label>
-  );
+  return <DM.Label className="px-2 pb-1 pt-1.5 eyebrow text-steel">{children}</DM.Label>;
 }
 
 export function DropdownMenuSeparator() {
@@ -161,7 +157,7 @@ export function ContextMenuItem({
   return (
     <CM.Item onSelect={onSelect} disabled={disabled} className={cn(itemClass, danger && dangerClass)}>
       {children}
-      {shortcut && <span className="ml-auto pl-4 text-[11px] text-steel">{shortcut}</span>}
+      {shortcut && <span className="ml-auto pl-4 text-micro text-steel">{shortcut}</span>}
     </CM.Item>
   );
 }

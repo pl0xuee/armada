@@ -126,6 +126,7 @@ macro_rules! handler {
             commands::base_branch_status,
             commands::push_base_branch,
             commands::revert_patch,
+            commands::apply_patch,
             commands::test_mcp_server,
             commands::acknowledge_agent,
             commands::update_account_key,
@@ -208,6 +209,9 @@ macro_rules! handler {
             toolkit::skills_toggles,
             toolkit::skills_set_enabled,
             commands::read_image,
+            commands::read_picture,
+            commands::default_projects_folder,
+            commands::create_project,
             commands::remote_status,
             commands::remote_rotate_token,
             commands::remote_revoke_device,
@@ -226,11 +230,17 @@ pub fn run() {
     // PATH is process-global and `set_var` is unsound once other threads may read the
     // environment, so every PATH change happens here, before Tauri, tokio or anything
     // else starts a thread. GUI launches (Finder, Start menu, .desktop files) get a
-    // minimal PATH; then Kvistcode-managed Node and agent CLIs are added.
-    kvistcode_core::providers::augment_path();
+    // minimal PATH; then Kvistcode-managed Node and agent CLIs are added. The login
+    // shell's PATH is cached in the data folder so a slow shell profile doesn't delay
+    // the window.
     let startup_data_dir = app_data_dir(&context.config().identifier);
+    let path_cached = kvistcode_core::providers::augment_path_cached(startup_data_dir.as_deref());
     if let Some(dir) = &startup_data_dir {
         kvistcode_core::toolchain::add_managed_paths(dir);
+        // Last: the probe thread reads the environment, so it starts after every set_var.
+        if path_cached {
+            kvistcode_core::providers::spawn_login_path_refresh(dir);
+        }
     }
 
     tauri::Builder::<Rt>::new()

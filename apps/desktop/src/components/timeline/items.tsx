@@ -23,6 +23,7 @@ import {
   Timer,
   Trash2,
   TriangleAlert,
+  Users,
   Wrench,
 } from "lucide-react";
 import { m, AnimatePresence } from "motion/react";
@@ -32,7 +33,7 @@ import { api } from "@/lib/api";
 import { PREVIEW_LINK_HINT, splitLoopbackUrls } from "@/lib/external";
 import { pluralize } from "@/lib/format";
 import type { Agent, Attachment, PermissionOption, TimelineItem, ToolKind } from "@/lib/types";
-import { cn, errorMessage } from "@/lib/utils";
+import { cn, errorMessage, scrollBehavior } from "@/lib/utils";
 import { toast } from "sonner";
 import { useUi } from "@/store/ui";
 import { RelTime } from "../RelTime";
@@ -46,13 +47,14 @@ import { usePermissionUi } from "@/store/permissionUi";
 import { usePinnedUi } from "@/store/pinnedUi";
 
 const NO_PARSED: ParsedFileDiff[] = [];
-import { attachmentSrc } from "@/lib/attachments";
 import { isImagePath } from "@/lib/images";
 import { hasPicture } from "@/lib/inlineImage";
 import { stripOutputFence } from "@/lib/terminalOutput";
 import { ImageLightbox } from "../ImageLightbox";
 import { LocationThumb } from "../LocalImage";
 import { useIdentity } from "@/hooks/useIdentity";
+import { useSingleKeys } from "@/hooks/useSingleKeys";
+import { AttachmentImg } from "../AttachmentImg";
 import { AttachmentStrip } from "../AttachmentStrip";
 import { CopyButton } from "../CopyButton";
 import { DiffStat, FileDiffView } from "../DiffView";
@@ -85,10 +87,10 @@ export const UserBubble = memo(function UserBubble({
   if (item.automatic) {
     return (
       <div className="flex justify-end" title={item.text} data-testid="auto-resume-note">
-        <div className="flex max-w-[80%] items-center gap-1.5 rounded-full border border-line/70 bg-raised/40 px-3 py-1 text-[12px] text-muted">
+        <div className="flex max-w-[80%] items-center gap-1.5 rounded-full border border-line/70 bg-raised/40 px-3 py-1 text-caption text-muted">
           <Timer className="h-3 w-3 shrink-0 text-warn" aria-hidden />
           <span className="truncate">Resumed automatically after the rate limit reset</span>
-          <RelTime ts={item.ts} className="shrink-0 text-[11px] text-steel" />
+          <RelTime ts={item.ts} className="shrink-0 text-micro text-steel" />
         </div>
       </div>
     );
@@ -105,7 +107,8 @@ export const UserBubble = memo(function UserBubble({
               dir="auto"
               className={cn(
                 "selectable whitespace-pre-wrap break-words px-3.5 py-2",
-                folded && "max-h-[22rem] overflow-hidden [mask-image:linear-gradient(to_bottom,#000_calc(100%-3rem),transparent)]",
+                folded &&
+                  "max-h-[22rem] overflow-hidden [mask-image:linear-gradient(to_bottom,#000_calc(100%-3rem),transparent)]",
               )}
             >
               {item.text}
@@ -115,7 +118,7 @@ export const UserBubble = memo(function UserBubble({
                 type="button"
                 aria-expanded={open}
                 onClick={() => setOpen((v) => !v)}
-                className="flex h-7 w-full items-center justify-center gap-1 rounded-b-2xl border-t border-line/60 text-[11.5px] text-steel transition-colors hover:bg-raised hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
+                className="flex h-7 w-full items-center justify-center gap-1 rounded-b-2xl border-t border-line/60 text-meta text-steel transition-colors hover:bg-raised hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
               >
                 {open ? "Show less" : `Show all ${userMessageLines(item.text).toLocaleString()} lines`}
               </button>
@@ -123,12 +126,12 @@ export const UserBubble = memo(function UserBubble({
           </div>
         )}
         {awaiting && (
-          <div className="mt-1 flex items-center justify-end gap-1 text-[11px] text-steel">
+          <div className="mt-1 flex items-center justify-end gap-1 text-micro text-steel">
             <CornerDownRight className="h-3 w-3" aria-hidden />
             Sent while it was working · it reads this at its next step
           </div>
         )}
-        <div className="absolute right-0 top-full z-[1] flex gap-1 pt-0.5 text-[11px] text-steel opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+        <div className="absolute right-0 top-full z-[1] flex gap-1 pt-0.5 text-micro text-steel opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
           {item.text && <CopyButton text={item.text} className="h-5" />}
           <RestoreAction item={item} />
           <RelTime ts={item.ts} long className="self-center" />
@@ -140,18 +143,14 @@ export const UserBubble = memo(function UserBubble({
 
 // ---------------------------------------------------------------- agent message
 
-/** Start of an agent turn: avatar and name; the time shows on hover. Rendered once per turn. */
+/** Start of an agent turn: avatar and name; the time shows beside it. Rendered once per turn. */
 export const TurnHeader = memo(function TurnHeader({ agent, ts }: { agent: Agent; ts: number }) {
   const identity = useIdentity(agent.provider, agent.customAgentId);
   return (
     <div className="group/turn mb-2 flex h-6 items-center gap-2">
       <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="xs" />
-      <span className="text-[12.5px] font-semibold text-fg/90">{identity.short}</span>
-      <RelTime
-        ts={ts}
-        long
-        className="text-[11px] text-steel opacity-0 transition-opacity group-hover/turn:opacity-100 [.group:hover_&]:opacity-100"
-      />
+      <span className="text-small font-semibold text-fg/90">{identity.short}</span>
+      <RelTime ts={ts} long className="text-micro text-steel/80" />
     </div>
   );
 });
@@ -205,7 +204,7 @@ export const AgentMessage = memo(function AgentMessage({
           />
         </MessageFold>
       ) : images.length > 0 ? null : !streaming ? (
-        <p className="text-[12.5px] italic text-steel">No reply (the turn ended before any text).</p>
+        <p className="text-small italic text-steel">No reply (the turn ended before any text).</p>
       ) : (
         <div className="flex h-5 items-center gap-1" aria-label="Typing">
           {[0, 1, 2].map((i) => (
@@ -239,9 +238,9 @@ function MessageImages({ images }: { images: Attachment[] }) {
           aria-label={`View ${img.name}`}
           className="overflow-hidden rounded-xl border border-line-strong bg-base transition-transform duration-150 hover:scale-[1.01] active:scale-[0.99]"
         >
-          <img
-            src={attachmentSrc(img)}
-            alt={img.name}
+          <AttachmentImg
+            attachment={img}
+            placeholder="h-[180px] w-[240px]"
             className="block max-h-[420px] w-auto max-w-full object-contain"
             draggable={false}
           />
@@ -272,7 +271,7 @@ export const ThoughtBlock = memo(function ThoughtBlock({
     .replace(/\s+/g, " ")
     .trim();
   return (
-    <div className="text-[12.5px]">
+    <div className="text-small">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -297,7 +296,7 @@ export const ThoughtBlock = memo(function ThoughtBlock({
               text={item.text || "…"}
               streaming={live}
               agentId={agentId}
-              className="!text-[12.5px] italic !leading-relaxed text-muted [&_*]:!text-muted"
+              className="!text-small italic !leading-relaxed text-muted [&_*]:!text-muted"
             />
           </m.div>
         )}
@@ -425,7 +424,7 @@ export function TerminalOutput({
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
         }}
         className={cn(
-          "selectable px-3.5 py-2.5 font-mono text-[12px] leading-[1.6] text-fg/85",
+          "selectable px-3.5 py-2.5 font-mono text-caption leading-[1.6] text-fg/85",
           compact ? "overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]" : "overflow-auto",
           tail && "overflow-hidden [mask-image:linear-gradient(to_bottom,transparent,#000_1.6rem)]",
         )}
@@ -451,12 +450,12 @@ export function TerminalOutput({
           <button
             type="button"
             onClick={() => setAll((v) => !v)}
-            className="flex h-7 w-full items-center justify-center gap-1 border-t border-line/60 text-[11.5px] text-steel transition-colors hover:bg-raised/40 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
+            className="flex h-7 w-full items-center justify-center gap-1 border-t border-line/60 text-meta text-steel transition-colors hover:bg-raised/40 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
           >
             {all ? "Show less" : `Show all ${lines.length.toLocaleString()} lines`}
           </button>
         ) : (
-          <div className="flex h-7 w-full items-center justify-center border-t border-line/60 text-[11.5px] tabular-nums text-steel">
+          <div className="flex h-7 w-full items-center justify-center border-t border-line/60 text-meta tabular-nums text-steel">
             {live ? "Live" : pluralize(text ? lines.length : 0, "line")}
           </div>
         ))}
@@ -485,7 +484,7 @@ const ToolTitle = memo(function ToolTitle({ title, kind }: { title: string; kind
   return (
     <>
       {m[1]}{" "}
-      <span className="rounded-md bg-raised/60 px-1.5 py-px font-mono text-[11.5px] text-steel">
+      <span className="rounded-md bg-raised/60 px-1.5 py-px font-mono text-meta text-steel">
         {path.slice(0, cut)}
         <span className="font-medium text-fg/85">{path.slice(cut)}</span>
       </span>
@@ -551,8 +550,8 @@ export const ToolCallCard = memo(function ToolCallCard({
         <Icon className={cn("h-3.5 w-3.5 shrink-0", running && "text-accent")} aria-hidden />
         <span
           className={cn(
-            "min-w-0 flex-1 truncate text-[12.5px]",
-            isCmd && "font-mono text-[12px]",
+            "min-w-0 flex-1 truncate text-small",
+            isCmd && "font-mono text-caption",
             running ? "text-muted" : failed ? "text-err/90" : "",
           )}
         >
@@ -560,7 +559,7 @@ export const ToolCallCard = memo(function ToolCallCard({
         </span>
         {hasDiffs && <DiffStat additions={stats.additions} deletions={stats.deletions} />}
         {exit !== null && (
-          <span className="shrink-0 rounded-md bg-err/10 px-1.5 text-[11px] font-medium tabular-nums text-err">
+          <span className="shrink-0 rounded-md bg-err/10 px-1.5 text-micro font-medium tabular-nums text-err">
             exit {exit}
           </span>
         )}
@@ -628,6 +627,8 @@ export const PermissionCard = memo(function PermissionCard({
   onReasonOpenChange?: (open: boolean) => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
+  // The letter hints (A, D, ⇧D) only mean something while one-letter shortcuts are on.
+  const letterKeys = useSingleKeys();
   const [localReason, setLocalReason] = useState(false);
   // The draft lives in a store so it survives the row being virtualized out of view.
   const reason = usePermissionUi((s) => s.reasonDraft[item.requestId] ?? "");
@@ -674,14 +675,14 @@ export const PermissionCard = memo(function PermissionCard({
   }, [pendingNow, item.requestId]);
   // Key hints go on the option the shortcut actually picks (by kind, first match).
   const keyHint = (o: PermissionOption): string | null => {
-    if (!keyboard) return null;
+    if (!keyboard || !letterKeys) return null;
     if (keyed.allow?.id === o.id) return "A";
     if (keyed.always?.id === o.id) return "⇧A";
     if (keyed.deny?.id === o.id) return "D";
     return null;
   };
   const shortcutFor = (o: PermissionOption): string | undefined => {
-    if (!keyboard) return undefined;
+    if (!keyboard || !letterKeys) return undefined;
     if (keyed.allow?.id === o.id) return "A Y";
     if (keyed.always?.id === o.id) return "Shift+A";
     if (keyed.deny?.id === o.id) return "D N";
@@ -693,7 +694,7 @@ export const PermissionCard = memo(function PermissionCard({
     const allowed = chosen?.kind.startsWith("allow");
     const Icon = cancelled ? ShieldX : allowed ? ShieldCheck : ShieldX;
     return (
-      <div className="flex h-8 items-center gap-2 px-1.5 text-[12.5px]">
+      <div className="flex h-8 items-center gap-2 px-1.5 text-small">
         <span
           className={cn(
             "flex h-6 w-6 shrink-0 items-center justify-center rounded-md border",
@@ -708,10 +709,7 @@ export const PermissionCard = memo(function PermissionCard({
         </span>
         <span className="min-w-0 flex-1 truncate text-muted">{item.title}</span>
         <span
-          className={cn(
-            "shrink-0 text-[11.5px] font-medium",
-            cancelled ? "text-steel" : allowed ? "text-ok" : "text-err",
-          )}
+          className={cn("shrink-0 text-meta font-medium", cancelled ? "text-steel" : allowed ? "text-ok" : "text-err")}
         >
           {cancelled ? "Cancelled" : (OPTION_LABEL[chosen.kind] ?? chosen.name)}
         </span>
@@ -764,13 +762,11 @@ export const PermissionCard = memo(function PermissionCard({
           <ShieldAlert className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-warn">
-            {identity.short} needs your approval
-          </div>
+          <div className="eyebrow text-warn">{identity.short} needs your approval</div>
           <div
             className={cn(
               "mt-0.5 break-words text-[14px] font-medium text-fg",
-              item.toolKind === "execute" && "font-mono text-[13px]",
+              item.toolKind === "execute" && "font-mono text-body",
             )}
           >
             {item.title}
@@ -790,7 +786,7 @@ export const PermissionCard = memo(function PermissionCard({
         </div>
       )}
       {docked ? (
-        <div className="border-t border-warn/15 bg-base/30 px-4 py-2 text-[12px] text-steel">
+        <div className="border-t border-warn/15 bg-base/30 px-4 py-2 text-caption text-steel">
           Answer with the buttons above the message box.
         </div>
       ) : (
@@ -820,11 +816,11 @@ export const PermissionCard = memo(function PermissionCard({
               variant="ghost"
               disabled={busy !== null}
               onClick={() => setShowReason(true)}
-              aria-keyshortcuts={keyboard ? "Shift+D Shift+N" : undefined}
+              aria-keyshortcuts={keyboard && letterKeys ? "Shift+D Shift+N" : undefined}
             >
               <MessageSquareX />
               Deny with reason…
-              {keyboard && <Kbd className="ml-0.5">⇧D</Kbd>}
+              {keyboard && letterKeys && <Kbd className="ml-0.5">⇧D</Kbd>}
             </Button>
           )}
         </div>
@@ -832,7 +828,7 @@ export const PermissionCard = memo(function PermissionCard({
       {armed && keyed.always && (
         <div
           role="status"
-          className="border-t border-warn/25 bg-warn/[0.12] px-4 py-2 text-[12px] font-medium text-warn"
+          className="border-t border-warn/25 bg-warn/[0.12] px-4 py-2 text-caption font-medium text-warn"
         >
           Press <Kbd className="mx-0.5 border-warn/40 text-warn">⇧A</Kbd> again to always allow “{keyed.always.name}”.
           This can't be undone for this session.
@@ -847,7 +843,7 @@ export const PermissionCard = memo(function PermissionCard({
             void denyWithReason();
           }}
         >
-          <label htmlFor={`reason-${item.id}`} className="mb-1.5 block text-[12px] font-medium text-muted">
+          <label htmlFor={`reason-${item.id}`} className="mb-1.5 block text-caption font-medium text-muted">
             Tell {identity.short} what to do instead
           </label>
           <Textarea
@@ -869,7 +865,7 @@ export const PermissionCard = memo(function PermissionCard({
             className="min-h-16"
           />
           <div className="mt-2 flex items-center justify-end gap-2">
-            <span className="mr-auto text-[11px] text-steel">
+            <span className="mr-auto text-micro text-steel">
               Denies this request, then sends your note as the next message.
             </span>
             <Button size="sm" variant="ghost" type="button" onClick={() => setShowReason(false)}>
@@ -901,7 +897,7 @@ export function PlanChecklist({
   return (
     <ul className={cn("space-y-1", dense && "space-y-0.5")}>
       {entries.map((e, i) => (
-        <li key={i} className="flex items-start gap-2.5 text-[12.5px] leading-snug">
+        <li key={i} className="flex items-start gap-2.5 text-small leading-snug">
           <span
             className={cn(
               "mt-[1px] flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
@@ -936,9 +932,7 @@ export function PlanChecklist({
             {e.content}
           </span>
           {e.priority === "high" && e.status !== "completed" && (
-            <span className="ml-auto mt-px shrink-0 rounded px-1 text-[11px] font-medium uppercase tracking-wide text-warn">
-              high
-            </span>
+            <span className="ml-auto mt-px shrink-0 rounded px-1 eyebrow text-warn">high</span>
           )}
         </li>
       ))}
@@ -955,8 +949,8 @@ export const PlanCard = memo(function PlanCard({ item }: { item: Item<"plan"> })
     <div className="rounded-xl border border-line bg-card/50 p-3.5">
       <div className="mb-2.5 flex items-center gap-2">
         <ListChecks className="h-4 w-4 text-accent" />
-        <span className="text-[12.5px] font-semibold">Plan</span>
-        <span className="text-[11.5px] text-steel tabular">
+        <span className="text-small font-semibold">Plan</span>
+        <span className="text-meta text-steel tabular">
           {done} of {total}
         </span>
         <div className="ml-auto h-1 w-24 overflow-hidden rounded-full bg-raised">
@@ -1014,7 +1008,7 @@ export const NoticeBanner = memo(function NoticeBanner({
     <div
       role={item.level === "error" ? "alert" : "status"}
       className={cn(
-        "rounded-xl border text-[12.5px]",
+        "rounded-xl border text-small",
         item.level === "error" && "border-err/30 bg-err/[0.07] text-err",
         item.level === "warn" && "border-warn/30 bg-warn/[0.07] text-warn",
         item.level === "info" && "border-line bg-card/40 text-muted",
@@ -1023,7 +1017,7 @@ export const NoticeBanner = memo(function NoticeBanner({
       <div className="flex items-start gap-2 px-3 py-2">
         <Icon className="mt-px h-3.5 w-3.5 shrink-0" />
         <span className="selectable">{item.text}</span>
-        <RelTime ts={item.ts} className="ml-auto shrink-0 text-[11px] text-steel" />
+        <RelTime ts={item.ts} className="ml-auto shrink-0 text-micro text-steel" />
       </div>
       {recover && (
         <div className="flex flex-wrap items-center gap-1.5 border-t border-err/20 px-2 py-1.5">
@@ -1037,6 +1031,12 @@ export const NoticeBanner = memo(function NoticeBanner({
             <Button size="xs" variant="ghost" className="text-fg" onClick={() => useUi.getState().setMoveAgent(agent)}>
               <Repeat className="!h-3 !w-3" />
               Switch account
+            </Button>
+          )}
+          {agent.provider !== "custom" && (
+            <Button size="xs" variant="ghost" className="text-fg" onClick={() => useUi.getState().setView("accounts")}>
+              <Users className="!h-3 !w-3" />
+              Accounts
             </Button>
           )}
           <Button
@@ -1072,9 +1072,9 @@ function ToolImages({ item, agentId }: { item: Item<"tool_call">; agentId: strin
           aria-label={`View ${img.name}`}
           className="overflow-hidden rounded-xl border border-line-strong bg-base transition-transform duration-150 hover:scale-[1.01] active:scale-[0.99]"
         >
-          <img
-            src={attachmentSrc(img)}
-            alt={img.name}
+          <AttachmentImg
+            attachment={img}
+            placeholder="h-[140px] w-[200px]"
             className="block max-h-[320px] w-auto max-w-full object-contain"
             draggable={false}
           />
@@ -1105,6 +1105,6 @@ function revealInScroller(el: HTMLElement) {
   if (!p) return;
   const box = p.getBoundingClientRect();
   const r = el.getBoundingClientRect();
-  if (r.bottom > box.bottom - 16) p.scrollBy({ top: r.bottom - box.bottom + 16, behavior: "smooth" });
-  else if (r.top < box.top + 16) p.scrollBy({ top: r.top - box.top - 16, behavior: "smooth" });
+  if (r.bottom > box.bottom - 16) p.scrollBy({ top: r.bottom - box.bottom + 16, behavior: scrollBehavior() });
+  else if (r.top < box.top + 16) p.scrollBy({ top: r.top - box.top - 16, behavior: scrollBehavior() });
 }

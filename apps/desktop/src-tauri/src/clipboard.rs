@@ -108,6 +108,7 @@ fn push_image(out: &mut ClipboardImages, mime: &str, bytes: Vec<u8>) {
         name: format!("pasted-image.{ext}"),
         mime_type: mime.to_string(),
         data: base64::engine::general_purpose::STANDARD.encode(bytes),
+        path: None,
     });
 }
 
@@ -282,6 +283,7 @@ fn file_attachment(path: &std::path::Path) -> Result<Option<Attachment>, String>
         name,
         mime_type: mime.into(),
         data: base64::engine::general_purpose::STANDARD.encode(bytes),
+        path: None,
     }))
 }
 

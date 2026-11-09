@@ -97,7 +97,7 @@ export function ProjectSectionHeader(p: Props) {
               onKeyDown={onKeyDown}
               aria-expanded={!p.collapsed}
               title={p.section.name}
-              className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 text-[11.5px] font-bold uppercase tracking-[0.08em] text-muted outline-none transition-colors hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/40"
+              className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 eyebrow text-muted outline-none transition-colors hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/40"
             >
               <ChevronRight
                 className={cn(
@@ -106,13 +106,13 @@ export function ProjectSectionHeader(p: Props) {
                 )}
               />
               <span className="truncate">{p.section.name}</span>
-              <span className="shrink-0 rounded-full bg-raised px-1.5 text-[10.5px] font-semibold leading-4 tracking-normal text-muted tabular">
+              <span className="shrink-0 rounded-full bg-raised px-1.5 text-micro font-semibold leading-4 tracking-normal text-muted tabular">
                 {p.count}
               </span>
               {/* Folded, it still says when something inside needs you. */}
               {p.collapsed && p.needs > 0 && (
                 <span
-                  className="flex shrink-0 items-center gap-1 rounded-full bg-warn/20 px-1.5 py-px text-[10.5px] font-semibold normal-case tracking-normal text-warn ring-1 ring-warn/40 tabular"
+                  className="flex shrink-0 items-center gap-1 rounded-full bg-warn/20 px-1.5 py-px text-micro font-semibold normal-case tracking-normal text-warn ring-1 ring-warn/40 tabular"
                   title={`${p.needs} need${p.needs === 1 ? "s" : ""} you`}
                 >
                   <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-warn" />
@@ -207,7 +207,7 @@ function SectionNameInput({ initial, onDone }: { initial: string; onDone: (name:
         }
       }}
       onBlur={(e) => focused.current && finish(e.currentTarget.value)}
-      className="h-7 min-w-0 flex-1 rounded-md border border-accent/50 bg-base px-2 text-[12px] font-semibold text-fg outline-none ring-3 ring-accent/10"
+      className="h-7 min-w-0 flex-1 rounded-md border border-accent/50 bg-base px-2 text-caption font-semibold text-fg outline-none ring-3 ring-accent/10"
     />
   );
 }

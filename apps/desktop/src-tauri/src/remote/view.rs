@@ -312,6 +312,7 @@ mod tests {
                     name: "image".into(),
                     mime_type: "image/png".into(),
                     data: "AAAA".into(),
+                    path: None,
                 }],
             },
             ItemBody::Plan { entries: vec![] },

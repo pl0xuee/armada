@@ -135,13 +135,13 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
               </Tooltip>
             )}
             {!compact && agentCount > 0 && (
-              <span className="text-[11.5px] text-steel tabular">
+              <span className="text-meta text-steel tabular">
                 · {agentCount} agent{agentCount === 1 ? "" : "s"}
               </span>
             )}
           </div>
           <div
-            className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px]"
+            className="mt-0.5 flex min-w-0 items-center gap-1.5 text-caption"
             title={st ? `Checked ${relativeTimeLong(st.checkedAt, now)}` : undefined}
           >
             {st === null ? (
@@ -176,19 +176,17 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
           {checkError && (
             <div
               role="alert"
-              className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-err/30 bg-err/[0.06] px-2.5 py-1.5 text-[12px]"
+              className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-err/30 bg-err/[0.06] px-2.5 py-1.5 text-caption"
             >
               <span className="font-medium text-err">Check failed</span>
-              <span className="selectable min-w-0 flex-1 break-words font-mono text-[11.5px] text-muted">
-                {checkError}
-              </span>
+              <span className="selectable min-w-0 flex-1 break-words font-mono text-meta text-muted">{checkError}</span>
               <Button size="xs" variant="secondary" onClick={() => void onCheck()} disabled={checking}>
                 <RefreshCw className={cn(checking && "animate-spin")} /> Retry
               </Button>
             </div>
           )}
           {local && !loggedIn && st !== null && account.local && INSTALL_URL[account.local.kind] && (
-            <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11.5px] text-steel">
+            <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-meta text-steel">
               Not installed?
               <button
                 type="button"
@@ -201,7 +199,7 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
           )}
           {local && account.local && <LocalHealthPanel account={account} />}
           {!loggedIn && st !== null && apiKey && !checkError && (
-            <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11.5px] text-steel">
+            <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-meta text-steel">
               The key was rejected.
               <button
                 type="button"
@@ -216,7 +214,7 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
             <div className={cn("flex flex-wrap items-end gap-x-4 gap-y-1.5", compact ? "mt-1.5" : "mt-2.5")}>
               <UsageMeters usage={usage} className="w-full max-w-[460px]" />
               {!compact && (
-                <span className="hidden pb-px text-[11px] text-steel @xl/acct:inline">
+                <span className="hidden pb-px text-micro text-steel @xl/acct:inline">
                   updated {relativeTimeLong(usage.updatedAt, now)}
                 </span>
               )}
@@ -291,7 +289,11 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
                     className={cn(removeBlocked ? "cursor-not-allowed opacity-40" : "hover:!bg-err/12 hover:!text-err")}
                     aria-disabled={removeBlocked}
                     onClick={() => !removeBlocked && setConfirmDelete(true)}
-                    aria-label={removeBlocked ? "Remove account (blocked by active agents)" : "Remove account"}
+                    aria-label={
+                      removeBlocked
+                        ? `Remove account (blocked by ${agentCount > 0 ? "active" : "archived"} agents)`
+                        : "Remove account"
+                    }
                   >
                     <Trash2 />
                   </Button>
@@ -316,10 +318,10 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
           description={
             <>
               {local ? (
-                "Kvistcode will forget this server and delete its profile directory. Your models stay where they are."
+                "Kvistcode will forget this server and delete its saved settings. Your models stay where they are."
               ) : (
                 <>
-                  Kvistcode will delete this profile's isolated config directory
+                  Kvistcode will delete this account's saved settings
                   {account.authKind === "api_key"
                     ? " and remove its API key from your OS keychain"
                     : " and its saved login"}
@@ -334,7 +336,7 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
           onConfirm={onDelete}
         >
           {deleteError && (
-            <p role="alert" className="rounded-lg border border-err/30 bg-err/[0.07] px-3 py-2 text-[12.5px] text-err">
+            <p role="alert" className="rounded-lg border border-err/30 bg-err/[0.07] px-3 py-2 text-small text-err">
               {deleteError}
             </p>
           )}

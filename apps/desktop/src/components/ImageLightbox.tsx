@@ -1,6 +1,6 @@
 import * as D from "@radix-ui/react-dialog";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
-import { attachmentSrc } from "@/lib/attachments";
+import { useAttachmentPicture } from "@/hooks/useAttachmentSrc";
 import type { Attachment } from "@/lib/types";
 import { useReturnFocus } from "./ui/returnFocus";
 
@@ -17,6 +17,7 @@ export function ImageLightbox({
   // The list can shrink while open (e.g. an attachment removed): stay on a valid image.
   const at = index !== null && images.length > 0 ? Math.min(index, images.length - 1) : null;
   const current = at !== null ? images[at] : undefined;
+  const { src, failed } = useAttachmentPicture(current);
   const many = images.length > 1;
   // Opened from a thumbnail (no Radix trigger): focus goes back to it on close.
   const focus = useReturnFocus();
@@ -39,14 +40,15 @@ export function ImageLightbox({
           onClick={(e) => e.target === e.currentTarget && onIndexChange(null)}
         >
           <D.Title className="sr-only">{current?.name ?? "Image"}</D.Title>
-          {current && (
+          {current && src && (
             <img
-              src={attachmentSrc(current)}
+              src={src}
               alt={current.name}
               className="max-h-[calc(100vh-120px)] max-w-full rounded-xl border border-white/10 object-contain shadow-2xl"
             />
           )}
-          <div className="mt-3 flex items-center gap-3 text-[12px] text-white/70">
+          {current && failed && <p className="text-body text-white/80">Picture no longer available</p>}
+          <div className="mt-3 flex items-center gap-3 text-caption text-white/70">
             <span className="max-w-[60vw] truncate">{current?.name}</span>
             {many && at !== null && (
               <span className="tabular">

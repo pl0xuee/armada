@@ -51,7 +51,7 @@ export function McpTestOutcome({
   if (!result || result.state === "running") return null;
   if (result.state === "ok") {
     return (
-      <p role="status" className={cn("flex items-center gap-1.5 text-[12px] text-ok", className)}>
+      <p role="status" className={cn("flex items-center gap-1.5 text-caption text-ok", className)}>
         <CircleCheck className="h-3.5 w-3.5 shrink-0" />
         <span className="min-w-0 truncate">Connected · {result.message}</span>
       </p>
@@ -59,10 +59,10 @@ export function McpTestOutcome({
   }
   return (
     <div role="alert" className={cn("rounded-lg border border-err/30 bg-err/[0.07] px-2.5 py-2", className)}>
-      <p className="flex items-center gap-1.5 text-[12px] font-medium text-err">
+      <p className="flex items-center gap-1.5 text-caption font-medium text-err">
         <CircleX className="h-3.5 w-3.5 shrink-0" /> Couldn't connect
       </p>
-      <pre className="selectable mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[11.5px] text-muted">
+      <pre className="selectable mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-meta text-muted">
         {result.message}
       </pre>
     </div>

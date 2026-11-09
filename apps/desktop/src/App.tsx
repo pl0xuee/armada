@@ -20,8 +20,9 @@ import { installBackgroundTracker } from "@/store/background";
 import { installCompletionTracker } from "@/store/completion";
 import { installNavHistory } from "@/store/navHistory";
 import { api } from "@/lib/api";
+import { setSingleKeyShortcuts } from "@/lib/approvalKeys";
 import { applyDevLinks } from "@/lib/devlinks";
-import { isLightTheme } from "@/lib/themes";
+import { cacheThemeChoice, isLightTheme } from "@/lib/themes";
 import { useResolvedTheme } from "@/lib/useResolvedTheme";
 import { installNavigationGuard } from "@/lib/external";
 import { useApp } from "@/store/app";
@@ -125,10 +126,16 @@ export function App() {
   // Links open externally; nothing navigates the webview.
   useEffect(() => installNavigationGuard(), []);
 
-  // Theme on <html data-theme>
+  // Theme on <html data-theme>. Until settings load, keep what index.html painted from the cache.
+  const settingsLoaded = settings !== undefined;
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
+    if (settingsLoaded) document.documentElement.dataset.theme = theme;
+  }, [theme, settingsLoaded]);
+  // Remember the choice so the next launch paints it before settings load (see index.html).
+  const singleKeys = settings?.singleKeyShortcuts !== false;
+  useEffect(() => setSingleKeyShortcuts(singleKeys), [singleKeys]);
+  const themeChoice = settings?.theme;
+  useEffect(() => cacheThemeChoice(themeChoice), [themeChoice]);
 
   // Interface zoom (webview zoom, so layout and measurements stay consistent)
   const scale = settings?.interfaceScale;
@@ -305,7 +312,8 @@ function Main() {
 
 function ViewFallback() {
   return (
-    <div className="flex h-full items-center justify-center" aria-busy="true" aria-label="Loading">
+    <div className="flex h-full items-center justify-center" role="status" aria-busy="true">
+      <span className="sr-only">Loading</span>
       <div className="h-1 w-32 overflow-hidden rounded-full bg-raised shimmer-bar" />
     </div>
   );
@@ -320,11 +328,12 @@ function BootScreen({ error }: { error: string | null }) {
       </div>
       {error ? (
         <div className="max-w-md text-center">
-          <p className="text-[15px] font-semibold">Couldn't reach the Kvistcode core</p>
-          <p className="selectable mt-1.5 font-mono text-xs text-muted">{error}</p>
+          <p className="text-[15px] font-semibold">Kvistcode couldn't start</p>
           <Button className="mt-4" variant="primary" onClick={() => void useApp.getState().boot()}>
             Try again
           </Button>
+          <p className="mt-3 text-xs text-muted">If it keeps happening, restart Kvistcode.</p>
+          <p className="selectable mt-3 break-words font-mono text-[11px] text-steel">Details: {error}</p>
         </div>
       ) : (
         <div

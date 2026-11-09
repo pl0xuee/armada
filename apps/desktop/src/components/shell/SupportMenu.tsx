@@ -44,7 +44,7 @@ export function SupportMenu({ compact }: { compact: boolean }) {
           <button
             type="button"
             aria-label="Help and support"
-            className="flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-1.5 text-[12px] text-steel transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg"
+            className="flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-1.5 text-caption text-steel transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg"
           >
             <LifeBuoy className="h-3.5 w-3.5" />
             {!compact && <span>Support</span>}

@@ -26,7 +26,7 @@ export function BarList({
 }) {
   const max = Math.max(0, ...data.map((d) => d.value));
   if (data.length === 0 || max === 0) {
-    return <div className="py-8 text-center text-[12.5px] text-steel">{emptyLabel}</div>;
+    return <div className="py-8 text-center text-small text-steel">{emptyLabel}</div>;
   }
   return (
     <ul className={cn("space-y-1", className)}>
@@ -39,10 +39,10 @@ export function BarList({
           >
             <div className="flex min-w-0 items-center gap-2">
               {d.icon}
-              <span className="truncate text-[12.5px] text-fg">{d.label}</span>
-              {d.sub && <span className="truncate text-[11.5px] text-steel">{d.sub}</span>}
+              <span className="truncate text-small text-fg">{d.label}</span>
+              {d.sub && <span className="truncate text-meta text-steel">{d.sub}</span>}
             </div>
-            <span className="text-right text-[12.5px] font-medium text-fg tabular">{d.display}</span>
+            <span className="text-right text-small font-medium text-fg tabular">{d.display}</span>
             <div className="col-span-2 h-2 overflow-hidden rounded-[4px] bg-raised/70">
               <div
                 className="h-full origin-left rounded-[4px] transition-[width] duration-300 ease-out"
@@ -95,7 +95,7 @@ export function ShareBar({ segments }: { segments: ShareSegment[] }) {
           ))
         )}
       </div>
-      <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-muted">
+      <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-meta text-muted">
         {segments.map((s) => (
           <span key={s.key} className="flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-[3px]" style={{ background: s.color }} />

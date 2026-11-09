@@ -54,7 +54,7 @@ export function FilePicker({
           type="button"
           aria-label="Jump to file"
           aria-haspopup="listbox"
-          className="flex h-8 min-w-0 flex-1 items-center justify-between gap-2 rounded-lg border border-line bg-base/60 px-3 text-left font-mono text-[12px] text-fg transition-colors hover:border-line-strong focus:border-accent/60 focus:outline-none focus:ring-3 focus:ring-accent/15"
+          className="flex h-8 min-w-0 flex-1 items-center justify-between gap-2 rounded-lg border border-line bg-base/60 px-3 text-left font-mono text-caption text-fg transition-colors hover:border-line-strong focus:border-accent/60 focus:outline-none focus:ring-3 focus:ring-accent/15"
         >
           <span className="min-w-0 truncate">{selected ?? "Jump to file"}</span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-steel" />
@@ -85,9 +85,15 @@ export function FilePicker({
               choose(rows[active].path);
             }
           }}
-          className="h-8 font-mono text-[12px]"
+          className="h-8 font-mono text-caption"
         />
-        <div ref={listRef} id="file-picker-list" role="listbox" aria-label="Files" className="mt-2 max-h-[min(320px,50vh)] overflow-y-auto">
+        <div
+          ref={listRef}
+          id="file-picker-list"
+          role="listbox"
+          aria-label="Files"
+          className="mt-2 max-h-[min(320px,50vh)] overflow-y-auto"
+        >
           {rows.map((f, i) => (
             <div
               key={f.path}
@@ -98,7 +104,7 @@ export function FilePicker({
               onMouseMove={() => active !== i && setActive(i)}
               onClick={() => choose(f.path)}
               className={cn(
-                "flex min-h-7 cursor-default items-center gap-2 rounded-md px-2 py-1 font-mono text-[12px] text-fg",
+                "flex min-h-7 cursor-default items-center gap-2 rounded-md px-2 py-1 font-mono text-caption text-fg",
                 i === active && "bg-gunmetal",
                 f.path === selected && "text-accent",
               )}
@@ -108,9 +114,9 @@ export function FilePicker({
               <span className="shrink-0 text-err">−{f.deletions}</span>
             </div>
           ))}
-          {rows.length === 0 && <p className="px-2 py-3 text-[12px] text-steel">No files match.</p>}
+          {rows.length === 0 && <p className="px-2 py-3 text-caption text-steel">No files match.</p>}
           {matches.length > rows.length && (
-            <p className="px-2 py-2 text-[11.5px] text-steel">
+            <p className="px-2 py-2 text-meta text-steel">
               Showing {rows.length} of {matches.length.toLocaleString()} — keep typing to narrow.
             </p>
           )}

@@ -60,7 +60,8 @@ export function MessageFold({
   if (height !== null && limitRole.current === null) limitRole.current = role;
   const foldRole = limitRole.current ?? role;
 
-  const foldable = canFold && height !== null && shouldCollapse(height, foldRole, { streaming, watched: watched.current });
+  const foldable =
+    canFold && height !== null && shouldCollapse(height, foldRole, { streaming, watched: watched.current });
   const collapsed = foldable && !expanded;
 
   // After folding back up, keep the message's top in view instead of leaving the reader below it.
@@ -106,7 +107,7 @@ export function MessageFold({
           onClick={toggle}
           aria-expanded={!collapsed}
           aria-controls={bodyId}
-          className="mt-1.5 inline-flex h-7 items-center gap-1.5 rounded-full border border-line bg-card/60 pl-2.5 pr-3 text-[12px] font-medium text-muted transition-colors hover:border-line-strong hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+          className="mt-1.5 inline-flex h-7 items-center gap-1.5 rounded-full border border-line bg-card/60 pl-2.5 pr-3 text-caption font-medium text-muted transition-colors hover:border-line-strong hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
         >
           {collapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
           {collapsed ? "Show more" : "Show less"}

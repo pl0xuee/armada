@@ -122,7 +122,7 @@ function CompactRow({ file, label }: { file: ChangedFile; label: string }) {
   const Icon = file.status === "added" ? FilePlus2 : file.status === "deleted" ? FileMinus2 : FileQuestion;
   const dir = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/") + 1) : "";
   return (
-    <div className="flex h-9 items-center gap-2 rounded-xl border border-line bg-card px-3 font-mono text-[12px]">
+    <div className="flex h-9 items-center gap-2 rounded-xl border border-line bg-card px-3 font-mono text-caption">
       <Icon
         className={cn(
           "h-3.5 w-3.5 shrink-0",
@@ -134,7 +134,7 @@ function CompactRow({ file, label }: { file: ChangedFile; label: string }) {
         <span className="text-fg">{file.path.slice(dir.length)}</span>
       </span>
       {file.lfs && <LfsTag />}
-      <span className="ml-auto shrink-0 font-sans text-[11.5px] text-steel">{label}</span>
+      <span className="ml-auto shrink-0 font-sans text-meta text-steel">{label}</span>
     </div>
   );
 }
@@ -173,12 +173,12 @@ function FileItem({
         initialOpen={false}
         onExpandRequest={expand}
         collapsedHint={
-          <div className="flex items-center justify-between gap-3 px-4 py-2.5 text-[12px] text-steel">
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 text-caption text-steel">
             <span>Large diff, collapsed to keep the review fast.</span>
             <button
               type="button"
               onClick={expand}
-              className="rounded-md border border-line-strong px-2.5 py-1 text-[12px] font-medium text-fg transition-colors hover:bg-raised"
+              className="rounded-md border border-line-strong px-2.5 py-1 text-caption font-medium text-fg transition-colors hover:bg-raised"
             >
               Show diff ({(file.additions + file.deletions).toLocaleString()} lines)
             </button>
@@ -190,7 +190,7 @@ function FileItem({
   const parsed = index.parsed(file.path);
   if (!parsed) {
     return (
-      <div className="rounded-xl border border-line bg-card px-4 py-3 font-mono text-[12px] text-muted">
+      <div className="rounded-xl border border-line bg-card px-4 py-3 font-mono text-caption text-muted">
         {file.path} · no textual diff
       </div>
     );

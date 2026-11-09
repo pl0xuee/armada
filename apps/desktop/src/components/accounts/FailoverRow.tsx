@@ -26,7 +26,7 @@ export function FailoverRow() {
   return (
     <div className="mb-4 rounded-xl border border-line bg-card/60 px-4 py-2.5 @2xl:mb-5">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="text-[13px] font-medium text-fg">If an account hits its limit</span>
+        <span className="text-body font-medium text-fg">If an account hits its limit</span>
         <Segmented
           size="sm"
           aria-label="If an account hits its limit"
@@ -39,7 +39,7 @@ export function FailoverRow() {
           options={FAILOVER.map((f) => ({ value: f.value, label: f.value === "off" ? "Do nothing" : f.label }))}
         />
       </div>
-      <p className="mt-1 text-[12px] text-muted">{FAILOVER.find((f) => f.value === failover)?.description}</p>
+      <p className="mt-1 text-caption text-muted">{FAILOVER.find((f) => f.value === failover)?.description}</p>
       <FieldError field="failover" />
     </div>
   );

@@ -44,7 +44,7 @@ export function CopyButton({
         }
       }}
       className={cn(
-        "inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] text-steel transition-colors hover:bg-raised hover:text-fg",
+        "inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-micro text-steel transition-colors hover:bg-raised hover:text-fg",
         className,
       )}
     >

@@ -1,3 +1,4 @@
+import { useVaReady } from "@/components/voice/ComposerVoiceButtons";
 import { TalkHero } from "@/components/voice/VoiceAssistantButton";
 import {
   Columns3,
@@ -118,7 +119,7 @@ function PaneFailed({ error, onRetry }: { error: string; onRetry: () => void }) 
       className="flex min-w-0 flex-1 flex-col items-center justify-center gap-2 bg-base p-8 text-center"
     >
       <p className="text-[14px] font-semibold">This conversation couldn't be displayed</p>
-      <p className="selectable max-w-md break-words font-mono text-[11.5px] text-muted">{error}</p>
+      <p className="selectable max-w-md break-words font-mono text-meta text-muted">{error}</p>
       <Button size="sm" variant="secondary" className="mt-2" onClick={onRetry}>
         Try again
       </Button>
@@ -319,7 +320,7 @@ function AgentPane({ agentId, tileIds }: { agentId: string; tileIds?: string[] }
         {workspaceOpen && (tiled || workspaceMax === 0) && (
           <div
             role="status"
-            className="flex h-8 shrink-0 items-center gap-2 border-t border-line bg-base px-3 text-[12px] text-muted"
+            className="flex h-8 shrink-0 items-center gap-2 border-t border-line bg-base px-3 text-caption text-muted"
           >
             <SquareTerminal className="h-3.5 w-3.5 shrink-0 text-steel" />
             <span className="min-w-0 truncate">
@@ -413,7 +414,7 @@ function AgentPane({ agentId, tileIds }: { agentId: string; tileIds?: string[] }
             key="inspector"
             agent={agent}
             className={
-              wide ? undefined : "absolute inset-y-0 right-0 z-20 shadow-[-24px_0_60px_-20px_rgba(0,0,0,0.6)] glass"
+              wide ? undefined : "absolute inset-y-0 right-0 z-20 shadow-[-24px_0_60px_-20px_rgba(0,0,0,0.6)] bg-card"
             }
           />
         )}
@@ -437,6 +438,9 @@ function Welcome() {
   const fleetCost = useMemo(() => list.reduce((sum, a) => sum + a.costUsd, 0), [list]);
   const budget = useBudgetStatus(fleetCost);
   const [confirmResume, setConfirmResume] = useState(false);
+  // Before the first agent, voice set-up shouldn't be the loudest thing on the page (the title bar still offers it).
+  const vaReady = useVaReady();
+  const showTalk = vaReady || list.length > 0;
 
   const shortcuts: [string, string[]][] = [
     ["Start from the palette", [modKey, "K"]],
@@ -478,7 +482,7 @@ function Welcome() {
             <h1 className="text-[20px] font-semibold tracking-[-0.02em]">Every coding agent, one calm place</h1>
             <div className="mt-1 flex min-h-[24px] flex-wrap items-center gap-1.5">
               {live === 0 && needs === 0 && (
-                <span className="text-[12.5px] text-muted">{list.length === 0 ? "No agents yet" : "All quiet"}</span>
+                <span className="text-small text-muted">{list.length === 0 ? "No agents yet" : "All quiet"}</span>
               )}
               {live > 0 && <PulseChip tone="accent" label={`${live} working`} onClick={() => openMission("all")} />}
               {needs > 0 && (
@@ -497,9 +501,11 @@ function Welcome() {
 
         <HomeComposer />
 
-        <div className="mt-3 flex">
-          <TalkHero />
-        </div>
+        {showTalk && (
+          <div className="mt-3 flex">
+            <TalkHero />
+          </div>
+        )}
 
         <div className="mt-3 flex flex-wrap gap-1.5">
           <QuickAction icon={<SlidersHorizontal />} label="All options" onClick={() => openNewAgent()} />
@@ -511,7 +517,7 @@ function Welcome() {
           <div className="mt-6 overflow-hidden rounded-xl border border-violet/30 bg-violet/[0.05]">
             <div className="flex items-center gap-2 border-b border-violet/20 px-3.5 py-2">
               <RotateCcw className="h-3.5 w-3.5 text-violet" />
-              <span className="text-[12.5px] font-semibold">Pick up where you left off</span>
+              <span className="text-small font-semibold">Pick up where you left off</span>
               <Button
                 size="xs"
                 variant="ghost"
@@ -529,8 +535,8 @@ function Welcome() {
                 >
                   <ProviderGlyph provider={a.provider} customAgentId={a.customAgentId} size="sm" />
                   <button type="button" onClick={() => openAgent(a.id)} className="min-w-0 flex-1 text-left">
-                    <span className="block truncate text-[13px] font-medium">{a.title}</span>
-                    <span className="block truncate text-[11.5px] text-steel">
+                    <span className="block truncate text-body font-medium">{a.title}</span>
+                    <span className="block truncate text-meta text-steel">
                       {basename(a.projectPath)} · interrupted <RelTime ts={a.lastActivityAt} long />
                     </span>
                   </button>
@@ -545,7 +551,7 @@ function Welcome() {
 
         <div className="mt-6 grid grid-cols-1 gap-x-6 gap-y-1.5 border-t border-line pt-4 @lg:grid-cols-2">
           {shortcuts.map(([label, keys]) => (
-            <div key={label} className="flex items-center justify-between text-[12px] text-muted">
+            <div key={label} className="flex items-center justify-between text-caption text-muted">
               <span>{label}</span>
               <span className="flex gap-0.5">
                 {keys.map((k) => (
@@ -587,7 +593,7 @@ function PulseChip({ label, tone, onClick }: { label: string; tone?: "accent" | 
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-6 items-center gap-1.5 rounded-full border border-line bg-card/60 px-2.5 text-[12px] tabular text-muted transition-colors hover:border-line-strong hover:bg-raised hover:text-fg"
+      className="inline-flex h-6 items-center gap-1.5 rounded-full border border-line bg-card/60 px-2.5 text-caption tabular text-muted transition-colors hover:border-line-strong hover:bg-raised hover:text-fg"
     >
       {tone && (
         <span
@@ -605,7 +611,7 @@ function QuickAction({ icon, label, onClick }: { icon: React.ReactNode; label: s
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-card/70 px-2.5 text-[12.5px] text-muted transition-[border-color,background-color,color,transform] duration-150 hover:border-line-strong hover:bg-raised hover:text-fg active:scale-[0.98] [&_svg]:h-3.5 [&_svg]:w-3.5"
+      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-card/70 px-2.5 text-small text-muted transition-[border-color,background-color,color,transform] duration-150 hover:border-line-strong hover:bg-raised hover:text-fg active:scale-[0.98] [&_svg]:h-3.5 [&_svg]:w-3.5"
     >
       {icon}
       {label}

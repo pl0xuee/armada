@@ -44,7 +44,7 @@ export function HelperOfLine({ agent }: { agent: Agent }) {
     <button
       type="button"
       onClick={() => useUi.getState().openAgent(ctx.main.id)}
-      className="flex min-w-0 shrink items-center gap-1.5 text-left text-[11.5px] leading-none text-steel transition-colors hover:text-fg"
+      className="flex min-w-0 shrink items-center gap-1.5 text-left text-meta leading-none text-steel transition-colors hover:text-fg"
     >
       <GitFork className="h-3 w-3 shrink-0 text-accent" />
       <span className="shrink-0">Helper of</span>
@@ -67,7 +67,7 @@ export function SyncChip({ agent }: { agent: Agent }) {
           type="button"
           aria-label={`Sync status: ${view.label}`}
           className={cn(
-            "inline-flex h-5 max-w-[220px] shrink-0 items-center gap-1 rounded-full border px-1.5 text-[11px] font-medium transition-[filter] hover:brightness-125",
+            "inline-flex h-5 max-w-[220px] shrink-0 items-center gap-1 rounded-full border px-1.5 text-micro font-medium transition-[filter] hover:brightness-125",
             TONE[view.tone],
           )}
         >
@@ -84,10 +84,8 @@ export function SyncChip({ agent }: { agent: Agent }) {
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80">
-        <div className="flex items-center gap-2 text-[13px] font-semibold">
-          {view.label}
-        </div>
-        <p className="mt-1 text-[12px] leading-relaxed text-muted">
+        <div className="flex items-center gap-2 text-body font-semibold">{view.label}</div>
+        <p className="mt-1 text-caption leading-relaxed text-muted">
           {sync.state === "inSync" &&
             `This helper and ${ctx.name} have each other's changes${sync.files > 0 ? ` (${sync.files} file${sync.files === 1 ? "" : "s"} merged)` : ""}.`}
           {sync.state === "pendingToMain" &&
@@ -97,7 +95,7 @@ export function SyncChip({ agent }: { agent: Agent }) {
           {sync.state === "conflict" && (sync.detail ?? "Both agents changed the same lines.")}
         </p>
         {sync.lastSyncAt && (
-          <p className="mt-1.5 text-[11.5px] text-steel">Last synced {relativeTimeLong(sync.lastSyncAt)}</p>
+          <p className="mt-1.5 text-meta text-steel">Last synced {relativeTimeLong(sync.lastSyncAt)}</p>
         )}
         <div className="mt-3 flex flex-wrap gap-2">
           <Button size="xs" variant="secondary" disabled={merging} onClick={() => void syncNow(agent)}>
@@ -122,7 +120,7 @@ export function ConflictBanner({ agent, embedded = false }: { agent: Agent; embe
     <div
       role="status"
       className={cn(
-        "flex shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 px-4 py-2 text-[12px]",
+        "flex shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 px-4 py-2 text-caption",
         !embedded && "border-b border-warn/25 bg-warn/[0.07]",
       )}
     >
@@ -145,14 +143,16 @@ export function ConflictBanner({ agent, embedded = false }: { agent: Agent; embe
 export function HelpersChip({ count, label }: { count: number; label?: boolean }) {
   const tile = useUi((s) => s.tileHelpers);
   return (
-    <Tooltip content={tile ? "Showing helpers beside this agent. Click for a single pane" : "Tile helpers beside this agent"}>
+    <Tooltip
+      content={tile ? "Showing helpers beside this agent. Click for a single pane" : "Tile helpers beside this agent"}
+    >
       <button
         type="button"
         aria-pressed={tile}
         aria-label={`${count} helper${count === 1 ? "" : "s"}`}
         onClick={() => useUi.getState().setTileHelpers(!tile)}
         className={cn(
-          "inline-flex h-6 items-center gap-1.5 rounded-full border px-2 text-[11.5px] font-medium transition-colors",
+          "inline-flex h-6 items-center gap-1.5 rounded-full border px-2 text-meta font-medium transition-colors",
           tile ? "border-accent/30 bg-accent/10 text-accent" : "border-line bg-card/60 text-muted hover:text-fg",
         )}
       >

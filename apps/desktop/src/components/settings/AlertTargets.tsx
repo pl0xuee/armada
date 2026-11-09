@@ -73,9 +73,11 @@ export function AlertTargets({ targets }: { targets: AlertTarget[] }) {
           }}
         />
       ) : (
-        <p className="px-4 py-3 text-[12px] text-steel">That's the most targets Kvistcode keeps ({MAX_ALERT_TARGETS}).</p>
+        <p className="px-4 py-3 text-caption text-steel">
+          That's the most targets Kvistcode keeps ({MAX_ALERT_TARGETS}).
+        </p>
       )}
-      <div className="px-4 py-3 text-[12px] leading-relaxed text-muted">
+      <div className="px-4 py-3 text-caption leading-relaxed text-muted">
         <FieldError field="alerts" />
         Messages carry only the agent&rsquo;s name, its project, what happened and a one-line summary with secrets
         scrubbed, never file contents or your prompts. A burst is combined into one message, and a target gets at most
@@ -89,11 +91,11 @@ export function AlertTargets({ targets }: { targets: AlertTarget[] }) {
 function TestResult({ test }: { test?: TestState }) {
   if (!test || test.state === "sending") return null;
   return test.state === "sent" ? (
-    <p role="status" className="text-[11.5px] text-ok">
+    <p role="status" className="text-meta text-ok">
       Sent. Check the channel.
     </p>
   ) : (
-    <p role="alert" className="break-words text-[11.5px] text-err">
+    <p role="alert" className="break-words text-meta text-err">
       {test.message}
     </p>
   );
@@ -119,11 +121,11 @@ function TargetRow({
     <div className={cn("space-y-2.5 px-4 py-3.5", !target.enabled && "opacity-70")}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="min-w-0 flex-1 basis-[200px]">
-          <p className="flex items-center gap-2 text-[13px] font-medium">
+          <p className="flex items-center gap-2 text-body font-medium">
             <span className="truncate">{label}</span>
             {target.name && <Badge tone="accent">{kindLabel(target.kind)}</Badge>}
           </p>
-          <p className="truncate font-mono text-[11.5px] text-steel" title="Hidden: the full URL is a secret">
+          <p className="truncate font-mono text-meta text-steel" title="Hidden: the full URL is a secret">
             {maskAlertUrl(target.url)}
           </p>
         </div>
@@ -166,7 +168,7 @@ function EventToggles({
           key={e.key}
           htmlFor={`${idBase}-${e.key}`}
           title={e.hint}
-          className="flex cursor-pointer items-center gap-2 text-[12.5px] text-muted"
+          className="flex cursor-pointer items-center gap-2 text-small text-muted"
         >
           <Checkbox
             id={`${idBase}-${e.key}`}
@@ -232,7 +234,7 @@ function AddTarget({
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void add()}
             className={cn(
-              "min-w-0 flex-1 basis-[260px] font-mono text-[12.5px]",
+              "min-w-0 flex-1 basis-[260px] font-mono text-small",
               problem && "border-err/60 focus:border-err/60 focus:ring-err/15",
             )}
           />
@@ -247,12 +249,14 @@ function AddTarget({
           />
         </div>
         {problem && (
-          <p role="alert" className="text-[11.5px] text-err">
+          <p role="alert" className="text-meta text-err">
             {problem}
           </p>
         )}
         {!problem && wrongKind && (
-          <p className="text-[11.5px] text-warn">This looks like a {wrongKind} URL. Pick {wrongKind} above.</p>
+          <p className="text-meta text-warn">
+            This looks like a {wrongKind} URL. Pick {wrongKind} above.
+          </p>
         )}
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="secondary" disabled={!ready} onClick={() => void add()}>

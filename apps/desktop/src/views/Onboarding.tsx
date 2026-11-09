@@ -105,7 +105,7 @@ export function Onboarding() {
             >
               <span
                 className={cn(
-                  "flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[11.5px] font-medium transition-colors duration-150",
+                  "flex h-6 items-center gap-1.5 rounded-full px-2.5 text-meta font-medium transition-colors duration-150",
                   i === step
                     ? "bg-raised text-fg ring-1 ring-line-strong"
                     : i < step
@@ -115,7 +115,7 @@ export function Onboarding() {
               >
                 <span
                   className={cn(
-                    "flex h-4 w-4 items-center justify-center rounded-full text-[11px] tabular",
+                    "flex h-4 w-4 items-center justify-center rounded-full text-micro tabular",
                     i < step
                       ? "bg-accent/90 text-accent-fg"
                       : i === step
@@ -135,7 +135,7 @@ export function Onboarding() {
           <button
             type="button"
             onClick={finish}
-            className="h-6 shrink-0 whitespace-nowrap rounded-md px-2 text-[12px] text-muted transition-colors hover:text-fg"
+            className="h-6 shrink-0 whitespace-nowrap rounded-md px-2 text-caption text-muted transition-colors hover:text-fg"
           >
             Skip setup
           </button>
@@ -230,7 +230,7 @@ function Welcome({ onNext }: { onNext: () => void }) {
           <span
             key={p}
             style={{ animationDelay: `${80 + i * 50}ms` }}
-            className="ob-rise flex items-center gap-2 rounded-full border border-line bg-card/80 py-1 pl-1 pr-3 text-[12.5px] text-muted edge"
+            className="ob-rise flex items-center gap-2 rounded-full border border-line bg-card/80 py-1 pl-1 pr-3 text-small text-muted edge"
           >
             <ProviderGlyph provider={p} size="sm" />
             {PROVIDERS[p].short}
@@ -240,7 +240,7 @@ function Welcome({ onNext }: { onNext: () => void }) {
       <Button variant="primary" size="lg" className="mt-9 min-w-[180px]" onClick={onNext} autoFocus>
         Get started <ArrowRight />
       </Button>
-      <p className="mt-3 text-[12px] text-steel">Takes about a minute. You can change everything later.</p>
+      <p className="mt-3 text-caption text-steel">Takes about a minute. You can change everything later.</p>
     </div>
   );
 }
@@ -274,12 +274,12 @@ function ProvidersStep() {
     <>
       <StepHeader
         title="Your AI tools"
-        description="Kvistcode uses the official command-line tool from each provider, so you get new features as soon as they ship. One click installs anything that's missing."
+        description="Kvistcode runs the official tool from each provider, so you get new features as soon as they ship. One click installs anything that's missing."
       />
       <div className="mb-3 flex items-center justify-between">
-        <span className="text-[12.5px] text-muted">
+        <span className="text-small text-muted">
           {detecting ? (
-            "Scanning your PATH…"
+            "Looking for your tools…"
           ) : (
             <>
               <span className="text-fg tabular">{ready}</span> of {providers.length} ready
@@ -299,7 +299,7 @@ function ProvidersStep() {
         ) : (
           <div className="flex flex-col items-center rounded-xl border border-line bg-card px-4 py-8 text-center edge">
             <p className="text-[13.5px] font-medium">No tools found yet</p>
-            <p className="mt-1 text-[12.5px] text-muted">Kvistcode couldn't look for Claude, Codex or Grok.</p>
+            <p className="mt-1 text-small text-muted">Kvistcode couldn't look for Claude, Codex or Grok.</p>
             <Button className="mt-4" variant="primary" onClick={detect}>
               <RefreshCw /> Try again
             </Button>
@@ -322,13 +322,13 @@ function AccountsStep() {
         description={
           accounts.length === 0
             ? "Add the login your agents will use: Claude, ChatGPT (Codex) or Grok."
-            : "Kvistcode found the logins your CLIs already use. Add more accounts (a second Claude Max, a work ChatGPT) and run agents on all of them at once."
+            : "Kvistcode found sign-ins already on this computer. Add more accounts (a second Claude Max, a work ChatGPT) and run agents on all of them at once."
         }
       />
       <div className="overflow-hidden rounded-xl border border-line bg-card edge">
         {accounts.length > 0 && (
           <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-            <span className="text-[12.5px] text-muted">
+            <span className="text-small text-muted">
               <span className="text-fg tabular">{signedIn}</span> of {accounts.length} signed in
             </span>
             <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
@@ -343,7 +343,7 @@ function AccountsStep() {
           {accounts.length === 0 && (
             <div className="flex flex-col items-center px-4 py-8 text-center">
               <p className="text-[13.5px] font-medium">No accounts yet</p>
-              <p className="mt-1 text-[12.5px] text-muted">Nothing is signed in on this computer so far.</p>
+              <p className="mt-1 text-small text-muted">Nothing is signed in on this computer so far.</p>
               <Button variant="primary" className="mt-4" onClick={() => setAdding(true)}>
                 <UserPlus /> Add account
               </Button>
@@ -391,7 +391,7 @@ function PrefsStep() {
               onValueCommit={(v) => void save({ sounds: { ...s, volume: v } })}
               className="max-w-[220px]"
             />
-            <span className="w-9 text-[12px] text-muted tabular">{Math.round(volume * 100)}%</span>
+            <span className="w-9 text-caption text-muted tabular">{Math.round(volume * 100)}%</span>
             <div className="ml-auto flex gap-1">
               {(["permission", "done", "error"] as const).map((r) => (
                 <Button
@@ -399,7 +399,11 @@ function PrefsStep() {
                   size="xs"
                   variant="ghost"
                   disabled={!s.enabled}
-                  onClick={() => void api.previewSound(r).catch(() => {})}
+                  onClick={() =>
+                    void api
+                      .previewSound(r)
+                      .catch((e) => toast.error("Couldn't play the sound", { description: errorMessage(e) }))
+                  }
                   aria-label={`Preview ${r} sound`}
                 >
                   <Play className="!h-3 !w-3" /> {r === "permission" ? "Approval" : r === "done" ? "Done" : "Error"}
@@ -434,8 +438,8 @@ function PrefsStep() {
         />
         <PrefCard
           icon={<GitBranch />}
-          title="Isolate agents in git worktrees"
-          description="Each agent works on its own branch, so parallel agents never collide."
+          title="Give each agent its own copy"
+          description="Each agent works in its own copy of the project, so parallel agents don't edit each other's files."
           control={
             <Switch
               aria-label="Default worktree"
@@ -470,7 +474,7 @@ function PrefCard({
         </span>
         <div className="min-w-0 flex-1">
           <div className="text-[13.5px] font-medium">{title}</div>
-          <div className="text-[12px] text-muted">{description}</div>
+          <div className="text-caption text-muted">{description}</div>
         </div>
         {control}
       </div>
@@ -520,7 +524,7 @@ function DoneStep({
       </div>
       {signedIn === 0 && (
         <div className="mt-4 flex w-full max-w-[420px] items-center gap-3 rounded-xl border border-warn/30 bg-warn/[0.06] px-4 py-3 text-left">
-          <p className="min-w-0 flex-1 text-[12.5px] leading-snug text-warn">
+          <p className="min-w-0 flex-1 text-small leading-snug text-warn">
             No account is signed in yet. Claude, Codex and Grok agents need one to start.
           </p>
           <Button size="sm" variant="secondary" onClick={onAddAccount}>
@@ -547,7 +551,7 @@ function Stat({ value, label }: { value: string; label: string }) {
   return (
     <div className="rounded-xl border border-line bg-card px-4 py-3 edge">
       <div className="text-[20px] font-semibold tracking-tight tabular">{value}</div>
-      <div className="text-[11.5px] text-muted">{label}</div>
+      <div className="text-meta text-muted">{label}</div>
     </div>
   );
 }
@@ -568,7 +572,7 @@ function ProjectsGlimpse() {
   if (failed) return null;
   if (found && found.length === 0) {
     return (
-      <div className="mt-4 flex w-full max-w-[420px] items-start gap-2 rounded-xl border border-line bg-card px-4 py-3 text-left text-[12.5px] edge">
+      <div className="mt-4 flex w-full max-w-[420px] items-start gap-2 rounded-xl border border-line bg-card px-4 py-3 text-left text-small edge">
         <FolderGit2 className="mt-px h-4 w-4 shrink-0 text-steel" />
         <span className="text-muted">
           No projects found on this computer yet. You can pick any folder when you start an agent.
@@ -578,7 +582,7 @@ function ProjectsGlimpse() {
   }
   return (
     <div className="mt-4 w-full max-w-[420px] rounded-xl border border-line bg-card px-4 py-3 text-left edge">
-      <div className="flex items-center gap-2 text-[12.5px]">
+      <div className="flex items-center gap-2 text-small">
         <FolderGit2 className="h-4 w-4 text-accent" />
         {found ? (
           <span>
@@ -595,17 +599,17 @@ function ProjectsGlimpse() {
               <span
                 key={p}
                 title={prettyPath(p)}
-                className="inline-flex h-6 max-w-[160px] items-center rounded-full border border-line bg-base/60 px-2.5 text-[11.5px] text-muted"
+                className="inline-flex h-6 max-w-[160px] items-center rounded-full border border-line bg-base/60 px-2.5 text-meta text-muted"
               >
                 <span className="truncate">{basename(p)}</span>
               </span>
             ))
           : ["w-20", "w-24", "w-16"].map((w) => <span key={w} className={cn("skeleton h-6 rounded-full", w)} />)}
         {found && found.length > 6 && (
-          <span className="inline-flex h-6 items-center px-1 text-[11.5px] text-steel">+{found.length - 6} more</span>
+          <span className="inline-flex h-6 items-center px-1 text-meta text-steel">+{found.length - 6} more</span>
         )}
       </div>
-      <p className="mt-2 text-[11.5px] text-steel">Pick any of them when you start an agent.</p>
+      <p className="mt-2 text-meta text-steel">Pick any of them when you start an agent.</p>
     </div>
   );
 }

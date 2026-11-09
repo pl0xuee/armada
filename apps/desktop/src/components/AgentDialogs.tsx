@@ -177,7 +177,7 @@ function HandoffDialog({ agent, onClose }: { agent: Agent | null; onClose: () =>
                   key={p.label}
                   type="button"
                   onClick={() => setInstruction(p.text)}
-                  className="h-6 rounded-full border border-line bg-card px-2.5 text-[11.5px] text-muted transition-colors hover:border-line-strong hover:text-fg"
+                  className="h-6 rounded-full border border-line bg-card px-2.5 text-meta text-muted transition-colors hover:border-line-strong hover:text-fg"
                 >
                   {p.label}
                 </button>
@@ -240,12 +240,12 @@ function DeleteDialog({ agent, onClose }: { agent: Agent | null; onClose: () => 
       }}
     >
       {agent?.worktree && (
-        <label className="flex items-start gap-2.5 rounded-lg border border-line bg-base/40 p-3 text-[12.5px]">
+        <label className="flex items-start gap-2.5 rounded-lg border border-line bg-base/40 p-3 text-small">
           <Checkbox checked={removeWorktree} onCheckedChange={setRemoveWorktree} className="mt-0.5" />
           <span>
             Also remove the worktree
-            <span className="mt-0.5 block font-mono text-[11px] text-steel">{agent.branch}</span>
-            <span className="mt-1 block text-[11.5px] text-steel">
+            <span className="mt-0.5 block font-mono text-micro text-steel">{agent.branch}</span>
+            <span className="mt-1 block text-meta text-steel">
               If it has uncommitted or unmerged work, Kvistcode checks with you before discarding it.
             </span>
           </span>
@@ -309,10 +309,8 @@ function MoveAccountDialog({ agent, onClose }: { agent: Agent | null; onClose: (
         <DialogBody className="space-y-3">
           {options.length === 0 ? (
             <div className="rounded-xl border border-dashed border-line-strong px-4 py-6 text-center">
-              <p className="text-[13px] font-medium">
-                No other {agent ? PROVIDERS[agent.provider].short : ""} accounts
-              </p>
-              <p className="mt-1 text-[12px] text-muted">Add one in Accounts, then come back here.</p>
+              <p className="text-body font-medium">No other {agent ? PROVIDERS[agent.provider].short : ""} accounts</p>
+              <p className="mt-1 text-caption text-muted">Add one in Accounts, then come back here.</p>
               <Button
                 size="sm"
                 variant="secondary"
@@ -339,14 +337,14 @@ function MoveAccountDialog({ agent, onClose }: { agent: Agent | null; onClose: (
                     disabled={!signedIn}
                     onClick={() => setTarget(a.id)}
                     className={cn(
-                      "flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors disabled:opacity-50",
+                      "flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors disabled:opacity-45",
                       on ? "border-accent/50 bg-accent/[0.07]" : "border-line bg-card/60 hover:border-line-strong",
                     )}
                   >
                     <AccountAvatar account={a} size={28} />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13px] font-medium">{a.name}</span>
-                      <span className={cn("block truncate text-[11.5px]", signedIn ? "text-steel" : "text-warn")}>
+                      <span className="block truncate text-body font-medium">{a.name}</span>
+                      <span className={cn("block truncate text-meta", signedIn ? "text-steel" : "text-warn")}>
                         {signedIn ? [a.status?.label, a.status?.email].filter(Boolean).join(" · ") : "Not signed in"}
                       </span>
                     </span>
@@ -364,7 +362,7 @@ function MoveAccountDialog({ agent, onClose }: { agent: Agent | null; onClose: (
             </div>
           )}
           {options.length > 0 && (
-            <label className="flex items-center gap-2.5 text-[12.5px]">
+            <label className="flex items-center gap-2.5 text-small">
               <Checkbox checked={cont} onCheckedChange={setCont} />
               Continue the task right away
               <span className="text-steel">(sends “{CONTINUE_PROMPT}”)</span>

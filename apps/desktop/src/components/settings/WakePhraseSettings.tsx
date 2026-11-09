@@ -74,7 +74,7 @@ export function WakePhraseGroup({
             <p
               id="va-wake-phrase-error"
               role="alert"
-              className="max-w-[300px] text-right text-[11.5px] leading-snug text-err"
+              className="max-w-[300px] text-right text-meta leading-snug text-err"
             >
               {problem}
             </p>
@@ -98,7 +98,7 @@ function WakeStatusRow({ assistantOn }: { assistantOn: boolean }) {
       <p
         role="status"
         className={cn(
-          "flex min-w-0 flex-1 basis-[220px] items-center gap-2 text-[12px] leading-relaxed",
+          "flex min-w-0 flex-1 basis-[220px] items-center gap-2 text-caption leading-relaxed",
           line.kind === "error" ? "text-err" : line.kind === "listening" ? "text-fg" : "text-muted",
         )}
       >
@@ -125,7 +125,7 @@ function WakeStatusRow({ assistantOn }: { assistantOn: boolean }) {
                   style={{ width: `${pct}%` }}
                 />
               </div>
-              <span className="tabular w-9 text-right text-[11.5px] text-steel">{pct}%</span>
+              <span className="tabular w-9 text-right text-meta text-steel">{pct}%</span>
               <Button variant="ghost" size="xs" onClick={dl.cancel} aria-label="Cancel download">
                 <X className="h-3 w-3" />
                 Cancel

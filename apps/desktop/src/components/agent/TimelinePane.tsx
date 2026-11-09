@@ -17,8 +17,8 @@ export function TimelinePane({ agent, focused = true }: { agent: Agent; focused?
       footer={
         loadError && !items ? (
           <div className="mx-auto mt-10 max-w-sm rounded-xl border border-err/30 bg-err/[0.06] p-4 text-center">
-            <p className="text-[13px] font-medium text-err">Couldn't load this conversation</p>
-            <p className="selectable mt-1 break-words font-mono text-[11.5px] text-muted">{loadError}</p>
+            <p className="text-body font-medium text-err">Couldn't load this conversation</p>
+            <p className="selectable mt-1 break-words font-mono text-meta text-muted">{loadError}</p>
             <Button
               size="sm"
               variant="secondary"
@@ -29,7 +29,7 @@ export function TimelinePane({ agent, focused = true }: { agent: Agent; focused?
             </Button>
           </div>
         ) : items && items.length === 0 && !loading ? (
-          <div className="py-16 text-center text-[12.5px] text-steel">
+          <div className="py-16 text-center text-small text-steel">
             {agent.status === "starting" ? "Starting session…" : "No messages yet. Say hello below."}
           </div>
         ) : null

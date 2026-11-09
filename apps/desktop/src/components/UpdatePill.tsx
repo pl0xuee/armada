@@ -38,7 +38,7 @@ export function UpdatePill() {
                   : "Updating…"
                 : `Update ${update.version}: Kvistcode ${update.version} is available`
             }
-            className="relative flex h-[24px] shrink-0 items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-full border border-accent/40 bg-accent/10 pl-2 pr-2.5 text-[11.5px] font-medium text-accent transition-colors hover:bg-accent/15"
+            className="relative flex h-[24px] shrink-0 items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-full border border-accent/40 bg-accent/10 pl-2 pr-2.5 text-meta font-medium text-accent transition-colors hover:bg-accent/15"
           >
             {installing ? (
               <>
@@ -66,8 +66,8 @@ export function UpdatePill() {
               <Sparkles className="h-4 w-4" />
             </span>
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-semibold">Kvistcode {update.version} is available</div>
-              <div className="text-[12px] text-muted">
+              <div className="text-body font-semibold">Kvistcode {update.version} is available</div>
+              <div className="text-caption text-muted">
                 You have {update.currentVersion}
                 {update.date ? ` · released ${new Date(update.date).toLocaleDateString()}` : ""}
               </div>
@@ -98,7 +98,7 @@ export function UpdatePill() {
                   style={ratio === null ? undefined : { transform: `scaleX(${ratio})` }}
                 />
               </div>
-              <p className="mt-1.5 text-[11.5px] text-steel">
+              <p className="mt-1.5 text-meta text-steel">
                 Kvistcode restarts automatically when the update is installed.
               </p>
             </div>

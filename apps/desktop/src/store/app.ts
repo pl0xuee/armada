@@ -290,7 +290,8 @@ export const useApp = create<AppStore>((set, get) => ({
         agents,
         // The implicit "system-custom" account backs custom ACP agents; it has no sign-in, so it isn't listed.
         accounts: s.accounts.filter((a) => a.provider !== "custom"),
-        providers: s.providers,
+        // An empty list is get_state timing out on detection: keep one a providers_changed already set.
+        providers: s.providers.length ? s.providers : get().providers,
         settings: s.settings,
       });
       // Divider positions saved for agents that were deleted in an earlier session.

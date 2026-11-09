@@ -271,6 +271,7 @@ export function seedSettings(onboarded: boolean): Settings {
       "/home/sam/Projects/infra",
     ],
     autoCheckUpdates: true,
+    singleKeyShortcuts: true,
     failover: "ask",
     defaultPermissionMode: "auto",
     busySend: "deliver",

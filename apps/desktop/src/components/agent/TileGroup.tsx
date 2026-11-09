@@ -112,8 +112,12 @@ export function TileRow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending, idsKey]);
 
-  const applyWidths = (next: number[]) =>
+  // The widths just applied by a drag: the separators read these instead of measuring on every move.
+  const dragWidths = useRef<number[]>([]);
+  const applyWidths = (next: number[]) => {
+    dragWidths.current = next;
     setWeights((w) => ({ ...w, ...Object.fromEntries(visible.map((id, i) => [id, next[i]])) }));
+  };
   const current = () => cells.current.slice(0, visible.length).map((el) => el?.getBoundingClientRect().width ?? 0);
 
   // Ctrl/⌘+Alt+←/→ moves focus between tiles (hidden ones included: they swap in).
@@ -165,12 +169,24 @@ export function TileRow({
                   aria-orientation="vertical"
                   aria-label="Resize tiles"
                   aria-valuemin={TILE_MIN_WIDTH}
-                  aria-valuenow={Math.round(cells.current[i - 1]?.getBoundingClientRect().width ?? 0)}
+                  aria-valuemax={Math.round(
+                    drag !== null
+                      ? (dragWidths.current[i - 1] ?? 0) + (dragWidths.current[i] ?? 0) - TILE_MIN_WIDTH
+                      : (cells.current[i - 1]?.getBoundingClientRect().width ?? 0) +
+                          (cells.current[i]?.getBoundingClientRect().width ?? 0) -
+                          TILE_MIN_WIDTH,
+                  )}
+                  aria-valuenow={Math.round(
+                    drag !== null
+                      ? (dragWidths.current[i - 1] ?? 0)
+                      : (cells.current[i - 1]?.getBoundingClientRect().width ?? 0),
+                  )}
                   tabIndex={0}
                   className="group/div relative z-10 w-px shrink-0 cursor-col-resize touch-none bg-line outline-none"
                   onPointerDown={(e) => {
                     e.currentTarget.setPointerCapture(e.pointerId);
                     start.current = { x: e.clientX, widths: current() };
+                    dragWidths.current = start.current.widths;
                     setDrag(i - 1);
                   }}
                   onPointerMove={(e) => {
@@ -266,7 +282,7 @@ function OverflowStrip({ hidden }: { hidden: string[] }) {
   const tabs = rows.slice(0, rows.length > 3 ? 2 : 3);
   const more = rows.slice(tabs.length);
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-line bg-panel/50 px-3 text-[12px]">
+    <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-line bg-panel/50 px-3 text-caption">
       <span className="shrink-0 text-steel">Also open:</span>
       {tabs.map((t) => (
         <button

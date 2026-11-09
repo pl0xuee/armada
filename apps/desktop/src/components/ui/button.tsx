@@ -10,15 +10,15 @@ const VARIANTS = {
   ghost: "text-muted hover:text-fg hover:bg-raised",
   outline: "border border-line text-fg hover:bg-raised hover:border-line-strong",
   danger: "bg-err/12 text-err border border-err/30 hover:bg-err/20 hover:border-err/50",
-  "danger-solid": "bg-err text-white font-medium hover:brightness-110 shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]",
+  "danger-solid": "bg-err text-err-fg font-medium hover:brightness-110 shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]",
   warn: "bg-warn text-warn-fg font-medium hover:brightness-110 shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_4px_14px_-4px_color-mix(in_srgb,var(--warn)_60%,transparent)]",
   ok: "bg-ok/12 text-ok border border-ok/30 hover:bg-ok/20",
 } as const;
 
 const SIZES = {
   xs: "h-6 px-2 text-xs gap-1 rounded-md",
-  sm: "h-7 px-2.5 text-[12.5px] gap-1.5 rounded-lg",
-  md: "h-8 px-3 text-[13px] gap-2 rounded-lg",
+  sm: "h-7 px-2.5 text-small gap-1.5 rounded-lg",
+  md: "h-8 px-3 text-body gap-2 rounded-lg",
   lg: "h-10 px-4 text-sm gap-2 rounded-xl",
   icon: "h-8 w-8 rounded-lg",
   "icon-sm": "h-7 w-7 rounded-md",

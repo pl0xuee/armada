@@ -81,7 +81,7 @@ function CapField({
     <div className="flex flex-col items-end">
       <div className="relative">
         {unit === "usd" && (
-          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[13px] text-steel">$</span>
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-body text-steel">$</span>
         )}
         <Input
           id={id}
@@ -102,13 +102,13 @@ function CapField({
           }}
         />
         {unit !== "usd" && text !== "" && (
-          <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-steel">
+          <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-micro text-steel">
             {unit}
           </span>
         )}
       </div>
       {error && (
-        <p role="alert" className="mt-1.5 flex max-w-[260px] items-start gap-1.5 text-right text-[11.5px] text-err">
+        <p role="alert" className="mt-1.5 flex max-w-[260px] items-start gap-1.5 text-right text-meta text-err">
           <CircleAlert className="mt-px h-3.5 w-3.5 shrink-0" />
           <span>{error}</span>
         </p>
@@ -148,7 +148,14 @@ function CapPair({
         onSave={onTokens}
         width={150}
       />
-      <CapField id={`${idBase}-turns`} label={`${what} in turns`} unit="turns" value={turns} onSave={onTurns} width={130} />
+      <CapField
+        id={`${idBase}-turns`}
+        label={`${what} in turns`}
+        unit="turns"
+        value={turns}
+        onSave={onTurns}
+        width={130}
+      />
     </div>
   );
 }
@@ -224,7 +231,7 @@ export function BudgetsSection({ settings }: { settings: Settings }) {
           />
         </SettingRow>
       </SettingGroup>
-      <div className="space-y-1.5 text-[12px] leading-relaxed text-muted">
+      <div className="space-y-1.5 text-caption leading-relaxed text-muted">
         <p>
           {off
             ? "No limit is set, so nothing is watched. "
@@ -234,12 +241,11 @@ export function BudgetsSection({ settings }: { settings: Settings }) {
         </p>
         <p>
           <span className="text-fg/80">Dollars</span> are what each runtime reports, as in the Usage view. API-key
-          accounts are billed that amount; subscription plans (Claude Max, ChatGPT Pro, …) show an API-equivalent
-          figure and are not billed per token; local models report no cost at all.{" "}
-          <span className="text-fg/80">Tokens</span> are counted for every agent, so use a token limit for those.{" "}
-          <span className="text-fg/80">Turns</span> count every completed reply to a prompt (a failed or cancelled turn
-          doesn&rsquo;t count) and are the simplest limit for a subscription. A restarted or reset agent never lowers
-          today&rsquo;s total.
+          accounts are billed that amount; subscription plans (Claude Max, ChatGPT Pro, …) show an API-equivalent figure
+          and are not billed per token; local models report no cost at all. <span className="text-fg/80">Tokens</span>{" "}
+          are counted for every agent, so use a token limit for those. <span className="text-fg/80">Turns</span> count
+          every completed reply to a prompt (a failed or cancelled turn doesn&rsquo;t count) and are the simplest limit
+          for a subscription. A restarted or reset agent never lowers today&rsquo;s total.
         </p>
       </div>
     </div>
@@ -276,8 +282,8 @@ function ProjectLimits({
           return (
             <div key={path} className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
               <div className="min-w-0 flex-1 basis-[160px] pt-1.5">
-                <p className="truncate text-[13px] font-medium">{basename(path)}</p>
-                <p className="truncate font-mono text-[11px] text-steel" title={path}>
+                <p className="truncate text-body font-medium">{basename(path)}</p>
+                <p className="truncate font-mono text-micro text-steel" title={path}>
                   {path}
                 </p>
               </div>
@@ -316,7 +322,7 @@ function ProjectLimits({
           />
         )}
         {paths.length === 0 && known.length === 0 && (
-          <p className="text-[12px] text-steel">Start an agent in a project folder to set a limit for it.</p>
+          <p className="text-caption text-steel">Start an agent in a project folder to set a limit for it.</p>
         )}
       </div>
     </SettingRow>

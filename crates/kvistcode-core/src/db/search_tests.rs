@@ -312,3 +312,98 @@ fn stays_fast_with_many_items() {
         "both queries took {both_took:?}"
     );
 }
+
+fn permission(agent: &str, seq: i64, resolution: Option<&str>) -> TimelineItem {
+    item(
+        agent,
+        seq,
+        ItemBody::Permission {
+            request_id: format!("r{seq}"),
+            title: "Run it".into(),
+            tool_kind: None,
+            command: Some("echo \"resolution\":null".into()),
+            diffs: vec![],
+            options: vec![],
+            resolution: resolution.map(str::to_string),
+            plan: None,
+        },
+    )
+}
+
+#[test]
+fn pending_requests_skip_resolved_ones() {
+    let db = open("pending");
+    for it in [
+        permission("a", 1, Some("allow")),
+        permission("a", 2, None),
+        permission("b", 3, None),
+        permission("a", 4, Some("deny")),
+        user("a", 5, "hello"),
+    ] {
+        db.put_item(&it).unwrap();
+    }
+    let ids = |v: Vec<TimelineItem>| v.into_iter().map(|i| i.id).collect::<Vec<_>>();
+    assert_eq!(ids(db.pending_requests("a").unwrap()), vec!["a-2"]);
+    assert_eq!(
+        ids(db.unresolved_permissions().unwrap()),
+        vec!["a-2", "b-3"]
+    );
+    // Answering it removes it from both.
+    db.put_item(&permission("a", 2, Some("allow"))).unwrap();
+    assert!(db.pending_requests("a").unwrap().is_empty());
+    assert_eq!(ids(db.unresolved_permissions().unwrap()), vec!["b-3"]);
+}
+
+#[test]
+fn a_streamed_draft_is_indexed_by_the_final_write_or_the_backfill() {
+    let db = open("draft");
+    let msg = |text: &str| {
+        item(
+            "a",
+            1,
+            ItemBody::AgentMessage {
+                text: text.into(),
+                images: vec![],
+            },
+        )
+    };
+    db.put_item_draft(&msg("half a zebrafish")).unwrap();
+    assert!(
+        db.search("zebrafish").unwrap().is_empty(),
+        "drafts skip the index"
+    );
+    assert!(db.has_unindexed());
+    // Another draft still keeps the stored text current.
+    db.put_item_draft(&msg("half a zebrafish sentence"))
+        .unwrap();
+    assert!(db.items("a").unwrap().iter().any(|i| matches!(
+        &i.body,
+        ItemBody::AgentMessage { text, .. } if text.ends_with("sentence")
+    )));
+    // The backfill (after a crash) indexes it.
+    while db.index_step(50).unwrap() > 0 {}
+    assert_eq!(db.search("zebrafish").unwrap().len(), 1);
+    // The final write indexes and marks it done.
+    db.put_item_draft(&msg("whole narwhal")).unwrap();
+    db.put_item(&msg("whole narwhal")).unwrap();
+    assert!(!db.has_unindexed());
+    assert_eq!(db.search("narwhal").unwrap().len(), 1);
+    assert!(db.search("zebrafish").unwrap().is_empty());
+}
+
+#[test]
+fn a_streaming_draft_does_not_make_search_report_indexing() {
+    let db = open("draft-indexing");
+    db.put_item_draft(&item(
+        "a",
+        1,
+        ItemBody::AgentMessage {
+            text: "still streaming".into(),
+            images: vec![],
+        },
+    ))
+    .unwrap();
+    // The backfill still sees it (a crash leaves drafts behind), search doesn't announce it.
+    assert!(db.has_unindexed());
+    assert!(!db.search_grouped("streaming").unwrap().indexing);
+}

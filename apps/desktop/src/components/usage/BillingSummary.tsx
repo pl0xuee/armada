@@ -43,7 +43,7 @@ function KeySpend({ accountId }: { accountId: string }) {
   const agents = useApp((s) => s.agents);
   const usd = accountSpend(Object.values(agents), accountId);
   return (
-    <div className="mt-2 flex items-baseline justify-between gap-2 text-[11.5px]">
+    <div className="mt-2 flex items-baseline justify-between gap-2 text-meta">
       <span className="text-steel">Used on this key</span>
       <span className="font-medium tabular text-fg">{formatCost(usd)}</span>
     </div>
@@ -60,7 +60,7 @@ function DailyBudget({ signal }: { signal: number }) {
   const b = budgetLeft(status);
   if (!b) return null;
   return (
-    <div className="mt-2 text-[11.5px]">
+    <div className="mt-2 text-meta">
       {b.budgetUsd !== null && b.leftUsd !== null ? (
         <>
           <div className="flex items-baseline justify-between gap-2">
@@ -118,18 +118,18 @@ export function BillingSummary({
       <div className="flex items-center gap-2">
         <span
           className={cn(
-            "shrink-0 whitespace-nowrap rounded-full border px-2 py-px text-[10.5px] font-medium",
+            "shrink-0 whitespace-nowrap rounded-full border px-2 py-px text-micro font-medium",
             PILL[billing.mode],
           )}
         >
           {billing.label}
         </span>
-        <span className="min-w-0 truncate text-[11.5px] text-steel" title={billing.detail}>
+        <span className="min-w-0 truncate text-meta text-steel" title={billing.detail}>
           {billing.detail}
         </span>
       </div>
       {windows.map((w) => (
-        <div key={w.name} className="mt-2 text-[11.5px]">
+        <div key={w.name} className="mt-2 text-meta">
           <div className="flex items-baseline justify-between gap-2">
             <span className="truncate text-steel">
               {w.name} left{resetLabel(w.resetsAt) ? ` · ${resetLabel(w.resetsAt)}` : ""}
@@ -163,7 +163,7 @@ export function AssistantBilling({ className }: { className?: string }) {
   }, []);
   return (
     <div className={className} data-billing="api">
-      <div className="flex items-center gap-1.5 text-[11.5px] leading-4 text-steel">
+      <div className="flex items-center gap-1.5 text-meta leading-4 text-steel">
         <span className="min-w-0 truncate">
           OpenAI API
           {month ? (
@@ -187,7 +187,7 @@ export function AssistantBilling({ className }: { className?: string }) {
         </button>
       </div>
       {open && (
-        <p className="mt-1.5 text-[11.5px] leading-snug text-steel">
+        <p className="mt-1.5 text-meta leading-snug text-steel">
           Billed per token on your OpenAI key
           {month ? `, ${month.sessions} ${month.sessions === 1 ? "session" : "sessions"} so far` : ""}. The amount is an
           estimate. Your OpenAI balance can&rsquo;t be read with an API key; check it at platform.openai.com.

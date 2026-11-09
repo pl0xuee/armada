@@ -11,6 +11,7 @@ import { useUi } from "@/store/ui";
 import { ErrorBoundary } from "../ui/ErrorBoundary";
 import { Spinner } from "../ui/misc";
 import { Skeleton } from "../ui/skeleton";
+import { Tooltip } from "../ui/tooltip";
 import {
   AgentMessage,
   NoticeBanner,
@@ -465,7 +466,7 @@ export function Timeline({
       {olderError && !olderLoading && (
         <div
           role="alert"
-          className="glass absolute left-1/2 top-2 z-10 flex h-7 -translate-x-1/2 items-center gap-2 rounded-full border border-line-strong px-3 text-[11.5px] text-muted shadow-md"
+          className="absolute left-1/2 top-2 z-10 flex h-7 bg-card -translate-x-1/2 items-center gap-2 rounded-full border border-line-strong px-3 text-meta text-muted shadow-md"
         >
           Couldn't load earlier messages.
           <button type="button" onClick={() => requestOlder(true)} className="font-medium text-accent hover:underline">
@@ -476,7 +477,7 @@ export function Timeline({
       {olderLoading && (
         <div
           role="status"
-          className="glass pointer-events-none absolute left-1/2 top-2 z-10 flex h-7 -translate-x-1/2 items-center gap-1.5 rounded-full border border-line-strong px-3 text-[11.5px] text-muted shadow-md"
+          className="pointer-events-none absolute left-1/2 top-2 z-10 flex h-7 bg-card -translate-x-1/2 items-center gap-1.5 rounded-full border border-line-strong px-3 text-meta text-muted shadow-md"
         >
           <Spinner className="h-3 w-3" /> Loading earlier messages…
         </div>
@@ -489,7 +490,11 @@ export function Timeline({
         onPointerDown={markIntent}
         onKeyDown={onKeyDownScroll}
         data-timeline-scroll=""
-        className="scroll-fade min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]"
+        // Focusable, so PageUp, PageDown, Space and the arrow keys scroll a reply that holds no control.
+        tabIndex={0}
+        role="region"
+        aria-label="Conversation"
+        className="scroll-fade min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] focus-visible:[outline-offset:-2px]"
         aria-busy={live}
       >
         <div ref={contentRef} className="mx-auto w-full max-w-[780px] px-3.5 pb-6 @lg:px-6">
@@ -582,25 +587,26 @@ export function Timeline({
           the cards' own controls, like a question's options. */}
       {!atBottom && (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-end px-3.5 @lg:px-6">
-          <button
-            type="button"
-            onClick={() => {
-              stick.current = true;
-              setHasNew(false);
-              setAtBottom(true);
-              scrollToBottom();
-            }}
-            aria-label={hasNew ? "New activity, jump to latest" : "Jump to latest"}
-            title="Jump to latest"
-            className={cn(
-              "glass pointer-events-auto flex h-8 items-center justify-center gap-1.5 rounded-full border text-[12px] font-medium text-fg shadow-md shadow-black/30 edge transition-colors hover:border-accent/50",
-              hasNew ? "border-accent/40 px-3" : "w-8 border-line-strong",
-            )}
-          >
-            {hasNew && <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]" />}
-            {hasNew && "New activity"}
-            <ArrowDown className="h-3.5 w-3.5" />
-          </button>
+          <Tooltip content="Jump to latest" side="left" disabled={hasNew}>
+            <button
+              type="button"
+              onClick={() => {
+                stick.current = true;
+                setHasNew(false);
+                setAtBottom(true);
+                scrollToBottom();
+              }}
+              aria-label={hasNew ? "New activity, jump to latest" : "Jump to latest"}
+              className={cn(
+                "pointer-events-auto flex h-8 bg-card items-center justify-center gap-1.5 rounded-full border text-caption font-medium text-fg shadow-md shadow-black/30 edge transition-colors hover:border-accent/50",
+                hasNew ? "border-accent/40 px-3" : "w-8 border-line-strong",
+              )}
+            >
+              {hasNew && <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]" />}
+              {hasNew && "New activity"}
+              <ArrowDown className="h-3.5 w-3.5" />
+            </button>
+          </Tooltip>
         </div>
       )}
     </div>
@@ -1000,7 +1006,7 @@ function renderItem(
 /** Stands in for one row that could not be drawn (an item with unexpected contents); the rest of the conversation stays. */
 function RowFailed() {
   return (
-    <div role="alert" className="rounded-lg border border-line px-3 py-2 text-[12px] text-steel">
+    <div role="alert" className="rounded-lg border border-line px-3 py-2 text-caption text-steel">
       This item couldn't be displayed.
     </div>
   );

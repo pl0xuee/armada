@@ -51,17 +51,17 @@ export function BudgetHoldPanel({ agent }: { agent: Agent }) {
           <p className="text-[13.5px] font-semibold">
             Paused at {hold.metric === "cost" ? "a spending" : hold.metric === "tokens" ? "a token" : "a turn"} limit
           </p>
-          <p className="selectable mt-0.5 break-words text-[12.5px] leading-relaxed text-muted">
+          <p className="selectable mt-0.5 break-words text-small leading-relaxed text-muted">
             {holdText(hold, equivalent)} It finished its turn first, so nothing was cut off.
             {agent.queuedPrompts > 0 &&
               ` ${agent.queuedPrompts} queued ${agent.queuedPrompts === 1 ? "message is" : "messages are"} waiting.`}
           </p>
           {hold.metric === "cost" && equivalent && (
-            <p className="mt-1 text-[12px] leading-relaxed text-steel">
+            <p className="mt-1 text-caption leading-relaxed text-steel">
               Subscriptions aren&rsquo;t billed per token, so a turn or token limit may fit this account better.
             </p>
           )}
-          {where && <p className="mt-1 text-[12px] leading-relaxed text-steel">{where}</p>}
+          {where && <p className="mt-1 text-caption leading-relaxed text-steel">{where}</p>}
         </div>
       </div>
       <div className="mt-3 flex flex-wrap gap-2 pl-[38px]">
@@ -69,9 +69,7 @@ export function BudgetHoldPanel({ agent }: { agent: Agent }) {
           size="sm"
           variant="warn"
           disabled={busy}
-          onClick={() =>
-            void choose({ action: "raise", by: steps[0]! }, "Couldn't raise the limit")
-          }
+          onClick={() => void choose({ action: "raise", by: steps[0]! }, "Couldn't raise the limit")}
         >
           <TrendingUp className="!h-3.5 !w-3.5" /> Raise limit by {raiseLabel(hold, steps[0]!)}
         </Button>

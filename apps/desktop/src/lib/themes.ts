@@ -53,6 +53,19 @@ export function resolveTheme(id: string | undefined, prefersLight: boolean = sys
   return isThemeId(id) ? (id as ThemeId) : "gunmetal";
 }
 
+/** Where the chosen theme is remembered so index.html can paint it before settings load (keep in step with its inline script). */
+export const THEME_CACHE_KEY = "kvistcode.theme";
+
+/** Remember the theme choice ("system" included) for the next launch's first paint. */
+export function cacheThemeChoice(choice: string | undefined): void {
+  if (!isThemeId(choice)) return;
+  try {
+    localStorage.setItem(THEME_CACHE_KEY, choice);
+  } catch {
+    // Storage can be unavailable; the next launch just paints the default first.
+  }
+}
+
 export function isLightTheme(id: string | undefined): boolean {
   if (id === SYSTEM_THEME) return systemPrefersLight();
   return THEMES.some((t) => t.id === id && t.light);

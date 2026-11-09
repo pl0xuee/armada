@@ -399,7 +399,7 @@ function AgentView({
               setJump(null);
               scrollToBottom(true);
             }}
-            className={`press animate-enter pointer-events-auto mb-2 inline-flex h-10 items-center gap-1.5 rounded-full border px-4 text-[13px] font-semibold shadow-[0_10px_30px_-10px_rgba(0,0,0,0.8)] ${
+            className={`press hit relative animate-enter pointer-events-auto mb-2 inline-flex h-10 items-center gap-1.5 rounded-full border px-4 text-[13px] font-semibold shadow-[0_10px_30px_-10px_rgba(0,0,0,0.8)] ${
               jump === "new" ? "border-accent/50 bg-accent text-accent-fg" : "border-line-strong bg-raised text-fg"
             }`}
           >
@@ -450,7 +450,7 @@ function StaleNotice({ agentId, stale, error }: { agentId: string; stale: boolea
       {error ? <Icon name="alertCircle" size={15} className="shrink-0 text-warn" /> : <Spinner size={13} className="shrink-0" />}
       <span className="min-w-0 flex-1">{error ? "Couldn't refresh this conversation." : "Updating…"}</span>
       {error && (
-        <button type="button" onClick={() => void loadTimeline(agentId)} className="press h-10 shrink-0 rounded-lg px-2 font-semibold text-accent">
+        <button type="button" onClick={() => void loadTimeline(agentId)} className="press hit relative h-10 shrink-0 rounded-lg px-2 font-semibold text-accent">
           Retry
         </button>
       )}

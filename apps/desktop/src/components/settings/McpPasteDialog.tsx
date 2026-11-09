@@ -129,16 +129,16 @@ function PasteBody({ existing, scope, onDone }: { existing: McpServer[]; scope: 
             aria-invalid={!!parsed.error}
             aria-describedby="mcp-paste-help"
             className={cn(
-              "min-h-[150px] font-mono text-[12px] leading-relaxed",
+              "min-h-[150px] font-mono text-caption leading-relaxed",
               parsed.error && "border-err/60 focus:border-err/70 focus:ring-err/15",
             )}
           />
           {parsed.error ? (
-            <p id="mcp-paste-help" role="alert" className="mt-1.5 text-[12px] text-err">
+            <p id="mcp-paste-help" role="alert" className="mt-1.5 text-caption text-err">
               {parsed.error}
             </p>
           ) : (
-            <p id="mcp-paste-help" className="mt-1.5 text-[12px] text-steel">
+            <p id="mcp-paste-help" className="mt-1.5 text-caption text-steel">
               Accepts <code className="font-mono">{'{ "mcpServers": { … } }'}</code> (comments and trailing commas are
               fine), a map of servers, an array, a single server object, or{" "}
               <code className="font-mono">claude mcp add …</code> lines.
@@ -182,7 +182,7 @@ function PasteBody({ existing, scope, onDone }: { existing: McpServer[]; scope: 
                         <Badge tone={stdio ? "neutral" : "accent"}>{stdio ? "stdio" : "HTTP"}</Badge>
                         {conflict && <Badge tone="err">{conflict}</Badge>}
                       </div>
-                      <p className="mt-1 truncate font-mono text-[11.5px] text-muted">
+                      <p className="mt-1 truncate font-mono text-meta text-muted">
                         {stdio ? [s.command, ...s.args].join(" ") : s.url}
                         {secrets > 0 && (
                           <span className="font-sans text-steel">
@@ -193,7 +193,7 @@ function PasteBody({ existing, scope, onDone }: { existing: McpServer[]; scope: 
                         )}
                       </p>
                       {conflict === "Name already in use" && (
-                        <p className="mt-1 text-[11.5px] text-steel">Rename it, or untick to skip.</p>
+                        <p className="mt-1 text-meta text-steel">Rename it, or untick to skip.</p>
                       )}
                     </div>
                   </li>
@@ -204,7 +204,7 @@ function PasteBody({ existing, scope, onDone }: { existing: McpServer[]; scope: 
         )}
 
         {parsed.result && parsed.result.warnings.length > 0 && (
-          <div role="status" className="rounded-lg border border-warn/30 bg-warn/[0.06] px-3 py-2 text-[12px]">
+          <div role="status" className="rounded-lg border border-warn/30 bg-warn/[0.06] px-3 py-2 text-caption">
             <p className="font-medium text-warn">Check before adding</p>
             <ul className="mt-1 space-y-0.5 text-muted">
               {parsed.result.warnings.map((w, i) => (
@@ -217,7 +217,7 @@ function PasteBody({ existing, scope, onDone }: { existing: McpServer[]; scope: 
         )}
 
         {parsed.result && parsed.result.skipped.length > 0 && (
-          <div className="rounded-lg border border-warn/30 bg-warn/[0.06] px-3 py-2 text-[12px]">
+          <div className="rounded-lg border border-warn/30 bg-warn/[0.06] px-3 py-2 text-caption">
             <p className="font-medium text-warn">Skipped {parsed.result.skipped.length}</p>
             <ul className="mt-1 space-y-0.5 text-muted">
               {parsed.result.skipped.map((s, i) => (

@@ -99,11 +99,11 @@ export function LocalModelPicker({
         )}
       </div>
       {loading ? (
-        <p className="flex h-9 items-center gap-2 text-[12.5px] text-muted">
+        <p className="flex h-9 items-center gap-2 text-small text-muted">
           <Spinner className="h-3.5 w-3.5" /> Asking {account.name} for its models…
         </p>
       ) : !probe?.running ? (
-        <div className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/[0.07] px-3 py-2 text-[12px] text-warn">
+        <div className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/[0.07] px-3 py-2 text-caption text-warn">
           <CircleAlert className="mt-px h-3.5 w-3.5 shrink-0" />
           <span className="min-w-0 flex-1">{probe?.error ?? "The model server isn't running."}</span>
           <Button size="xs" variant="ghost" onClick={() => void load()}>
@@ -111,7 +111,7 @@ export function LocalModelPicker({
           </Button>
         </div>
       ) : probe.models.length === 0 ? (
-        <p className="text-[12px] text-warn">
+        <p className="text-caption text-warn">
           This server has no models yet.{ollama ? " Use “Get a model” to download one." : ""}
         </p>
       ) : (
@@ -126,14 +126,14 @@ export function LocalModelPicker({
               value: m.id,
               label: (
                 <span className="flex min-w-0 items-baseline gap-2">
-                  <span className="truncate font-mono text-[12.5px]">{m.id}</span>
-                  <span className="truncate text-[11px] text-steel">{describeModel(m)}</span>
+                  <span className="truncate font-mono text-small">{m.id}</span>
+                  <span className="truncate text-micro text-steel">{describeModel(m)}</span>
                 </span>
               ),
             }))}
           />
           {selected && (
-            <p className="text-[11.5px] text-muted tabular">
+            <p className="text-meta text-muted tabular">
               {selected.contextLength
                 ? `Supports up to ${formatContext(selected.contextLength)} tokens of context`
                 : "Context length not reported"}
@@ -143,7 +143,7 @@ export function LocalModelPicker({
           {selected?.tools === false && (
             <div
               role="alert"
-              className="flex items-start gap-2 rounded-lg border border-err/30 bg-err/[0.06] px-3 py-2 text-[12px] leading-snug text-err"
+              className="flex items-start gap-2 rounded-lg border border-err/30 bg-err/[0.06] px-3 py-2 text-caption leading-snug text-err"
             >
               <CircleAlert className="mt-px h-3.5 w-3.5 shrink-0" />
               <span>
@@ -161,15 +161,15 @@ export function LocalModelPicker({
             </div>
           )}
           {probe.remote && (
-            <p className="text-[11.5px] text-warn">Runs on another machine: your prompts and code are sent to it.</p>
+            <p className="text-meta text-warn">Runs on another machine: your prompts and code are sent to it.</p>
           )}
         </>
       )}
-      <p className="text-[11.5px] leading-snug text-steel">{SMALL_MODEL_NOTE}</p>
+      <p className="text-meta leading-snug text-steel">{SMALL_MODEL_NOTE}</p>
       {ollama && (
         // Ollama reports the model's maximum but runs it with its own default window (4k tokens
         // on most graphics cards). Kvistcode starts the agent on a copy with a real window.
-        <p className="text-[11.5px] leading-snug text-steel">
+        <p className="text-meta leading-snug text-steel">
           Ollama's own default window is only 4k tokens, which silently cuts off an agent's instructions. Kvistcode
           starts the agent with a larger one that fits your memory. You can change that in the account's settings.
         </p>

@@ -79,7 +79,7 @@ export function StatusPill({
   return (
     <span
       className={cn(
-        "inline-flex h-6 min-w-0 items-center gap-1.5 rounded-full border px-2 text-[11.5px] font-medium",
+        "inline-flex h-6 min-w-0 items-center gap-1.5 rounded-full border px-2 text-meta font-medium",
         className,
       )}
       style={{

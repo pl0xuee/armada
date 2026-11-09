@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useIdentity } from "@/hooks/useIdentity";
+import { useSingleKeys } from "@/hooks/useSingleKeys";
 import { CONTINUE_PROMPT, attempt, findOption, respondPermission, resumeAgent } from "@/lib/actions";
 import { api } from "@/lib/api";
 import { parseFileDiff } from "@/lib/diff";
@@ -85,6 +86,7 @@ export function NeedsYouDetail({
   const pending = usePendingPermissions().find((p) => p.agent.id === agent.id)?.item;
   const question = usePendingQuestions().find((p) => p.agent.id === agent.id)?.item;
   const openAgent = useUi((s) => s.openAgent);
+  const letterKeys = useSingleKeys();
   const label = reasonLabel(reason, !pending && !!question, backgroundActive(useBackground(agent.id)));
 
   return (
@@ -93,17 +95,17 @@ export function NeedsYouDetail({
         <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="lg" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-medium", REASON_TONE[reason])}>
+            <span className={cn("rounded-full border px-2 py-0.5 text-micro font-medium", REASON_TONE[reason])}>
               {label}
             </span>
-            <span className="text-[11.5px] text-steel">
+            <span className="text-meta text-steel">
               <RelTime ts={agent.lastActivityAt} long />
             </span>
           </div>
           <h2 className="mt-1 line-clamp-2 text-[17px] font-semibold leading-snug tracking-[-0.015em]">
             {agent.title}
           </h2>
-          <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px] text-steel">
+          <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-caption text-steel">
             {account ? (
               <>
                 <AccountAvatar account={account} size={14} showProvider={false} />
@@ -134,7 +136,7 @@ export function NeedsYouDetail({
           ) : question ? (
             <QuestionCard item={question} agent={agent} compact />
           ) : (
-            <p className="text-[13px] text-muted">The request was answered elsewhere. Mark this done to move on.</p>
+            <p className="text-body text-muted">The request was answered elsewhere. Mark this done to move on.</p>
           )
         ) : reason === "budget" ? (
           <BudgetHoldPanel agent={agent} />
@@ -204,10 +206,12 @@ export function NeedsYouDetail({
         <div className="ml-auto flex items-center gap-2">
           <Button size="sm" variant="ghost" onClick={onArchive}>
             <Archive className="!h-3.5 !w-3.5" /> Archive
-            <span className="ml-1 hidden gap-0.5 @2xl:flex">
-              <Kbd>⇧</Kbd>
-              <Kbd>E</Kbd>
-            </span>
+            {letterKeys && (
+              <span className="ml-1 hidden gap-0.5 @2xl:flex">
+                <Kbd>⇧</Kbd>
+                <Kbd>E</Kbd>
+              </span>
+            )}
           </Button>
           <Button
             size="sm"
@@ -221,20 +225,22 @@ export function NeedsYouDetail({
                 : reason === "permission"
                   ? question && !pending
                     ? "Answer the question first"
-                    : "Answer the approval first (A / D)"
+                    : (letterKeys ? "Answer the approval first (A / D)" : "Answer the approval first")
                   : undefined
             }
             className={cn((reason === "permission" || reason === "budget") && "cursor-not-allowed opacity-45")}
           >
             <CircleCheck className="!h-3.5 !w-3.5" /> Done
-            <Kbd
-              className={cn(
-                "ml-1 hidden bg-transparent @2xl:inline-flex",
-                reason === "done" && "border-warn-fg/30 text-warn-fg/80",
-              )}
-            >
-              E
-            </Kbd>
+            {letterKeys && (
+              <Kbd
+                className={cn(
+                  "ml-1 hidden bg-transparent @2xl:inline-flex",
+                  reason === "done" && "border-warn-fg/30 text-warn-fg/80",
+                )}
+              >
+                E
+              </Kbd>
+            )}
           </Button>
         </div>
       </footer>
@@ -260,19 +266,16 @@ function PermissionPanel({
           <ShieldAlert className="h-3.5 w-3.5" />
         </span>
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-warn">{provider} wants to</p>
+          <p className="eyebrow text-warn">{provider} wants to</p>
           <p
-            className={cn(
-              "break-words text-[14px] font-medium",
-              item.toolKind === "execute" && "font-mono text-[13px]",
-            )}
+            className={cn("break-words text-[14px] font-medium", item.toolKind === "execute" && "font-mono text-body")}
           >
             {item.title}
           </p>
         </div>
       </div>
       {item.command && (
-        <pre className="selectable overflow-x-auto rounded-xl border border-line bg-code px-3.5 py-2.5 font-mono text-[12px] text-fg/90">
+        <pre className="selectable overflow-x-auto rounded-xl border border-line bg-code px-3.5 py-2.5 font-mono text-caption text-fg/90">
           <span className="select-none text-accent">❯ </span>
           <CodeText code={item.command} lang="shellscript" />
         </pre>
@@ -281,7 +284,7 @@ function PermissionPanel({
         <FileDiffView key={i} file={f} defaultOpen={false} maxHeight={220} />
       ))}
       {alwaysArmed && always && (
-        <p role="status" className="rounded-lg border border-warn/35 bg-warn/10 px-3 py-2 text-[12px] text-warn">
+        <p role="status" className="rounded-lg border border-warn/35 bg-warn/10 px-3 py-2 text-caption text-warn">
           Press <Kbd>⇧</Kbd>
           <Kbd>A</Kbd> again to always allow “{always.name}”. This can't be undone from here.
         </p>
@@ -293,6 +296,7 @@ function PermissionPanel({
 /** The approval buttons, pinned above the footer so they never scroll away or sit under a long diff. */
 function PermissionActions({ agentId, item }: { agentId: string; item: Permission }) {
   const [busy, setBusy] = useState(false);
+  const letterKeys = useSingleKeys();
   const options = useMemo(
     () => [...item.options].sort((a, b) => OPTION_ORDER[a.kind] - OPTION_ORDER[b.kind]),
     [item.options],
@@ -323,14 +327,14 @@ function PermissionActions({ agentId, item }: { agentId: string; item: Permissio
           >
             {allow ? <ShieldCheck className="!h-3.5 !w-3.5" /> : <ShieldX className="!h-3.5 !w-3.5" />}
             {o.name}
-            {o === once && <Kbd className="ml-1 border-warn-fg/30 bg-transparent text-warn-fg/80">A</Kbd>}
-            {o === always && (
+            {letterKeys && o === once && <Kbd className="ml-1 border-warn-fg/30 bg-transparent text-warn-fg/80">A</Kbd>}
+            {letterKeys && o === always && (
               <span className="ml-1 flex gap-0.5">
                 <Kbd className="bg-transparent">⇧</Kbd>
                 <Kbd className="bg-transparent">A</Kbd>
               </span>
             )}
-            {o === deny && <Kbd className="ml-1 bg-transparent">D</Kbd>}
+            {letterKeys && o === deny && <Kbd className="ml-1 bg-transparent">D</Kbd>}
           </Button>
         );
       })}
@@ -372,7 +376,7 @@ function RecoveryPanel({
         </span>
         <div className="min-w-0">
           <p className="text-[13.5px] font-semibold">{title}</p>
-          <p className="selectable mt-0.5 break-words text-[12.5px] leading-relaxed text-muted">{text}</p>
+          <p className="selectable mt-0.5 break-words text-small leading-relaxed text-muted">{text}</p>
           {note}
         </div>
       </div>
@@ -398,12 +402,12 @@ function DonePanel({
   return (
     <div className="space-y-3">
       {backgroundActive(bg) && (
-        <p className="text-[12px] text-accent" title={backgroundDetail(bg)}>
+        <p className="text-caption text-accent" title={backgroundDetail(bg)}>
           Its turn finished, but not everything: {backgroundShort(bg).toLowerCase()}.
         </p>
       )}
       {summary && (
-        <p className="flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-steel tabular">
+        <p className="flex flex-wrap gap-x-3 gap-y-1 text-caption text-steel tabular">
           <span>{formatDuration(summary.durationMs)}</span>
           <span>
             {summary.files.length} file{summary.files.length === 1 ? "" : "s"} changed
@@ -416,9 +420,9 @@ function DonePanel({
       {message?.text ? (
         <Markdown text={message.text} agentId={agentId} />
       ) : fallback ? (
-        <p className="text-[13px] leading-relaxed text-muted">{fallback}</p>
+        <p className="text-body leading-relaxed text-muted">{fallback}</p>
       ) : (
-        <p className="text-[13px] text-steel">The agent finished without a message.</p>
+        <p className="text-body text-steel">The agent finished without a message.</p>
       )}
     </div>
   );

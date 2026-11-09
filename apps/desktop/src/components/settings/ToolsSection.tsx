@@ -85,9 +85,9 @@ export function ToolsSection({ settings }: { settings: Settings }) {
             <ToolCard key={p.provider} info={p} />
           ))}
       </div>
-      <p className="mt-4 text-[12px] text-steel">
-        Updates come from the official npm registry. Kvistcode was tested with the versions shown as Tested and can go back
-        to them at any time.
+      <p className="mt-4 text-caption text-steel">
+        Updates come from the official npm registry. Kvistcode was tested with the versions shown as Tested and can go
+        back to them at any time.
       </p>
     </>
   );
@@ -118,17 +118,17 @@ function ToolCard({ info }: { info: ProviderInfo }) {
         <div className="min-w-0 flex-1 basis-[240px]">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[14px] font-semibold tracking-tight">{meta.name}</span>
-            <span className="text-[12px] text-steel">{meta.tagline}</span>
+            <span className="text-caption text-steel">{meta.tagline}</span>
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <Badge tone={source === "bundled" ? "accent" : "neutral"}>{SOURCE_LABEL[source]}</Badge>
             <StatusChip status={status} />
           </div>
           {versions.length > 0 && (
-            <p className="selectable mt-2 text-[12px] text-muted tabular">{versions.join(" · ")}</p>
+            <p className="selectable mt-2 text-caption text-muted tabular">{versions.join(" · ")}</p>
           )}
           {source === "system" && (
-            <p className="mt-1.5 text-[12px] text-muted">Kvistcode will install its own copy shortly.</p>
+            <p className="mt-1.5 text-caption text-muted">Kvistcode will install its own copy shortly.</p>
           )}
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">

@@ -67,7 +67,7 @@ import { api } from "@/lib/api";
 import { relativeTimeLong } from "@/lib/format";
 import { updateCount } from "@/lib/toolVersions";
 import type { AttentionReason, Settings, SoundPack } from "@/lib/types";
-import { cn, errorMessage, isMac, modKey } from "@/lib/utils";
+import { cn, errorMessage, isMac, modKey, scrollBehavior } from "@/lib/utils";
 import { MAX_SCALE, MIN_SCALE, DEFAULT_SCALE, SCALE_PRESETS, SCALE_STEP } from "@/lib/zoom";
 import { useApp } from "@/store/app";
 import { openTour } from "@/store/tour";
@@ -80,7 +80,7 @@ const PAGES: { id: SettingsSection; label: string; icon: ComponentType<{ classNa
   { id: "budgets", label: "Budgets", icon: Wallet },
   { id: "projects", label: "Projects", icon: FolderCog },
   { id: "toolkit", label: "Tools & instructions", icon: Plug },
-  { id: "providers", label: "Agents", icon: Bot },
+  { id: "providers", label: "Providers", icon: Bot },
   { id: "voice", label: "Voice", icon: Mic },
   { id: "remote", label: "Remote & mobile", icon: Smartphone },
   { id: "about", label: "About", icon: Info },
@@ -199,7 +199,7 @@ function SettingsNav({ page, onSelect }: { page: SettingsSection; onSelect: (s: 
     const el = strip?.querySelector<HTMLElement>('[aria-current="page"]');
     if (!strip || !el || strip.scrollWidth <= strip.clientWidth) return;
     const target = el.offsetLeft - (strip.clientWidth - el.offsetWidth) / 2;
-    strip.scrollTo({ left: Math.max(0, target), behavior: "smooth" });
+    strip.scrollTo({ left: Math.max(0, target), behavior: scrollBehavior() });
   }, [page]);
 
   return (
@@ -232,7 +232,7 @@ function SettingsNav({ page, onSelect }: { page: SettingsSection; onSelect: (s: 
               aria-current={active ? "page" : undefined}
               onClick={() => onSelect(s.id)}
               className={cn(
-                "relative flex h-8 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 text-[13px] transition-colors",
+                "relative flex h-8 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 text-body transition-colors",
                 "max-[860px]:h-8 max-[860px]:gap-2 max-[860px]:rounded-full max-[860px]:px-3",
                 active ? "text-fg" : "text-muted hover:bg-raised/60 hover:text-fg",
               )}
@@ -315,7 +315,7 @@ function Appearance({ settings }: { settings: Settings }) {
                 void save({ interfaceScale: v });
               }}
             />
-            <span className="w-12 text-right font-mono text-[12px] tabular-nums text-fg">{shownScale}%</span>
+            <span className="w-12 text-right font-mono text-caption tabular-nums text-fg">{shownScale}%</span>
             <Segmented
               size="sm"
               aria-label="Scale presets"
@@ -334,7 +334,7 @@ function Appearance({ settings }: { settings: Settings }) {
           </div>
         </SettingRow>
       </SettingGroup>
-      <p className="mt-4 text-[12px] text-steel">
+      <p className="mt-4 text-caption text-steel">
         Animations follow your system's reduce-motion setting automatically.
       </p>
     </>
@@ -447,7 +447,7 @@ function Sounds({ settings }: { settings: Settings }) {
                 onValueChange={setVolume}
                 onValueCommit={(v) => void save({ sounds: { ...s, volume: v } })}
               />
-              <span className="w-9 text-right text-[12px] text-muted tabular">{Math.round(volume * 100)}%</span>
+              <span className="w-9 text-right text-caption text-muted tabular">{Math.round(volume * 100)}%</span>
             </div>
           </SettingRow>
         </SettingGroup>
@@ -670,7 +670,7 @@ function Notifications({ settings }: { settings: Settings }) {
               onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
               className={cn(fieldClass, "h-8 w-[128px] tabular [color-scheme:inherit]")}
             />
-            <span className="text-[12px] text-steel">to</span>
+            <span className="text-caption text-steel">to</span>
             <input
               type="time"
               aria-label="Quiet hours end"
@@ -708,7 +708,7 @@ function Notifications({ settings }: { settings: Settings }) {
                   aria-invalid={!ntfyValid || !!ntfyError}
                   aria-describedby={ntfyError ? fieldErrorId("ntfy") : undefined}
                   className={cn(
-                    "min-w-0 flex-1 basis-[260px] font-mono text-[12.5px]",
+                    "min-w-0 flex-1 basis-[260px] font-mono text-small",
                     (!ntfyValid || ntfyError) && "border-err/60 focus:border-err/60 focus:ring-err/15",
                   )}
                 />
@@ -724,15 +724,15 @@ function Notifications({ settings }: { settings: Settings }) {
                   Send test push
                 </Button>
               </div>
-              {!ntfyValid && <p className="mt-1.5 text-[11.5px] text-err">Enter a full http(s) URL.</p>}
+              {!ntfyValid && <p className="mt-1.5 text-meta text-err">Enter a full http(s) URL.</p>}
               <FieldError field="ntfy" />
               {push.state === "sent" && (
-                <p role="status" className="mt-1.5 text-[11.5px] text-ok">
+                <p role="status" className="mt-1.5 text-meta text-ok">
                   Sent. Check your phone.
                 </p>
               )}
               {push.state === "error" && (
-                <p role="alert" className="mt-1.5 break-words text-[11.5px] text-err">
+                <p role="alert" className="mt-1.5 break-words text-meta text-err">
                   {push.message}
                 </p>
               )}
@@ -855,7 +855,7 @@ function Behavior({ settings }: { settings: Settings }) {
             aria-invalid={hotkeyError !== null}
             aria-describedby={hotkeyError ? "b-hotkey-error" : undefined}
             className={cn(
-              "peer h-8 pr-8 font-mono text-[12px]",
+              "peer h-8 pr-8 font-mono text-caption",
               // The caps below stand in for the raw text until you edit it.
               hotkeyCaps.length > 0 && !hotkeyError && "text-transparent focus:text-fg",
               hotkeyError && "border-err/60 focus:border-err/60 focus:ring-err/15",
@@ -902,7 +902,7 @@ function Behavior({ settings }: { settings: Settings }) {
           />
         </div>
         {hotkeyError && (
-          <p id="b-hotkey-error" role="alert" className="mt-1.5 text-[11.5px] leading-snug text-err">
+          <p id="b-hotkey-error" role="alert" className="mt-1.5 text-meta leading-snug text-err">
             {hotkeyError}
           </p>
         )}
@@ -1010,6 +1010,17 @@ function Behavior({ settings }: { settings: Settings }) {
                 }))}
               />
             </SettingRow>
+            <SettingRow
+              title="One-letter shortcuts"
+              description="A, Y, D and N answer an approval, number keys pick an answer to a pinned question, and J, K and E step through Needs you. Turn off if a stray key press could answer by mistake."
+              htmlFor="single-keys"
+            >
+              <Switch
+                id="single-keys"
+                checked={settings.singleKeyShortcuts}
+                onCheckedChange={(v) => void save({ singleKeyShortcuts: v })}
+              />
+            </SettingRow>
           </SettingGroup>
           <HelperSettings settings={settings} />
         </Advanced>
@@ -1108,8 +1119,8 @@ function About() {
           </div>
           <div className="min-w-0">
             <h2 className="text-[22px] font-semibold tracking-[-0.025em]">Kvistcode</h2>
-            <p className="text-[13px] text-muted">Every coding agent, one calm place.</p>
-            <p className="mt-1 text-[12px] text-steel tabular">
+            <p className="text-body text-muted">Every coding agent, one calm place.</p>
+            <p className="mt-1 text-caption text-steel tabular">
               Version {version || "dev"} ·{" "}
               {platform === "macos" ? "macOS" : platform === "windows" ? "Windows" : "Linux"} · MIT licensed
             </p>
@@ -1151,7 +1162,7 @@ function About() {
               <Sparkles className="h-4 w-4" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-medium text-fg">Kvistcode {update.version} is available</p>
+              <p className="text-body font-medium text-fg">Kvistcode {update.version} is available</p>
               {progress ? (
                 <div className="mt-1.5 flex items-center gap-2">
                   <div className="h-1 w-40 overflow-hidden rounded-full bg-raised">
@@ -1164,10 +1175,10 @@ function About() {
                       />
                     )}
                   </div>
-                  <span className="text-[11.5px] text-muted tabular">{pct === null ? "Downloading…" : `${pct}%`}</span>
+                  <span className="text-meta text-muted tabular">{pct === null ? "Downloading…" : `${pct}%`}</span>
                 </div>
               ) : (
-                <p className="text-[12px] text-muted">
+                <p className="text-caption text-muted">
                   You have {update.currentVersion}
                   {update.date ? ` · released ${new Date(update.date).toLocaleDateString()}` : ""}
                   {" · "}
@@ -1250,7 +1261,7 @@ function About() {
       >
         {SHORTCUTS.map((s) => (
           <div key={s.label} className="flex items-center justify-between px-4 py-2.5">
-            <span className="text-[13px] text-muted">{s.label}</span>
+            <span className="text-body text-muted">{s.label}</span>
             <span className="flex gap-1">
               {s.keys.map((k) => (
                 <Kbd key={k}>{k}</Kbd>
@@ -1260,7 +1271,7 @@ function About() {
         ))}
       </SettingGroup>
 
-      <p className="mt-6 text-[12px] leading-relaxed text-steel">
+      <p className="mt-6 text-caption leading-relaxed text-steel">
         No telemetry. Your keys stay in your OS keychain, and every agent runs through its vendor's official CLI.
       </p>
     </>

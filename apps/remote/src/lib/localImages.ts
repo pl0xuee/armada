@@ -62,11 +62,11 @@ export function cachedLocalImage(agentId: string, path: string): Attachment | un
 
 function remember(k: string, a: Attachment) {
   cache.set(k, a);
-  bytes += a.data.length;
+  bytes += a.data?.length ?? 0;
   for (const [key, v] of cache) {
     if (bytes <= MAX_BYTES || key === k) break;
     cache.delete(key);
-    bytes -= v.data.length;
+    bytes -= v.data?.length ?? 0;
   }
 }
 

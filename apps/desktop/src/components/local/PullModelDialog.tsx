@@ -94,7 +94,7 @@ export function PullModelDialog({
         className="w-[min(560px,calc(100vw-32px))]"
       >
         <DialogBody className="space-y-2">
-          <p className="text-[12px] leading-snug text-muted" aria-live="polite">
+          <p className="text-caption leading-snug text-muted" aria-live="polite">
             {!here ? (
               "This Ollama runs on another machine, so its memory and disk can't be checked from here."
             ) : hw ? (
@@ -127,21 +127,21 @@ export function PullModelDialog({
                 <div className="flex items-center gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline gap-x-2">
-                      <span className="text-[13px] font-medium text-fg">{m.title}</span>
-                      <span className="font-mono text-[11px] text-steel">{m.name}</span>
+                      <span className="text-body font-medium text-fg">{m.title}</span>
+                      <span className="font-mono text-micro text-steel">{m.name}</span>
                       {best && (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-accent">
+                        <span className="inline-flex items-center gap-1 text-micro font-medium text-accent">
                           <Sparkles className="h-3 w-3" /> Best for this computer
                         </span>
                       )}
                     </div>
-                    <p className="text-[11.5px] text-muted">
+                    <p className="text-meta text-muted">
                       {m.blurb} · {m.sizeGb} GB download
                     </p>
                     {here && fit.level !== "unknown" && (
                       <p
                         className={cn(
-                          "text-[11.5px]",
+                          "text-meta",
                           fit.level === "great" || fit.level === "ok"
                             ? "text-ok"
                             : fit.level === "no"
@@ -153,7 +153,7 @@ export function PullModelDialog({
                       </p>
                     )}
                     {!roomOnDisk && (
-                      <p className="text-[11.5px] text-err">
+                      <p className="text-meta text-err">
                         Not enough free disk space ({Math.round((hw?.diskFreeBytes ?? 0) / 1e9)} GB free).
                       </p>
                     )}
@@ -163,7 +163,7 @@ export function PullModelDialog({
                       <X /> Cancel
                     </Button>
                   ) : done ? (
-                    <span className="text-[12px] text-ok">Downloaded</span>
+                    <span className="text-caption text-ok">Downloaded</span>
                   ) : (
                     <Button
                       size="sm"
@@ -183,7 +183,7 @@ export function PullModelDialog({
                         style={{ width: `${pct ?? 6}%` }}
                       />
                     </div>
-                    <p className="mt-1 flex items-center gap-1.5 text-[11.5px] text-muted tabular">
+                    <p className="mt-1 flex items-center gap-1.5 text-meta text-muted tabular">
                       {pct == null && <Spinner className="h-3 w-3" />}
                       {active.progress ? pullText(active.progress) : "Starting…"}
                     </p>
@@ -192,7 +192,7 @@ export function PullModelDialog({
               </div>
             );
           })}
-          <p className="text-[11.5px] leading-snug text-steel">{QUALITY_NOTE}</p>
+          <p className="text-meta leading-snug text-steel">{QUALITY_NOTE}</p>
 
           <div className="pt-2">
             <Label htmlFor="pull-custom">Or any model from the Ollama library</Label>
@@ -208,7 +208,7 @@ export function PullModelDialog({
                 value={custom}
                 onChange={(e) => setCustom(e.target.value)}
                 placeholder="e.g. qwen2.5-coder:7b"
-                className="font-mono text-[12.5px]"
+                className="font-mono text-small"
                 disabled={!!active}
                 autoComplete="off"
                 spellCheck={false}
@@ -217,7 +217,7 @@ export function PullModelDialog({
                 <Download /> Get
               </Button>
             </form>
-            <p className="mt-1.5 text-[11.5px] text-steel">
+            <p className="mt-1.5 text-meta text-steel">
               Browse{" "}
               <button
                 type="button"

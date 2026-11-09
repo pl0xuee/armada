@@ -133,9 +133,9 @@ export function AccountsView() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <h2 className="text-[14px] font-semibold tracking-tight">{meta.name}</h2>
-                        <span className="text-[12px] text-steel">{meta.vendor}</span>
+                        <span className="text-caption text-steel">{meta.vendor}</span>
                       </div>
-                      <p className="text-[12px] text-muted">
+                      <p className="text-caption text-muted">
                         {p === "local"
                           ? info?.installed
                             ? "Ollama, LM Studio, llama.cpp or any OpenAI-compatible server · runs through the Codex CLI"
@@ -172,7 +172,7 @@ export function AccountsView() {
                       <AccountRow key={a.id} account={a} />
                     ))}
                     {list.length === 0 && (
-                      <div className="px-4 py-6 text-center text-[13px] text-muted">
+                      <div className="px-4 py-6 text-center text-body text-muted">
                         {p === "local"
                           ? "No local model servers yet. Add Ollama or LM Studio to run models on your own hardware."
                           : `No ${meta.short} accounts yet.`}
@@ -189,7 +189,7 @@ export function AccountsView() {
             })}
           </div>
 
-          <p className="mx-auto mt-6 max-w-[560px] text-center text-[12px] leading-relaxed text-steel">
+          <p className="mx-auto mt-6 max-w-[560px] text-center text-caption leading-relaxed text-steel">
             Kvistcode drives each vendor's official CLI. Subscriptions sign in through the vendor's own browser flow;
             API keys live in your OS keychain.
           </p>

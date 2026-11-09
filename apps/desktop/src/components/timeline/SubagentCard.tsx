@@ -76,19 +76,19 @@ export const SubagentCard = memo(function SubagentCard({
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="inline-flex h-5 items-center rounded-md border border-violet/30 bg-violet/10 px-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-violet">
+            <span className="inline-flex h-5 items-center rounded-md border border-violet/30 bg-violet/10 px-1.5 eyebrow text-violet">
               {kind}
             </span>
             <SubagentChips chips={chips} />
-            <span className="text-[11.5px] text-steel tabular">{pluralize(childCalls.length, "tool call")}</span>
-            {bgRunning && <span className="text-[11.5px] text-accent">Running in background</span>}
+            <span className="text-meta text-steel tabular">{pluralize(childCalls.length, "tool call")}</span>
+            {bgRunning && <span className="text-meta text-accent">Running in background</span>}
             {running && childrenRunning > 0 && (
-              <span className="text-[11.5px] text-accent tabular">{childrenRunning} running</span>
+              <span className="text-meta text-accent tabular">{childrenRunning} running</span>
             )}
           </div>
-          <p className="mt-1 break-words text-[13px] font-medium leading-snug text-fg">{title}</p>
+          <p className="mt-1 break-words text-body font-medium leading-snug text-fg">{title}</p>
           {description && item.title && item.title !== description && (
-            <p className="mt-0.5 truncate text-[11.5px] text-steel" title={item.title}>
+            <p className="mt-0.5 truncate text-meta text-steel" title={item.title}>
               {item.title}
             </p>
           )}
@@ -113,7 +113,7 @@ export const SubagentCard = memo(function SubagentCard({
             aria-expanded={showPrompt}
             aria-controls={promptId}
             onClick={() => setShowPrompt((v) => !v)}
-            className="-ml-1 inline-flex h-6 items-center gap-1 rounded-md px-1 text-[11.5px] text-muted transition-colors hover:text-fg focus-visible:outline-2"
+            className="-ml-1 inline-flex h-6 items-center gap-1 rounded-md px-1 text-meta text-muted transition-colors hover:text-fg focus-visible:outline-2"
           >
             <ScrollText className="h-3.5 w-3.5" />
             {showPrompt ? "Hide prompt" : "Show prompt"}
@@ -129,7 +129,7 @@ export const SubagentCard = memo(function SubagentCard({
                 transition={{ duration: 0.12 }}
                 className="mt-1 max-h-60 overflow-y-auto rounded-lg border border-line bg-base/50 px-3 py-2"
               >
-                <Markdown text={info.prompt} className="!text-[12.5px] text-muted" />
+                <Markdown text={info.prompt} className="!text-small text-muted" />
               </m.div>
             )}
           </AnimatePresence>
@@ -144,7 +144,7 @@ export const SubagentCard = memo(function SubagentCard({
             aria-expanded={showChildren}
             aria-controls={childrenId}
             onClick={() => setShowChildren((v) => !v)}
-            className="flex h-8 w-full items-center gap-1.5 px-3 text-left text-[11.5px] text-muted transition-colors hover:bg-raised/40 hover:text-fg"
+            className="flex h-8 w-full items-center gap-1.5 px-3 text-left text-meta text-muted transition-colors hover:bg-raised/40 hover:text-fg"
           >
             <ChevronRight className={cn("h-3 w-3 transition-transform duration-150", showChildren && "rotate-90")} />
             {showChildren ? "Hide tool calls" : `Show all ${childCalls.length}`}
@@ -172,8 +172,8 @@ export const SubagentCard = memo(function SubagentCard({
 
       {!unfinished && !bgRunning && item.output.trim() && (
         <div className="border-t border-line bg-base/30 px-3 py-2.5">
-          <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel">Result</div>
-          <Markdown text={item.output} className="!text-[12.5px]" />
+          <div className="mb-1 eyebrow text-steel">Result</div>
+          <Markdown text={item.output} className="!text-small" />
         </div>
       )}
     </section>
@@ -184,7 +184,7 @@ function LatestChild({ item }: { item: ToolItem }) {
   const Icon = TOOL_ICON[item.toolKind];
   const running = item.status === "in_progress" || item.status === "pending";
   return (
-    <div className="flex h-8 items-center gap-2 border-b border-line/60 px-3 text-[12px]" aria-live="polite">
+    <div className="flex h-8 items-center gap-2 border-b border-line/60 px-3 text-caption" aria-live="polite">
       <span className="ml-[22px] h-full w-px bg-line-strong" aria-hidden />
       <Icon className="h-3.5 w-3.5 shrink-0 text-steel" />
       <span className={cn("min-w-0 flex-1 truncate", running ? "text-fg/90" : "text-muted")}>{item.title}</span>

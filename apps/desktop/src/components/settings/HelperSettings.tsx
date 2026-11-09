@@ -111,7 +111,7 @@ export function HelperSettings({ settings }: { settings: Settings }) {
             onChange={(e) => setModel(e.target.value)}
             onBlur={commitModel}
             onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-            className="h-8 w-[240px] font-mono text-[12px]"
+            className="h-8 w-[240px] font-mono text-caption"
             spellCheck={false}
           />
         </SettingRow>

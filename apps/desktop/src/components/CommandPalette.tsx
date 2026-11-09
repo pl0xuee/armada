@@ -89,10 +89,10 @@ import { Spinner } from "./ui/misc";
 import { useReturnFocus } from "./ui/returnFocus";
 
 const itemClass =
-  "group flex h-10 cursor-default select-none items-center gap-3 rounded-lg px-2.5 text-[13px] text-fg outline-none data-[selected=true]:bg-gunmetal/80 data-[selected=true]:shadow-[inset_0_0_0_1px_var(--border-strong)] [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0";
+  "group flex h-10 cursor-default select-none items-center gap-3 rounded-lg px-2.5 text-body text-fg outline-none data-[selected=true]:bg-gunmetal/80 data-[selected=true]:shadow-[inset_0_0_0_1px_var(--border-strong)] [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0";
 
 const groupClass =
-  "px-1.5 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2.5 [&_[cmdk-group-heading]]:text-[10.5px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.08em] [&_[cmdk-group-heading]]:text-steel";
+  "px-1.5 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2.5 [&_[cmdk-group-heading]]:text-micro [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.08em] [&_[cmdk-group-heading]]:text-steel";
 
 function IconBox({ children }: { children: ReactNode }) {
   return (
@@ -109,12 +109,12 @@ export function CommandPalette() {
   return (
     <D.Root open={open} onOpenChange={setOpen}>
       <D.Portal>
-        <D.Overlay className="anim-fade fixed inset-0 z-[70] bg-[var(--scrim)] backdrop-blur-[2px]" />
+        <D.Overlay className="anim-fade fixed inset-0 z-[70] bg-[var(--scrim)]" />
         <D.Content
           aria-describedby={undefined}
           onOpenAutoFocus={focus.onOpenAutoFocus}
           onCloseAutoFocus={focus.onCloseAutoFocus}
-          className="anim-pop fixed left-1/2 top-[12vh] z-[70] w-[min(640px,calc(100vw-16px))] max-sm:top-2 -translate-x-1/2 overflow-hidden rounded-2xl border border-line-strong bg-card/95 shadow-[0_32px_100px_-12px_rgba(0,0,0,0.75)] backdrop-blur-xl edge-strong focus:outline-none"
+          className="anim-pop fixed left-1/2 top-[12vh] z-[70] w-[min(640px,calc(100vw-16px))] max-sm:top-2 -translate-x-1/2 overflow-hidden rounded-2xl border border-line-strong bg-card shadow-[0_32px_100px_-12px_rgba(0,0,0,0.75)] edge-strong focus:outline-none"
         >
           <D.Title className="sr-only">Command palette</D.Title>
           {open && <Palette onClose={() => setOpen(false)} />}
@@ -316,7 +316,7 @@ function Palette({ onClose }: { onClose: () => void }) {
       </div>
       <Command.List className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1.5 [&_[cmdk-list-sizer]]:space-y-0.5">
         {!hasHits && !startMode && !searchMode && (
-          <Command.Empty className="px-4 py-10 text-center text-[13px] text-steel">
+          <Command.Empty className="px-4 py-10 text-center text-body text-steel">
             {searching ? "Searching conversations…" : "No results. Try a different phrase."}
           </Command.Empty>
         )}
@@ -324,9 +324,7 @@ function Palette({ onClose }: { onClose: () => void }) {
         {startMode && (
           <Command.Group heading="Start an agent" className={groupClass}>
             {task.length < 3 ? (
-              <div className="px-2.5 py-3 text-[12.5px] text-steel">
-                Describe the task after “&gt;”, then press Enter.
-              </div>
+              <div className="px-2.5 py-3 text-small text-steel">Describe the task after “&gt;”, then press Enter.</div>
             ) : (
               [defaultMode, defaultMode === "auto" ? ("ask" as const) : ("auto" as const)].map((m) => (
                 <Command.Item
@@ -343,7 +341,7 @@ function Palette({ onClose }: { onClose: () => void }) {
                       Start agent{m === defaultMode ? "" : ` (${PERMISSION_LABEL[m].toLowerCase()})`}:{" "}
                       <span className="text-fg">“{task}”</span>
                     </span>
-                    <span className="flex min-w-0 items-center gap-1 text-[11px] text-steel">
+                    <span className="flex min-w-0 items-center gap-1 text-micro text-steel">
                       <ProviderGlyph provider={launch.provider} customAgentId={launch.customAgentId} size="xs" />
                       <span className="truncate">
                         {launchIdentity.short}
@@ -450,10 +448,10 @@ function Palette({ onClose }: { onClose: () => void }) {
                   <ProviderGlyph provider={a.provider} customAgentId={a.customAgentId} size="sm" />
                   <span className="min-w-0 flex-1 truncate">
                     {a.title}
-                    {a.archived && <span className="ml-2 text-[11px] text-steel">archived</span>}
+                    {a.archived && <span className="ml-2 text-micro text-steel">archived</span>}
                   </span>
                   <StatusDot status={a.status} size={6} />
-                  <span className="w-24 truncate text-right text-[11.5px] text-steel max-[480px]:hidden">
+                  <span className="w-24 truncate text-right text-meta text-steel max-[480px]:hidden">
                     {basename(a.projectPath)}
                   </span>
                   {/* Always reserve the badge's width so rows don't shift when one is selected. */}
@@ -518,6 +516,7 @@ function Palette({ onClose }: { onClose: () => void }) {
                   <PaletteAction
                     icon={<GitCompare />}
                     label="Review diff"
+                    shortcut={[modKey, "⇧", "R"]}
                     keywords={["review", "diff", "changes", "commit", "merge"]}
                     onSelect={() => run(() => ui.setReviewAgent(current.id))}
                   />
@@ -806,7 +805,7 @@ function Palette({ onClose }: { onClose: () => void }) {
                     <span className="min-w-0 flex-1 truncate">
                       Allow once <span className="text-muted">· {item.title}</span>
                     </span>
-                    <span className="truncate text-[11.5px] text-steel">{agent.title}</span>
+                    <span className="truncate text-meta text-steel">{agent.title}</span>
                   </Command.Item>,
                   <Command.Item
                     key={`${item.id}-deny`}
@@ -821,7 +820,7 @@ function Palette({ onClose }: { onClose: () => void }) {
                     <span className="min-w-0 flex-1 truncate">
                       Deny <span className="text-muted">· {item.title}</span>
                     </span>
-                    <span className="truncate text-[11.5px] text-steel">{agent.title}</span>
+                    <span className="truncate text-meta text-steel">{agent.title}</span>
                   </Command.Item>,
                 ])}
               </Command.Group>
@@ -843,7 +842,7 @@ function Palette({ onClose }: { onClose: () => void }) {
                     <span className="min-w-0 flex-1 truncate">
                       Answer <span className="text-muted">· {item.message}</span>
                     </span>
-                    <span className="truncate text-[11.5px] text-steel">{agent.title}</span>
+                    <span className="truncate text-meta text-steel">{agent.title}</span>
                   </Command.Item>
                 ))}
               </Command.Group>
@@ -863,7 +862,7 @@ function Palette({ onClose }: { onClose: () => void }) {
           />
         )}
       </Command.List>
-      <div className="flex items-center gap-3 border-t border-line bg-panel/60 px-4 py-2 text-[11px] text-steel">
+      <div className="flex items-center gap-3 border-t border-line bg-panel/60 px-4 py-2 text-micro text-steel">
         <span className="flex items-center gap-1">
           <Kbd>↑</Kbd>
           <Kbd>↓</Kbd> navigate
@@ -922,11 +921,11 @@ function AgentRow({
       <ProviderGlyph provider={a.provider} customAgentId={a.customAgentId} size="sm" />
       <span className="min-w-0 flex-1 truncate">{a.title}</span>
       {note ? (
-        <span className="shrink-0 text-[11.5px] text-warn">{note}</span>
+        <span className="shrink-0 text-meta text-warn">{note}</span>
       ) : (
         <>
           <StatusDot status={a.status} size={6} />
-          <span className="w-24 truncate text-right text-[11.5px] text-steel max-[480px]:hidden">
+          <span className="w-24 truncate text-right text-meta text-steel max-[480px]:hidden">
             {basename(a.projectPath)}
           </span>
         </>
@@ -979,7 +978,7 @@ function RenameMode({ agent, onCancel, onDone }: { agent: Agent; onCancel: () =>
           className="h-12 flex-1 bg-transparent text-[14px] text-fg focus:outline-none"
         />
       </div>
-      <div className="flex items-center gap-3 px-4 py-2 text-[11px] text-steel">
+      <div className="flex items-center gap-3 px-4 py-2 text-micro text-steel">
         <span className="flex items-center gap-1">
           <Kbd>
             <CornerDownLeft className="h-2.5 w-2.5" />

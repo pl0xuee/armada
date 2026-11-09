@@ -39,9 +39,7 @@ export function DialogContent({
   const focus = useReturnFocus({ onOpenAutoFocus, onCloseAutoFocus });
   return (
     <D.Portal>
-      <D.Overlay
-        className={cn("anim-fade fixed inset-0 z-50 bg-[var(--scrim)] backdrop-blur-[3px]", overlayClassName)}
-      />
+      <D.Overlay className={cn("anim-fade fixed inset-0 z-50 bg-[var(--scrim)]", overlayClassName)} />
       <D.Content
         onOpenAutoFocus={focus.onOpenAutoFocus}
         onEscapeKeyDown={onEscapeKeyDown}
@@ -61,7 +59,7 @@ export function DialogContent({
           <div className="min-w-0">
             <D.Title className="text-[15px] font-semibold tracking-tight text-fg">{title}</D.Title>
             {description ? (
-              <D.Description className="mt-0.5 text-[12.5px] text-muted">{description}</D.Description>
+              <D.Description className="mt-0.5 text-small text-muted">{description}</D.Description>
             ) : (
               <D.Description className="sr-only">{typeof title === "string" ? title : "Dialog"}</D.Description>
             )}

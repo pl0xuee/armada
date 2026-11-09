@@ -101,6 +101,12 @@ interface UiStore {
   setPreviewWidth: (px: number) => void;
   /** Bumps to ask the composer to focus itself. */
   composerFocusTick: number;
+  /** What is typed in the home composer, kept so going to Accounts and back doesn't lose it. */
+  homePrompt: string;
+  setHomePrompt: (text: string) => void;
+  /** Agents already started for the home prompt when some failed, so a retry joins them (kept with the prompt). */
+  homeBatch: { groupId: string; ids: string[]; count: number } | null;
+  setHomeBatch: (batch: { groupId: string; ids: string[]; count: number } | null) => void;
   /** A timeline item to scroll into view once its agent's timeline is showing (see `revealItem`). */
   revealTarget: { agentId: string; itemId: string; tick: number } | null;
 
@@ -343,6 +349,10 @@ export const useUi = create<UiStore>((set) => ({
   terminal: null,
   windowFocused: typeof document !== "undefined" ? document.hasFocus() : true,
   composerFocusTick: 0,
+  homePrompt: "",
+  setHomePrompt: (homePrompt) => set({ homePrompt }),
+  homeBatch: null,
+  setHomeBatch: (homeBatch) => set({ homeBatch }),
   revealTarget: null,
   workspaceOpen: readWorkspace().open,
   workspaceHeight: readWorkspace().height,

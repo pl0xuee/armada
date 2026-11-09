@@ -47,7 +47,7 @@ export function MergeDialog({
 
 function Note({ children }: { children: string }) {
   return (
-    <p role="alert" className="rounded-lg border border-warn/30 bg-warn/[0.07] px-3 py-2 text-[12px] text-warn">
+    <p role="alert" className="rounded-lg border border-warn/30 bg-warn/[0.07] px-3 py-2 text-caption text-warn">
       {children}
     </p>
   );
@@ -154,8 +154,8 @@ function MergeBody({ agent, pr: opened, onClose }: { agent: Agent; pr: PrInfo; o
                 {method === o.value && <span className="h-2 w-2 rounded-full bg-accent" />}
               </span>
               <span className="min-w-0">
-                <span className="block text-[13px] font-medium text-fg">{o.label}</span>
-                <span className="block text-[11.5px] text-steel">{o.hint}</span>
+                <span className="block text-body font-medium text-fg">{o.label}</span>
+                <span className="block text-meta text-steel">{o.hint}</span>
               </span>
             </button>
           ))}
@@ -169,7 +169,7 @@ function MergeBody({ agent, pr: opened, onClose }: { agent: Agent; pr: PrInfo; o
             </Button>
           </div>
         ) : !pr ? (
-          <div className="flex items-center gap-2 text-[12px] text-muted" role="status">
+          <div className="flex items-center gap-2 text-caption text-muted" role="status">
             <Spinner className="h-3.5 w-3.5" /> Checking GitHub for the latest commit…
           </div>
         ) : finished ? (
@@ -181,10 +181,10 @@ function MergeBody({ agent, pr: opened, onClose }: { agent: Agent; pr: PrInfo; o
         ) : (
           <>
             <div>
-              <div className="text-[11.5px] text-steel">
+              <div className="text-meta text-steel">
                 This is what you'd merge: commit <span className="font-mono text-fg/90 tabular">{shortSha(sha)}</span>
               </div>
-              <ul className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1 text-[12px]">
+              <ul className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1 text-caption">
                 {mergeFacts(pr).map((f) => (
                   <li key={f.key} className="flex min-w-0 items-center gap-1.5">
                     <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", FACT_DOT[f.tone])} />
@@ -196,7 +196,7 @@ function MergeBody({ agent, pr: opened, onClose }: { agent: Agent; pr: PrInfo; o
               </ul>
             </div>
             {cautions.length > 0 && (
-              <ul className="space-y-1 rounded-lg border border-warn/30 bg-warn/[0.07] px-3 py-2 text-[12px] text-warn">
+              <ul className="space-y-1 rounded-lg border border-warn/30 bg-warn/[0.07] px-3 py-2 text-caption text-warn">
                 {cautions.map((c) => (
                   <li key={c} className="flex items-start gap-1.5">
                     <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" /> <span>{c}</span>
@@ -206,7 +206,7 @@ function MergeBody({ agent, pr: opened, onClose }: { agent: Agent; pr: PrInfo; o
             )}
           </>
         )}
-        <p className="text-[12px] text-steel">
+        <p className="text-caption text-steel">
           This merges on GitHub. The agent's checkout and branch stay as they are.
         </p>
         {error && (

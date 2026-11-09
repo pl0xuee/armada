@@ -100,7 +100,7 @@ export function Rail() {
           <span
             aria-hidden
             className={cn(
-              "max-w-full truncate px-0.5 text-[10.5px] leading-[13px] tracking-[-0.005em] [@media(max-height:579px)]:hidden",
+              "max-w-full truncate px-0.5 text-micro leading-[13px] tracking-[-0.005em] [@media(max-height:579px)]:hidden",
               active ? "font-semibold" : "font-medium",
             )}
           >

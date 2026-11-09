@@ -23,7 +23,7 @@ function Issue({ issue }: { issue: HealthIssue }) {
   return (
     <li
       className={cn(
-        "flex items-start gap-2 rounded-lg border px-3 py-2 text-[12px] leading-snug",
+        "flex items-start gap-2 rounded-lg border px-3 py-2 text-caption leading-snug",
         TONE[issue.severity],
       )}
     >
@@ -98,7 +98,7 @@ export function LocalHealthPanel({ account }: { account: Account }) {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="inline-flex items-center gap-1 text-[12px] font-medium text-muted transition-colors hover:text-fg"
+        className="inline-flex items-center gap-1 text-caption font-medium text-muted transition-colors hover:text-fg"
       >
         <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
         Server details
@@ -109,14 +109,14 @@ export function LocalHealthPanel({ account }: { account: Account }) {
       {open && (
         <div className="mt-2 space-y-3 rounded-xl border border-line bg-base/40 p-3" aria-live="polite">
           {loading && !health ? (
-            <p className="flex items-center gap-2 text-[12px] text-muted">
+            <p className="flex items-center gap-2 text-caption text-muted">
               <Spinner className="h-3.5 w-3.5" /> Checking the server…
             </p>
           ) : error ? (
-            <p className="text-[12px] text-err">{error}</p>
+            <p className="text-caption text-err">{error}</p>
           ) : health ? (
             <>
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption">
                 <span
                   className={cn(
                     "h-1.5 w-1.5 rounded-full",
@@ -127,7 +127,7 @@ export function LocalHealthPanel({ account }: { account: Account }) {
                   {health.flavor}
                   {health.version ? ` ${health.version}` : ""}
                 </span>
-                <span className="font-mono text-[11px] text-steel">{health.baseUrl}</span>
+                <span className="font-mono text-micro text-steel">{health.baseUrl}</span>
                 <Button size="xs" variant="ghost" className="ml-auto" onClick={() => void load()} disabled={loading}>
                   <RefreshCw className={cn(loading && "animate-spin")} /> Refresh
                 </Button>
@@ -140,15 +140,15 @@ export function LocalHealthPanel({ account }: { account: Account }) {
                   ))}
                 </ul>
               ) : (
-                <p className="text-[12px] text-ok">No problems found.</p>
+                <p className="text-caption text-ok">No problems found.</p>
               )}
 
               {health.loaded.length > 0 && (
                 <div>
-                  <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-steel">In memory now</p>
+                  <p className="mb-1 eyebrow text-steel">In memory now</p>
                   <ul className="space-y-1">
                     {health.loaded.map((m) => (
-                      <li key={m.id} className="flex items-center gap-2 text-[12px]">
+                      <li key={m.id} className="flex items-center gap-2 text-caption">
                         <MemoryStick className="h-3.5 w-3.5 shrink-0 text-steel" />
                         <span className="min-w-0 flex-1 truncate">
                           <span className="font-mono text-fg/90">{m.id}</span>
@@ -184,12 +184,12 @@ export function LocalHealthPanel({ account }: { account: Account }) {
 
               {health.models.length > 0 && (
                 <div>
-                  <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-steel">Models</p>
+                  <p className="mb-1 eyebrow text-steel">Models</p>
                   <ul className="divide-y divide-line/60">
                     {health.models.map((m) => {
                       const r = speed[m.id];
                       return (
-                        <li key={m.id} className="py-1.5 text-[12px]">
+                        <li key={m.id} className="py-1.5 text-caption">
                           <div className="flex items-center gap-2">
                             <span className="min-w-0 flex-1 truncate">
                               <span className="font-mono text-fg/90">{m.id}</span>
@@ -227,7 +227,7 @@ export function LocalHealthPanel({ account }: { account: Account }) {
                             )}
                           </div>
                           {r && (
-                            <p className="mt-0.5 text-[11.5px] text-muted tabular">
+                            <p className="mt-0.5 text-meta text-muted tabular">
                               {r.tokensPerSecond != null ? (
                                 <>
                                   <span className="font-medium text-fg">{r.tokensPerSecond.toFixed(1)} tokens/s</span>
@@ -247,7 +247,7 @@ export function LocalHealthPanel({ account }: { account: Account }) {
                             </p>
                           )}
                           {confirmDelete === m.id && (
-                            <div className="mt-1.5 flex items-center gap-2 rounded-lg border border-err/30 bg-err/[0.06] px-2.5 py-1.5 text-[12px] text-err">
+                            <div className="mt-1.5 flex items-center gap-2 rounded-lg border border-err/30 bg-err/[0.06] px-2.5 py-1.5 text-caption text-err">
                               <span className="flex-1">
                                 Delete {m.id} from disk{m.sizeBytes ? ` (frees ${formatBytes(m.sizeBytes)})` : ""}?
                               </span>
@@ -283,9 +283,7 @@ export function LocalHealthPanel({ account }: { account: Account }) {
 
               {ollama && !remote && (
                 <div>
-                  <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-steel">
-                    Context window for agents
-                  </p>
+                  <p className="mb-1 eyebrow text-steel">Context window for agents</p>
                   <div className="max-w-[260px]">
                     <Select
                       aria-label="Context window for agents"
@@ -299,7 +297,7 @@ export function LocalHealthPanel({ account }: { account: Account }) {
                       }))}
                     />
                   </div>
-                  <p className="mt-1 text-[11.5px] leading-snug text-steel">
+                  <p className="mt-1 text-meta leading-snug text-steel">
                     How much an agent can keep in mind. Automatic picks up to 64k from your memory
                     {hw ? ` (${describeHardware(hw)})` : ""}. Bigger windows use more memory; below 32k agents forget
                     files and instructions.
@@ -308,10 +306,8 @@ export function LocalHealthPanel({ account }: { account: Account }) {
               )}
               {health.running && health.models.length > 0 && (
                 <div>
-                  <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-steel">
-                    Save subscription usage
-                  </p>
-                  <label className="flex items-center gap-2.5 text-[12.5px] text-fg">
+                  <p className="mb-1 eyebrow text-steel">Save subscription usage</p>
+                  <label className="flex items-center gap-2.5 text-small text-fg">
                     <Switch
                       aria-label="Use this server to condense handoff briefs"
                       checked={assistOn}
@@ -335,7 +331,7 @@ export function LocalHealthPanel({ account }: { account: Account }) {
                       />
                     </div>
                   )}
-                  <p className="mt-1 text-[11.5px] leading-snug text-steel">
+                  <p className="mt-1 text-meta leading-snug text-steel">
                     When you hand an agent's work to another agent, a long conversation is summarized here first, for
                     free, so the next agent reads a short brief instead of the whole thing. Off by default; if the
                     server is down the full conversation is sent.

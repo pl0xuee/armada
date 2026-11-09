@@ -7,11 +7,13 @@ const REFRESH_MS = 30_000;
 
 /**
  * Today's spend against the daily budget. Re-read when `signal` changes (the fleet's total
- * cost) and every so often, since the day rolls over at local midnight.
+ * cost) and every so often, since the day rolls over at local midnight. With `enabled` false
+ * (no daily limit to measure) nothing is read.
  */
-export function useBudgetStatus(signal: number): BudgetStatus | null {
+export function useBudgetStatus(signal: number, enabled = true): BudgetStatus | null {
   const [status, setStatus] = useState<BudgetStatus | null>(null);
   useEffect(() => {
+    if (!enabled) return;
     let live = true;
     const read = () =>
       api
@@ -26,6 +28,6 @@ export function useBudgetStatus(signal: number): BudgetStatus | null {
       clearTimeout(soon);
       stopEvery();
     };
-  }, [signal]);
-  return status;
+  }, [signal, enabled]);
+  return enabled ? status : null;
 }

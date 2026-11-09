@@ -42,7 +42,7 @@ const inflight = new Map<string, Promise<Entry>>();
 const keyOf = (agentId: string, path: string) => `${agentId}\u0000${path}`;
 
 function remember(key: string, image: Attachment) {
-  const bytes = Math.ceil((image.data.length * 3) / 4);
+  const bytes = Math.ceil(((image.data?.length ?? 0) * 3) / 4);
   const prev = ok.get(key);
   if (prev) okBytes -= prev.bytes;
   ok.delete(key);

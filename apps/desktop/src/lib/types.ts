@@ -597,6 +597,7 @@ export interface Settings {
   ntfyDetail: "minimal" | "full"; // what a phone push says: generic text, or the agent's own (scrubbed) text
   recentProjects: string[];
   autoCheckUpdates: boolean;
+  singleKeyShortcuts: boolean; // one-letter keys (A/Y/D/N approvals, J/K/E in Needs you) active window-wide
   templates: PromptTemplate[];
   mcpServers: McpServer[];
   failover: "off" | "ask" | "auto";
@@ -782,11 +783,25 @@ export interface CustomAgent {
   enabled: boolean;
 }
 
-/** Image attachment; `data` is base64 without the "data:" prefix. */
+/**
+ * Image attachment. Inline, `data` is base64 without the "data:" prefix. A picture stored in the
+ * timeline has no `data`, only `path` (its file name in Kvistcode's pictures folder); load it
+ * with `readPicture`. Rows saved before pictures became files keep their `data`.
+ */
+/** A project folder Kvistcode just made. */
+export interface NewProject {
+  path: string;
+  /** A git repo with a first commit. */
+  git: boolean;
+  /** Plain-words heads-up when git could not be set up. */
+  note?: string;
+}
+
 export interface Attachment {
   name: string;
   mimeType: string;
-  data: string;
+  data?: string;
+  path?: string;
 }
 
 /** Voice dictation (local speech-to-text). */

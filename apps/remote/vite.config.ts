@@ -105,7 +105,7 @@ export default defineConfig({
     target: ["es2022", "safari16.4", "chrome111", "firefox128"],
     cssTarget: ["safari16.4", "chrome111", "firefox128"],
     reportCompressedSize: true,
+    // Single-file build: the default 500 kB warning doubles as a size budget (now ~425 kB).
     modulePreload: { polyfill: false },
-    chunkSizeWarningLimit: 1024,
   },
 });

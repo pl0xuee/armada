@@ -13,7 +13,7 @@ function FolderChip({ path, active, onPick }: { path: string; active: boolean; o
         onClick={() => onPick(path)}
         aria-pressed={active}
         className={cn(
-          "inline-flex h-6 max-w-[200px] items-center gap-1 rounded-full border px-2.5 text-[11.5px] transition-colors",
+          "inline-flex h-6 max-w-[200px] items-center gap-1 rounded-full border px-2.5 text-meta transition-colors",
           active
             ? "border-accent/50 bg-accent/10 text-accent"
             : "border-line bg-card text-muted hover:border-line-strong hover:text-fg",
@@ -83,7 +83,7 @@ export function ProjectPicker({
           type="button"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
-          className="flex items-center gap-1.5 text-[11.5px] text-muted transition-colors hover:text-fg"
+          className="flex items-center gap-1.5 text-meta text-muted transition-colors hover:text-fg"
         >
           <ChevronRight className={cn("h-3.5 w-3.5 transition-transform duration-150", open && "rotate-90")} />
           <Compass className="h-3.5 w-3.5 text-steel" />
@@ -93,7 +93,7 @@ export function ProjectPicker({
         {open && (
           <div className="mt-2 rounded-xl border border-line bg-base/40 p-2">
             {error ? (
-              <div className="flex items-center gap-2 px-1 py-1 text-[12px] text-err">
+              <div className="flex items-center gap-2 px-1 py-1 text-caption text-err">
                 <span className="min-w-0 flex-1 truncate">Couldn't look for projects: {error}</span>
                 <button
                   type="button"
@@ -110,7 +110,7 @@ export function ProjectPicker({
                 ))}
               </div>
             ) : found.length === 0 ? (
-              <p className="px-1 py-1 text-[12px] text-steel">
+              <p className="px-1 py-1 text-caption text-steel">
                 No git repositories found in your home folder. Use Browse… to pick any folder.
               </p>
             ) : (
@@ -124,7 +124,7 @@ export function ProjectPicker({
                       placeholder="Filter repositories"
                       aria-label="Filter repositories"
                       spellCheck={false}
-                      className="h-7 w-full rounded-md border border-line bg-base/60 pl-7 pr-2 text-[12px] text-fg placeholder:text-steel focus:border-accent/50 focus:outline-none"
+                      className="h-7 w-full rounded-md border border-line bg-base/60 pl-7 pr-2 text-caption text-fg placeholder:text-steel focus:border-accent/50 focus:outline-none"
                     />
                   </div>
                 )}
@@ -137,7 +137,7 @@ export function ProjectPicker({
                     <FolderChip key={p} path={p} active={value === p} onPick={onChange} />
                   ))}
                   {extra.length === 0 && (
-                    <span className="px-1 text-[12px] text-steel">
+                    <span className="px-1 text-caption text-steel">
                       {filter ? `No repositories match “${filter}”.` : "All found projects are listed above."}
                     </span>
                   )}

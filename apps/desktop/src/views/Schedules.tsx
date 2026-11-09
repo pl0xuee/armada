@@ -164,10 +164,10 @@ export function SchedulesView() {
           {loadError ? (
             <div
               role="alert"
-              className="flex items-center gap-3 rounded-xl border border-err/30 bg-err/[0.06] px-4 py-3 text-[13px]"
+              className="flex items-center gap-3 rounded-xl border border-err/30 bg-err/[0.06] px-4 py-3 text-body"
             >
               <span className="min-w-0 flex-1 text-err">
-                Couldn't load schedules: <span className="selectable font-mono text-[12px]">{loadError}</span>
+                Couldn't load schedules: <span className="selectable font-mono text-caption">{loadError}</span>
               </span>
               <Button size="sm" variant="secondary" onClick={() => void load()}>
                 <RefreshCw className="!h-3.5 !w-3.5" /> Retry
@@ -219,7 +219,7 @@ export function SchedulesView() {
             </ul>
           )}
           {schedules !== null && !loadError && (
-            <p className="mt-6 text-center text-[11.5px] text-steel">
+            <p className="mt-6 text-center text-meta text-steel">
               Times are local. Schedules run while Kvistcode is running, including when it's minimized to the tray.
             </p>
           )}

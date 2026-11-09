@@ -747,6 +747,16 @@ const MAX_REVERT_PATCH: usize = 16 * 1024 * 1024;
 /// file's section, or a file header plus one hunk), reverse-applied to the working
 /// tree. All or nothing: if any part no longer applies, nothing changes.
 pub async fn revert_patch(agent: &Agent, patch: &str) -> anyhow::Result<()> {
+    apply_slice(agent, patch, true).await
+}
+
+/// Puts back what [`revert_patch`] took out (the Undo of a revert): the same slice,
+/// applied forward. All or nothing, like the revert.
+pub async fn reapply_patch(agent: &Agent, patch: &str) -> anyhow::Result<()> {
+    apply_slice(agent, patch, false).await
+}
+
+async fn apply_slice(agent: &Agent, patch: &str, reverse: bool) -> anyhow::Result<()> {
     let cwd = agent_cwd(agent)?;
     if patch.len() > MAX_REVERT_PATCH {
         bail!("That change is too large to revert here");
@@ -761,12 +771,20 @@ pub async fn revert_patch(agent: &Agent, patch: &str) -> anyhow::Result<()> {
     // Same hardening as viewing a diff: the agent controls .git/config and
     // .gitattributes, so no filters/fsmonitor run while touching its files.
     let git = ReadOnlyGit::new(cwd).await?;
-    git.run_input(
-        &["apply", "-R", "--whitespace=nowarn", "-"],
-        Some(patch.into_bytes()),
-    )
-    .await
-    .map_err(|e| e.context("The change couldn't be reverted (the file has changed since)"))?;
+    let args: &[&str] = if reverse {
+        &["apply", "-R", "--whitespace=nowarn", "-"]
+    } else {
+        &["apply", "--whitespace=nowarn", "-"]
+    };
+    git.run_input(args, Some(patch.into_bytes()))
+        .await
+        .map_err(|e| {
+            e.context(if reverse {
+                "The change couldn't be reverted (the file has changed since)"
+            } else {
+                "The change couldn't be put back (the file has changed since)"
+            })
+        })?;
     Ok(())
 }
 
@@ -3166,6 +3184,23 @@ mod tests {
             "{err:#}"
         );
         assert!(revert_patch(&agent, "rm -rf /").await.is_err());
+
+        // Undo: the same slices go back, and a second apply is refused.
+        reapply_patch(&agent, &hunk).await.unwrap();
+        let now = std::fs::read_to_string(repo.dir.join("a.txt")).unwrap();
+        assert!(
+            now.contains("TWO\n") && now.contains("TWENTY-NINE\n"),
+            "{now}"
+        );
+        reapply_patch(&agent, &section("new.txt")).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(repo.dir.join("new.txt")).unwrap(),
+            "fresh\n"
+        );
+        let err = reapply_patch(&agent, &section("new.txt"))
+            .await
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("put back"), "{err:#}");
     }
 
     #[tokio::test]

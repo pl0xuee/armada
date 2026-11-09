@@ -88,8 +88,8 @@ function VoiceAssistantComposerButton() {
           </PopoverTrigger>
         </Tooltip>
         <PopoverContent side="top" align="end" className="w-64">
-          <div className="text-[13px] font-medium text-fg">Voice assistant needs setup</div>
-          <p className="mt-1 text-[12px] leading-relaxed text-muted">
+          <div className="text-body font-medium text-fg">Voice assistant needs setup</div>
+          <p className="mt-1 text-caption leading-relaxed text-muted">
             Talking to Kvistcode uses OpenAI's realtime voice. Turn it on and pick an OpenAI API-key account to pay for
             sessions.
           </p>

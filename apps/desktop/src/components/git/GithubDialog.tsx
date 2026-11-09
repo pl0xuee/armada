@@ -147,7 +147,7 @@ function GithubBody({
     );
   if (!status || !repo)
     return (
-      <DialogBody className="flex items-center gap-2 py-8 text-[13px] text-muted">
+      <DialogBody className="flex items-center gap-2 py-8 text-body text-muted">
         <Spinner className="h-4 w-4" /> Checking GitHub…
       </DialogBody>
     );
@@ -163,7 +163,7 @@ function GithubBody({
         <Step n={1} done={status.loggedIn && status.gitReady} title="Sign in">
           {!status.ghInstalled ? (
             <>
-              <p className="text-[12.5px] text-muted">
+              <p className="text-small text-muted">
                 Kvistcode uses the GitHub CLI (<code className="font-mono">gh</code>) to talk to GitHub, and it isn't
                 installed.
               </p>
@@ -173,7 +173,7 @@ function GithubBody({
             </>
           ) : !status.loggedIn ? (
             <>
-              <p className="text-[12.5px] text-muted">
+              <p className="text-small text-muted">
                 Opens your browser to sign in to GitHub. Kvistcode never sees your password.
               </p>
               <Button size="sm" variant="primary" onClick={() => void startGithubLogin()}>
@@ -182,7 +182,7 @@ function GithubBody({
             </>
           ) : !status.gitReady ? (
             <>
-              <p className="text-[12.5px] text-muted">
+              <p className="text-small text-muted">
                 Signed in{status.user ? ` as ${status.user}` : ""}, but git doesn't use that sign-in yet, so pushes fail
                 from here. This runs <code className="font-mono">gh auth setup-git</code>, which adds GitHub's
                 credential helper to your git config.
@@ -206,7 +206,7 @@ function GithubBody({
               </Button>
             </>
           ) : (
-            <p className="text-[12.5px] text-muted">
+            <p className="text-small text-muted">
               Signed in
               {status.user ? (
                 <>
@@ -224,9 +224,9 @@ function GithubBody({
         {/* 2. Push or publish */}
         {origin ? (
           <Step n={2} done={false} title={`Push ${branch}`}>
-            <p className="text-[12.5px] text-muted">
-              To <span className="selectable break-all font-mono text-[11.5px] text-fg">{origin.url}</span>. Commit
-              first: only commits are pushed, and Kvistcode never force-pushes.
+            <p className="text-small text-muted">
+              To <span className="selectable break-all font-mono text-meta text-fg">{origin.url}</span>. Commit first:
+              only commits are pushed, and Kvistcode never force-pushes.
             </p>
             <Button
               size="sm"
@@ -343,12 +343,13 @@ function PublishForm({
         if (!disabled && valid) onSubmit(name.trim(), isPrivate, description);
       }}
     >
-      <p className="text-[12.5px] text-muted">
-        {repo.isRepo ? "This repository has no GitHub remote." : "This folder isn't a git repository yet."} Kvistcode will
+      <p className="text-small text-muted">
+        {repo.isRepo ? "This repository has no GitHub remote." : "This folder isn't a git repository yet."} Kvistcode
+        will
         {repo.isRepo ? "" : " set it up,"}
         {repo.hasCommits ? "" : " make a first commit (leaving out files that look like secrets),"} create the
         repository and push <span className="font-mono">{repo.branch ?? "main"}</span> from{" "}
-        <span className="selectable break-all font-mono text-[11.5px] text-fg">{agent.projectPath}</span>.
+        <span className="selectable break-all font-mono text-meta text-fg">{agent.projectPath}</span>.
       </p>
       <div>
         <Label htmlFor="gh-name">Repository name</Label>
@@ -361,7 +362,7 @@ function PublishForm({
           aria-invalid={!valid}
         />
         {!valid && (
-          <p className="mt-1 text-[11.5px] text-err">
+          <p className="mt-1 text-meta text-err">
             Letters, numbers, “.”, “-” and “_” only (or owner/name to publish under an organisation).
           </p>
         )}
@@ -370,7 +371,7 @@ function PublishForm({
         <Label htmlFor="gh-desc">Description (optional)</Label>
         <Input id="gh-desc" value={description} onChange={(e) => setDescription(e.target.value)} />
       </div>
-      <label className="flex items-center justify-between gap-3 text-[12.5px]">
+      <label className="flex items-center justify-between gap-3 text-small">
         <span>
           <span className="font-medium text-fg">{isPrivate ? "Private" : "Public"}</span>
           <span className="block text-muted">
@@ -389,12 +390,12 @@ function PublishForm({
 function Step({ n, done, title, children }: { n: number; done: boolean; title: string; children: ReactNode }) {
   return (
     <section className="rounded-xl border border-line bg-base/40 p-3.5">
-      <h3 className="mb-2 flex items-center gap-2 text-[13px] font-medium text-fg">
+      <h3 className="mb-2 flex items-center gap-2 text-body font-medium text-fg">
         <span
           className={
             done
               ? "flex h-5 w-5 items-center justify-center rounded-full bg-ok/15 text-ok"
-              : "flex h-5 w-5 items-center justify-center rounded-full bg-raised text-[11px] text-muted"
+              : "flex h-5 w-5 items-center justify-center rounded-full bg-raised text-micro text-muted"
           }
         >
           {done ? <Check className="h-3 w-3" /> : n}
@@ -410,7 +411,7 @@ function Problem({ children }: { children: ReactNode }) {
   return (
     <p
       role="alert"
-      className="selectable flex items-start gap-1.5 whitespace-pre-wrap break-words rounded-lg border border-err/30 bg-err/[0.07] px-2.5 py-2 text-[12px] text-err"
+      className="selectable flex items-start gap-1.5 whitespace-pre-wrap break-words rounded-lg border border-err/30 bg-err/[0.07] px-2.5 py-2 text-caption text-err"
     >
       <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" /> <span>{children}</span>
     </p>

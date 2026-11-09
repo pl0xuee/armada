@@ -49,7 +49,7 @@ export function TokenInsights({ agents }: { agents: Agent[] }) {
 
   return (
     <section className="rounded-xl border border-line bg-card edge" aria-label="Token insights">
-      <h2 className="flex items-center gap-2 px-4 pb-2 pt-3.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel [&_svg]:h-3.5 [&_svg]:w-3.5">
+      <h2 className="flex items-center gap-2 px-4 pb-2 pt-3.5 eyebrow text-steel [&_svg]:h-3.5 [&_svg]:w-3.5">
         <Lightbulb />
         Save tokens
       </h2>
@@ -58,8 +58,8 @@ export function TokenInsights({ agents }: { agents: Agent[] }) {
           <li key={i.id} className="flex items-start gap-3 px-4 py-3">
             <span aria-hidden className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${DOT[i.severity]}`} />
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-fg">{i.title}</div>
-              <p className="mt-0.5 text-[12px] leading-relaxed text-muted">{i.detail}</p>
+              <div className="text-body font-medium text-fg">{i.title}</div>
+              <p className="mt-0.5 text-caption leading-relaxed text-muted">{i.detail}</p>
             </div>
             {i.action && (
               <Button size="sm" variant="secondary" className="shrink-0" onClick={() => void run(i.action!)}>

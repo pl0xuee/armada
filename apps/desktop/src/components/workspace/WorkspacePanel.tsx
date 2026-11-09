@@ -114,7 +114,7 @@ export function WorkspacePanel({ agent, maxHeight }: { agent: Agent; maxHeight: 
               tabIndex={t.id === tab.id ? 0 : -1}
               onClick={() => setTab(agent.id, t.id)}
               className={cn(
-                "flex h-6 items-center gap-1.5 rounded-md px-2 outline-none focus-visible:ring-2 focus-visible:ring-accent/60 text-[12px] font-medium transition-colors [&_svg]:h-3.5 [&_svg]:w-3.5",
+                "flex h-6 items-center gap-1.5 rounded-md px-2 outline-none focus-visible:ring-2 focus-visible:ring-accent/60 text-caption font-medium transition-colors [&_svg]:h-3.5 [&_svg]:w-3.5",
                 t.id === tab.id ? "bg-raised text-fg" : "text-muted hover:bg-raised/60 hover:text-fg",
               )}
             >

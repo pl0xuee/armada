@@ -6,7 +6,7 @@ export function FieldError({ field }: { field: SettingsField }) {
   const error = useFieldError(field);
   if (!error) return null;
   return (
-    <p id={fieldErrorId(field)} role="alert" className="mt-1.5 flex items-start gap-1.5 text-[11.5px] text-err">
+    <p id={fieldErrorId(field)} role="alert" className="mt-1.5 flex items-start gap-1.5 text-meta text-err">
       <CircleAlert className="mt-px h-3.5 w-3.5 shrink-0" />
       <span className="break-words">{error}</span>
     </p>

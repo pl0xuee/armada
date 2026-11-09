@@ -28,10 +28,10 @@ export function SettingRow({
       )}
     >
       <div className={cn("min-w-0", !stack && "flex-1 basis-[220px]")}>
-        <label htmlFor={htmlFor} className="block text-[13px] font-medium text-fg">
+        <label htmlFor={htmlFor} className="block text-body font-medium text-fg">
           {title}
         </label>
-        {description && <p className="mt-0.5 text-[12px] leading-relaxed text-muted">{description}</p>}
+        {description && <p className="mt-0.5 text-caption leading-relaxed text-muted">{description}</p>}
       </div>
       <div className={cn("flex max-w-full shrink-0 flex-wrap items-center gap-2", stack && "w-full")}>{children}</div>
     </div>
@@ -57,8 +57,8 @@ export function SettingGroup({
       {(title || right) && (
         <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
           <div className="min-w-0">
-            {title && <h3 className="text-[13px] font-semibold tracking-tight text-fg">{title}</h3>}
-            {description && <p className="mt-0.5 text-[12px] text-muted">{description}</p>}
+            {title && <h3 className="text-body font-semibold tracking-tight text-fg">{title}</h3>}
+            {description && <p className="mt-0.5 text-caption text-muted">{description}</p>}
           </div>
           {right}
         </div>
@@ -81,7 +81,7 @@ export function SectionHeader({
     <div className="mb-6 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
       <div className="min-w-0 flex-1 basis-[260px]">
         <h2 className="text-[17px] font-semibold tracking-[-0.015em] text-fg">{title}</h2>
-        {description && <p className="mt-1 text-[13px] text-muted">{description}</p>}
+        {description && <p className="mt-1 text-body text-muted">{description}</p>}
       </div>
       {right}
     </div>

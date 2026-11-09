@@ -56,7 +56,7 @@ export function PermissionModeChip({
         aria-label={`${PERMISSION_LABEL[value]}. Click to switch.`}
         onClick={() => onChange(auto ? "ask" : "auto")}
         className={cn(
-          "inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded-full border text-[11.5px] font-medium transition-colors",
+          "inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded-full border text-meta font-medium transition-colors",
           compact ? "w-7" : "px-2",
           auto
             ? "border-accent/35 bg-accent/10 text-accent hover:bg-accent/15"

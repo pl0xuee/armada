@@ -128,7 +128,7 @@ export const AgentTile = memo(function AgentTile({
           {!(agent.rateLimited && agent.status === "error") && (
             <span
               title={view.detail ?? undefined}
-              className="flex h-5 min-w-0 items-center gap-1.5 rounded-full border px-1.5 text-[10.5px] font-medium"
+              className="flex h-5 min-w-0 items-center gap-1.5 rounded-full border px-1.5 text-micro font-medium"
               style={{
                 color:
                   !done && !background && (agent.status === "idle" || agent.status === "stopped")
@@ -143,7 +143,7 @@ export const AgentTile = memo(function AgentTile({
             </span>
           )}
           {agent.rateLimited && (
-            <span className="flex h-5 min-w-0 shrink items-center gap-1 rounded-full border border-warn/35 bg-warn/10 px-1.5 text-[10.5px] font-medium text-warn">
+            <span className="flex h-5 min-w-0 shrink items-center gap-1 rounded-full border border-warn/35 bg-warn/10 px-1.5 text-micro font-medium text-warn">
               <Gauge className="h-3 w-3 shrink-0" />
               <span className="truncate">
                 <ResumesAt agent={agent} fallback="Rate limited" />
@@ -162,13 +162,13 @@ export const AgentTile = memo(function AgentTile({
           {summary.subagents > 0 && (
             <span
               title={`${summary.subagents} sub-agent${summary.subagents === 1 ? "" : "s"} running`}
-              className="flex h-5 shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-1.5 text-[10.5px] font-medium text-accent"
+              className="flex h-5 shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-1.5 text-micro font-medium text-accent"
             >
               <Workflow className="h-3 w-3" />
               {background ? summary.subagents : `${summary.subagents} sub-agent${summary.subagents === 1 ? "" : "s"}`}
             </span>
           )}
-          <span className="ml-auto flex items-center gap-1.5 text-[11px] text-steel">
+          <span className="ml-auto flex items-center gap-1.5 text-micro text-steel">
             {agent.unread && <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-label="Unread" />}
             <RelTime ts={agent.lastActivityAt} />
           </span>
@@ -178,7 +178,7 @@ export const AgentTile = memo(function AgentTile({
           <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="md" className="mt-0.5" />
           <div className="min-w-0 flex-1">
             <h3 className="truncate text-[13.5px] font-medium tracking-[-0.005em] text-fg">{agent.title}</h3>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11.5px] text-steel">
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-meta text-steel">
               {account && <AccountAvatar account={account} size={13} showProvider={false} />}
               <span className="shrink-0">{account?.name ?? identity.short}</span>
               <span className="text-line-strong">·</span>
@@ -186,7 +186,7 @@ export const AgentTile = memo(function AgentTile({
               {agent.branch && (
                 <span className="flex min-w-0 items-center gap-1">
                   <GitBranch className="h-3 w-3 shrink-0" />
-                  <span className="truncate font-mono text-[10.5px]">{agent.branch.replace(/^kvistcode\//, "")}</span>
+                  <span className="truncate font-mono text-micro">{agent.branch.replace(/^kvistcode\//, "")}</span>
                 </span>
               )}
             </div>
@@ -197,7 +197,7 @@ export const AgentTile = memo(function AgentTile({
           {(tail ?? action) && !pending && !question && (
             <div
               className={cn(
-                "flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[11px]",
+                "flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-micro",
                 tail ? "border-accent/25 bg-accent/[0.06] text-fg/85" : "border-line/70 bg-base/50 text-muted",
               )}
               aria-live={tail ? "off" : undefined}
@@ -209,11 +209,9 @@ export const AgentTile = memo(function AgentTile({
             </div>
           )}
           {message ? (
-            <p className={cn("line-clamp-3 text-[12.5px] leading-relaxed text-muted", streaming && "caret")}>
-              {message}
-            </p>
+            <p className={cn("line-clamp-3 text-small leading-relaxed text-muted", streaming && "caret")}>{message}</p>
           ) : (
-            <p className="text-[12.5px] italic text-steel/70">No messages yet</p>
+            <p className="text-small italic text-steel/70">No messages yet</p>
           )}
         </div>
       </div>
@@ -224,7 +222,7 @@ export const AgentTile = memo(function AgentTile({
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
-          <div className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-warn">
+          <div className="flex min-w-0 items-center gap-1.5 text-meta text-warn">
             <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate font-medium">{pending.title}</span>
           </div>
@@ -271,7 +269,7 @@ export const AgentTile = memo(function AgentTile({
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
-          <div className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-warn">
+          <div className="flex min-w-0 items-center gap-1.5 text-meta text-warn">
             <MessageCircleQuestion className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate font-medium">{question.message}</span>
           </div>
@@ -283,7 +281,7 @@ export const AgentTile = memo(function AgentTile({
         </div>
       )}
 
-      <div className="relative mt-3 flex items-center gap-3 border-t border-line/70 px-3.5 py-2 text-[11px] text-steel tabular">
+      <div className="relative mt-3 flex items-center gap-3 border-t border-line/70 px-3.5 py-2 text-micro text-steel tabular">
         <span>{agentCostText(agent)}</span>
         <span>{formatTokens(agent.tokensUsed)} tok</span>
         {agent.contextUsed !== null && agent.contextSize ? (

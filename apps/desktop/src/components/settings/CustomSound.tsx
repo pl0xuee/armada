@@ -57,11 +57,11 @@ export function CustomSoundLine({
 
   return (
     <span className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
-      <span className="flex min-w-0 items-center gap-1.5 rounded-md border border-line bg-base/50 px-2 py-0.5 text-[11.5px]">
+      <span className="flex min-w-0 items-center gap-1.5 rounded-md border border-line bg-base/50 px-2 py-0.5 text-meta">
         <Music className="h-3 w-3 shrink-0 text-steel" />
         {path ? (
           <Tooltip content={path}>
-            <span className="selectable min-w-0 max-w-[220px] truncate font-mono text-[11px] text-fg/90">
+            <span className="selectable min-w-0 max-w-[220px] truncate font-mono text-micro text-fg/90">
               {basename(path)}
             </span>
           </Tooltip>

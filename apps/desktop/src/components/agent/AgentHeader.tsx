@@ -211,7 +211,7 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
         )}
         {tile?.index && (
           <span
-            className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md border border-line-strong bg-card px-1 text-[11px] font-semibold text-muted tabular"
+            className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md border border-line-strong bg-card px-1 text-micro font-semibold text-muted tabular"
             aria-label={`Agent ${tile.index}`}
           >
             {tile.index}
@@ -510,7 +510,7 @@ function ReviewPill({
         <GitCompare />
         {full && <span>{label}</span>}
         {!full && count > 0 && (
-          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[11px] font-bold leading-none text-accent-fg tabular">
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-micro font-bold leading-none text-accent-fg tabular">
             {count}
           </span>
         )}

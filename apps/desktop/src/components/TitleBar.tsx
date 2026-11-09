@@ -64,7 +64,7 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
         {/* Three columns, so the search box sits at the same x on every view whatever the sides hold. */}
         <div data-tauri-drag-region className="flex min-w-0 items-center gap-2">
           <AppMark size={18} />
-          <span data-tauri-drag-region className="text-[13px] font-semibold tracking-[-0.01em] text-fg">
+          <span data-tauri-drag-region className="text-body font-semibold tracking-[-0.01em] text-fg">
             Kvistcode
           </span>
           {!minimal && (
@@ -77,10 +77,7 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
               </span>
               <span
                 data-tauri-drag-region
-                className={cn(
-                  "truncate text-[12.5px] text-muted max-[1199px]:hidden",
-                  crowded && "max-[1319px]:hidden",
-                )}
+                className={cn("truncate text-small text-muted max-[1199px]:hidden", crowded && "max-[1319px]:hidden")}
               >
                 {VIEW_LABEL[view]}
               </span>
@@ -107,7 +104,7 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
               <button
                 type="button"
                 onClick={() => setPaletteOpen(true)}
-                className="group flex h-[26px] w-full min-w-0 max-w-[380px] @max-[139px]:w-7 @max-[139px]:justify-center @max-[139px]:px-0 items-center gap-2 rounded-lg border border-line bg-base/60 px-2.5 text-[12.5px] text-steel transition-colors hover:border-line-strong hover:bg-base hover:text-muted"
+                className="group flex h-[26px] w-full min-w-0 max-w-[380px] @max-[139px]:w-7 @max-[139px]:justify-center @max-[139px]:px-0 items-center gap-2 rounded-lg border border-line bg-base/60 px-2.5 text-small text-steel transition-colors hover:border-line-strong hover:bg-base hover:text-muted"
                 aria-label="Open command palette"
               >
                 <Search className="h-3.5 w-3.5 shrink-0" />
@@ -148,7 +145,7 @@ function SubagentsIndicator({ compact }: { compact: boolean }) {
           <button
             type="button"
             aria-label={label}
-            className="flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-accent/30 bg-accent/[0.08] px-2 text-[11.5px] text-accent transition-colors hover:border-accent/50 hover:bg-accent/15"
+            className="flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-accent/30 bg-accent/[0.08] px-2 text-meta text-accent transition-colors hover:border-accent/50 hover:bg-accent/15"
           >
             <Workflow className="h-3 w-3" />
             <span className="tabular">{total}</span>
@@ -162,7 +159,7 @@ function SubagentsIndicator({ compact }: { compact: boolean }) {
             <section key={agent.id} className="pb-1.5 last:pb-0">
               <div className="flex items-center gap-1.5 px-2 pb-0.5 pt-1.5">
                 <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="xs" />
-                <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-muted">{agent.title}</span>
+                <span className="min-w-0 flex-1 truncate text-meta font-semibold text-muted">{agent.title}</span>
               </div>
               <PopoverClose asChild>
                 <div>
@@ -182,7 +179,7 @@ function NavButtons() {
   const back = useNav((s) => s.back.at(-1) ?? null);
   const forward = useNav((s) => s.forward.at(-1) ?? null);
   const btn =
-    "flex h-6 w-6 items-center justify-center rounded-md text-steel transition-colors hover:bg-raised hover:text-fg disabled:pointer-events-none disabled:opacity-35 [&_svg]:h-4 [&_svg]:w-4";
+    "flex h-6 w-6 items-center justify-center rounded-md text-steel transition-colors hover:bg-raised hover:text-fg disabled:pointer-events-none disabled:opacity-45 [&_svg]:h-4 [&_svg]:w-4";
   const backKeys = isMac ? ["⌘", "["] : ["Alt", "←"];
   const forwardKeys = isMac ? ["⌘", "]"] : ["Alt", "→"];
   return (
@@ -206,12 +203,12 @@ function ConnectionLostBanner({ error }: { error: string }) {
   return (
     <div
       role="alert"
-      className="relative z-20 flex shrink-0 items-center gap-2.5 border-b border-err/30 bg-err/[0.08] px-3 py-1.5 text-[12.5px]"
+      className="relative z-20 flex shrink-0 items-center gap-2.5 border-b border-err/30 bg-err/[0.08] px-3 py-1.5 text-small"
     >
       <Unplug className="h-3.5 w-3.5 shrink-0 text-err" />
-      <span className="font-medium text-err">Lost connection to Kvistcode core</span>
+      <span className="font-medium text-err">Lost connection to Kvistcode</span>
       <span className="min-w-0 flex-1 truncate text-muted" title={error}>
-        Live updates are paused. {error}
+        Live updates are paused. Reload to reconnect.
       </span>
       <Button size="xs" variant="secondary" onClick={() => window.location.reload()}>
         <RotateCw className="!h-3 !w-3" /> Reload
@@ -262,12 +259,12 @@ function AccountsPopover({ accounts, stacked }: { accounts: Account[]; stacked: 
               </span>
             ))}
             {stacked && accounts.length > 1 && (
-              <span className="relative z-20 -ml-1 flex h-[22px] min-w-[22px] items-center justify-center rounded-full border border-line-strong bg-raised px-1.5 text-[10px] font-medium text-muted tabular ring-2 ring-panel">
+              <span className="relative z-20 -ml-1 flex h-[22px] min-w-[22px] items-center justify-center rounded-full border border-line-strong bg-raised px-1.5 text-micro font-medium text-muted tabular ring-2 ring-panel">
                 +{accounts.length - 1}
               </span>
             )}
             {!stacked && accounts.length > 3 && (
-              <span className="-ml-1 flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-raised px-1 text-[10px] text-muted ring-2 ring-panel">
+              <span className="-ml-1 flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-raised px-1 text-micro text-muted ring-2 ring-panel">
                 +{accounts.length - 3}
               </span>
             )}
@@ -276,8 +273,8 @@ function AccountsPopover({ accounts, stacked }: { accounts: Account[]; stacked: 
       </Tooltip>
       <PopoverContent align="end" className="w-[320px] p-0">
         <div className="flex items-center justify-between border-b border-line px-3.5 py-2.5">
-          <span className="text-[12.5px] font-semibold">Accounts</span>
-          <span className="text-[11.5px] text-steel tabular">
+          <span className="text-small font-semibold">Accounts</span>
+          <span className="text-meta text-steel tabular">
             {signedIn} of {accounts.length} signed in
           </span>
         </div>
@@ -287,10 +284,10 @@ function AccountsPopover({ accounts, stacked }: { accounts: Account[]; stacked: 
               <div className="flex items-center gap-2.5">
                 <AccountAvatar account={a} size={26} />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[12.5px] font-medium">
+                  <div className="truncate text-small font-medium">
                     {a.name} <span className="font-normal text-steel">· {PROVIDERS[a.provider].short}</span>
                   </div>
-                  <div className={cn("truncate text-[11px]", a.status?.loggedIn ? "text-steel" : "text-warn")}>
+                  <div className={cn("truncate text-micro", a.status?.loggedIn ? "text-steel" : "text-warn")}>
                     {a.status?.loggedIn ? (a.status.label ?? "Signed in") : "Not signed in"}
                     {a.authKind === "api_key" && a.status?.loggedIn && " · billed per token"}
                   </div>
@@ -309,7 +306,7 @@ function AccountsPopover({ accounts, stacked }: { accounts: Account[]; stacked: 
             <button
               type="button"
               onClick={() => setView("accounts")}
-              className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-[12.5px] text-muted transition-colors hover:bg-gunmetal hover:text-fg"
+              className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-small text-muted transition-colors hover:bg-gunmetal hover:text-fg"
             >
               <Users className="h-3.5 w-3.5" /> Manage accounts
             </button>

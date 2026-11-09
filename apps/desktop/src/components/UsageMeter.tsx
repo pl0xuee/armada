@@ -32,7 +32,7 @@ function Meter({ w, compact }: { w: UsageWindow; compact?: boolean }) {
   const reset = resetLabel(w.resetsAt);
   return (
     <div className={cn("min-w-0", compact ? "w-full" : "w-full max-w-[240px]")}>
-      <div className="flex items-baseline justify-between gap-2 text-[11px]">
+      <div className="flex items-baseline justify-between gap-2 text-micro">
         <span className="truncate text-steel">
           {windowLabel(w)}
           {reset && !compact && <span className="text-steel/80"> · {reset}</span>}
@@ -54,7 +54,7 @@ function Meter({ w, compact }: { w: UsageWindow; compact?: boolean }) {
           style={{ transform: `scaleX(${pct / 100})` }}
         />
       </div>
-      {reset && compact && <div className="mt-0.5 text-[10.5px] text-steel">{reset}</div>}
+      {reset && compact && <div className="mt-0.5 text-micro text-steel">{reset}</div>}
     </div>
   );
 }

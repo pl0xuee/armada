@@ -1662,6 +1662,7 @@ async fn queue_survives_a_restart() {
         name: "shot.png".into(),
         mime_type: "image/png".into(),
         data: "iVBORw0KGgo=".into(),
+        path: None,
     };
     env.core
         .send_prompt(&agent.id, "second", vec![png])

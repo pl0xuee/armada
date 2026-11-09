@@ -21,7 +21,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center gap-1 whitespace-nowrap rounded-md border px-1.5 text-[11px] font-medium [&_svg]:h-3 [&_svg]:w-3",
+        "inline-flex h-5 items-center gap-1 whitespace-nowrap rounded-md border px-1.5 text-micro font-medium [&_svg]:h-3 [&_svg]:w-3",
         tones[tone],
         className,
       )}
@@ -44,7 +44,7 @@ export function CountBadge({
   return (
     <span
       className={cn(
-        "flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular leading-none shadow-[0_0_0_2px_var(--bg-1)]",
+        "flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-micro font-semibold tabular leading-none shadow-[0_0_0_2px_var(--bg-1)]",
         tone === "warn" ? "bg-warn text-warn-fg" : "bg-accent text-accent-fg",
         className,
       )}
@@ -69,7 +69,7 @@ export function SectionTitle({
 }) {
   return (
     <div className={cn("mb-2 flex items-center justify-between", className)}>
-      <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-steel">{children}</h3>
+      <h3 className="eyebrow text-steel">{children}</h3>
       {right}
     </div>
   );

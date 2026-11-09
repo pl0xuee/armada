@@ -8,7 +8,7 @@ import { cn, errorMessage, modKey } from "@/lib/utils";
 import { runInNewTerminal } from "@/store/workspace";
 
 const btn =
-  "inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] text-steel transition-colors hover:bg-raised hover:text-fg";
+  "inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-micro text-steel transition-colors hover:bg-raised hover:text-fg";
 
 /** Run a shell code block in a new terminal of the agent's workspace panel (see runInNewTerminal). */
 export function RunButton({
@@ -62,14 +62,14 @@ export function RunButton({
               ? "This command can change or delete things. Run it?"
               : "Run this command from the agent?"}
           </p>
-          <pre className="selectable mb-3 max-h-40 overflow-auto rounded-lg border border-line bg-code p-2 font-mono text-[12px] leading-[1.5] whitespace-pre-wrap break-all">
+          <pre className="selectable mb-3 max-h-40 overflow-auto rounded-lg border border-line bg-code p-2 font-mono text-caption leading-[1.5] whitespace-pre-wrap break-all">
             {command}
           </pre>
           <div className="flex justify-end gap-2">
-            <PopoverClose className={cn(btn, "h-7 px-2.5 text-[12px]")}>Cancel</PopoverClose>
+            <PopoverClose className={cn(btn, "h-7 px-2.5 text-caption")}>Cancel</PopoverClose>
             <PopoverClose
               onClick={() => void go(true)}
-              className="inline-flex h-7 items-center rounded-md bg-err/15 px-2.5 text-[12px] font-medium text-err transition-colors hover:bg-err/25"
+              className="inline-flex h-7 items-center rounded-md bg-err/15 px-2.5 text-caption font-medium text-err transition-colors hover:bg-err/25"
             >
               Run
             </PopoverClose>

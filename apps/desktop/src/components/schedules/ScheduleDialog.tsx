@@ -190,7 +190,7 @@ function ScheduleForm({
         {initial.id && initial.lastError && (
           <div
             role="note"
-            className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/[0.07] px-3 py-2 text-[12.5px]"
+            className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/[0.07] px-3 py-2 text-small"
           >
             <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
             <span className="min-w-0 text-muted">
@@ -210,7 +210,7 @@ function ScheduleForm({
               placeholder="e.g. Nightly dependency audit"
             />
           </div>
-          <label className="flex h-9 items-center gap-2 text-[12.5px] text-muted">
+          <label className="flex h-9 items-center gap-2 text-small text-muted">
             Enabled
             <Switch checked={draft.enabled} onCheckedChange={(v) => set("enabled", v)} aria-label="Enabled" />
           </label>
@@ -247,18 +247,18 @@ function ScheduleForm({
           </div>
           <div className="mt-2">
             {draft.provider === "custom" ? (
-              <div className="flex h-9 items-center gap-2 rounded-lg border border-dashed border-line-strong px-3 text-[12.5px] text-steel">
+              <div className="flex h-9 items-center gap-2 rounded-lg border border-dashed border-line-strong px-3 text-small text-steel">
                 <span className="text-muted">No sign-in needed</span>
                 {customAgent && (
                   <>
                     <span className="text-line-strong">·</span>
-                    <span className="min-w-0 truncate font-mono text-[11.5px]">
+                    <span className="min-w-0 truncate font-mono text-meta">
                       {[customAgent.command, ...customAgent.args].join(" ")}
                     </span>
                   </>
                 )}
                 {customAgent && !customAgent.enabled && (
-                  <span className="shrink-0 text-warn">· disabled in Settings → Agents</span>
+                  <span className="shrink-0 text-warn">· disabled in Settings → Providers</span>
                 )}
                 {!customAgent && <span className="text-warn">This custom agent no longer exists</span>}
               </div>
@@ -277,7 +277,7 @@ function ScheduleForm({
                     <span className="flex items-center gap-2">
                       <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: a.color }} />
                       <span className="truncate">{a.name}</span>
-                      <span className={cn("text-[11px]", a.status?.loggedIn ? "text-steel" : "text-warn")}>
+                      <span className={cn("text-micro", a.status?.loggedIn ? "text-steel" : "text-warn")}>
                         {a.status?.loggedIn ? (a.status.label ?? "Signed in") : "Not signed in"}
                       </span>
                     </span>
@@ -287,7 +287,7 @@ function ScheduleForm({
             )}
           </div>
           {account && account.status && !account.status.loggedIn && (
-            <p className="mt-2 flex items-center gap-1.5 text-[12px] text-warn">
+            <p className="mt-2 flex items-center gap-1.5 text-caption text-warn">
               <TriangleAlert className="h-3.5 w-3.5" /> {account.name} isn't signed in, so scheduled runs will fail
               until it is.
             </p>
@@ -304,7 +304,7 @@ function ScheduleForm({
                 value={draft.projectPath}
                 onChange={(e) => set("projectPath", e.target.value)}
                 placeholder="/path/to/project"
-                className="pl-9 font-mono text-[12.5px]"
+                className="pl-9 font-mono text-small"
               />
             </div>
             <Button variant="secondary" className="h-9" onClick={() => void browse()}>
@@ -323,7 +323,7 @@ function ScheduleForm({
                     aria-pressed={on}
                     onClick={() => set("projectPath", p)}
                     className={cn(
-                      "inline-flex h-6 items-center gap-1 rounded-full border px-2.5 text-[11.5px] transition-colors",
+                      "inline-flex h-6 items-center gap-1 rounded-full border px-2.5 text-meta transition-colors",
                       on
                         ? "border-accent/50 bg-accent/10 text-accent"
                         : "border-line bg-card text-muted hover:border-line-strong hover:text-fg",
@@ -395,7 +395,7 @@ function ScheduleForm({
                     aria-label={DAY_LONG[day]}
                     onClick={() => toggleDay(day)}
                     className={cn(
-                      "h-9 rounded-lg border text-[12px] font-medium transition-[border-color,background-color,color,transform] active:scale-[0.97]",
+                      "h-9 rounded-lg border text-caption font-medium transition-[border-color,background-color,color,transform] active:scale-[0.97]",
                       on
                         ? "border-accent/50 bg-accent/12 text-accent"
                         : "border-line bg-base/50 text-steel hover:border-line-strong hover:text-fg",
@@ -410,7 +410,7 @@ function ScheduleForm({
         </div>
 
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          <label className="flex items-center gap-2 text-[12.5px] text-fg">
+          <label className="flex items-center gap-2 text-small text-fg">
             <Switch
               checked={draft.worktree}
               onCheckedChange={(v) => set("worktree", v)}
@@ -418,9 +418,9 @@ function ScheduleForm({
             />
             <GitBranch className="h-3.5 w-3.5 text-steel" />
             Isolated worktree
-            <span className="text-[11.5px] text-steel">(each run gets its own branch)</span>
+            <span className="text-meta text-steel">(each run gets its own branch)</span>
           </label>
-          <div className="flex items-center gap-2 text-[12.5px] text-fg">
+          <div className="flex items-center gap-2 text-small text-fg">
             <span className="flex items-center gap-1.5">
               {(draft.permissionMode ?? defaultMode) === "auto" ? (
                 <Zap className="h-3.5 w-3.5 text-accent" />
@@ -443,14 +443,14 @@ function ScheduleForm({
           </div>
         </div>
         {(draft.permissionMode ?? defaultMode) === "auto" && (
-          <p role="note" className="-mt-2 text-[11.5px] text-warn">
+          <p role="note" className="-mt-2 text-meta text-warn">
             Runs unattended with auto-approval; changes to the project between runs aren't reviewed.
           </p>
         )}
 
         <div
           aria-live="polite"
-          className="flex items-center gap-2.5 rounded-xl border border-line bg-base/40 px-3 py-2.5 text-[12.5px]"
+          className="flex items-center gap-2.5 rounded-xl border border-line bg-base/40 px-3 py-2.5 text-small"
         >
           <CalendarClock className={cn("h-4 w-4 shrink-0", next ? "text-accent" : "text-steel")} />
           {!draft.enabled ? (
@@ -485,7 +485,7 @@ function QuickDays({ active, onClick, children }: { active: boolean; onClick: ()
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "h-5 rounded-md px-1.5 text-[11px] font-medium transition-colors",
+        "h-5 rounded-md px-1.5 text-micro font-medium transition-colors",
         active ? "bg-accent/12 text-accent" : "text-steel hover:bg-raised hover:text-fg",
       )}
     >

@@ -90,7 +90,7 @@ export function KeyValueEditor({
                     aria-label={`${label} name`}
                     aria-invalid={!!err}
                     className={cn(
-                      "h-8 w-[38%] font-mono text-[12px]",
+                      "h-8 w-[38%] font-mono text-caption",
                       err && "border-err/60 focus:border-err/70 focus:ring-err/15",
                     )}
                   />
@@ -102,7 +102,7 @@ export function KeyValueEditor({
                       onChange={(e) => update(r.key, { value: e.target.value })}
                       placeholder={valuePlaceholder}
                       aria-label={`${r.name || label} value`}
-                      className="h-8 pr-8 font-mono text-[12px]"
+                      className="h-8 pr-8 font-mono text-caption"
                     />
                     <Tooltip content={shown ? "Hide value" : "Show value"}>
                       <button
@@ -130,7 +130,7 @@ export function KeyValueEditor({
                   </Tooltip>
                 </div>
                 {err && (
-                  <p role="alert" className="mt-1 text-[12px] text-err">
+                  <p role="alert" className="mt-1 text-caption text-err">
                     {err}
                   </p>
                 )}

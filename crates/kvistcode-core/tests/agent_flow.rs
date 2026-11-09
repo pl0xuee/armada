@@ -610,6 +610,7 @@ async fn custom_agents_attachments_and_files() {
         name: "a.txt".into(),
         mime_type: "text/plain".into(),
         data: "aGk=".into(),
+        path: None,
     };
     assert!(core
         .create_agent(req(Some("mock"), vec![not_image]))
@@ -620,6 +621,7 @@ async fn custom_agents_attachments_and_files() {
         name: "shot.png".into(),
         mime_type: "image/png".into(),
         data: "iVBORw0KGgo=".into(),
+        path: None,
     };
     let agent = core
         .create_agent(req(Some("mock"), vec![png]))

@@ -22,7 +22,7 @@ function Row({
   const level = budgetLevel(spent, cap);
   return (
     <div>
-      <div className="flex items-baseline justify-between gap-x-4 text-[12.5px] tabular">
+      <div className="flex items-baseline justify-between gap-x-4 text-small tabular">
         <span className="text-steel">{label}</span>
         <span className="flex items-baseline gap-2">
           <span className="font-medium text-fg">{format(spent)}</span>
@@ -55,14 +55,16 @@ export function BudgetBar({ status, onConfigure }: { status: BudgetStatus; onCon
   if (cost == null && tokens == null && turns == null) return null;
   return (
     <div className="space-y-2.5 rounded-xl border border-line bg-card px-4 py-3 edge">
-      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-steel [&_svg]:h-3.5 [&_svg]:w-3.5">
+      <div className="flex items-center gap-1.5 eyebrow text-steel [&_svg]:h-3.5 [&_svg]:w-3.5">
         <Wallet />
         Today&rsquo;s budget
       </div>
       {cost != null && <Row label="Cost" spent={status.todayUsd} cap={cost} format={formatCost} />}
       {tokens != null && <Row label="Tokens" spent={status.todayTokens} cap={tokens} format={formatTokens} />}
-      {turns != null && <Row label="Turns" spent={status.todayTurns} cap={turns} format={(n) => String(Math.round(n))} />}
-      <div className="text-[11.5px] text-steel">
+      {turns != null && (
+        <Row label="Turns" spent={status.todayTurns} cap={turns} format={(n) => String(Math.round(n))} />
+      )}
+      <div className="text-meta text-steel">
         Since midnight, all agents.{" "}
         <button
           type="button"

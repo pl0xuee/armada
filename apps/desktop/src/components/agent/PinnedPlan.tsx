@@ -106,7 +106,7 @@ export function PlanSection({ agentId, pin, compact }: { agentId: string; pin: P
     </div>
   );
   const count = (
-    <span className="shrink-0 text-[11.5px] text-steel tabular">
+    <span className="shrink-0 text-meta text-steel tabular">
       {compact && !done ? `${progress.done}/${progress.total}` : `${progress.done} of ${progress.total}`}
     </span>
   );
@@ -127,7 +127,7 @@ export function PlanSection({ agentId, pin, compact }: { agentId: string; pin: P
           )}
           {count}
           {bar}
-          <span className={cn("min-w-0 truncate text-[12px]", done ? "text-muted" : "font-medium text-fg")}>
+          <span className={cn("min-w-0 truncate text-caption", done ? "text-muted" : "font-medium text-fg")}>
             {done ? "Plan complete" : (currentText ?? "")}
           </span>
         </button>
@@ -149,7 +149,7 @@ export function PlanSection({ agentId, pin, compact }: { agentId: string; pin: P
           ) : (
             <ListChecks className="h-4 w-4 shrink-0 text-accent" aria-hidden />
           )}
-          <span className="text-[12.5px] font-semibold">{label}</span>
+          <span className="text-small font-semibold">{label}</span>
           {count}
         </button>
         <div className="ml-auto flex items-center gap-1.5">
@@ -169,7 +169,7 @@ export function PlanSection({ agentId, pin, compact }: { agentId: string; pin: P
         </div>
       </div>
       {!done && !open && currentText && (
-        <div className="mt-1.5 flex items-start gap-2 pl-[1.375rem] text-[12.5px] leading-snug">
+        <div className="mt-1.5 flex items-start gap-2 pl-[1.375rem] text-small leading-snug">
           <span
             aria-hidden
             className="mt-[3px] flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-accent/60"

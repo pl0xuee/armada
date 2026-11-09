@@ -121,7 +121,7 @@ export function QueueStack({
     >
       <div
         className={cn(
-          "flex h-8 items-center gap-2 px-3 text-[11.5px]",
+          "flex h-8 items-center gap-2 px-3 text-meta",
           expanded && "border-b",
           paused ? "border-warn/20 bg-warn/[0.07] text-warn" : "border-line text-muted",
         )}
@@ -161,7 +161,7 @@ export function QueueStack({
               type="button"
               onClick={() => void resumeQueue()}
               disabled={resuming}
-              className="flex items-center gap-1 rounded-md border border-warn/35 bg-warn/10 px-1.5 py-0.5 font-medium text-warn transition-colors hover:bg-warn/20 disabled:opacity-60"
+              className="flex items-center gap-1 rounded-md border border-warn/35 bg-warn/10 px-1.5 py-0.5 font-medium text-warn transition-colors hover:bg-warn/20 disabled:opacity-45"
             >
               {resuming ? <Spinner className="h-3 w-3 text-current" /> : <Play className="h-3 w-3" />}
               Resume queue
@@ -254,20 +254,20 @@ function QueueRow({
   };
 
   const iconBtn =
-    "inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded-md px-1.5 text-[11.5px] text-muted transition-colors hover:bg-raised hover:text-fg focus-visible:bg-raised";
+    "inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded-md px-1.5 text-meta text-muted transition-colors hover:bg-raised hover:text-fg focus-visible:bg-raised";
   const armedBtn = "bg-warn/15 text-warn hover:bg-warn/25 hover:text-warn";
 
   return (
     <li className="group flex items-start gap-2.5 px-3 py-2">
-      <span className="mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-line bg-raised text-[10.5px] font-semibold text-steel tabular">
+      <span className="mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-line bg-raised text-micro font-semibold text-steel tabular">
         {index}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="line-clamp-2 whitespace-pre-wrap break-words text-[12.5px] leading-snug text-fg/90">
+        <p className="line-clamp-2 whitespace-pre-wrap break-words text-small leading-snug text-fg/90">
           {item.text || <span className="italic text-steel">(images only)</span>}
         </p>
         {item.attachments > 0 && (
-          <span className="mt-1 inline-flex items-center gap-1 rounded border border-line px-1 text-[10.5px] text-steel">
+          <span className="mt-1 inline-flex items-center gap-1 rounded border border-line px-1 text-micro text-steel">
             <ImageIcon className="h-3 w-3" />
             {item.attachments} image{item.attachments === 1 ? "" : "s"}
           </span>

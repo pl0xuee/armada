@@ -35,7 +35,7 @@ export function Select({
         id={id}
         aria-label={ariaLabel}
         className={cn(
-          "flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-line bg-base/60 px-3 text-left text-[13px] text-fg transition-colors hover:border-line-strong focus:border-accent/60 focus:outline-none focus:ring-3 focus:ring-accent/15 disabled:opacity-50 data-[placeholder]:text-steel",
+          "flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-line-strong bg-base/60 px-3 text-left text-body text-fg transition-colors hover:border-line-strong focus:border-accent/60 focus:outline-hidden focus:ring-3 focus:ring-accent/15 disabled:opacity-45 data-[placeholder]:text-steel",
           className,
         )}
       >
@@ -58,14 +58,14 @@ export function Select({
                 key={o.value}
                 value={o.value}
                 disabled={o.disabled}
-                className="relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-lg py-1.5 pl-7 pr-2 text-[13px] text-fg outline-none data-[disabled]:opacity-40 data-[highlighted]:bg-gunmetal"
+                className="relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-lg py-1.5 pl-7 pr-2 text-body text-fg outline-none data-[disabled]:opacity-45 data-[highlighted]:bg-gunmetal"
               >
                 <S.ItemIndicator className="absolute left-2">
                   <Check className="h-3.5 w-3.5 text-accent" />
                 </S.ItemIndicator>
                 <div className="flex min-w-0 flex-col">
                   <S.ItemText>{o.label}</S.ItemText>
-                  {o.description && <span className="text-[11.5px] text-steel">{o.description}</span>}
+                  {o.description && <span className="text-meta text-steel">{o.description}</span>}
                 </div>
               </S.Item>
             ))}

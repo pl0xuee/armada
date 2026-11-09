@@ -49,7 +49,7 @@ function Section({
 }) {
   return (
     <section className="border-b border-line px-4 py-3.5 last:border-b-0">
-      <div className="mb-2.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel [&_svg]:h-3.5 [&_svg]:w-3.5">
+      <div className="mb-2.5 flex items-center gap-1.5 eyebrow text-steel [&_svg]:h-3.5 [&_svg]:w-3.5">
         {icon}
         {title}
         {right && <span className="ml-auto normal-case tracking-normal">{right}</span>}
@@ -98,11 +98,11 @@ export const Inspector = memo(function Inspector({
           {agent.contextSize ? (
             <ContextRing used={agent.contextUsed ?? 0} size={agent.contextSize} diameter={68} label="context" />
           ) : (
-            <div className="flex h-[68px] w-[68px] items-center justify-center rounded-full border border-dashed border-line-strong text-[11px] text-steel">
+            <div className="flex h-[68px] w-[68px] items-center justify-center rounded-full border border-dashed border-line-strong text-micro text-steel">
               n/a
             </div>
           )}
-          <dl className="grid flex-1 grid-cols-1 gap-2 text-[12px]">
+          <dl className="grid flex-1 grid-cols-1 gap-2 text-caption">
             <Stat label="Cost" value={agentCostText(agent)} />
             <Stat label="Tokens" value={formatTokens(agent.tokensUsed)} />
             {agent.contextSize ? (
@@ -120,7 +120,7 @@ export const Inspector = memo(function Inspector({
 
       {(subagents > 0 || agent.queue.length > 0) && (
         <Section title="Activity" icon={<Workflow />}>
-          <dl className="space-y-2 text-[12px]">
+          <dl className="space-y-2 text-caption">
             {subagents > 0 && (
               <Row label="Sub-agents">
                 <span className="flex items-center gap-1.5 text-accent">
@@ -146,7 +146,7 @@ export const Inspector = memo(function Inspector({
           title="Plan"
           icon={<ListChecks />}
           right={
-            <span className="text-[11px] text-steel tabular">
+            <span className="text-micro text-steel tabular">
               {done}/{plan.entries.length}
             </span>
           }
@@ -158,10 +158,10 @@ export const Inspector = memo(function Inspector({
       <Section
         title="Files touched"
         icon={<FilePen />}
-        right={files.length > 0 ? <span className="text-[11px] text-steel tabular">{files.length}</span> : undefined}
+        right={files.length > 0 ? <span className="text-micro text-steel tabular">{files.length}</span> : undefined}
       >
         {files.length === 0 ? (
-          <p className="text-[12px] text-steel">No files yet.</p>
+          <p className="text-caption text-steel">No files yet.</p>
         ) : (
           <ul className="-mx-1.5 space-y-px">
             {files.slice(0, 40).map((f) => (
@@ -172,11 +172,11 @@ export const Inspector = memo(function Inspector({
       </Section>
 
       <Section title="Session" icon={<Hash />}>
-        <dl className="space-y-2.5 text-[12px]">
+        <dl className="space-y-2.5 text-caption">
           <Row label="Session">
             {agent.sessionId ? (
               <span className="flex min-w-0 items-center gap-1">
-                <span className="selectable truncate font-mono text-[11px] text-fg/90">{agent.sessionId}</span>
+                <span className="selectable truncate font-mono text-micro text-fg/90">{agent.sessionId}</span>
                 <CopyButton text={agent.sessionId} label="" ariaLabel="Copy session id" className="h-5 px-1" />
               </span>
             ) : (
@@ -185,7 +185,7 @@ export const Inspector = memo(function Inspector({
           </Row>
           {agent.branch && (
             <Row label="Branch">
-              <span className="flex min-w-0 items-center gap-1 font-mono text-[11px]">
+              <span className="flex min-w-0 items-center gap-1 font-mono text-micro">
                 <GitBranch className="h-3 w-3 shrink-0 text-steel" />
                 <span className="truncate">{agent.branch}</span>
               </span>
@@ -193,7 +193,7 @@ export const Inspector = memo(function Inspector({
           )}
           {agent.baseCommit && (
             <Row label="Base">
-              <span className="font-mono text-[11px] text-muted">
+              <span className="font-mono text-micro text-muted">
                 {agent.baseBranch} @ {agent.baseCommit.slice(0, 7)}
               </span>
             </Row>
@@ -216,7 +216,7 @@ export const Inspector = memo(function Inspector({
           <div>
             <dt className="mb-1 text-steel">Working directory</dt>
             <dd>
-              <div className="selectable break-all rounded-lg border border-line bg-base/50 px-2 py-1.5 font-mono text-[11px] text-muted">
+              <div className="selectable break-all rounded-lg border border-line bg-base/50 px-2 py-1.5 font-mono text-micro text-muted">
                 {prettyPath(agent.cwd)}
               </div>
               <Button
@@ -255,7 +255,7 @@ const FileRow = memo(function FileRow({ file: f, cwd }: { file: AgentDerived["fi
       ) : (
         <FileSearch className="h-3.5 w-3.5 shrink-0 text-steel" />
       )}
-      <span className="min-w-0 truncate font-mono text-[11.5px]">
+      <span className="min-w-0 truncate font-mono text-meta">
         <span className={cn(f.edited ? "text-fg" : "text-muted")}>{name}</span>
         <span className="ml-1.5 text-steel">{dir}</span>
       </span>
@@ -268,7 +268,7 @@ const FileRow = memo(function FileRow({ file: f, cwd }: { file: AgentDerived["fi
           side="left"
           content={
             <span className="flex flex-col">
-              <span className="font-mono text-[11px]">{f.path}</span>
+              <span className="font-mono text-micro">{f.path}</span>
               <span className="text-steel">Click to show in folder</span>
             </span>
           }
@@ -288,7 +288,7 @@ function AccountSection({ account, agent }: { account: Account; agent: Agent }) 
   const plan = account.status?.label ?? (usage?.plan ? usage.plan.charAt(0).toUpperCase() + usage.plan.slice(1) : null);
   return (
     <Section title="Account" icon={<UserRound />}>
-      <div className="flex items-center gap-2 text-[12px]">
+      <div className="flex items-center gap-2 text-caption">
         <AccountAvatar account={account} size={18} showProvider={false} />
         <span className="min-w-0 truncate text-fg">{account.name}</span>
         {plan && <span className="ml-auto shrink-0 text-steel">{plan}</span>}
@@ -334,7 +334,7 @@ function CompactRow({ agent }: { agent: Agent }) {
       )}
     >
       {suggest && (
-        <p className="mb-1.5 text-[11.5px] leading-snug text-muted">
+        <p className="mb-1.5 text-meta leading-snug text-muted">
           Context is {Math.round(ratio * 100)}% full. Compacting summarizes the conversation so the agent keeps room to
           work.
         </p>

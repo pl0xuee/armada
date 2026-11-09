@@ -5,6 +5,8 @@ import { preflight, type PreflightIssue } from "@/lib/launchDefaults";
 import type { Account, Provider } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/store/app";
+import { useUi } from "@/store/ui";
+import { Button } from "../ui/button";
 
 /**
  * Asks the core whether `folder` is a git repo with commits, debounced while typing.
@@ -45,16 +47,39 @@ export function usePreflight(p: {
   return preflight({ ...p, providerInfo, isGitRepo });
 }
 
+/** Where each warning is fixed. The New agent dialog is closed first so the page shows. */
+const FIXES: Partial<Record<PreflightIssue["id"], { label: string; go: () => void }>> = {
+  signed_out: { label: "Accounts", go: () => useUi.getState().setView("accounts") },
+  not_installed: { label: "Providers", go: () => useUi.getState().openSettings("providers") },
+  no_adapter: { label: "Providers", go: () => useUi.getState().openSettings("providers") },
+};
+
 export function PreflightNotes({ issues, className }: { issues: PreflightIssue[]; className?: string }) {
   if (issues.length === 0) return null;
   return (
     <ul className={cn("space-y-1", className)} aria-label="Before you start">
-      {issues.map((i) => (
-        <li key={i.id} className="flex items-start gap-1.5 text-[12px] leading-snug text-warn">
-          <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
-          <span>{i.text}</span>
-        </li>
-      ))}
+      {issues.map((i) => {
+        const fix = FIXES[i.id];
+        return (
+          <li key={i.id} className="flex items-start gap-1.5 text-caption leading-snug text-warn">
+            <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span className="min-w-0 flex-1">{i.text}</span>
+            {fix && (
+              <Button
+                size="xs"
+                variant="secondary"
+                className="shrink-0"
+                onClick={() => {
+                  useUi.getState().closeNewAgent();
+                  fix.go();
+                }}
+              >
+                {fix.label}
+              </Button>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }

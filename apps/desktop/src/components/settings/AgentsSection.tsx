@@ -23,7 +23,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { monogram } from "@/lib/identity";
 import type { CustomAgent } from "@/lib/types";
-import { cn, errorMessage, uuid } from "@/lib/utils";
+import { cn, errorMessage, scrollBehavior, uuid } from "@/lib/utils";
 import { useShallow } from "zustand/react/shallow";
 import { useApp } from "@/store/app";
 import { cleanKeyValues, KeyValueEditor, validateKeyValues, type KeyValueRow } from "./KeyValueEditor";
@@ -183,7 +183,7 @@ export function AgentsSection({ agents }: { agents: CustomAgent[] }) {
               />
             ))}
           </ul>
-          <p className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12px] text-steel">
+          <p className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-caption text-steel">
             Enabled agents appear as providers in New agent, Compare and Schedules.
             <a
               href={ACP_AGENTS_URL}
@@ -235,7 +235,7 @@ function AddMenu({ onPick }: { onPick: (p: Preset) => void }) {
             <AgentMonogram name={p.name} color={p.color} size={20} />
             <span className="flex min-w-0 flex-col">
               <span className="truncate">{p.name || "Other ACP agent"}</span>
-              <span className="truncate text-[11px] text-steel">
+              <span className="truncate text-micro text-steel">
                 {p.command ? `${p.command} ${p.args.join(" ")}` : p.blurb}
               </span>
             </span>
@@ -262,8 +262,8 @@ function PresetGrid({ onPick }: { onPick: (p: Preset) => void }) {
         >
           <AgentMonogram name={p.name} color={p.color} size={30} />
           <span className="min-w-0">
-            <span className="block truncate text-[13px] font-medium">{p.name || "Other ACP agent"}</span>
-            <span className="block truncate font-mono text-[11px] text-steel">
+            <span className="block truncate text-body font-medium">{p.name || "Other ACP agent"}</span>
+            <span className="block truncate font-mono text-micro text-steel">
               {p.command ? `${p.command} ${p.args.join(" ")}` : p.blurb}
             </span>
           </span>
@@ -301,27 +301,27 @@ function AgentRow({
         aria-label={`Edit ${agent.name}`}
       >
         <span className="flex items-center gap-2">
-          <span className={cn("truncate text-[13px] font-medium", agent.enabled ? "text-fg" : "text-muted")}>
+          <span className={cn("truncate text-body font-medium", agent.enabled ? "text-fg" : "text-muted")}>
             {agent.name}
           </span>
           {count > 0 && (
-            <span className="shrink-0 text-[11.5px] text-steel">
+            <span className="shrink-0 text-meta text-steel">
               · {count} agent{count === 1 ? "" : "s"}
             </span>
           )}
         </span>
-        <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted">
+        <span className="mt-1 flex min-w-0 items-center gap-1.5 text-meta text-muted">
           <span className="shrink-0 font-mono text-fg/85">{agent.command}</span>
           {shownArgs.map((a, i) => (
             <span
               key={i}
-              className="min-w-0 max-w-[180px] truncate rounded border border-line bg-base/50 px-1 font-mono text-[11px] text-muted"
+              className="min-w-0 max-w-[180px] truncate rounded border border-line bg-base/50 px-1 font-mono text-micro text-muted"
             >
               {a}
             </span>
           ))}
           {agent.args.length > shownArgs.length && (
-            <span className="shrink-0 text-[11px] text-steel">+{agent.args.length - shownArgs.length}</span>
+            <span className="shrink-0 text-micro text-steel">+{agent.args.length - shownArgs.length}</span>
           )}
           {agent.env.length > 0 && (
             <span className="shrink-0 text-steel">
@@ -494,7 +494,7 @@ function AgentDialog({ draft, agents, onClose }: { draft: Draft | null; agents: 
                 />
                 {show("name") && errors.name && <FieldError>{errors.name}</FieldError>}
               </div>
-              <label className="flex shrink-0 cursor-default items-center gap-2 pt-[30px] text-[12.5px] text-muted">
+              <label className="flex shrink-0 cursor-default items-center gap-2 pt-[30px] text-small text-muted">
                 Enabled
                 <Switch checked={enabled} onCheckedChange={setEnabled} aria-label="Enabled" />
               </label>
@@ -519,16 +519,16 @@ function AgentDialog({ draft, agents, onClose }: { draft: Draft | null; agents: 
                   invalidate();
                 }}
                 onBlur={touch("command")}
-                className={cn("font-mono text-[12.5px]", show("command") && errors.command && errClass)}
+                className={cn("font-mono text-small", show("command") && errors.command && errClass)}
               />
               {show("command") && errors.command ? (
                 <FieldError>{errors.command}</FieldError>
               ) : commandHasSpaces ? (
-                <p className="mt-1.5 text-[12px] text-warn">
+                <p className="mt-1.5 text-caption text-warn">
                   Put each argument on its own line below so paths with spaces stay intact.
                 </p>
               ) : (
-                <p className="mt-1.5 text-[12px] text-steel">A program on your PATH, or an absolute path.</p>
+                <p className="mt-1.5 text-caption text-steel">A program on your PATH, or an absolute path.</p>
               )}
             </div>
 
@@ -542,10 +542,10 @@ function AgentDialog({ draft, agents, onClose }: { draft: Draft | null; agents: 
                   invalidate();
                 }}
                 placeholder={"--acp"}
-                className="min-h-[72px] font-mono text-[12px]"
+                className="min-h-[72px] font-mono text-caption"
                 spellCheck={false}
               />
-              <p className="mt-1.5 text-[12px] text-steel">One argument per line. Blank lines are ignored.</p>
+              <p className="mt-1.5 text-caption text-steel">One argument per line. Blank lines are ignored.</p>
             </div>
 
             <div>
@@ -572,7 +572,7 @@ function AgentDialog({ draft, agents, onClose }: { draft: Draft | null; agents: 
             <a
               href={ACP_AGENTS_URL}
               rel="noreferrer noopener"
-              className="mr-auto inline-flex items-center gap-1 text-[12px] text-muted transition-colors hover:text-fg"
+              className="mr-auto inline-flex items-center gap-1 text-caption text-muted transition-colors hover:text-fg"
             >
               Which agents support ACP? <ExternalLink className="h-3 w-3" />
             </a>
@@ -596,7 +596,7 @@ function TestPanel({ state, onRun }: { state: TestState; onRun: () => void }) {
   useEffect(() => {
     if (state.kind !== "ok" && state.kind !== "fail") return;
     const box = ref.current?.closest<HTMLElement>(".overflow-y-auto");
-    box?.scrollTo({ top: box.scrollHeight, behavior: "smooth" });
+    box?.scrollTo({ top: box.scrollHeight, behavior: scrollBehavior() });
   }, [state]);
   return (
     <div ref={ref} className="rounded-xl border border-line bg-base/40 p-3">
@@ -605,8 +605,8 @@ function TestPanel({ state, onRun }: { state: TestState; onRun: () => void }) {
           <Plug className="h-3.5 w-3.5" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium">Connection test</div>
-          <div className="text-[12px] text-muted">Starts the agent and runs the ACP handshake, then stops it.</div>
+          <div className="text-body font-medium">Connection test</div>
+          <div className="text-caption text-muted">Starts the agent and runs the ACP handshake, then stops it.</div>
         </div>
         <Button type="button" size="sm" variant="secondary" onClick={onRun} disabled={state.kind === "running"}>
           {state.kind === "running" ? <Spinner className="h-3.5 w-3.5" /> : <Plug className="!h-3.5 !w-3.5" />}
@@ -615,20 +615,20 @@ function TestPanel({ state, onRun }: { state: TestState; onRun: () => void }) {
       </div>
       <div aria-live="polite">
         {state.kind === "ok" && (
-          <p className="mt-2.5 flex items-center gap-2 text-[12.5px] text-ok">
+          <p className="mt-2.5 flex items-center gap-2 text-small text-ok">
             <CircleCheck className="h-4 w-4 shrink-0" />
             <span className="min-w-0 truncate">
-              Connected · <span className="font-mono text-[12px]">{state.message}</span>
+              Connected · <span className="font-mono text-caption">{state.message}</span>
             </span>
           </p>
         )}
         {state.kind === "fail" && (
           <div role="alert" className="mt-2.5 rounded-lg border border-err/30 bg-err/[0.07]">
-            <div className="flex items-center gap-2 px-3 pt-2 text-[12.5px] font-medium text-err">
+            <div className="flex items-center gap-2 px-3 pt-2 text-small font-medium text-err">
               <CircleX className="h-4 w-4 shrink-0" />
               Couldn't connect
             </div>
-            <pre className="selectable max-h-40 overflow-auto whitespace-pre-wrap break-words px-3 pb-2.5 pt-1.5 font-mono text-[11.5px] leading-relaxed text-err/90">
+            <pre className="selectable max-h-40 overflow-auto whitespace-pre-wrap break-words px-3 pb-2.5 pt-1.5 font-mono text-meta leading-relaxed text-err/90">
               {state.message}
             </pre>
           </div>

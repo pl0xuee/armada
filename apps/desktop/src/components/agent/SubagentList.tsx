@@ -52,25 +52,25 @@ export function SubagentList({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5">
-                  <span className="inline-flex h-4 shrink-0 items-center gap-1 rounded border border-violet/30 bg-violet/10 px-1 text-[11px] font-semibold uppercase tracking-[0.05em] text-violet">
+                  <span className="inline-flex h-4 shrink-0 items-center gap-1 rounded border border-violet/30 bg-violet/10 px-1 eyebrow text-violet">
                     <Bot className="h-2.5 w-2.5" />
                     {r.kind ?? "Sub-agent"}
                   </span>
-                  {running && r.background && <span className="text-[11px] text-steel">background</span>}
+                  {running && r.background && <span className="text-micro text-steel">background</span>}
                   {running && (
-                    <span className="ml-auto shrink-0 text-[11px] text-steel tabular">
+                    <span className="ml-auto shrink-0 text-micro text-steel tabular">
                       {formatElapsed(now - r.startedAt)}
                     </span>
                   )}
                 </span>
                 <span
-                  className={cn("mt-0.5 block truncate text-[12.5px]", running ? "text-fg" : "text-muted")}
+                  className={cn("mt-0.5 block truncate text-small", running ? "text-fg" : "text-muted")}
                   title={r.description}
                 >
                   {r.description}
                 </span>
                 {running && r.step && (
-                  <span className="block truncate text-[11.5px] text-steel" title={r.step}>
+                  <span className="block truncate text-meta text-steel" title={r.step}>
                     {r.step}
                   </span>
                 )}

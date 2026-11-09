@@ -640,6 +640,27 @@ impl Core {
         &self.inner.data_dir
     }
 
+    /// A picture stored for a timeline item, by the file name in its `path`.
+    pub fn read_picture(&self, name: &str) -> Result<Attachment> {
+        crate::pictures::read(&crate::pictures::dir(&self.inner.data_dir), name)
+    }
+
+    /// Puts the bytes back into stored pictures, for readers that need them inline
+    /// (the phone, a JSON export). The window loads pictures one by one instead.
+    pub fn hydrate_pictures(&self, items: &mut [TimelineItem]) {
+        let dir = crate::pictures::dir(&self.inner.data_dir);
+        for item in items {
+            crate::pictures::hydrate(&dir, item);
+        }
+    }
+
+    /// Checks a prompt's images, and reads back the ones that are only a stored file
+    /// (a message sent again).
+    fn prepare_attachments(&self, list: &mut [Attachment]) -> Result<()> {
+        crate::pictures::load_for_prompt(&crate::pictures::dir(&self.inner.data_dir), list)?;
+        validate_attachments(list)
+    }
+
     pub fn emit(&self, event: KvistcodeEvent) {
         self.inner.sink.emit(event)
     }
@@ -648,7 +669,7 @@ impl Core {
         &self.inner.db
     }
 
-    fn weak(&self) -> WeakCore {
+    pub(crate) fn weak(&self) -> WeakCore {
         WeakCore(Arc::downgrade(&self.inner))
     }
 
@@ -773,6 +794,12 @@ impl Core {
         self.inner.db.items(agent_id)
     }
 
+    /// The agent's approvals and questions still waiting for an answer.
+    pub fn pending_requests(&self, agent_id: &str) -> Result<Vec<TimelineItem>> {
+        self.flush_ctx(agent_id);
+        self.inner.db.pending_requests(agent_id)
+    }
+
     /// Progress of the Workflow run a tool call launched. The transcript folder is taken
     /// from the stored call (never from the caller) and validated by `workflow::resolve_dir`.
     pub fn workflow_progress(
@@ -888,7 +915,7 @@ impl Core {
                 if core.is_shutting_down() {
                     return;
                 }
-                match core.inner.db.index_step(250) {
+                match core.inner.db.index_step(50) {
                     Ok(0) => return,
                     Ok(_) => std::thread::sleep(std::time::Duration::from_millis(25)),
                     Err(e) => {
@@ -1760,13 +1787,13 @@ impl Core {
         } else {
             None
         };
-        validate_attachments(&req.attachments)?;
+        let mut req = req;
+        self.prepare_attachments(&mut req.attachments)?;
         let permission_mode = match req.permission_mode.as_deref().map(str::trim) {
             None | Some("") => None,
             Some(m @ ("auto" | "ask")) => Some(m.to_string()),
             Some(other) => bail!("Unknown permission mode \u{201c}{other}\u{201d}"),
         };
-        let mut req = req;
         req.project_path = providers::expand_home(&req.project_path)
             .to_string_lossy()
             .into_owned();
@@ -2044,7 +2071,7 @@ impl Core {
         &self,
         agent_id: &str,
         text: &str,
-        attachments: Vec<Attachment>,
+        mut attachments: Vec<Attachment>,
     ) -> Result<()> {
         let text = text.trim();
         if text.is_empty() && attachments.is_empty() {
@@ -2053,7 +2080,7 @@ impl Core {
         if self.is_shutting_down() {
             bail!(SHUTTING_DOWN);
         }
-        validate_attachments(&attachments)?;
+        self.prepare_attachments(&mut attachments)?;
         self.agent(agent_id)?;
         let ctx = self.ctx(agent_id);
         if ctx.is_turn_active() && !ctx.is_queue_paused() && !text.starts_with('/') {
@@ -2096,7 +2123,7 @@ impl Core {
         &self,
         agent_id: &str,
         text: &str,
-        attachments: Vec<Attachment>,
+        mut attachments: Vec<Attachment>,
         internal: bool,
     ) -> Result<()> {
         let text = text.trim();
@@ -2106,7 +2133,7 @@ impl Core {
         if self.is_shutting_down() {
             bail!(SHUTTING_DOWN);
         }
-        validate_attachments(&attachments)?;
+        self.prepare_attachments(&mut attachments)?;
         let agent = self.agent(agent_id)?;
         let ctx = self.ctx(agent_id);
         // A helper picks up what the main agent changed before it starts its turn.
@@ -2585,6 +2612,8 @@ impl Core {
         }
         // Only now that nothing was refused: the checkpoints went with the agent.
         crate::checkpoints::forget_agent(&agent).await;
+        let pictures =
+            crate::pictures::names_of(&self.inner.db.items(agent_id).unwrap_or_default());
         if let Err(e) = self.inner.db.delete_agent(agent_id) {
             // Its process is gone: settle it like a stop, so it isn't left "working".
             ctx.end_turn_early(ExitIntent::Stop);
@@ -2597,6 +2626,12 @@ impl Core {
             });
             return Err(e);
         }
+        // Pictures live in files shared by hash: drop the ones no other agent shows.
+        crate::pictures::unused_after_delete(
+            &crate::pictures::dir(&self.inner.data_dir),
+            &pictures,
+            |name| self.inner.db.picture_in_use(name),
+        );
         self.inner.agents.lock().remove(agent_id);
         self.helper_deleted(&agent).await;
         self.inner.ctxs.lock().remove(agent_id);
@@ -3200,11 +3235,14 @@ impl Core {
     /// Writes the conversation to `path`: JSON if it ends in `.json`, else Markdown.
     pub fn export_agent(&self, agent_id: &str, path: &str) -> Result<()> {
         let agent = self.agent(agent_id)?;
-        let items = self.items(agent_id)?;
+        let mut items = self.items(agent_id)?;
         let path = Path::new(path);
         let is_json = path
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("json"));
+        if is_json {
+            self.hydrate_pictures(&mut items);
+        }
         let content = export_content(&agent, &items, is_json)?;
         std::fs::write(path, content).with_context(|| format!("writing {}", path.display()))?;
         Ok(())
@@ -3649,7 +3687,7 @@ impl Core {
             .find(|c| c.id == id)
             .cloned()
             .ok_or_else(|| {
-                anyhow!("That custom agent no longer exists. Re-add it in Settings → Agents.")
+                anyhow!("That custom agent no longer exists. Re-add it in Settings → Providers.")
             })
     }
 
@@ -3703,7 +3741,11 @@ impl Core {
                 files
             }
         };
-        Ok(crate::files::fuzzy_filter(&files, query, 50))
+        // Scoring tens of thousands of paths is too much for an async worker.
+        let query = query.to_string();
+        tokio::task::spawn_blocking(move || crate::files::fuzzy_filter(&files, &query, 50))
+            .await
+            .map_err(|e| anyhow!("{e}"))
     }
 
     /// Loads an image an agent referenced (e.g. a screenshot it saved) so the UI can

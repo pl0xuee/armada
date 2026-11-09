@@ -6,7 +6,8 @@
 //!   items are searchable the moment they are stored.
 //! * Rows written before this existed (or by an older Kvistcode) have `idx_ver = 0`.
 //!   `Db::index_step` re-derives their text and indexes them in small batches from a
-//!   background thread, so startup never waits for it.
+//!   background thread, so startup never waits for it and other writes only wait
+//!   for a short batch of updates.
 
 use std::collections::HashMap;
 
@@ -159,6 +160,18 @@ impl Db {
         if rows.is_empty() {
             return Ok(0);
         }
+        // Parse and extract before taking the writer lock, so other writes wait only for
+        // the updates below.
+        let texts: Vec<(i64, String)> = rows
+            .iter()
+            .map(|(rowid, data)| {
+                // A row this build can't read has nothing to index, but is still done.
+                let text = serde_json::from_str::<TimelineItem>(data)
+                    .map(|i| item_text(&i))
+                    .unwrap_or_default();
+                (*rowid, text)
+            })
+            .collect();
         let conn = self.conn.lock();
         let tx = conn.unchecked_transaction()?;
         {
@@ -166,11 +179,7 @@ impl Db {
                 "UPDATE items SET search_text = ?1, idx_ver = {INDEX_VERSION}
                  WHERE rowid = ?2 AND idx_ver < {INDEX_VERSION}"
             ))?;
-            for (rowid, data) in &rows {
-                // A row this build can't read has nothing to index, but is still done.
-                let text = serde_json::from_str::<TimelineItem>(data)
-                    .map(|i| item_text(&i))
-                    .unwrap_or_default();
+            for (rowid, text) in &texts {
                 update.execute(params![text, rowid])?;
             }
         }
@@ -184,6 +193,19 @@ impl Db {
             .lock()
             .query_row(
                 &format!("SELECT EXISTS(SELECT 1 FROM items WHERE idx_ver < {INDEX_VERSION})"),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(false)
+    }
+
+    /// Whether rows from before search existed still wait for `index_step`. Unlike
+    /// `has_unindexed`, this ignores text still streaming in (`idx_ver = -1`).
+    fn has_legacy_unindexed(&self) -> bool {
+        self.reader
+            .lock()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM items WHERE idx_ver = 0)",
                 [],
                 |r| r.get(0),
             )
@@ -255,7 +277,7 @@ impl Db {
                 .into_iter()
                 .filter_map(|id| groups.remove(&id))
                 .collect(),
-            indexing: self.has_unindexed(),
+            indexing: self.has_legacy_unindexed(),
             truncated,
         })
     }

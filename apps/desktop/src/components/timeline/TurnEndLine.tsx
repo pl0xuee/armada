@@ -39,7 +39,7 @@ export function TurnEndLine({ end, lastActivityAt }: { end: TurnEnd; lastActivit
         )}
       </span>
       <span
-        className={cn("flex items-baseline gap-1.5 text-[12.5px] font-medium", tone.text, fresh && "animate-think-in")}
+        className={cn("flex items-baseline gap-1.5 text-small font-medium", tone.text, fresh && "animate-think-in")}
       >
         {end.label}
         {end.elapsedMs !== null && end.elapsedMs >= 1000 && (
@@ -61,7 +61,7 @@ export function EverythingFinishedLine({ detail }: { detail?: string }) {
       >
         <Check className="h-3.5 w-3.5" strokeWidth={3} />
       </span>
-      <span className="flex items-baseline gap-1.5 text-[12.5px] font-medium text-ok">
+      <span className="flex items-baseline gap-1.5 text-small font-medium text-ok">
         Everything finished
         {detail && <span className="text-2xs font-normal text-steel">· {detail}</span>}
       </span>

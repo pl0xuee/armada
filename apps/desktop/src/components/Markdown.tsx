@@ -44,7 +44,7 @@ const RunContext = createContext<string | null>(null);
 const StreamingContext = createContext(false);
 
 /** Height of a folded code block's visible part: the preview lines plus the block's vertical padding. */
-const CODE_LINE_PX = 12.5 * 1.65;
+const CODE_LINE_PX = 21;
 const CODE_PREVIEW_PX = Math.round(CODE_PREVIEW_LINES * CODE_LINE_PX + 24);
 
 function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
@@ -72,9 +72,9 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
     <div dir="ltr" className="group/code my-3 overflow-hidden rounded-xl border border-line bg-code">
       <div className="flex h-8 items-center justify-between border-b border-line/70 bg-panel/50 pl-3.5 pr-1.5">
         <span className="flex items-baseline gap-2">
-          <span className="font-mono text-[11px] lowercase tracking-wide text-steel">{lang ?? "text"}</span>
+          <span className="font-mono text-micro lowercase tracking-wide text-steel">{lang ?? "text"}</span>
           {lines.length > 12 && (
-            <span className="text-[11px] tabular-nums text-steel">{lines.length.toLocaleString()} lines</span>
+            <span className="text-micro tabular-nums text-steel">{lines.length.toLocaleString()} lines</span>
           )}
         </span>
         <div className="flex items-center gap-0.5">
@@ -91,7 +91,7 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
         </div>
       </div>
       {hidden && (
-        <div role="alert" className="border-b border-line bg-err/10 px-3.5 py-1.5 text-[12px] text-err">
+        <div role="alert" className="border-b border-line bg-err/10 px-3.5 py-1.5 text-caption text-err">
           This command contains hidden characters and can't be run from here.
         </div>
       )}
@@ -110,7 +110,7 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
           : {})}
         style={folded ? { maxHeight: CODE_PREVIEW_PX } : undefined}
         className={cn(
-          "selectable overflow-x-auto px-3.5 py-3 font-mono text-[12.5px] leading-[1.65] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/50",
+          "selectable overflow-x-auto px-3.5 py-3 font-mono text-small leading-[21px] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/50",
           folded && "overflow-y-hidden fold-fade-code",
         )}
         // Tabbing into a folded block opens it (the keyboard can't scroll a clipped one); clicking to select text doesn't.
@@ -141,7 +141,7 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={!folded}
-          className="flex h-8 w-full items-center justify-center gap-1.5 border-t border-line/70 text-[12px] text-steel transition-colors hover:bg-raised/40 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
+          className="flex h-8 w-full items-center justify-center gap-1.5 border-t border-line/70 text-caption text-steel transition-colors hover:bg-raised/40 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
         >
           <ChevronDown className={cn("h-3.5 w-3.5 transition-transform duration-150", !folded && "rotate-180")} />
           {folded ? `Show all ${lines.length.toLocaleString()} lines` : "Show less"}
@@ -166,7 +166,7 @@ function RemoteImageChip({ url, alt }: { url: string; alt: string }) {
       disabled={!external}
       title={external ? `Open ${url} in your browser` : "Image not shown"}
       onClick={() => external && void openExternal(url)}
-      className="mx-0.5 inline-flex max-w-full items-center gap-1.5 rounded-md border border-line-strong bg-raised px-1.5 py-0.5 align-middle text-[12px] text-muted transition-colors hover:text-fg disabled:opacity-60"
+      className="mx-0.5 inline-flex max-w-full items-center gap-1.5 rounded-md border border-line-strong bg-raised px-1.5 py-0.5 align-middle text-caption text-muted transition-colors hover:text-fg disabled:opacity-45"
     >
       <ImageOff className="h-3.5 w-3.5 shrink-0 text-steel" />
       <span className="truncate">
@@ -397,6 +397,9 @@ function useComponents(agentId: string | undefined): Components {
 
 /** How often the streaming tail is re-parsed. */
 const STREAM_PARSE_MS = 100;
+/** A long code block still being written is one block, so each re-parse costs more as it grows: slow down. */
+const BIG_FENCE_CHARS = 4000;
+const BIG_FENCE_PARSE_MS = 400;
 
 /** One parsed block; memoized on its text so finished blocks never re-parse. */
 const Block = memo(function Block({ text, comps }: { text: string; comps: Components }) {
@@ -423,7 +426,8 @@ export const Markdown = memo(function Markdown({
   runAgentId?: string;
 }) {
   // The growing tail is re-parsed on every change, so refresh it at ~10 Hz instead of per delta.
-  const src = useThrottledValue(text, STREAM_PARSE_MS, !!streaming);
+  const bigFence = useRef(false);
+  const src = useThrottledValue(text, bigFence.current ? BIG_FENCE_PARSE_MS : STREAM_PARSE_MS, !!streaming);
   const comps = useComponents(agentId);
   // Incremental while streaming: only the last block is re-scanned as text appends.
   const prev = useRef<{ text: string; ranges: BlockRange[] } | null>(null);
@@ -439,6 +443,11 @@ export const Markdown = memo(function Markdown({
       next = splitBlockRanges(src);
     }
     prev.current = { text: src, ranges: next };
+    const tail = next[next.length - 1];
+    bigFence.current =
+      !!tail &&
+      tail.end - tail.start > BIG_FENCE_CHARS &&
+      /^ {0,3}(```|~~~)/.test(src.slice(tail.start, tail.start + 8));
     return next;
   }, [src, streaming]);
   // The same block structure is rendered while streaming and after, so finishing a stream
@@ -446,7 +455,9 @@ export const Markdown = memo(function Markdown({
   return (
     <RunContext.Provider value={runAgentId && !streaming ? runAgentId : null}>
       <StreamingContext.Provider value={!!streaming}>
-        <div className={cn("prose-kvistcode selectable", streaming && "[&>*:last-child>*:last-child]:caret", className)}>
+        <div
+          className={cn("prose-kvistcode selectable", streaming && "[&>*:last-child>*:last-child]:caret", className)}
+        >
           {ranges.map((r, i) => (
             // Index keys are stable: blocks only ever append or grow at the end.
             // dir="auto": a block that starts in Arabic or Hebrew reads right to left (code stays left to right).

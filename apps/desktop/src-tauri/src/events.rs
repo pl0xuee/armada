@@ -45,8 +45,9 @@ fn coalesce(batch: Vec<KvistcodeEvent>) -> Vec<KvistcodeEvent> {
     use std::collections::HashMap;
 
     let mut out: Vec<Option<KvistcodeEvent>> = Vec::with_capacity(batch.len());
-    // (agent, item, field) → slot of the last delta for it.
-    let mut deltas: HashMap<(String, String, DeltaField), usize> = HashMap::new();
+    // (agent, item, field) → slot of the last delta for it, and where that delta ends
+    // (in UTF-16 units, as offsets are), so a merge doesn't recount the whole delta.
+    let mut deltas: HashMap<(String, String, DeltaField), (usize, usize)> = HashMap::new();
     let mut terminals: HashMap<String, usize> = HashMap::new();
     let mut agents: HashMap<String, usize> = HashMap::new();
     for event in batch {
@@ -59,20 +60,17 @@ fn coalesce(batch: Vec<KvistcodeEvent>) -> Vec<KvistcodeEvent> {
                 offset,
             } => {
                 let key = (agent_id, item_id, field);
-                if let Some(&slot) = deltas.get(&key) {
-                    if let Some(KvistcodeEvent::TextDelta {
-                        delta: d1,
-                        offset: o1,
-                        ..
-                    }) = &mut out[slot]
-                    {
-                        if *o1 + d1.encode_utf16().count() == offset {
+                let end = offset + delta.encode_utf16().count();
+                if let Some(&(slot, slot_end)) = deltas.get(&key) {
+                    if let Some(KvistcodeEvent::TextDelta { delta: d1, .. }) = &mut out[slot] {
+                        if slot_end == offset {
                             d1.push_str(&delta);
+                            deltas.insert(key, (slot, end));
                             continue;
                         }
                     }
                 }
-                deltas.insert(key.clone(), out.len());
+                deltas.insert(key.clone(), (out.len(), end));
                 out.push(Some(KvistcodeEvent::TextDelta {
                     agent_id: key.0,
                     item_id: key.1,

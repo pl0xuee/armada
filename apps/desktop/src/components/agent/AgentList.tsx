@@ -301,7 +301,9 @@ export function AgentList({
   // "/" focuses the search when nothing else is focused.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "/" && document.activeElement === document.body) {
+      // The conversation scroller is focusable (for PageUp/Space), so resting there counts as nothing focused.
+      const at = document.activeElement;
+      if (e.key === "/" && (at === document.body || (at instanceof HTMLElement && at.hasAttribute("data-timeline-scroll")))) {
         e.preventDefault();
         searchRef.current?.focus();
       }
@@ -358,7 +360,7 @@ export function AgentList({
                 }}
                 aria-expanded={!isCollapsed}
                 title={p.path}
-                className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md pl-1 pr-1 text-[12.5px] font-semibold tracking-tight text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md pl-1 pr-1 text-small font-semibold tracking-tight text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
               >
                 <ChevronRight
                   className={cn(
@@ -368,10 +370,10 @@ export function AgentList({
                 />
                 <FolderOpen className={cn("h-4 w-4 shrink-0", holdsOpen ? "text-accent" : "text-muted")} />
                 <span className="truncate">{p.name}</span>
-                <span className="shrink-0 text-[11.5px] font-medium tabular text-steel">{p.agents.length}</span>
+                <span className="shrink-0 text-meta font-medium tabular text-steel">{p.agents.length}</span>
                 {p.needs > 0 && (
                   <span
-                    className="flex shrink-0 items-center gap-1 rounded-full bg-warn/20 px-1.5 py-px text-[11px] font-semibold text-warn ring-1 ring-warn/40 tabular"
+                    className="flex shrink-0 items-center gap-1 rounded-full bg-warn/20 px-1.5 py-px text-micro font-semibold text-warn ring-1 ring-warn/40 tabular"
                     title={`${p.needs} need${p.needs === 1 ? "s" : ""} you`}
                   >
                     <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-warn" />
@@ -521,10 +523,10 @@ export function AgentList({
               </Button>
             </Tooltip>
           )}
-          <h2 className={cn("font-semibold tracking-tight", variant === "full" ? "text-[18px]" : "text-[13px]")}>
+          <h2 className={cn("font-semibold tracking-tight", variant === "full" ? "text-[18px]" : "text-body")}>
             Projects
           </h2>
-          <span className="rounded-md bg-raised px-1.5 text-[11px] font-medium text-steel tabular">{total}</span>
+          <span className="rounded-md bg-raised px-1.5 text-micro font-medium text-steel tabular">{total}</span>
           <Tooltip content="Refresh: find projects whose folder was renamed or moved">
             <Button
               size="icon-xs"
@@ -605,7 +607,7 @@ export function AgentList({
               placeholder="Filter projects"
               aria-label="Filter projects"
               spellCheck={false}
-              className="h-8 w-full rounded-lg border border-line bg-base/50 pl-8 pr-8 text-[12.5px] text-fg placeholder:text-steel transition-colors hover:border-line-strong focus:border-accent/50 focus:outline-none focus:ring-3 focus:ring-accent/10"
+              className="h-8 w-full rounded-lg border border-line bg-base/50 pl-8 pr-8 text-small text-fg placeholder:text-steel transition-colors hover:border-line-strong focus:border-accent/50 focus:outline-none focus:ring-3 focus:ring-accent/10"
             />
             {query ? (
               <button
@@ -622,7 +624,21 @@ export function AgentList({
           </div>
         </div>
 
-        <div ref={listRef} className="relative min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+        <div
+          ref={listRef}
+          // Arrow keys move between agent rows (each row's opener is one Tab stop; this saves crossing them all).
+          onKeyDown={(e) => {
+            if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+            if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+            if (!(e.target as HTMLElement).hasAttribute("data-agent-row")) return;
+            const rows = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("[data-agent-row]"));
+            const at = rows.indexOf(e.target as HTMLElement);
+            const to = e.key === "Home" ? 0 : e.key === "End" ? rows.length - 1 : at + (e.key === "ArrowDown" ? 1 : -1);
+            e.preventDefault();
+            rows[Math.max(0, Math.min(rows.length - 1, to))]?.focus();
+          }}
+          className="relative min-h-0 flex-1 overflow-y-auto px-2 pb-3"
+        >
           {showLine && (
             <div
               aria-hidden
@@ -692,7 +708,7 @@ export function AgentList({
                 type="button"
                 onClick={() => toggle(ARCHIVED_KEY)}
                 aria-expanded={!collapsed[ARCHIVED_KEY] || searching}
-                className="flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel transition-colors hover:text-muted"
+                className="flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 eyebrow text-steel transition-colors hover:text-muted"
               >
                 <ChevronRight
                   className={cn(
@@ -724,7 +740,7 @@ export function AgentList({
             </div>
           )}
           {searching && projects.length === 0 && archived.length === 0 && (
-            <div className="px-4 py-10 text-center text-[12.5px] text-steel">
+            <div className="px-4 py-10 text-center text-small text-steel">
               No projects or agents match “{query}”.
               <div className="mt-3">
                 <Button size="sm" variant="secondary" onClick={() => setQuery("")}>
@@ -735,8 +751,8 @@ export function AgentList({
           )}
           {!searching && agents.length === 0 && (
             <div className="px-4 py-10 text-center">
-              <p className="text-[13px] font-medium">No projects yet</p>
-              <p className="mt-1 text-[12px] text-steel">Launch an agent in a folder to get started.</p>
+              <p className="text-body font-medium">No projects yet</p>
+              <p className="mt-1 text-caption text-steel">Launch an agent in a folder to get started.</p>
               <Button size="sm" variant="primary" className="mt-4" onClick={() => openNewAgent()}>
                 <Plus className="!h-3.5 !w-3.5" /> New agent
               </Button>
@@ -749,7 +765,7 @@ export function AgentList({
           <div
             ref={chipRef}
             aria-hidden
-            className="pointer-events-none fixed left-0 top-0 z-[100] flex max-w-[240px] items-center gap-1.5 rounded-lg border border-line-strong bg-raised px-2.5 py-1.5 text-[12px] font-semibold text-fg shadow-xl"
+            className="pointer-events-none fixed left-0 top-0 z-[100] flex max-w-[240px] items-center gap-1.5 rounded-lg border border-line-strong bg-raised px-2.5 py-1.5 text-caption font-semibold text-fg shadow-xl"
             style={{ transform: `translate3d(${drag.x + 14}px, ${drag.y + 10}px, 0)` }}
           >
             {drag.item.kind === "project" ? (
@@ -778,7 +794,7 @@ function DropZone({
   return (
     <div
       className={cn(
-        "mb-3 flex h-9 items-center justify-center rounded-lg border border-dashed border-line px-2 text-center text-[11.5px] text-steel transition-colors",
+        "mb-3 flex h-9 items-center justify-center rounded-lg border border-dashed border-line px-2 text-center text-meta text-steel transition-colors",
         highlight && "border-accent/60 bg-accent/5 text-accent",
         className,
       )}
@@ -868,7 +884,7 @@ function SubagentBadge({ agentId }: { agentId: string }) {
   return (
     <Tooltip content={`${n} sub-agent${n === 1 ? "" : "s"} running`} side="right">
       <span
-        className="flex shrink-0 items-center gap-0.5 text-[11px] text-accent tabular"
+        className="flex shrink-0 items-center gap-0.5 text-micro text-accent tabular"
         aria-label={`${n} sub-agent${n === 1 ? "" : "s"} running`}
       >
         <Workflow className="h-3 w-3" />
@@ -885,7 +901,7 @@ function SyncHint({ sync }: { sync: NonNullable<Agent["helperSync"]> }) {
   const label = sync.state === "conflict" ? "Conflict" : sync.state === "merging" ? "Merging" : "Syncing";
   return (
     <Tooltip content={sync.detail ?? v.label} side="right">
-      <span className={cn("shrink-0 text-[11px]", v.tone === "warn" ? "text-warn" : "text-steel")}>{label}</span>
+      <span className={cn("shrink-0 text-micro", v.tone === "warn" ? "text-warn" : "text-steel")}>{label}</span>
     </Tooltip>
   );
 }
@@ -897,7 +913,7 @@ function PrIndicator({ agentId }: { agentId: string }) {
   return (
     <Tooltip content={`PR #${pr.number} · ${ciSummary(pr)}`} side="right">
       <span
-        className="flex shrink-0 items-center gap-0.5 text-[11px] tabular"
+        className="flex shrink-0 items-center gap-0.5 text-micro tabular"
         aria-label={`Pull request ${pr.number}, ${ciSummary(pr)}`}
       >
         #{pr.number}
@@ -998,6 +1014,7 @@ const AgentRow = memo(function AgentRow({
     : {
         role: "button",
         tabIndex: 0,
+        "data-agent-row": "",
         "aria-current": selected ? ("true" as const) : undefined,
         "aria-label": `${agent.title}, ${status.label}`,
       };
@@ -1069,12 +1086,12 @@ const AgentRow = memo(function AgentRow({
                           cancelRename();
                         }
                       }}
-                      className="h-5 min-w-0 flex-1 rounded border border-accent/50 bg-base px-1 text-[13px] focus:outline-none"
+                      className="h-5 min-w-0 flex-1 rounded border border-accent/50 bg-base px-1 text-body focus:outline-none"
                     />
                   ) : (
                     <span
                       className={cn(
-                        "min-w-0 flex-1 truncate text-[13px]",
+                        "min-w-0 flex-1 truncate text-body",
                         agent.unread ? "font-semibold text-fg" : "font-medium text-fg/90",
                       )}
                     >
@@ -1094,16 +1111,16 @@ const AgentRow = memo(function AgentRow({
                       aria-label="Unread"
                     />
                   )}
-                  <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-steel">
+                  <span className="flex shrink-0 items-center gap-1.5 text-micro text-steel">
                     {hotkey !== null && (
-                      <span aria-hidden className="hidden text-[11px] text-steel group-hover:inline">
+                      <span aria-hidden className="hidden text-micro text-steel group-hover:inline">
                         {modKey}
                         {hotkey}
                       </span>
                     )}
                     {voiceNumber !== null && (
                       <Tooltip content={`Say "agent ${voiceNumber}" to the voice assistant`} side="right">
-                        <span className="tabular rounded border border-line px-1 text-[10px] leading-[14px] text-steel/80">
+                        <span className="tabular rounded border border-line px-1 text-micro leading-[14px] text-steel/80">
                           {voiceNumber}
                         </span>
                       </Tooltip>
@@ -1119,7 +1136,7 @@ const AgentRow = memo(function AgentRow({
                     </Tooltip>
                   </span>
                 </div>
-                <div className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[11.5px] text-steel">
+                <div className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-meta text-steel">
                   <StatusDot status={view.dot} size={6} done={done} />
                   {/* May shrink (and end in …) when the label is long, e.g. "1 background agent may be running". */}
                   <span
@@ -1138,7 +1155,7 @@ const AgentRow = memo(function AgentRow({
                     <Tooltip content="Hit its rate limit" side="right">
                       <span className="flex min-w-0 items-center gap-1 text-warn" aria-label="Rate limit reached">
                         <Gauge className="h-3 w-3 shrink-0" />
-                        <span className="truncate text-[10.5px]">
+                        <span className="truncate text-micro">
                           <ResumesAt agent={agent} />
                         </span>
                       </span>
@@ -1169,7 +1186,7 @@ const AgentRow = memo(function AgentRow({
                   !nested &&
                   density === "comfortable" &&
                   (selected || agent.status === "needs_permission") && (
-                    <p className="mt-1 line-clamp-1 text-[12px] leading-snug text-muted">{agent.lastMessage}</p>
+                    <p className="mt-1 line-clamp-1 text-caption leading-snug text-muted">{agent.lastMessage}</p>
                   )}
               </div>
             </div>
@@ -1183,7 +1200,7 @@ const AgentRow = memo(function AgentRow({
                     void resumeAgent(agent);
                   }}
                   className={cn(
-                    "inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[11.5px] font-medium transition-colors",
+                    "inline-flex h-6 items-center gap-1 rounded-md border px-2 text-meta font-medium transition-colors",
                     agent.status === "interrupted"
                       ? "border-violet/40 bg-violet/10 text-violet hover:bg-violet/20"
                       : "border-line-strong bg-raised text-muted hover:text-fg",

@@ -247,7 +247,7 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
               <span className="h-2.5 w-2.5 rounded-full bg-raised" />
               <span className="h-2.5 w-2.5 rounded-full bg-raised" />
             </span>
-            <span className="ml-1 font-mono text-[11px] text-steel">
+            <span className="ml-1 font-mono text-micro text-steel">
               {session.kind === "login" ? "login" : "install"} · pty
             </span>
             <span className="ml-auto">
@@ -261,16 +261,16 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
           />
         </div>
         {session.command && (
-          <div className="mt-2 flex min-w-0 items-center gap-2 text-[11.5px] text-steel">
+          <div className="mt-2 flex min-w-0 items-center gap-2 text-meta text-steel">
             <span className="shrink-0">Command</span>
-            <code className="selectable min-w-0 flex-1 truncate rounded-md border border-line bg-code px-2 py-1 font-mono text-[11px] text-muted">
+            <code className="selectable min-w-0 flex-1 truncate rounded-md border border-line bg-code px-2 py-1 font-mono text-micro text-muted">
               {session.command}
             </code>
             <CopyButton text={session.command} ariaLabel="Copy the command" />
           </div>
         )}
         {session.kind === "login" && !exited && (
-          <p className="mt-2.5 text-[12px] text-muted">
+          <p className="mt-2.5 text-caption text-muted">
             Finish signing in in your browser. If the CLI asks for a code, paste it here and press Enter.
           </p>
         )}
@@ -312,7 +312,7 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
 function StatusChip({ state }: { state: RunState }) {
   if (state.kind === "running") {
     return (
-      <span className="inline-flex h-5 items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-2 text-[11px] font-medium text-accent">
+      <span className="inline-flex h-5 items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-2 text-micro font-medium text-accent">
         <Spinner className="h-3 w-3" /> Running
       </span>
     );
@@ -322,8 +322,8 @@ function StatusChip({ state }: { state: RunState }) {
     <span
       className={
         ok
-          ? "inline-flex h-5 items-center gap-1 rounded-full border border-ok/30 bg-ok/10 px-2 text-[11px] font-medium text-ok"
-          : "inline-flex h-5 items-center gap-1 rounded-full border border-err/30 bg-err/10 px-2 text-[11px] font-medium text-err"
+          ? "inline-flex h-5 items-center gap-1 rounded-full border border-ok/30 bg-ok/10 px-2 text-micro font-medium text-ok"
+          : "inline-flex h-5 items-center gap-1 rounded-full border border-err/30 bg-err/10 px-2 text-micro font-medium text-err"
       }
     >
       {ok ? <CircleCheck className="h-3 w-3" /> : <CircleX className="h-3 w-3" />}
@@ -363,7 +363,7 @@ async function afterExit(session: TerminalSession, code: number | null) {
           toast.error(`${session.title} didn't finish`, {
             description: "Kvistcode kept the version that was working. See the terminal for details.",
           });
-        else toast.error("Install didn't finish", { description: `Exit code ${code ?? "unknown"}` });
+        else toast.error("Install didn't finish", { description: "See the terminal for details, then try again." });
       } else {
         // "Install everything": report how many runtimes are now ready.
         const ready = providers.filter((p) => p.installed && (!p.adapterRequired || p.adapterInstalled)).length;
@@ -371,7 +371,7 @@ async function afterExit(session: TerminalSession, code: number | null) {
           toast.success("Agents installed", { description: `${ready} of ${providers.length} providers ready` });
         else
           toast.error("Some installs failed", {
-            description: `${ready} of ${providers.length} providers ready · exit code ${code ?? "unknown"}`,
+            description: `${ready} of ${providers.length} providers ready. See the terminal for details, then try again.`,
           });
       }
     }

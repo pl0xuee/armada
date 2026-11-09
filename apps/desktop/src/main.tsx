@@ -10,10 +10,13 @@ createRoot(document.getElementById("root")!).render(
     {/* Last resort: without it, one rendering mistake anywhere leaves a blank window. Agents keep running. */}
     <ErrorBoundary
       fallback={(error) => (
-        <div role="alert" className="flex h-screen flex-col items-center justify-center gap-2 bg-base p-8 text-center text-fg">
+        <div
+          role="alert"
+          className="flex h-screen flex-col items-center justify-center gap-2 bg-base p-8 text-center text-fg"
+        >
           <p className="text-[15px] font-semibold">Kvistcode hit a problem drawing this window</p>
-          <p className="max-w-lg break-words font-mono text-[12px] text-muted">{error}</p>
-          <p className="text-[12.5px] text-steel">Your agents keep running. Reloading brings the window back.</p>
+          <p className="max-w-lg break-words font-mono text-caption text-muted">{error}</p>
+          <p className="text-small text-steel">Your agents keep running. Reloading brings the window back.</p>
           <Button variant="secondary" className="mt-2" onClick={() => window.location.reload()}>
             Reload
           </Button>

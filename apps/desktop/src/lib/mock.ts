@@ -61,6 +61,7 @@ import type {
   AppState,
   KvistcodeEvent,
   Attachment,
+  NewProject,
   LanAddress,
   TailscaleStatus,
   LocalKind,
@@ -230,7 +231,10 @@ function mockLimitWatch() {
         agentId: first.id,
         reason: "done",
         title: due.length === 1 ? first.title : "Usage limit reset",
-        body: due.length === 1 ? `Resumed ${first.title} after your usage limit reset` : `Resumed ${due.length} agents after your usage limit reset`,
+        body:
+          due.length === 1
+            ? `Resumed ${first.title} after your usage limit reset`
+            : `Resumed ${due.length} agents after your usage limit reset`,
         requestId: null,
       }),
     (due.length - 1) * 3_000 + 400,
@@ -241,7 +245,7 @@ const mockOpenedAt = Date.now();
 if (limitMode === "resume" || limitMode === "unknown") setInterval(mockLimitWatch, 1000);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const rand =(a: number, b: number) => a + Math.random() * (b - a);
+const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const clone = <T>(v: T): T => structuredClone(v);
 
 function getAgent(id: string): Agent {
@@ -1280,7 +1284,13 @@ function mockHardware(): Hardware {
     ...base,
     os: "linux",
     ramBytes: 64 * GIB,
-    gpus: [{ name: hw === "16gb" ? "NVIDIA GeForce RTX 4060 Ti" : "NVIDIA GeForce RTX 4090", vendor: "nvidia", vramBytes: vram }],
+    gpus: [
+      {
+        name: hw === "16gb" ? "NVIDIA GeForce RTX 4060 Ti" : "NVIDIA GeForce RTX 4090",
+        vendor: "nvidia",
+        vramBytes: vram,
+      },
+    ],
     unifiedMemory: false,
     accel: "gpu",
     modelMemoryBytes: vram,
@@ -1408,6 +1418,9 @@ const MOCK_ISSUES: IssueSummary[] = [
     updatedAt: new Date(Date.now() - 12 * 86400_000).toISOString(),
   },
 ];
+
+/** Folders made by createProject with git on: they count as repos. */
+const mockNewRepos = new Set<string>();
 
 /** Browser preview: GitHub starts signed out so the whole flow can be tried. */
 let mockGithub: GithubStatus = { ghInstalled: true, loggedIn: false, user: null, gitReady: false };
@@ -2189,6 +2202,17 @@ export const mockApi: KvistcodeApi = {
     });
   },
 
+  async applyPatch(agentId, patch) {
+    assertIdle(getAgent(agentId), "restoring");
+    await gitLock(agentId, 300);
+    const list = revertedPatches.get(agentId) ?? [];
+    if (!list.includes(patch)) throw new Error("The change couldn't be put back (the file has changed since).");
+    revertedPatches.set(
+      agentId,
+      list.filter((p) => p !== patch),
+    );
+  },
+
   async shipAgent(agentId, message): Promise<ShipResult> {
     const a = getAgent(agentId);
     if (!a.worktree) throw new Error("Only worktree agents can be merged. Commit from your own branch instead.");
@@ -2333,7 +2357,8 @@ export const mockApi: KvistcodeApi = {
 
   async githubIssues(_path, search) {
     await sleep(350);
-    if (!mockGithub.loggedIn) throw new Error("Sign in to GitHub first (the GitHub button in an agent's Review panel).");
+    if (!mockGithub.loggedIn)
+      throw new Error("Sign in to GitHub first (the GitHub button in an agent's Review panel).");
     const q = search?.trim().toLowerCase();
     const issues = q ? MOCK_ISSUES.filter((i) => i.title.toLowerCase().includes(q)) : MOCK_ISSUES;
     return { issues, truncated: false };
@@ -2409,7 +2434,9 @@ export const mockApi: KvistcodeApi = {
     if (agentId === "a-e2e") return delay(mk(77, "open", [c("e2e", "pending", null), c("lint", "passing", 38)], null));
     if (agentId === "a-ratelimit") return delay(mk(64, "draft", [c("test", "passing", 120)], null));
     if (agentId === "a-billing")
-      return delay(mk(91, "open", [c("lint", "passing", 38), c("test", "passing", 154), c("build", "passing", 97)], "approved"));
+      return delay(
+        mk(91, "open", [c("lint", "passing", 38), c("test", "passing", 154), c("build", "passing", 97)], "approved"),
+      );
     return delay<PrStatus>({ ...base, state: "none", pr: null });
   },
 
@@ -2788,7 +2815,9 @@ export const mockApi: KvistcodeApi = {
     const midnight = new Date().setHours(0, 0, 0, 0);
     const todayUsd = db.agents.filter((a) => a.lastActivityAt >= midnight).reduce((sum, a) => sum + a.costUsd, 0);
     const todayTokens = db.agents.filter((a) => a.lastActivityAt >= midnight).reduce((sum, a) => sum + a.tokensUsed, 0);
-    const todayTurns = db.agents.filter((a) => a.lastActivityAt >= midnight).reduce((sum, a) => sum + (a.turns ?? 0), 0);
+    const todayTurns = db.agents
+      .filter((a) => a.lastActivityAt >= midnight)
+      .reduce((sum, a) => sum + (a.turns ?? 0), 0);
     const cap = db.settings.dailyBudgetUsd;
     const tokenCap = db.settings.dailyBudgetTokens;
     const turnCap = db.settings.dailyBudgetTurns;
@@ -2826,12 +2855,22 @@ export const mockApi: KvistcodeApi = {
         db.settings.projectBudgets[agent.projectPath] = { ...cur, [field]: cap };
       } else {
         const key =
-          hold.metric === "cost" ? "dailyBudgetUsd" : hold.metric === "turns" ? "dailyBudgetTurns" : "dailyBudgetTokens";
+          hold.metric === "cost"
+            ? "dailyBudgetUsd"
+            : hold.metric === "turns"
+              ? "dailyBudgetTurns"
+              : "dailyBudgetTokens";
         db.settings[key] = cap;
       }
     }
     if (choice.action === "stop") {
-      patchAgent(agentId, { budgetHold: null, queue: [], queuedPrompts: 0, queuePaused: false, acknowledgedAt: Date.now() });
+      patchAgent(agentId, {
+        budgetHold: null,
+        queue: [],
+        queuedPrompts: 0,
+        queuePaused: false,
+        acknowledgedAt: Date.now(),
+      });
     } else {
       patchAgent(agentId, { budgetHold: null, queuePaused: false });
     }
@@ -2867,7 +2906,12 @@ export const mockApi: KvistcodeApi = {
 
   async outputFilterStats() {
     // Pretend a filtered session ran once the filter is on.
-    return delay(db.settings.tokenSaver.outputFilter ? { calls: 42, before: 380_000, after: 196_000 } : { calls: 0, before: 0, after: 0 }, 80);
+    return delay(
+      db.settings.tokenSaver.outputFilter
+        ? { calls: 42, before: 380_000, after: 196_000 }
+        : { calls: 0, before: 0, after: 0 },
+      80,
+    );
   },
 
   async updateSettings(settings: Settings) {
@@ -2940,6 +2984,23 @@ export const mockApi: KvistcodeApi = {
     return mockScreenshot(name, path);
   },
 
+  async defaultProjectsFolder() {
+    return "/home/sam/Projects";
+  },
+
+  async createProject(parent, name, git) {
+    await sleep(rand(150, 350));
+    const clean = name.trim();
+    if (!clean || /[\\/:*?"<>|]/.test(clean)) throw new Error("Give the project a name without slashes or special characters.");
+    const path = `${parent.replace(/[\\/]+$/, "")}/${clean}`;
+    if (git) mockNewRepos.add(path);
+    return { path, git } satisfies NewProject;
+  },
+
+  async readPicture(path) {
+    throw new Error(`No stored picture ${path}`);
+  },
+
   async testMcpServer(server) {
     await sleep(rand(700, 1300));
     if (server.transport === "http") {
@@ -2962,7 +3023,7 @@ export const mockApi: KvistcodeApi = {
       .trim()
       .replace(/^~(?=\/|$)/, "/home/sam")
       .replace(/\/+$/, "");
-    return MOCK_PROJECTS.some((r) => p === r || p.startsWith(`${r}/`));
+    return mockNewRepos.has(p) || MOCK_PROJECTS.some((r) => p === r || p.startsWith(`${r}/`));
   },
 
   async discoverProjects() {
@@ -3566,7 +3627,8 @@ async function gitLock(agentId: string, ms: number) {
 }
 
 const UNSAVED_WORK: Record<string, string> = {
-  "a-e2e": "1 uncommitted change in the worktree and 2 commits on kvistcode/e2e-checkout that no other branch contains.",
+  "a-e2e":
+    "1 uncommitted change in the worktree and 2 commits on kvistcode/e2e-checkout that no other branch contains.",
   "a-billing": "3 uncommitted changes in the worktree.",
 };
 
@@ -3698,10 +3760,12 @@ function validateSettings(s: Settings): string | null {
     if (p) return `Alerts: ${p}`;
   }
   for (const cap of [s.dailyBudgetTokens, s.agentBudgetTokens]) {
-    if (cap != null && (!Number.isFinite(cap) || cap <= 0)) return "Token budgets must be more than 0 (or empty for no cap)";
+    if (cap != null && (!Number.isFinite(cap) || cap <= 0))
+      return "Token budgets must be more than 0 (or empty for no cap)";
   }
   for (const cap of [s.dailyBudgetTurns, s.agentBudgetTurns]) {
-    if (cap != null && (!Number.isFinite(cap) || cap <= 0)) return "Turn budgets must be more than 0 (or empty for no cap)";
+    if (cap != null && (!Number.isFinite(cap) || cap <= 0))
+      return "Turn budgets must be more than 0 (or empty for no cap)";
   }
   return null;
 }

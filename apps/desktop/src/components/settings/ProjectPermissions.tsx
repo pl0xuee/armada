@@ -90,12 +90,12 @@ function RuleList({
     <section className="overflow-hidden rounded-xl border border-line bg-card edge" aria-label={`${spec.title} rules`}>
       <header className="flex items-center gap-2 border-b border-line px-4 py-2.5">
         <Icon className={cn("h-4 w-4", spec.tone)} />
-        <h3 className="text-[13px] font-semibold text-fg">{spec.title}</h3>
-        <span className="text-[12px] text-muted">{spec.blurb}</span>
-        <span className="ml-auto text-[11.5px] tabular text-steel">{list.length}</span>
+        <h3 className="text-body font-semibold text-fg">{spec.title}</h3>
+        <span className="text-caption text-muted">{spec.blurb}</span>
+        <span className="ml-auto text-meta tabular text-steel">{list.length}</span>
       </header>
       {list.length === 0 ? (
-        <p className="px-4 py-3 text-[12.5px] text-steel">
+        <p className="px-4 py-3 text-small text-steel">
           No {kind} rules. Example: <code className="font-mono text-muted">{spec.example}</code>
         </p>
       ) : (
@@ -104,7 +104,7 @@ function RuleList({
             const also = otherKindsHolding(rules, kind, rule);
             return (
               <li key={rule} className="group flex items-center gap-2 px-4 py-1.5 hover:bg-raised/40">
-                <code className="min-w-0 flex-1 break-all font-mono text-[12.5px] text-fg">{rule}</code>
+                <code className="min-w-0 flex-1 break-all font-mono text-small text-fg">{rule}</code>
                 {also.length > 0 && <Badge tone="warn">also in {also.join(", ")}</Badge>}
                 <Button
                   size="icon-xs"
@@ -138,7 +138,7 @@ function RuleList({
             setDraft(e.target.value);
             if (error) setError(null);
           }}
-          className="h-8 font-mono text-[12.5px]"
+          className="h-8 font-mono text-small"
         />
         <Button type="submit" size="sm" variant="secondary" disabled={disabled || busy || !draft.trim()}>
           {busy ? <Spinner /> : <Plus />} Add
@@ -202,7 +202,7 @@ export function ProjectPermissions({
           </Button>
         )}
       </div>
-      <p className="-mt-1 text-[12px] leading-relaxed text-muted">
+      <p className="-mt-1 text-caption leading-relaxed text-muted">
         {scope === "shared"
           ? "Shared rules live in .claude/settings.json, which projects normally commit so the whole team gets them."
           : "Local rules live in .claude/settings.local.json, which Claude Code keeps out of git. They're yours alone."}{" "}
@@ -211,11 +211,11 @@ export function ProjectPermissions({
 
       {locked && (
         <div className="rounded-xl border border-err/30 bg-err/8 px-4 py-3">
-          <div className="flex items-center gap-2 text-[13px] font-medium text-err">
+          <div className="flex items-center gap-2 text-body font-medium text-err">
             <FileLock2 className="h-4 w-4" /> Kvistcode won't edit this file
           </div>
-          <p className="mt-1 break-words text-[12.5px] text-muted">{file.error}</p>
-          <p className="mt-1 text-[11.5px] text-steel">{prettyPath(file.path)}</p>
+          <p className="mt-1 break-words text-small text-muted">{file.error}</p>
+          <p className="mt-1 text-meta text-steel">{prettyPath(file.path)}</p>
         </div>
       )}
 

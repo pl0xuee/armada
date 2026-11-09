@@ -78,6 +78,7 @@ export function prunePreviews(keep: (id: string) => boolean): boolean {
   for (const id of gone) {
     delete rest[id];
     lastProbe.delete(id);
+    scanned.delete(id);
   }
   usePreview.setState({ byAgent: rest });
   save();
@@ -149,14 +150,22 @@ export function autoSelect(cur: Pick<PreviewState, "url" | "auto">, live: string
 
 const SCAN_TAIL = 200_000;
 
+/** The last scan per agent, reused while its terminals and timeline are unchanged (the tick is 2.5 s). */
+const scanned = new Map<string, { items: unknown; terms: string; ranked: DetectedUrl[] }>();
+
 function candidates(agentId: string): DetectedUrl[] {
+  const terms = useWorkspace.getState().byAgent[agentId]?.terms ?? [];
+  const items = useApp.getState().items[agentId] ?? [];
+  // Timeline items are replaced, never edited, so the array itself says whether anything changed.
+  const fp = terms.map((t) => `${t.id}:${terminalTranscript(t.id).length}`).join(" ");
+  const hit = scanned.get(agentId);
+  if (hit && hit.items === items && hit.terms === fp) return hit.ranked;
   // Terminals first (no timestamps), then the conversation, which is chronological: whatever the
   // agent said last ranks highest.
   const texts: string[] = [];
-  for (const t of useWorkspace.getState().byAgent[agentId]?.terms ?? []) {
+  for (const t of terms) {
     texts.push(terminalTranscript(t.id).slice(-SCAN_TAIL));
   }
-  const items = useApp.getState().items[agentId] ?? [];
   for (const it of items.slice(-60)) {
     if (it.kind === "tool_call") {
       if (it.command) texts.push(it.command);
@@ -165,7 +174,9 @@ function candidates(agentId: string): DetectedUrl[] {
       texts.push(it.text.slice(-20_000));
     }
   }
-  return rankDevUrls(texts.join("\n"));
+  const ranked = rankDevUrls(texts.join("\n"));
+  scanned.set(agentId, { items, terms: fp, ranked });
+  return ranked;
 }
 
 const scanning = new Set<string>();

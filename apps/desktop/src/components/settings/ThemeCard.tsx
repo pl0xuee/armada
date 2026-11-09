@@ -52,8 +52,8 @@ export function ThemeCard({ id, active, onSelect }: { id: ThemeId; active: boole
       </div>
       <div className="flex items-center justify-between px-1 pb-0.5 pt-2.5">
         <div>
-          <div className="text-[13px] font-medium text-fg">{meta.name}</div>
-          <div className="text-[11.5px] text-muted">{meta.description}</div>
+          <div className="text-body font-medium text-fg">{meta.name}</div>
+          <div className="text-meta text-muted">{meta.description}</div>
         </div>
         <span
           className={cn(

@@ -29,7 +29,7 @@ export function InstallAllBanner({ providers, className }: { providers: Provider
         <p className="text-[13.5px] font-medium text-fg">
           {list} {missing.length === 1 ? "isn't" : "aren't"} ready yet
         </p>
-        <p className="mt-0.5 flex items-start gap-1.5 text-[12px] leading-relaxed text-muted">
+        <p className="mt-0.5 flex items-start gap-1.5 text-caption leading-relaxed text-muted">
           <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ok" />
           Kvistcode installs what's missing. No admin rights needed; if Node.js isn't installed it downloads a private
           copy.

@@ -608,7 +608,7 @@ function ComposerImpl({
             {escArmed && (
               <div
                 role="status"
-                className="flex items-center gap-2 rounded-t-2xl border-b border-warn/25 bg-warn/[0.08] px-4 py-1.5 text-[12px] font-medium text-warn"
+                className="flex items-center gap-2 rounded-t-2xl border-b border-warn/25 bg-warn/[0.08] px-4 py-1.5 text-caption font-medium text-warn"
               >
                 <Kbd>Esc</Kbd>
                 {blocked
@@ -666,7 +666,7 @@ function ComposerImpl({
                   // Tabbing into another tile's composer makes that tile the focused one (a click already does).
                   if (compact && !focused) useUi.getState().openAgent(agent.id);
                 }}
-                className="relative block max-h-[40vh] min-h-[52px] w-full resize-none field-sizing-content bg-transparent px-4 pb-1 pt-3.5 text-[13.5px] leading-relaxed text-fg placeholder:text-steel focus:outline-none"
+                className="relative block max-h-[40vh] min-h-[52px] w-full resize-none field-sizing-content bg-transparent px-4 pb-1 pt-3.5 text-[13.5px] leading-relaxed text-fg placeholder:text-steel focus:outline-hidden"
               />
             </div>
             <div ref={toolbarRef} className="flex items-center gap-2 px-2.5 pb-2.5 pt-1">
@@ -698,7 +698,7 @@ function ComposerImpl({
               {/* Never narrower than the dot: a squeeze shows up as overflow and folds the toolbar instead of halving it. */}
               <div
                 className={cn(
-                  "flex items-center gap-1.5 overflow-hidden text-[11.5px] text-steel",
+                  "flex items-center gap-1.5 overflow-hidden text-meta text-steel",
                   busy ? "min-w-2" : "min-w-0",
                   fold.bare && "hidden",
                 )}
@@ -794,23 +794,23 @@ function ComposerImpl({
                         {primary !== "deliver" && agentTakesMidTurn && (
                           <DropdownMenuItem disabled={!canSend} onSelect={() => void send("deliverMenu")}>
                             <ArrowUp /> Send into the running turn
-                            <span className="ml-auto pl-4 text-[11px] text-steel">read at its next step</span>
+                            <span className="ml-auto pl-4 text-micro text-steel">read at its next step</span>
                           </DropdownMenuItem>
                         )}
                         {primary !== "queue" && (
                           <DropdownMenuItem disabled={!canSend} onSelect={() => void send("queueMenu")}>
                             <ListPlus /> Queue until the turn ends
-                            <span className="ml-auto pl-4 text-[11px] text-steel">nothing interrupted</span>
+                            <span className="ml-auto pl-4 text-micro text-steel">nothing interrupted</span>
                           </DropdownMenuItem>
                         )}
                         {primary !== "helper" && helperAllowed && (
                           <DropdownMenuItem disabled={!canSend} onSelect={() => void send("helperMenu")}>
                             <GitFork /> Start a helper now
-                            <span className="ml-auto pl-4 text-[11px] text-steel">{modKey}⏎</span>
+                            <span className="ml-auto pl-4 text-micro text-steel">{modKey}⏎</span>
                           </DropdownMenuItem>
                         )}
                         {!canSend && (
-                          <div className="px-2.5 pb-1.5 pt-0.5 text-[11.5px] text-steel">Type a message first.</div>
+                          <div className="px-2.5 pb-1.5 pt-0.5 text-meta text-steel">Type a message first.</div>
                         )}
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -871,7 +871,7 @@ function SuggestMenu({
       className="anim-pop absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-xl border border-line-strong bg-raised/95 shadow-[0_16px_48px_-8px_rgba(0,0,0,0.55)] backdrop-blur-xl edge"
       data-state="open"
     >
-      <div className="flex items-center justify-between border-b border-line px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-steel">
+      <div className="flex items-center justify-between border-b border-line px-3 py-1.5 eyebrow text-steel">
         <span>{title}</span>
         <span className="flex items-center gap-1 font-normal normal-case tracking-normal">
           <Kbd>↑</Kbd>
@@ -897,10 +897,10 @@ function SuggestMenu({
               i === active && "bg-gunmetal/80",
             )}
           >
-            <span className={cn("shrink-0 text-[12.5px] text-fg", mono ? "font-mono" : "")}>{it.label}</span>
+            <span className={cn("shrink-0 text-small text-fg", mono ? "font-mono" : "")}>{it.label}</span>
             {it.detail && (
               <span
-                className={cn("min-w-0 truncate text-[12px] text-muted", !mono && "font-mono text-[11px] text-steel")}
+                className={cn("min-w-0 truncate text-caption text-muted", !mono && "font-mono text-micro text-steel")}
               >
                 {it.detail}
               </span>
@@ -931,8 +931,8 @@ function ResumeBanner({ agent }: { agent: Agent }) {
         <RotateCcw className="h-3.5 w-3.5" />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium">{interrupted ? "Interrupted mid-turn" : "Agent shut down"}</div>
-        <div className="truncate text-[12px] text-muted">
+        <div className="text-body font-medium">{interrupted ? "Interrupted mid-turn" : "Agent shut down"}</div>
+        <div className="truncate text-caption text-muted">
           {interrupted
             ? "The session is saved. Resume continues the turn from exactly where it stopped."
             : "The session is saved. Resume to reattach and keep chatting."}

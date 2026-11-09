@@ -84,7 +84,7 @@ export const ScheduleRow = memo(function ScheduleRow({
               </button>
               <span
                 className={cn(
-                  "hidden h-5 shrink-0 items-center gap-1.5 rounded-full border border-line bg-base/50 pr-2 text-[11px] text-muted @4xl/row:inline-flex",
+                  "hidden h-5 shrink-0 items-center gap-1.5 rounded-full border border-line bg-base/50 pr-2 text-micro text-muted @4xl/row:inline-flex",
                   account ? "pl-0.5" : "pl-2",
                 )}
               >
@@ -92,7 +92,7 @@ export const ScheduleRow = memo(function ScheduleRow({
                 {runtime}
               </span>
             </div>
-            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted">
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted">
               <span className="flex items-center gap-1.5 @4xl/row:hidden">
                 {account && <AccountAvatar account={account} size={14} showProvider={false} compact />}
                 {runtime}
@@ -115,7 +115,7 @@ export const ScheduleRow = memo(function ScheduleRow({
                       : "Runs start in Ask: agents ask before editing or running commands"
                   }
                 >
-                  <span className="flex items-center gap-1 text-[11.5px] text-steel">
+                  <span className="flex items-center gap-1 text-meta text-steel">
                     {schedule.permissionMode === "auto" ? (
                       <Zap className="h-3.5 w-3.5 text-accent" />
                     ) : (
@@ -133,13 +133,13 @@ export const ScheduleRow = memo(function ScheduleRow({
                 </Tooltip>
               )}
             </div>
-            <p className="mt-1.5 line-clamp-1 text-[12px] text-steel" title={schedule.prompt}>
+            <p className="mt-1.5 line-clamp-1 text-caption text-steel" title={schedule.prompt}>
               {schedule.prompt}
             </p>
             {schedule.lastError && (
               <div
                 role="note"
-                className="mt-1 flex min-w-0 items-start gap-1.5 text-[12px] leading-4 text-warn"
+                className="mt-1 flex min-w-0 items-start gap-1.5 text-caption leading-4 text-warn"
                 aria-label={`Last run failed: ${schedule.lastError}`}
               >
                 <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -153,7 +153,7 @@ export const ScheduleRow = memo(function ScheduleRow({
                     type="button"
                     disabled={running}
                     onClick={onRun}
-                    className="underline-offset-2 hover:underline disabled:opacity-50"
+                    className="underline-offset-2 hover:underline disabled:opacity-45"
                   >
                     Run now
                   </button>
@@ -167,14 +167,14 @@ export const ScheduleRow = memo(function ScheduleRow({
         </div>
 
         <div className="flex w-full items-center justify-between gap-4 @3xl/row:w-auto">
-          <dl className="grid min-w-0 flex-1 grid-cols-2 gap-x-4 text-[12px] @3xl/row:w-[264px] @3xl/row:flex-none">
+          <dl className="grid min-w-0 flex-1 grid-cols-2 gap-x-4 text-caption @3xl/row:w-[264px] @3xl/row:flex-none">
             <div className="min-w-0">
-              <dt className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-steel">Next run</dt>
+              <dt className="eyebrow text-steel">Next run</dt>
               <dd className="mt-0.5 truncate">
                 {next ? (
                   <>
                     <span className="font-medium text-fg tabular">{whenLabel(next, now)}</span>
-                    <span className="block text-[11.5px] text-accent tabular">{untilLabel(next, now)}</span>
+                    <span className="block text-meta text-accent tabular">{untilLabel(next, now)}</span>
                   </>
                 ) : (
                   <span className="text-steel">{schedule.enabled ? "Invalid time" : "Paused"}</span>
@@ -182,7 +182,7 @@ export const ScheduleRow = memo(function ScheduleRow({
               </dd>
             </div>
             <div className="min-w-0">
-              <dt className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-steel">Last run</dt>
+              <dt className="eyebrow text-steel">Last run</dt>
               <dd className="mt-0.5 min-w-0">
                 {schedule.lastRunAt ? (
                   <>
@@ -191,14 +191,14 @@ export const ScheduleRow = memo(function ScheduleRow({
                       <button
                         type="button"
                         onClick={() => onOpenAgent(lastAgent.id)}
-                        className="group/link flex max-w-full items-center gap-1 text-[11.5px] text-muted transition-colors hover:text-accent"
+                        className="group/link flex max-w-full items-center gap-1 text-meta text-muted transition-colors hover:text-accent"
                       >
                         <StatusDot status={lastAgent.status} size={6} />
                         <span className="truncate">Open agent</span>
                         <ArrowUpRight className="h-3 w-3 shrink-0 opacity-60 group-hover/link:opacity-100" />
                       </button>
                     ) : (
-                      <span className="block text-[11.5px] text-steel">Agent removed</span>
+                      <span className="block text-meta text-steel">Agent removed</span>
                     )}
                   </>
                 ) : (

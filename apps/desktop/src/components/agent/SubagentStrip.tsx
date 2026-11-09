@@ -16,7 +16,7 @@ const LINGER_MS = 3000;
 export function Elapsed({ since }: { since: number }) {
   const [now, setNow] = useState(() => Date.now());
   useVisibleInterval(() => setNow(Date.now()), 1000);
-  return <span className="shrink-0 text-[11.5px] text-steel tabular">{formatElapsed(now - since)}</span>;
+  return <span className="shrink-0 text-meta text-steel tabular">{formatElapsed(now - since)}</span>;
 }
 
 /**
@@ -81,13 +81,13 @@ export function SubagentRow({
             <CircleCheck className="h-3.5 w-3.5 shrink-0 text-ok" aria-hidden />
           )}
           {kind && !compact && (
-            <span className="shrink-0 rounded border border-violet/30 bg-violet/10 px-1 text-[11px] font-semibold uppercase tracking-[0.05em] text-violet">
+            <span className="shrink-0 rounded border border-violet/30 bg-violet/10 px-1 eyebrow text-violet">
               {kind}
             </span>
           )}
-          <span className="min-w-0 shrink-0 truncate text-[12px] font-medium text-fg">{strip.headline}</span>
+          <span className="min-w-0 shrink-0 truncate text-caption font-medium text-fg">{strip.headline}</span>
           {active && strip.step && !compact && (
-            <span className="min-w-0 flex-1 truncate text-[11.5px] text-steel" title={strip.step}>
+            <span className="min-w-0 flex-1 truncate text-meta text-steel" title={strip.step}>
               <span aria-hidden className="mr-2 text-line-strong">
                 ·
               </span>

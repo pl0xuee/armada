@@ -118,10 +118,8 @@ export function LocalSetup({
               >
                 {k === "custom" ? <Globe /> : <HardDrive />}
                 <span className="min-w-0">
-                  <span className="block text-[13px] font-medium text-fg">{LOCAL_KIND_LABEL[k]}</span>
-                  <span
-                    className={cn("flex items-center gap-1.5 text-[11.5px]", p?.running ? "text-ok" : "text-muted")}
-                  >
+                  <span className="block text-body font-medium text-fg">{LOCAL_KIND_LABEL[k]}</span>
+                  <span className={cn("flex items-center gap-1.5 text-meta", p?.running ? "text-ok" : "text-muted")}>
                     {k === "custom" ? (
                       "Any address"
                     ) : detected === null ? (
@@ -152,7 +150,7 @@ export function LocalSetup({
                   setCustom({ probe: null, checking: false, error: null });
                 }}
                 placeholder="http://127.0.0.1:8080/v1"
-                className="font-mono text-[12.5px]"
+                className="font-mono text-small"
                 autoComplete="off"
                 spellCheck={false}
               />
@@ -166,7 +164,7 @@ export function LocalSetup({
                 Test
               </Button>
             </div>
-            <p className="mt-1.5 text-[11.5px] text-steel">
+            <p className="mt-1.5 text-meta text-steel">
               llama.cpp, vLLM or anything that serves the OpenAI Responses API. Use the address that ends in /v1.
             </p>
           </div>
@@ -185,20 +183,20 @@ export function LocalSetup({
             />
           </div>
           {url.trim() !== "" && !customUrl && (
-            <p className="flex items-center gap-1.5 text-[12px] text-warn">
+            <p className="flex items-center gap-1.5 text-caption text-warn">
               <CircleAlert className="h-3.5 w-3.5 shrink-0" /> The address must start with http:// or https://
             </p>
           )}
           {customUrl && !isLoopbackUrl(customUrl) && (
             <p
               role="note"
-              className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/[0.07] px-3 py-2 text-[12px] leading-snug text-warn"
+              className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/[0.07] px-3 py-2 text-caption leading-snug text-warn"
             >
               <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" />
               <span>
                 This server is not on this computer. Your prompts and your code will be sent to it over the network, so
                 only use a machine you trust. A GPU box away from home is best reached through Tailscale (run{" "}
-                <code className="font-mono text-[11px]">tailscale serve</code> on it and use its https address) rather
+                <code className="font-mono text-micro">tailscale serve</code> on it and use its https address) rather
                 than an open port.
               </span>
             </p>
@@ -208,7 +206,7 @@ export function LocalSetup({
 
       {/* Status of the selected server */}
       <div
-        className="rounded-lg border border-line bg-base/50 px-3 py-2.5 text-[12px] leading-relaxed"
+        className="rounded-lg border border-line bg-base/50 px-3 py-2.5 text-caption leading-relaxed"
         aria-live="polite"
       >
         {checking ? (
@@ -220,7 +218,7 @@ export function LocalSetup({
             <p className="flex items-center gap-1.5 text-ok">
               <span className="h-1.5 w-1.5 rounded-full bg-ok shadow-[0_0_6px_var(--ok)]" />
               {serverStatusText(true, probe.models.length)}
-              <span className="font-mono text-[11px] text-steel">{probe.baseUrl}</span>
+              <span className="font-mono text-micro text-steel">{probe.baseUrl}</span>
             </p>
             {probe.models.slice(0, 4).map((m) => (
               <p key={m.id} className="truncate text-muted">

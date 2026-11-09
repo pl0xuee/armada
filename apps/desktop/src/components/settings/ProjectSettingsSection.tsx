@@ -7,6 +7,7 @@ import { projectChoices, ruleCount, type ProjectConfig, type SettingsFile } from
 import { basename, errorMessage, prettyPath } from "@/lib/utils";
 import { useApp } from "@/store/app";
 import { useProjectSettings } from "@/store/projectSettings";
+import { useUi } from "@/store/ui";
 import { openToolkit } from "@/store/toolkit";
 import { Button } from "../ui/button";
 import { Select } from "../ui/select";
@@ -75,7 +76,7 @@ export function ProjectSettingsSection() {
   const header = (
     <SectionHeader
       title="Projects"
-      description="Permission rules, hooks, commands and skills that Claude Code reads from a project."
+      description="What each agent may do in a project folder: permission rules, automations, commands and skills."
     />
   );
 
@@ -87,7 +88,12 @@ export function ProjectSettingsSection() {
           <EmptyState
             icon={<FolderCog />}
             title="No projects yet"
-            description="Start an agent in a folder and it shows up here, with its permission rules, hooks and commands."
+            description="Start an agent in a folder and it shows up here, with its permission rules, automations and commands."
+            action={
+              <Button size="sm" variant="primary" onClick={() => useUi.getState().openNewAgent()}>
+                New agent
+              </Button>
+            }
           />
         </div>
       </>
@@ -110,7 +116,7 @@ export function ProjectSettingsSection() {
             }))}
           />
         </div>
-        <span className="min-w-0 flex-1 truncate text-[12px] text-steel" title={project}>
+        <span className="min-w-0 flex-1 truncate text-caption text-steel" title={project}>
           {prettyPath(project)}
         </span>
         <Button
@@ -131,7 +137,7 @@ export function ProjectSettingsSection() {
         </Button>
       </div>
 
-      <p className="mb-4 flex flex-wrap items-center gap-x-1.5 text-[12.5px] leading-[20px] text-muted">
+      <p className="mb-4 flex flex-wrap items-center gap-x-1.5 text-small leading-[20px] text-muted">
         CLAUDE.md and AGENTS.md now live in
         <button
           type="button"
@@ -155,7 +161,7 @@ export function ProjectSettingsSection() {
               <>
                 <Shield className="h-3.5 w-3.5" /> Permissions
                 {config && (
-                  <span className="tabular text-[11px] text-steel">
+                  <span className="tabular text-micro text-steel">
                     {config.settings.reduce((n, s) => n + ruleCount(s.rules), 0)}
                   </span>
                 )}

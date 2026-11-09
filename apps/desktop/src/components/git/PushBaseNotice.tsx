@@ -67,13 +67,13 @@ export function PushBaseNotice({
 
   if (pushed && status.upstream && status.ahead === 0) {
     return (
-      <p role="status" className="flex items-center gap-1.5 text-[12px] font-medium text-ok">
-        <Check className="h-3.5 w-3.5" /> Pushed to {status.upstream} ✓
+      <p role="status" className="flex items-center gap-1.5 text-caption font-medium text-ok">
+        <Check className="h-3.5 w-3.5" /> Pushed to {status.upstream}
       </p>
     );
   }
   return (
-    <div role="status" className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[12px]">
+    <div role="status" className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-caption">
       <span className="min-w-0 flex-1 break-words text-muted">{baseSyncLine(status)}</span>
       {canPush && (
         <Button size="xs" variant="primary" onClick={push} disabled={busy || disabled}>
@@ -84,7 +84,7 @@ export function PushBaseNotice({
       {(canPush || !status.upstream) && (
         <Button size="xs" variant="ghost" onClick={copy} title={`Copy: ${command}`}>
           <Copy /> Copy command
-          <code className="ml-1 font-mono text-[10.5px] text-steel">{command}</code>
+          <code className="ml-1 font-mono text-micro text-steel">{command}</code>
         </Button>
       )}
       {error && (

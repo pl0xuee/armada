@@ -240,11 +240,13 @@ fn fetch_verified(
 
     let actual = crate::toolchain::hex_lower(&hasher.finalize());
     if done != spec.size_bytes || actual != spec.sha256 {
-        bail!(
-            "checksum mismatch for {} (expected {}, got {actual}); the download was discarded",
+        tracing::warn!(
+            "speech model {} failed its checksum (expected {}, got {actual}, {done} of {} bytes)",
             spec.file_name(),
-            spec.sha256
+            spec.sha256,
+            spec.size_bytes
         );
+        bail!("The speech model didn't download correctly, so it was thrown away. Try again.");
     }
     Ok(())
 }

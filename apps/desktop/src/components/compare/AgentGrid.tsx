@@ -169,7 +169,7 @@ export function AgentGrid({
                 aria-controls={`cmp-col-${a.id}`}
                 onClick={() => setTabId(a.id)}
                 className={cn(
-                  "flex h-9 min-w-0 flex-1 basis-0 items-center justify-center gap-2 rounded-lg border px-3 text-[12.5px] font-medium transition-colors",
+                  "flex h-9 min-w-0 flex-1 basis-0 items-center justify-center gap-2 rounded-lg border px-3 text-small font-medium transition-colors",
                   sel
                     ? "border-line-strong bg-raised text-fg edge"
                     : "border-line/60 text-muted hover:bg-raised/60 hover:text-fg",
@@ -184,7 +184,7 @@ export function AgentGrid({
                 {a.status === "working" || a.status === "starting" ? (
                   <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent animate-breathe" aria-label="Working" />
                 ) : showCheapest && a.costUsd === minCost ? (
-                  <span className="hidden text-[11px] font-normal text-ok @md:inline">cheapest</span>
+                  <span className="hidden text-micro font-normal text-ok @md:inline">cheapest</span>
                 ) : null}
               </button>
             );

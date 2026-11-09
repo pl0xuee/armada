@@ -508,13 +508,19 @@ pub struct WorkflowLaunch {
     pub transcript_dir: String,
 }
 
-/// An image attached to a prompt (base64 payload, no data: prefix).
+/// An image attached to a prompt or shown in the timeline. Inline it is a base64
+/// payload (no data: prefix); stored in the timeline it is a file in the pictures
+/// folder named by `path`, with `data` empty. Older rows keep their inline `data`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Attachment {
     pub name: String,
     pub mime_type: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub data: String,
+    /// File name of the stored picture (see `pictures.rs`), when it isn't inline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -810,6 +816,15 @@ impl ItemBody {
             if !sa.control && sa.workflow.is_none() && output.starts_with(ASYNC_LAUNCH_PREFIX) {
                 sa.background = true;
             }
+        }
+    }
+
+    /// The item's pictures: a message's attachments, a reply's or tool call's images.
+    pub fn pictures(&self) -> &[Attachment] {
+        match self {
+            ItemBody::UserMessage { attachments, .. } => attachments,
+            ItemBody::AgentMessage { images, .. } | ItemBody::ToolCall { images, .. } => images,
+            _ => &[],
         }
     }
 
@@ -1271,6 +1286,8 @@ pub struct Settings {
     pub ntfy_detail: String,
     pub recent_projects: Vec<String>,
     pub auto_check_updates: bool,
+    /// One-letter keys (A/Y/D/N to answer an approval, J/K/E in Needs you) work window-wide.
+    pub single_key_shortcuts: bool,
     pub templates: Vec<PromptTemplate>,
     pub mcp_servers: Vec<McpServer>,
     /// What to do when an account hits a usage/rate limit: "off" | "ask" | "auto".
@@ -1821,6 +1838,7 @@ impl Default for Settings {
             ntfy_detail: "minimal".into(),
             recent_projects: Vec::new(),
             auto_check_updates: true,
+            single_key_shortcuts: true,
             templates: vec![
                 PromptTemplate {
                     id: "tpl-tests".into(),

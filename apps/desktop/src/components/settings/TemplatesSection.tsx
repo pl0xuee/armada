@@ -138,12 +138,12 @@ export function TemplatesSection({ templates }: { templates: PromptTemplate[] })
                   aria-label={`Edit ${t.name}`}
                 >
                   <span className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[13px] font-medium text-fg">{t.name}</span>
+                    <span className="text-body font-medium text-fg">{t.name}</span>
                     {fields.map((f) => (
                       <FieldChip key={f} name={f} />
                     ))}
                   </span>
-                  <span className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-muted">
+                  <span className="mt-1 line-clamp-2 text-caption leading-relaxed text-muted">
                     <HighlightedBody body={t.body} />
                   </span>
                 </button>
@@ -171,7 +171,7 @@ export function TemplatesSection({ templates }: { templates: PromptTemplate[] })
         </ul>
       )}
 
-      <p className="mt-3 text-[12px] text-steel">
+      <p className="mt-3 text-caption text-steel">
         Insert templates from the composer, the New agent dialog or a schedule. Order here is the order in the picker.
       </p>
 
@@ -215,7 +215,7 @@ function MoveButton({
       data-move={dataMove}
       disabled={disabled}
       onClick={onClick}
-      className="flex h-[18px] w-6 items-center justify-center rounded text-steel transition-colors hover:bg-gunmetal hover:text-fg disabled:pointer-events-none disabled:opacity-25 [&_svg]:h-3.5 [&_svg]:w-3.5"
+      className="flex h-[18px] w-6 items-center justify-center rounded text-steel transition-colors hover:bg-gunmetal hover:text-fg disabled:pointer-events-none disabled:opacity-45 [&_svg]:h-3.5 [&_svg]:w-3.5"
     >
       {children}
     </button>
@@ -228,7 +228,7 @@ function HighlightedBody({ body }: { body: string }) {
     <>
       {body.split(/(\{\{[^{}]+\}\})/g).map((part, i) =>
         /^\{\{[^{}]+\}\}$/.test(part) ? (
-          <span key={i} className="font-mono text-[11px] text-accent">
+          <span key={i} className="font-mono text-micro text-accent">
             {part}
           </span>
         ) : (
@@ -241,7 +241,7 @@ function HighlightedBody({ body }: { body: string }) {
 
 export function FieldChip({ name }: { name: string }) {
   return (
-    <span className="inline-flex h-[18px] items-center rounded-md border border-accent/25 bg-accent/[0.08] px-1.5 font-mono text-[11px] text-accent">
+    <span className="inline-flex h-[18px] items-center rounded-md border border-accent/25 bg-accent/[0.08] px-1.5 font-mono text-micro text-accent">
       {name}
     </span>
   );
@@ -340,32 +340,32 @@ function TemplateDialog({
                   }
                 }}
                 className={cn(
-                  "min-h-[168px] font-mono text-[12.5px] leading-relaxed",
+                  "min-h-[168px] font-mono text-small leading-relaxed",
                   touched.body && bodyError && "border-err/60 focus:border-err/70 focus:ring-err/15",
                 )}
               />
               {touched.body && bodyError && <FieldError>{bodyError}</FieldError>}
-              <p id="tpl-body-hint" className="mt-1.5 text-[12px] leading-relaxed text-steel">
+              <p id="tpl-body-hint" className="mt-1.5 text-caption leading-relaxed text-steel">
                 Wrap a word in double braces, like <code className="font-mono text-muted">{"{{file}}"}</code>, to make
                 it a field you fill in when inserting.
               </p>
             </div>
             <div className="rounded-lg border border-line bg-base/40 px-3 py-2.5">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-steel">Fields</div>
+              <div className="eyebrow text-steel">Fields</div>
               {fields.length === 0 ? (
-                <p className="mt-1 text-[12px] text-muted">None. The template is inserted as-is.</p>
+                <p className="mt-1 text-caption text-muted">None. The template is inserted as-is.</p>
               ) : (
                 <ul className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Detected fields">
                   {fields.map((f) => (
                     <li key={f} className="flex items-center gap-1.5">
                       <FieldChip name={f} />
-                      <span className="text-[11.5px] text-muted">{placeholderLabel(f)}</span>
+                      <span className="text-meta text-muted">{placeholderLabel(f)}</span>
                     </li>
                   ))}
                 </ul>
               )}
               {unbalanced && (
-                <p className="mt-1.5 text-[12px] text-warn">
+                <p className="mt-1.5 text-caption text-warn">
                   Some braces aren't closed, so they'll be inserted literally.
                 </p>
               )}
@@ -388,7 +388,7 @@ function TemplateDialog({
 
 export function FieldError({ children, id }: { children: React.ReactNode; id?: string }) {
   return (
-    <p id={id} role="alert" className="mt-1.5 text-[12px] text-err">
+    <p id={id} role="alert" className="mt-1.5 text-caption text-err">
       {children}
     </p>
   );

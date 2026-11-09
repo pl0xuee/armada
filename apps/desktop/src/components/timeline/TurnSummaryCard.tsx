@@ -44,7 +44,7 @@ export function formatDuration(ms: number): string {
 /** One-line recap used for earlier turns (only the latest gets the full card). */
 export const TurnSummaryLine = memo(function TurnSummaryLine({ item }: { item: Summary }) {
   return (
-    <div className="flex items-center gap-2 px-1 text-[11.5px] text-steel">
+    <div className="flex items-center gap-2 px-1 text-meta text-steel">
       <CircleCheckBig className="h-3.5 w-3.5 text-ok/70" />
       <span>
         Done in {formatDuration(item.durationMs)} · {pluralize(item.files.length, "file")} ·{" "}
@@ -158,7 +158,7 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
           <span
             tabIndex={0}
             aria-label={`Turn finished. ${metrics}`}
-            className="flex items-center gap-2 rounded-md text-[13px] font-medium text-fg/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="flex items-center gap-2 rounded-md text-body font-medium text-fg/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
           >
             <span
               className="flex h-5 w-5 items-center justify-center rounded-full bg-ok/15 text-ok"
@@ -179,13 +179,13 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
           </span>
         </Tooltip>
         {stale && !shipped && (
-          <span className="rounded-md border border-line-strong px-1.5 text-[11px] font-medium text-muted">
+          <span className="rounded-md border border-line-strong px-1.5 text-micro font-medium text-muted">
             Earlier turn
           </span>
         )}
         {bgRunning && (
           <Tooltip content={backgroundDetail(bg)}>
-            <span className="inline-flex h-5 items-center gap-1.5 rounded-md border border-accent/30 bg-accent/10 px-1.5 text-[11px] font-medium text-accent">
+            <span className="inline-flex h-5 items-center gap-1.5 rounded-md border border-accent/30 bg-accent/10 px-1.5 text-micro font-medium text-accent">
               <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent animate-breathe" />
               {bg.workflows > 0 ? "Workflow still running" : "Background agents may still run"}
             </span>
@@ -201,7 +201,7 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
                 <button
                   type="button"
                   onClick={() => setReviewAgent(agent.id, f)}
-                  className="inline-flex h-6 max-w-[240px] items-center gap-1.5 px-2 font-mono text-[11.5px] text-fg transition-colors hover:bg-raised focus-visible:outline-offset-[-2px]"
+                  className="inline-flex h-6 max-w-[240px] items-center gap-1.5 px-2 font-mono text-meta text-fg transition-colors hover:bg-raised focus-visible:outline-offset-[-2px]"
                 >
                   <FileCode2 className="h-3 w-3 shrink-0 text-steel" />
                   <span className="truncate">{basename(f)}</span>
@@ -215,7 +215,7 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
                     disabled={agentBusy}
                     title={busyReason ?? undefined}
                     aria-label={`Revert changes to ${f}`}
-                    className="flex h-6 w-6 items-center justify-center border-l border-line text-steel transition-colors hover:bg-err/12 hover:text-err focus-visible:outline-offset-[-2px] disabled:opacity-40"
+                    className="flex h-6 w-6 items-center justify-center border-l border-line text-steel transition-colors hover:bg-err/12 hover:text-err focus-visible:outline-offset-[-2px] disabled:opacity-45"
                   >
                     <Undo2 className="h-3 w-3" />
                   </button>
@@ -230,7 +230,7 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
                 onClick={() => showAllFiles(!allFiles)}
                 aria-expanded={allFiles}
                 aria-label={allFiles ? "Show fewer files" : `Show ${pluralize(hiddenFiles, "more file")}`}
-                className="inline-flex h-6 items-center rounded-md px-2 text-[11.5px] font-medium text-muted transition-colors hover:bg-raised hover:text-fg"
+                className="inline-flex h-6 items-center rounded-md px-2 text-meta font-medium text-muted transition-colors hover:bg-raised hover:text-fg"
               >
                 {allFiles ? "Show fewer" : `+${hiddenFiles} more`}
               </button>
@@ -247,7 +247,7 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
       {shipState?.kind === "not_merged" && (
         <div
           role="status"
-          className="mt-2.5 flex flex-wrap items-center gap-2 rounded-xl border border-warn/25 bg-warn/[0.07] px-3 py-2 text-[12px]"
+          className="mt-2.5 flex flex-wrap items-center gap-2 rounded-xl border border-warn/25 bg-warn/[0.07] px-3 py-2 text-caption"
         >
           <span className="min-w-0 flex-1 break-words text-muted">{shipState.error}</span>
           {shipState.conflict && (
@@ -302,7 +302,7 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
               onConfirm={(m) => run("ship", m)}
             />
           ) : (
-            <span className="px-1.5 text-[11.5px] text-steel">Not in a worktree</span>
+            <span className="px-1.5 text-meta text-steel">Not in a worktree</span>
           ))}
         {hasFiles && agent.branch && (
           <Button size="sm" variant="ghost" onClick={() => setReviewAgent(agent.id, null, "pr")}>
@@ -333,8 +333,21 @@ function RevertFileDialog({ agent, path, onClose }: { agent: Agent; path: string
         setError("This file has no changes in the current diff (it may already be reverted or committed).");
         return;
       }
-      await api.revertPatch(agent.id, file.text);
-      toast.success(`Reverted ${basename(path)}`, { description: path });
+      const patch = file.text;
+      await api.revertPatch(agent.id, patch);
+      toast.success(`Reverted ${basename(path)}`, {
+        description: path,
+        duration: 12000,
+        action: {
+          label: "Undo",
+          onClick: () => {
+            api.applyPatch(agent.id, patch).then(
+              () => toast.success("Revert undone"),
+              (e) => toast.error("Couldn't undo the revert", { description: errorMessage(e) }),
+            );
+          },
+        },
+      });
       onClose();
     } catch (e) {
       setError(errorMessage(e));
@@ -357,7 +370,8 @@ function RevertFileDialog({ agent, path, onClose }: { agent: Agent; path: string
       description={
         path && (
           <>
-            This discards the agent's change to <span className="font-mono text-fg">{path}</span>; it can't be undone.
+            This discards the agent's change to <span className="font-mono text-fg">{path}</span>; you can undo it right
+            after.
           </>
         )
       }
@@ -365,7 +379,7 @@ function RevertFileDialog({ agent, path, onClose }: { agent: Agent; path: string
       onConfirm={revert}
     >
       {error && (
-        <p role="alert" className="rounded-lg border border-err/30 bg-err/[0.07] px-3 py-2 text-[12.5px] text-err">
+        <p role="alert" className="rounded-lg border border-err/30 bg-err/[0.07] px-3 py-2 text-small text-err">
           {error}
         </p>
       )}
@@ -414,8 +428,8 @@ function MessagePopover({
           }}
         >
           <div>
-            <div className="text-[13px] font-semibold">{title}</div>
-            <p className="mt-0.5 text-[12px] text-muted">{hint}</p>
+            <div className="text-body font-semibold">{title}</div>
+            <p className="mt-0.5 text-caption text-muted">{hint}</p>
           </div>
           <div>
             <Label htmlFor={`msg-${title}`}>Commit message</Label>

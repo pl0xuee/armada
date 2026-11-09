@@ -26,7 +26,7 @@ export function DiffStat({
   className?: string;
 }) {
   return (
-    <span className={cn("inline-flex items-center gap-1.5 font-mono text-[11px] tabular", className)}>
+    <span className={cn("inline-flex items-center gap-1.5 font-mono text-micro tabular", className)}>
       <span className="text-ok">+{additions}</span>
       <span className="text-err">−{deletions}</span>
     </span>
@@ -171,11 +171,11 @@ export const FileDiffView = memo(function FileDiffView({
               file.status === "added" ? "text-ok" : file.status === "deleted" ? "text-err" : "text-steel",
             )}
           />
-          <span className="min-w-0 truncate font-mono text-[12px]">
+          <span className="min-w-0 truncate font-mono text-caption">
             <span className="text-steel">{dir}</span>
             <span className="text-fg">{name}</span>
           </span>
-          {file.oldPath && <span className="truncate font-mono text-[11px] text-steel">← {file.oldPath}</span>}
+          {file.oldPath && <span className="truncate font-mono text-micro text-steel">← {file.oldPath}</span>}
           <span className="ml-auto flex shrink-0 items-center gap-2">
             <DiffStat additions={file.additions} deletions={file.deletions} />
             <span className="max-sm:hidden">
@@ -190,14 +190,14 @@ export const FileDiffView = memo(function FileDiffView({
               onClick={() => review.revertFile(file.path)}
               title="Revert this file's changes"
               aria-label={`Revert all changes to ${file.path}`}
-              className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11.5px] text-muted transition-colors hover:bg-err/12 hover:text-err"
+              className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-meta text-muted transition-colors hover:bg-err/12 hover:text-err"
             >
               <Undo2 className="h-3.5 w-3.5" />
               <span className="max-md:hidden">Revert file</span>
             </button>
             <label
               className={cn(
-                "inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[11.5px] transition-colors hover:bg-raised",
+                "inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-meta transition-colors hover:bg-raised",
                 viewed ? "text-ok" : "text-muted",
               )}
             >
@@ -230,7 +230,7 @@ export const FileDiffView = memo(function FileDiffView({
           ) : file.hunks.length === 0 ? (
             <div className="px-4 py-3 text-xs text-steel">No textual changes</div>
           ) : (
-            <table className="w-full border-collapse font-mono text-[12px] leading-[1.55]">
+            <table className="w-full border-collapse font-mono text-caption leading-[1.55]">
               {commenting ? (
                 <CommentableBody file={file} commenting={commenting} review={review} tokens={hunkTokens} />
               ) : (
@@ -262,7 +262,7 @@ function codeCell(text: string, tokens: HlLine | null | undefined): ReactNode {
 function HunkHeaderRow({ header, onRevert }: { header: string; onRevert?: () => void }) {
   return (
     <tr>
-      <td colSpan={4} className="border-y border-line/60 bg-accent/[0.05] px-3 py-1 text-[11px] text-accent/75">
+      <td colSpan={4} className="border-y border-line/60 bg-accent/[0.05] px-3 py-1 text-micro text-accent/75">
         <span className="flex items-center gap-2">
           <span className="min-w-0 flex-1 truncate">{header}</span>
           {onRevert && (
@@ -271,7 +271,7 @@ function HunkHeaderRow({ header, onRevert }: { header: string; onRevert?: () => 
               onClick={onRevert}
               title="Revert this hunk"
               aria-label={`Revert hunk ${header}`}
-              className="inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 font-sans text-[11px] text-muted transition-colors hover:bg-err/12 hover:text-err"
+              className="inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 font-sans text-micro text-muted transition-colors hover:bg-err/12 hover:text-err"
             >
               <Undo2 className="h-3 w-3" />
               Revert hunk
@@ -302,10 +302,10 @@ function HunkRows({
           key={i}
           className={cn(l.type === "add" && "bg-[var(--diff-add)]", l.type === "del" && "bg-[var(--diff-del)]")}
         >
-          <td className="w-10 select-none border-r border-line/50 pr-2 text-right align-top text-[11px] text-steel tabular">
+          <td className="w-10 select-none border-r border-line/50 pr-2 text-right align-top text-micro text-steel tabular">
             {l.oldNo ?? ""}
           </td>
-          <td className="w-10 select-none border-r border-line/50 pr-2 text-right align-top text-[11px] text-steel tabular">
+          <td className="w-10 select-none border-r border-line/50 pr-2 text-right align-top text-micro text-steel tabular">
             {l.newNo ?? ""}
           </td>
           <td
@@ -525,7 +525,7 @@ const LazyChunk = memo(function LazyChunk({
                 l.type === "del" && "bg-[var(--diff-del)]",
               )}
             >
-              <td className="relative w-12 select-none border-r border-line/50 pl-5 pr-2 text-right align-top text-[11px] text-steel tabular">
+              <td className="relative w-12 select-none border-r border-line/50 pl-5 pr-2 text-right align-top text-micro text-steel tabular">
                 {anchor && (
                   <button
                     type="button"
@@ -544,7 +544,7 @@ const LazyChunk = memo(function LazyChunk({
                 {l.oldNo ?? ""}
               </td>
               <td
-                className="w-10 cursor-pointer select-none border-r border-line/50 pr-2 text-right align-top text-[11px] text-steel tabular hover:text-accent"
+                className="w-10 cursor-pointer select-none border-r border-line/50 pr-2 text-right align-top text-micro text-steel tabular hover:text-accent"
                 onClick={() => anchor && commenting.onLineComment(anchor)}
               >
                 {l.newNo ?? ""}

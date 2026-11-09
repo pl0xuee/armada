@@ -1,5 +1,10 @@
 import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { extendTailwindMerge } from "tailwind-merge";
+
+/** The type steps in styles/globals.css (@theme), so cn() lets a later size replace an earlier one. */
+export const FONT_SIZE_TOKENS = ["2xs", "micro", "meta", "caption", "small", "body"];
+
+const twMerge = extendTailwindMerge({ extend: { theme: { text: FONT_SIZE_TOKENS } } });
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -45,6 +50,13 @@ export function basename(path: string): string {
 /** Shorten a home-relative path for display. */
 export function prettyPath(path: string): string {
   return path.replace(/^\/(home|Users)\/[^/]+/, "~").replace(/^[A-Z]:\\Users\\[^\\]+/i, "~");
+}
+
+/** Smooth scrolling from script, unless the user asked for reduced motion (CSS can't reach scrollTo). */
+export function scrollBehavior(): ScrollBehavior {
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    ? "auto"
+    : "smooth";
 }
 
 export function clamp(n: number, min: number, max: number) {

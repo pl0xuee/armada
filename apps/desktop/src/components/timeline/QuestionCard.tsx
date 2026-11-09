@@ -246,7 +246,7 @@ export const QuestionCard = memo(function QuestionCard({
           <MessageCircleQuestion className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-warn">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 eyebrow text-warn">
             <span>{identity.short} has a question</span>
             {item.source && (
               <span className="flex min-w-0 items-center gap-1 font-medium normal-case tracking-normal text-steel">
@@ -255,9 +255,7 @@ export const QuestionCard = memo(function QuestionCard({
               </span>
             )}
           </div>
-          <div
-            className={cn("mt-0.5 break-words text-fg", multi ? "text-[13px] text-muted" : "text-[14px] font-medium")}
-          >
+          <div className={cn("mt-0.5 break-words text-fg", multi ? "text-body text-muted" : "text-[14px] font-medium")}>
             {item.message}
           </div>
         </div>
@@ -302,7 +300,7 @@ export const QuestionCard = memo(function QuestionCard({
           Skip
         </Button>
         {keyboard && (
-          <span className="ml-auto hidden items-center gap-1.5 text-[11px] text-steel sm:flex">
+          <span className="ml-auto hidden items-center gap-1.5 text-micro text-steel sm:flex">
             {activeKind === "boolean" && (
               <>
                 <Kbd>1</Kbd> Yes <Kbd>2</Kbd> No
@@ -388,17 +386,15 @@ export function FieldBlock({
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             {field.title && (
-              <span className="rounded-md border border-warn/30 bg-warn/10 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-warn">
+              <span className="rounded-md border border-warn/30 bg-warn/10 px-1.5 py-0.5 eyebrow text-warn">
                 {field.title}
               </span>
             )}
-            {field.kind === "multi" && <span className="text-[11px] text-steel">Select all that apply</span>}
-            {field.required && <span className="text-[11px] text-steel">Required</span>}
+            {field.kind === "multi" && <span className="text-micro text-steel">Select all that apply</span>}
+            {field.required && <span className="text-micro text-steel">Required</span>}
           </div>
           {field.description && !hideDescription && (
-            <div
-              className={cn("break-words", multi ? "text-[13.5px] font-medium text-fg" : "text-[12.5px] text-muted")}
-            >
+            <div className={cn("break-words", multi ? "text-[13.5px] font-medium text-fg" : "text-small text-muted")}>
               {field.description}
             </div>
           )}
@@ -495,7 +491,7 @@ export function FieldBlock({
             className="max-w-48 tabular"
           />
           {badNumber && (
-            <div id={`${field.id}-nan`} role="alert" className="text-[11.5px] text-err">
+            <div id={`${field.id}-nan`} role="alert" className="text-meta text-err">
               Not a number
             </div>
           )}
@@ -512,7 +508,7 @@ export function FieldBlock({
               disabled={disabled}
               onClick={() => onBool(field.id, v)}
               className={cn(
-                "h-9 min-w-20 rounded-lg border px-4 text-[13px] font-medium transition-colors disabled:opacity-50",
+                "h-9 min-w-20 rounded-lg border px-4 text-body font-medium transition-colors disabled:opacity-45",
                 draft.bools[field.id] === v
                   ? "border-warn/60 bg-warn/15 text-fg"
                   : "border-line bg-base/40 text-muted hover:border-line-strong hover:text-fg",
@@ -558,7 +554,7 @@ function OptionRow({
       onClick={onClick}
       aria-keyshortcuts={hint ?? undefined}
       className={cn(
-        "group flex w-full items-start gap-3 rounded-xl border px-3 text-left transition-colors disabled:opacity-60",
+        "group flex w-full items-start gap-3 rounded-xl border px-3 text-left transition-colors disabled:opacity-45",
         dense ? "py-1.5" : "py-2.5",
         selected
           ? "border-warn/55 bg-warn/[0.12]"
@@ -581,13 +577,13 @@ function OptionRow({
       {dense ? (
         // One line in the pinned dock; the whole description is in the tooltip and on the card.
         <span className="flex min-w-0 flex-1 items-baseline gap-2" title={description ?? undefined}>
-          <span className="shrink-0 text-[13px] font-medium text-fg">{label}</span>
-          {description && <span className="min-w-0 truncate text-[12px] text-steel">{description}</span>}
+          <span className="shrink-0 text-body font-medium text-fg">{label}</span>
+          {description && <span className="min-w-0 truncate text-caption text-steel">{description}</span>}
         </span>
       ) : (
         <span className="min-w-0 flex-1">
           <span className="block text-[13.5px] font-medium text-fg">{label}</span>
-          {description && <span className="mt-0.5 block text-[12px] leading-snug text-muted">{description}</span>}
+          {description && <span className="mt-0.5 block text-caption leading-snug text-muted">{description}</span>}
         </span>
       )}
       {hint && <Kbd className="mt-0.5 shrink-0">{hint}</Kbd>}
@@ -601,7 +597,7 @@ function ResolvedQuestion({ item }: { item: QuestionItem }) {
   const cancelled = item.resolution === "cancelled";
   const Icon = answered ? MessageCircleQuestion : MessageCircleX;
   return (
-    <div className="px-1.5 text-[12.5px]">
+    <div className="px-1.5 text-small">
       <div className="flex h-8 items-center gap-2">
         <span
           className={cn(
@@ -612,7 +608,7 @@ function ResolvedQuestion({ item }: { item: QuestionItem }) {
           <Icon className="h-3.5 w-3.5" />
         </span>
         <span className="min-w-0 flex-1 truncate text-muted">{item.message}</span>
-        <span className={cn("shrink-0 text-[11.5px] font-medium", answered ? "text-ok" : "text-steel")}>
+        <span className={cn("shrink-0 text-meta font-medium", answered ? "text-ok" : "text-steel")}>
           {RESOLUTION_LABEL[item.resolution ?? ""] ?? (cancelled ? "Cancelled" : "Answered")}
         </span>
       </div>
@@ -620,13 +616,13 @@ function ResolvedQuestion({ item }: { item: QuestionItem }) {
         <dl className="ml-8 space-y-1 pb-1.5">
           {summary.map((s) => (
             <div key={s.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <dt className="text-[11.5px] text-steel">{s.title}:</dt>
+              <dt className="text-meta text-steel">{s.title}:</dt>
               <dd className="flex flex-wrap gap-1">
                 {s.chips.map((c, i) => (
                   <span
                     key={i}
                     className={cn(
-                      "rounded-md border px-1.5 py-px text-[11.5px] font-medium",
+                      "rounded-md border px-1.5 py-px text-meta font-medium",
                       c.custom ? "border-line-strong bg-raised text-fg italic" : "border-warn/35 bg-warn/10 text-fg",
                     )}
                   >

@@ -1,6 +1,7 @@
 // Agents waiting for a rate limit to lift, as the interface words them. Kvistcode resumes them by
 // itself (core `limit_resume`); this is only how that reads: "Resumes 6:00 PM", "in 12 min".
 import { useEffect, useState } from "react";
+import { windowBlurred } from "@/hooks/useVisibleInterval";
 import type { Agent } from "./types";
 
 const MINUTE = 60_000;
@@ -60,7 +61,11 @@ export function isResumedBody(body: string): boolean {
 }
 
 /** The short row/chip text: "Resumes 6:00 PM". Null when nothing is waiting. */
-export function resumesShort(agent: Waiter | null | undefined, enabled: boolean, now: number = Date.now()): string | null {
+export function resumesShort(
+  agent: Waiter | null | undefined,
+  enabled: boolean,
+  now: number = Date.now(),
+): string | null {
   if (!waitingToResume(agent, enabled)) return null;
   const at = agent!.limitResetsAt;
   if (at == null) return "Resumes when it lifts";
@@ -78,14 +83,22 @@ export interface ResumeLine {
 }
 
 /** The banner's line for an agent that will be resumed; null when nothing is waiting. */
-export function resumeLine(agent: Waiter | null | undefined, enabled: boolean, now: number = Date.now()): ResumeLine | null {
+export function resumeLine(
+  agent: Waiter | null | undefined,
+  enabled: boolean,
+  now: number = Date.now(),
+): ResumeLine | null {
   if (!waitingToResume(agent, enabled)) return null;
   const at = agent!.limitResetsAt;
   const attempts = agent!.limitResume?.attempts ?? 0;
   const verb = attempts > 0 ? "Trying again automatically" : "Resuming automatically";
   const tries = attempts > 0 ? `try ${attempts + 1} of ${MAX_RESUME_TRIES}` : null;
   if (at == null) {
-    return { text: `${attempts > 0 ? "Will try again" : "Will resume automatically"} when the limit lifts`, countdown: null, tries };
+    return {
+      text: `${attempts > 0 ? "Will try again" : "Will resume automatically"} when the limit lifts`,
+      countdown: null,
+      tries,
+    };
   }
   if (at <= now) return { text: `${verb} now`, countdown: null, tries };
   return { text: `${verb} at ${clockLabel(at, now)}`, countdown: untilLabel(at, now), tries };
@@ -114,17 +127,21 @@ export function useMinuteNow(active: boolean): number {
     if (!active) return;
     setNow(Date.now());
     const tick = () => {
-      if (typeof document !== "undefined" && document.hidden) return;
+      if (windowBlurred()) return;
       setNow((prev) => {
         const next = Date.now();
         return Math.floor(next / MINUTE) === Math.floor(prev / MINUTE) ? prev : next;
       });
     };
     const id = setInterval(tick, 15_000);
-    document.addEventListener("visibilitychange", tick);
+    // useWindowActivity updates the blurred marker on the same event: tick after it has.
+    const onFocus = () => setTimeout(tick, 0);
+    document.addEventListener("visibilitychange", onFocus);
+    window.addEventListener("focus", onFocus);
     return () => {
       clearInterval(id);
-      document.removeEventListener("visibilitychange", tick);
+      document.removeEventListener("visibilitychange", onFocus);
+      window.removeEventListener("focus", onFocus);
     };
   }, [active]);
   return now;

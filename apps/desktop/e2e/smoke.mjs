@@ -139,7 +139,7 @@ try {
   // tour that starts covering this run fails loudly here instead of as "element not clickable".
   // The tour itself is exercised from Settings -> About below.
   await sleep(1500); // longer than the tour's settle delay
-  check(!(await text()).includes("Many agents, one place"), "the first-run tour opened by itself under WebDriver");
+  check(!(await text()).includes("Skip tour"), "the first-run tour opened by itself under WebDriver");
 
   // ---- main views -----------------------------------------------------------------
   // [rail aria-label prefix, expected <h1> or null]
@@ -231,7 +231,7 @@ try {
   // ---- settings sections (each one loads its own backend data) -----------------------
   await goRail("Settings");
   const sections = [
-    "General", "Alerts", "Budgets", "Projects", "Tools & instructions", "Agents", "Voice", "Remote & mobile", "About",
+    "General", "Alerts", "Budgets", "Projects", "Tools & instructions", "Providers", "Voice", "Remote & mobile", "About",
   ];
   for (const name of sections) {
     log(`settings: ${name}`);
@@ -268,14 +268,18 @@ try {
   // broken chunk.
   log("welcome tour");
   await browser.$("button*=Show the tour").click();
-  await waitText(/Many agents, one place/, "the tour's first step");
+  await waitText(/Start an agent/, "the tour's first step");
   await browser.$("button*=Next").click();
-  await waitText(/What needs you stays in view/, "the tour's second step");
+  await waitText(/Many agents, one place/, "the tour's second step");
   await browser.$("button*=Next").click();
-  await waitText(/Find anything, spend on your terms/, "the tour's last step");
+  await waitText(/What needs you stays in view/, "the tour's third step");
+  await browser.$("button*=Next").click();
+  await waitText(/Find anything, spend on your terms/, "the tour's fourth step");
+  await browser.$("button*=Next").click();
+  await waitText(/One key reaches everything/, "the tour's last step");
   await assertHealthy("tour");
   await browser.$("button*=Got it").click();
-  await browser.waitUntil(async () => !/Find anything, spend on your terms/.test(await text()), {
+  await browser.waitUntil(async () => !/One key reaches everything/.test(await text()), {
     timeout: 5_000,
     timeoutMsg: "the tour did not close",
   });

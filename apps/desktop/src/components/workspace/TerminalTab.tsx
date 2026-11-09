@@ -95,7 +95,7 @@ export function TerminalTab({ agent }: { agent: Agent }) {
       {active ? (
         <XtermView key={active.id} term={active} agentId={agent.id} />
       ) : (
-        <div className="flex flex-1 items-center justify-center text-[12.5px] text-steel">
+        <div className="flex flex-1 items-center justify-center text-small text-steel">
           {ws.autoStarted ? "No terminals. Press + to open one." : "Starting a shell…"}
         </div>
       )}
@@ -136,7 +136,7 @@ function TermChip({
   return (
     <div
       className={cn(
-        "group/chip flex h-6 shrink-0 items-center rounded-md border text-[12px] transition-colors",
+        "group/chip flex h-6 shrink-0 items-center rounded-md border text-caption transition-colors",
         selected ? "border-line-strong bg-raised text-fg" : "border-transparent text-muted hover:bg-raised/60",
       )}
     >

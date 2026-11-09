@@ -68,7 +68,7 @@ export function EditAccountPopover({ account, children }: { account: Account; ch
             aria-describedby={duplicate ? `acc-name-dup-${account.id}` : undefined}
           />
           {duplicate && (
-            <p id={`acc-name-dup-${account.id}`} className="mt-1.5 text-[11.5px] text-warn">
+            <p id={`acc-name-dup-${account.id}`} className="mt-1.5 text-meta text-warn">
               Another {PROVIDERS[account.provider].short} account is already called “{name.trim()}”. A distinct name
               makes them easier to tell apart.
             </p>

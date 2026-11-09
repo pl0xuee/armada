@@ -221,8 +221,8 @@ function ErrorRow({ agent }: { agent: Agent }) {
         <CircleX className="h-4 w-4" aria-hidden />
       </span>
       <div className="min-w-[160px] flex-1">
-        <div className="text-[13px] font-semibold">{identity.short} stopped with an error</div>
-        {notice && <div className="selectable line-clamp-2 text-[12px] leading-snug text-muted">{notice.text}</div>}
+        <div className="text-body font-semibold">{identity.short} stopped with an error</div>
+        {notice && <div className="selectable line-clamp-2 text-caption leading-snug text-muted">{notice.text}</div>}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
         {lastPrompt?.kind === "user_message" && (
@@ -255,8 +255,8 @@ function BudgetRow({ agent, cap }: { agent: Agent; cap: number | null | undefine
         <Wallet className="h-4 w-4" aria-hidden />
       </span>
       <div className="min-w-[160px] flex-1">
-        <div className="text-[13px] font-semibold">Budget reached</div>
-        <div className="text-[12px] leading-snug text-muted">
+        <div className="text-body font-semibold">Budget reached</div>
+        <div className="text-caption leading-snug text-muted">
           <span className="tabular">
             {formatCost(agent.costUsd)} of {cap != null ? formatCost(cap) : "its cap"}
           </span>

@@ -40,7 +40,7 @@ export function TemplatePicker({
             <button
               type="button"
               aria-label="Prompt templates"
-              className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11.5px] text-muted transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg"
+              className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-meta text-muted transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg"
             >
               <BookText className="h-3.5 w-3.5" />
               Templates
@@ -126,7 +126,7 @@ function PickerBody({
           }}
           placeholder="Search templates"
           aria-label="Search templates"
-          className="h-10 flex-1 bg-transparent text-[13px] text-fg placeholder:text-steel focus:outline-none"
+          className="h-10 flex-1 bg-transparent text-body text-fg placeholder:text-steel focus:outline-none"
         />
       </div>
       <ul role="listbox" aria-label="Templates" className="min-h-0 flex-1 overflow-y-auto p-1">
@@ -143,27 +143,27 @@ function PickerBody({
                   i === active ? "bg-gunmetal/80" : "hover:bg-gunmetal/50",
                 )}
               >
-                <span className="flex items-center gap-2 text-[13px] font-medium text-fg">
+                <span className="flex items-center gap-2 text-body font-medium text-fg">
                   {t.name}
                   {fields.length > 0 && (
-                    <span className="rounded border border-line-strong px-1 text-[10px] font-normal text-steel">
+                    <span className="rounded border border-line-strong px-1 text-micro font-normal text-steel">
                       {fields.length} field{fields.length === 1 ? "" : "s"}
                     </span>
                   )}
                 </span>
-                <span className="line-clamp-2 text-[11.5px] leading-snug text-muted">{t.body}</span>
+                <span className="line-clamp-2 text-meta leading-snug text-muted">{t.body}</span>
               </button>
             </li>
           );
         })}
         {list.length === 0 && (
-          <li className="px-3 py-8 text-center text-[12.5px] text-steel">
+          <li className="px-3 py-8 text-center text-small text-steel">
             {templates.length === 0 ? "No templates yet." : "No templates match."}
           </li>
         )}
       </ul>
       <div className="flex items-center justify-between border-t border-line px-3 py-2">
-        <span className="flex items-center gap-1 text-[11px] text-steel">
+        <span className="flex items-center gap-1 text-micro text-steel">
           <Kbd>↑</Kbd>
           <Kbd>↓</Kbd>
           <Kbd>
@@ -173,7 +173,7 @@ function PickerBody({
         <button
           type="button"
           onClick={onManage}
-          className="flex items-center gap-1 text-[11.5px] text-muted transition-colors hover:text-fg"
+          className="flex items-center gap-1 text-meta text-muted transition-colors hover:text-fg"
         >
           <Settings2 className="h-3.5 w-3.5" />
           Manage templates
@@ -210,7 +210,7 @@ function FillForm({
         <Button type="button" size="icon-xs" variant="ghost" onClick={onBack} aria-label="Back to templates">
           <ArrowLeft className="!h-3.5 !w-3.5" />
         </Button>
-        <span className="truncate text-[13px] font-medium">{template.name}</span>
+        <span className="truncate text-body font-medium">{template.name}</span>
       </div>
       <div className="space-y-3 px-3 pb-2 pt-3">
         {fields.map((f, i) => (
@@ -225,7 +225,7 @@ function FillForm({
             />
           </div>
         ))}
-        <div className="max-h-28 overflow-y-auto rounded-lg border border-line bg-base/50 px-2.5 py-2 text-[11.5px] leading-relaxed text-muted">
+        <div className="max-h-28 overflow-y-auto rounded-lg border border-line bg-base/50 px-2.5 py-2 text-meta leading-relaxed text-muted">
           {preview.split(/(\{\{[^{}]+\}\})/g).map((part, i) =>
             /^\{\{/.test(part) ? (
               <span key={i} className="rounded bg-accent/10 px-0.5 text-accent">

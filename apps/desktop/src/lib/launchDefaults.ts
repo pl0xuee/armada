@@ -265,7 +265,7 @@ export function preflight(p: {
   if (p.worktree && folder && p.isGitRepo === false) {
     out.push({
       id: "not_git",
-      text: "This folder isn't a git repository with at least one commit, so a worktree can't be created. Turn Worktree off, or pick a repository.",
+      text: "This folder isn't set up for git yet. It needs at least one commit for a worktree. Turn off the worktree switch, or pick a different folder.",
     });
   }
   return out;

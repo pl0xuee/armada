@@ -182,7 +182,7 @@ export function CompareView() {
                   tabIndex={sel ? 0 : -1}
                   onClick={() => openCompare(g.id)}
                   className={cn(
-                    "flex h-8 max-w-[260px] shrink-0 items-center gap-2 rounded-lg border px-2.5 text-[12.5px] transition-colors",
+                    "flex h-8 max-w-[260px] shrink-0 items-center gap-2 rounded-lg border px-2.5 text-small transition-colors",
                     sel
                       ? "border-line-strong bg-raised text-fg edge"
                       : "border-transparent text-muted hover:bg-raised/60 hover:text-fg",
@@ -212,10 +212,8 @@ export function CompareView() {
         <div className="flex shrink-0 flex-wrap items-start gap-x-3 gap-y-1.5 rounded-xl border border-line bg-panel/60 px-4 py-3 edge">
           <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-steel">Prompt</div>
-            <p className="selectable mt-0.5 line-clamp-3 text-[13px] leading-relaxed text-fg">
-              {prompt ?? group.title}
-            </p>
+            <div className="eyebrow text-steel">Prompt</div>
+            <p className="selectable mt-0.5 line-clamp-3 text-body leading-relaxed text-fg">{prompt ?? group.title}</p>
           </div>
           {archived.length > 0 && (
             <Button size="xs" variant="ghost" className="ml-auto" onClick={() => setShowArchived((v) => !v)}>

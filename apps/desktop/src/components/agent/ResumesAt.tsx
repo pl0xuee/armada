@@ -27,9 +27,9 @@ export function ResumeLine({ agent, className }: { agent: Agent; className?: str
   const line = resumeLine(agent, enabled, now);
   const note = notResumingNote(agent, enabled);
   if (!line && !note) return null;
-  if (!line) return <div className={cn("text-[11.5px] text-steel", className)}>{note}</div>;
+  if (!line) return <div className={cn("text-meta text-steel", className)}>{note}</div>;
   return (
-    <div className={cn("text-[12px] font-medium leading-snug text-fg/90", className)} data-testid="resume-line">
+    <div className={cn("text-caption font-medium leading-snug text-fg/90", className)} data-testid="resume-line">
       <Timer className="mr-1 inline h-3 w-3 -translate-y-px text-warn" aria-hidden />
       {line.text}
       {line.countdown && <span className="whitespace-nowrap font-normal text-muted"> · {line.countdown}</span>}
@@ -37,7 +37,7 @@ export function ResumeLine({ agent, className }: { agent: Agent; className?: str
       <button
         type="button"
         onClick={() => void attempt("Couldn't cancel the automatic resume", () => api.cancelLimitResume(agent.id))}
-        className="ml-2 rounded text-[11.5px] font-normal text-steel underline decoration-line underline-offset-2 transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+        className="ml-2 rounded text-meta font-normal text-steel underline decoration-line underline-offset-2 transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
       >
         Cancel
       </button>

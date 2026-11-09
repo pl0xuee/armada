@@ -16,7 +16,10 @@ export function RememberedChoicesRow() {
 
   useEffect(() => {
     let live = true;
-    void api.configDefaults().then((d) => live && setDefaults(d), () => {});
+    void api.configDefaults().then(
+      (d) => live && setDefaults(d),
+      () => {},
+    );
     return () => {
       live = false;
     };
@@ -41,10 +44,10 @@ export function RememberedChoicesRow() {
       description="New agents start with the model, effort and other options you last picked for that provider. Permission mode is never remembered."
     >
       {groups.length === 0 ? (
-        <p className="text-[12px] text-steel">Nothing yet — change an option in a composer to remember it.</p>
+        <p className="text-caption text-steel">Nothing yet — change an option in a composer to remember it.</p>
       ) : (
         <div className="flex items-start justify-between gap-3">
-          <ul className="min-w-0 space-y-1 text-[12px] text-muted">
+          <ul className="min-w-0 space-y-1 text-caption text-muted">
             {groups.map((g) => (
               <li key={g.key} className="truncate">
                 <span className="text-fg">{g.label}</span>
@@ -61,7 +64,7 @@ export function RememberedChoicesRow() {
             </PopoverTrigger>
             <PopoverContent align="end" className="space-y-3">
               <p className="text-fg">Reset the defaults new agents start with?</p>
-              <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
+              <label className="flex cursor-pointer items-start gap-2 text-caption text-muted">
                 <Checkbox
                   checked={alsoAgents}
                   onCheckedChange={setAlsoAgents}

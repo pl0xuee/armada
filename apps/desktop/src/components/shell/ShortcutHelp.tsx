@@ -34,6 +34,7 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
       { keys: [modKey, "⇧", "A"], label: "Voice assistant: start, end or unmute (Esc ends)" },
       { keys: [modKey, "B"], label: "Show or hide the agent list" },
       { keys: [modKey, "1–9"], label: "Jump to an agent" },
+      { keys: isMac ? ["⌥", "↑", "↓"] : ["Alt", "↑", "↓"], label: "Previous or next agent (not while typing)" },
       { keys: [modKey, ","], label: "Settings" },
       { keys: [modKey, "+"], label: "Interface scale: larger" },
       { keys: [modKey, "−"], label: "Interface scale: smaller" },
@@ -51,7 +52,7 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
     rows: [
       { keys: ["⏎"], label: "Send (while the agent works: queue, start a helper, or ask, per Settings)" },
       { keys: [modKey, "⏎"], label: "While the agent works: start a helper agent with this message" },
-      { keys: [modKey, "⌥", "←/→"], label: "Move focus between tiled helper agents" },
+      { keys: [modKey, isMac ? "⌥" : "Alt", "←/→"], label: "Move focus between tiled helper agents" },
       { keys: ["⇧", "⏎"], label: "New line" },
       { keys: [modKey, "⇧", "D"], label: "Dictate: start or stop (⏎ stops and transcribes, Esc cancels)" },
       { keys: ["/"], label: "Slash commands (at the start of the message)" },
@@ -59,7 +60,10 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
       { keys: ["Esc"], label: "Stop this turn (press twice from an empty composer)" },
       { keys: [modKey, "`"], label: "Show or hide the workspace panel (terminals, scripts)" },
       { keys: [modKey, "⇧", "P"], label: "Show or hide the web preview beside the conversation" },
+      { keys: [modKey, "⇧", "R"], label: "Review the agent's changes (agents with their own worktree)" },
       { keys: ["F2"], label: "Rename the focused agent in the list" },
+      { keys: ["↑", "↓"], label: "Move between agents in the list (Home and End too)" },
+      { keys: isMac ? ["⌥", "↑", "↓"] : ["Alt", "↑", "↓"], label: "Move the focused project up or down" },
       { keys: ["/"], label: "Filter the agent list (when nothing is focused)" },
     ],
   },
@@ -98,15 +102,12 @@ export function ShortcutHelp() {
         <DialogBody className="grid gap-x-8 gap-y-5 pb-5 sm:grid-cols-2">
           {SECTIONS.map((sec) => (
             <section key={sec.title} aria-labelledby={`sc-${sec.title}`}>
-              <h3
-                id={`sc-${sec.title}`}
-                className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel"
-              >
+              <h3 id={`sc-${sec.title}`} className="mb-2 eyebrow text-steel">
                 {sec.title}
               </h3>
               <dl className="space-y-1.5">
                 {sec.rows.map((r) => (
-                  <div key={r.label} className="flex items-center justify-between gap-3 text-[12.5px]">
+                  <div key={r.label} className="flex items-center justify-between gap-3 text-small">
                     <dt className="text-muted">{r.label}</dt>
                     <dd className="flex shrink-0 gap-0.5">
                       {r.keys.map((k) => (

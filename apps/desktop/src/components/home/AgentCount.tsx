@@ -24,14 +24,14 @@ export function AgentCount({
   className?: string;
 }) {
   const step =
-    "flex h-5 w-5 items-center justify-center rounded-md text-muted enabled:hover:bg-gunmetal enabled:hover:text-fg disabled:opacity-35 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25";
+    "flex h-5 w-5 items-center justify-center rounded-md text-muted enabled:hover:bg-gunmetal enabled:hover:text-fg disabled:opacity-45 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/25";
   return (
     <Tooltip content={`Start up to ${max} separate agents on this task, each in its own worktree`}>
       <div
         role="group"
         aria-label="Number of agents"
         className={cn(
-          "inline-flex h-7 items-center gap-1 rounded-lg border bg-base/50 pl-2 pr-1 text-[12px] text-fg/90 transition-colors",
+          "inline-flex h-7 items-center gap-1 rounded-lg border bg-base/50 pl-2 pr-1 text-caption text-fg/90 transition-colors",
           value > 1 ? "border-accent/40 bg-accent/[0.07]" : "border-line",
           className,
         )}

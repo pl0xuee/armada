@@ -76,7 +76,12 @@ function HeaderMeter({ agent, compact }: { agent: Agent; compact?: boolean }) {
     for (const a of Object.values(s.agents)) sum += a.costUsd;
     return sum;
   });
-  const daily = useBudgetStatus(fleetCost);
+  // No daily limit means nothing to measure, so no reads.
+  const hasDaily = useApp((s) => {
+    const c = s.settings;
+    return !!c && (c.dailyBudgetUsd != null || c.dailyBudgetTokens != null || c.dailyBudgetTurns != null);
+  });
+  const daily = useBudgetStatus(fleetCost, hasDaily);
   const { meters, equivalent } = useMeters(agent, daily);
   if (meters.length === 0) return null;
   const worst = worstMeter(meters);

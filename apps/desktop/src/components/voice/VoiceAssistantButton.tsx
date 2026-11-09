@@ -67,10 +67,12 @@ export function VoiceAssistantButton({ compact = false }: { compact?: boolean })
         aria-pressed={live}
         aria-keyshortcuts={isMac ? "Meta+Shift+A" : "Control+Shift+A"}
         className={cn(
-          "relative flex h-[26px] shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[12px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+          "relative flex h-[26px] shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-caption font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
           live
             ? "border-accent/60 bg-accent/15 text-accent shadow-[0_0_14px_-3px_color-mix(in_srgb,var(--accent)_70%,transparent)]"
-            : "border-accent/50 bg-accent text-accent-fg shadow-[0_0_14px_-4px_color-mix(in_srgb,var(--accent)_80%,transparent)] hover:brightness-110",
+            : ready
+              ? "border-accent/50 bg-accent text-accent-fg shadow-[0_0_14px_-4px_color-mix(in_srgb,var(--accent)_80%,transparent)] hover:brightness-110"
+              : "border-line bg-transparent text-muted hover:border-accent/50 hover:text-fg",
         )}
       >
         <AudioLines
@@ -111,7 +113,7 @@ export function TalkHero() {
       </span>
       <span className="min-w-0">
         <span className="block truncate text-[13.5px] font-semibold">{live ? (status ?? label) : label}</span>
-        <span className="block truncate text-[12px] text-muted">
+        <span className="block truncate text-caption text-muted">
           {live
             ? paused
               ? "Press to unmute"

@@ -13,7 +13,7 @@ export function LfsTag({ className }: { className?: string }) {
     <span
       title="Stored with Git LFS"
       className={cn(
-        "inline-flex h-4 shrink-0 items-center rounded border border-line-strong px-1 font-sans text-[11px] font-semibold uppercase tracking-wide text-steel",
+        "inline-flex h-4 shrink-0 items-center rounded border border-line-strong px-1 font-sans eyebrow text-steel",
         className,
       )}
     >
@@ -144,15 +144,15 @@ function FileRow({
         )}
       />
       <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1 truncate font-mono text-[12px] text-fg">
+        <span className="flex items-center gap-1 truncate font-mono text-caption text-fg">
           {viewed && <Check className="h-3 w-3 shrink-0 text-ok" aria-hidden />}
           <span className="truncate">{name}</span>
           {file.lfs && <LfsTag />}
         </span>
-        {dir && <span className="block truncate font-mono text-[11px] text-steel">{dir}</span>}
+        {dir && <span className="block truncate font-mono text-micro text-steel">{dir}</span>}
       </span>
       <span className="flex shrink-0 flex-col items-end gap-1">
-        <span className="font-mono text-[11px] tabular">
+        <span className="font-mono text-micro tabular">
           <span className="text-ok">+{file.additions}</span> <span className="text-err">−{file.deletions}</span>
         </span>
         <DiffBar additions={file.additions} deletions={file.deletions} />

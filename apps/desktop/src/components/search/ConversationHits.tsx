@@ -57,10 +57,10 @@ export function Snippet({ text }: { text: string }) {
 }
 
 const itemClass =
-  "group flex h-auto min-h-10 cursor-default select-none items-center gap-3 rounded-lg px-2.5 py-2 text-[13px] text-fg outline-none data-[selected=true]:bg-gunmetal/80 data-[selected=true]:shadow-[inset_0_0_0_1px_var(--border-strong)] [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0";
+  "group flex h-auto min-h-10 cursor-default select-none items-center gap-3 rounded-lg px-2.5 py-2 text-body text-fg outline-none data-[selected=true]:bg-gunmetal/80 data-[selected=true]:shadow-[inset_0_0_0_1px_var(--border-strong)] [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0";
 
 const groupClass =
-  "px-1.5 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2.5 [&_[cmdk-group-heading]]:text-[10.5px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.08em] [&_[cmdk-group-heading]]:text-steel";
+  "px-1.5 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2.5 [&_[cmdk-group-heading]]:text-micro [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.08em] [&_[cmdk-group-heading]]:text-steel";
 
 function HitRow({
   hit,
@@ -85,10 +85,10 @@ function HitRow({
         {KIND_ICON[hit.kind] ?? <History />}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[12.5px] text-fg/90">
+        <span className="block truncate text-small text-fg/90">
           <Snippet text={hit.snippet} />
         </span>
-        <span className="block truncate text-[11px] text-steel">
+        <span className="block truncate text-micro text-steel">
           {showAgent && `${agent?.title ?? "Deleted agent"} · `}
           {KIND_LABEL[hit.kind] ?? hit.kind.replace("_", " ")} · {relativeTime(hit.ts)}
         </span>
@@ -100,12 +100,12 @@ function HitRow({
 function GroupHeading({ group, agent }: { group: SearchGroup; agent?: Agent }) {
   return (
     <span className="flex min-w-0 items-baseline gap-2 normal-case tracking-normal">
-      <span className="truncate text-[12px] font-medium text-fg/90">{agent?.title ?? "Deleted agent"}</span>
-      <span className="truncate text-[11px] font-normal text-steel">
+      <span className="truncate text-caption font-medium text-fg/90">{agent?.title ?? "Deleted agent"}</span>
+      <span className="truncate text-micro font-normal text-steel">
         {agent ? basename(agent.projectPath) : ""}
         {agent?.archived ? " · archived" : ""}
       </span>
-      <span className="ml-auto shrink-0 text-[11px] font-normal text-steel tabular">
+      <span className="ml-auto shrink-0 text-micro font-normal text-steel tabular">
         {group.total} {group.total === 1 ? "match" : "matches"}
       </span>
     </span>
@@ -142,14 +142,14 @@ export function ConversationHits({
   if (full) {
     if (term.length < 2) {
       return (
-        <div className="px-4 py-10 text-center text-[13px] text-steel">
+        <div className="px-4 py-10 text-center text-body text-steel">
           Search messages, tool calls, files and plans across every agent, archived ones included.
         </div>
       );
     }
     if (groups.length === 0) {
       return (
-        <div className="px-4 py-10 text-center text-[13px] text-steel">
+        <div className="px-4 py-10 text-center text-body text-steel">
           {searching ? "Searching…" : `No conversation mentions “${term}”.`}
           {!searching && results?.indexing && <Indexing />}
         </div>
@@ -169,7 +169,7 @@ export function ConversationHits({
             ))}
           </Command.Group>
         ))}
-        <div className="px-3.5 pb-2 pt-1 text-[11px] text-steel">
+        <div className="px-3.5 pb-2 pt-1 text-micro text-steel">
           {results?.truncated && "Showing the best matches. Add a word to narrow it down. "}
           {results?.indexing && <Indexing inline />}
         </div>
@@ -187,7 +187,7 @@ export function ConversationHits({
         value="history:see-all"
         forceMount
         onSelect={onSeeAll}
-        className="flex h-9 cursor-default select-none items-center gap-3 rounded-lg px-2.5 text-[12.5px] text-muted outline-none data-[selected=true]:bg-gunmetal/80 data-[selected=true]:text-fg"
+        className="flex h-9 cursor-default select-none items-center gap-3 rounded-lg px-2.5 text-small text-muted outline-none data-[selected=true]:bg-gunmetal/80 data-[selected=true]:text-fg"
       >
         <span className="w-6 shrink-0" />
         See all matches in {groups.length} {groups.length === 1 ? "conversation" : "conversations"}
@@ -198,7 +198,7 @@ export function ConversationHits({
 
 function Indexing({ inline }: { inline?: boolean }) {
   return (
-    <span className={inline ? "" : "mt-1 block text-[11.5px]"}>
+    <span className={inline ? "" : "mt-1 block text-meta"}>
       Older conversations are still being indexed, so results may be incomplete.
     </span>
   );

@@ -156,7 +156,7 @@ export function QuestionSection({
           <MessageCircleQuestion className="h-4 w-4" aria-hidden />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-x-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-warn">
+          <div className="flex min-w-0 items-center gap-x-2 eyebrow text-warn">
             <span className="shrink-0">{identity.short} has a question</span>
             {item.source && (
               <span className="flex min-w-0 items-center gap-1 font-medium normal-case tracking-normal text-steel">
@@ -365,7 +365,7 @@ function ChoiceButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "inline-flex h-8 max-w-full items-center gap-2 rounded-lg border px-3 text-[13px] font-medium transition-colors disabled:pointer-events-none disabled:opacity-50",
+        "inline-flex h-8 max-w-full items-center gap-2 rounded-lg border px-3 text-body font-medium transition-colors disabled:pointer-events-none disabled:opacity-45",
         selected
           ? "border-warn/60 bg-warn/15 text-fg"
           : ghost
@@ -482,7 +482,7 @@ function Stepper({
   return (
     <div className="border-t border-warn/15 bg-base/30 px-3.5 pt-2.5">
       {many && (
-        <div className="mb-2 flex items-center gap-2 text-[11.5px] text-steel">
+        <div className="mb-2 flex items-center gap-2 text-meta text-steel">
           <span className="tabular">
             Question {step + 1} of {groups.length}
           </span>

@@ -71,6 +71,8 @@ pub enum TurnOutcome {
 }
 
 const FLUSH_EVERY: Duration = Duration::from_millis(400);
+/// Streamed reply text is saved less often: each save rewrites the whole text so far.
+const STREAM_FLUSH_EVERY: Duration = Duration::from_millis(1000);
 /// Full re-sends of a tool call that keeps changing are limited to this rate.
 const TOOL_EMIT_EVERY: Duration = Duration::from_millis(100);
 const MAX_OUTPUT: usize = 64 * 1024;
@@ -195,6 +197,9 @@ pub struct AgentCtx {
     /// Orders a process's event handling against retiring/replacing it (see
     /// `with_current_generation`). Always taken before `st`, never the other way.
     gate: Mutex<()>,
+    /// Makes "read the queue, store it, show it" one step (see `publish_queue`). Taken
+    /// before `st` and the agents lock, and nothing else is taken while holding it.
+    publish: Mutex<()>,
 }
 
 impl AgentCtx {
@@ -245,15 +250,42 @@ impl AgentCtx {
             }),
             settle: Mutex::new(()),
             gate: Mutex::new(()),
+            publish: Mutex::new(()),
         }
+    }
+
+    /// The item with its pictures moved to files, for storing and sending: the
+    /// in-memory copy keeps the bytes, the stored and sent one only names the file.
+    /// None when it has no inline pictures.
+    fn slim(&self, item: &TimelineItem) -> Option<TimelineItem> {
+        let core = self.core.upgrade()?;
+        crate::pictures::slim(&crate::pictures::dir(core.data_dir()), item)
     }
 
     fn persist(&self, item: &TimelineItem) {
         if let Some(core) = self.core.upgrade() {
-            if let Err(e) = core.db().put_item(item) {
+            let slim = self.slim(item);
+            if let Err(e) = core.db().put_item(slim.as_ref().unwrap_or(item)) {
                 tracing::warn!("persisting item: {e:#}");
             }
         }
+    }
+
+    fn persist_draft(&self, item: &TimelineItem) {
+        if let Some(core) = self.core.upgrade() {
+            let slim = self.slim(item);
+            if let Err(e) = core.db().put_item_draft(slim.as_ref().unwrap_or(item)) {
+                tracing::warn!("persisting item: {e:#}");
+            }
+        }
+    }
+
+    /// Stores the item and sends it to the clients in full.
+    fn persist_and_emit(&self, item: &TimelineItem) {
+        let slim = self.slim(item);
+        let item = slim.as_ref().unwrap_or(item);
+        self.persist(item);
+        self.emit(KvistcodeEvent::ItemUpserted { item: item.clone() });
     }
 
     fn emit(&self, event: KvistcodeEvent) {
@@ -338,9 +370,7 @@ impl AgentCtx {
         st.dirty.remove(id);
         st.unsent.remove(id);
         if let Some(item) = st.items.get(id) {
-            let item = item.clone();
-            self.persist(&item);
-            self.emit(KvistcodeEvent::ItemUpserted { item });
+            self.persist_and_emit(item);
             st.last_emit.insert(id.to_string(), Instant::now());
         }
     }
@@ -362,6 +392,23 @@ impl AgentCtx {
         st.last_flush = Instant::now();
     }
 
+    /// The periodic save while text streams: the streaming item is stored without
+    /// re-indexing its search text (the final write does that), everything else in full.
+    fn flush_streaming_locked(&self, st: &mut CtxState) {
+        self.send_unsent_locked(st);
+        let streaming = st.stream.as_ref().map(|(id, _)| id.clone());
+        for id in st.dirty.drain().collect::<Vec<_>>() {
+            if let Some(item) = st.items.get(&id) {
+                if streaming.as_deref() == Some(id.as_str()) {
+                    self.persist_draft(item);
+                } else {
+                    self.persist(item);
+                }
+            }
+        }
+        st.last_flush = Instant::now();
+    }
+
     pub fn flush(&self) {
         let mut st = self.st.lock();
         self.flush_locked(&mut st);
@@ -373,8 +420,7 @@ impl AgentCtx {
         if let Some((id, _)) = st.stream.take() {
             st.dirty.remove(&id);
             if let Some(item) = st.items.get(&id) {
-                self.persist(item);
-                self.emit(KvistcodeEvent::ItemUpserted { item: item.clone() });
+                self.persist_and_emit(item);
             }
         }
     }
@@ -391,8 +437,7 @@ impl AgentCtx {
             body,
         };
         let id = item.id.clone();
-        self.persist(&item);
-        self.emit(KvistcodeEvent::ItemUpserted { item: item.clone() });
+        self.persist_and_emit(&item);
         st.items.insert(id.clone(), item);
         st.last_emit.insert(id.clone(), Instant::now());
         id
@@ -497,6 +542,14 @@ impl AgentCtx {
                 id
             }
         };
+        // The stream moves on without ending (Codex items interleave): the item it leaves
+        // may have been saved as a draft, so store it in full now.
+        if let Some((prev, _)) = st.stream.take().filter(|(prev, _)| *prev != id) {
+            st.dirty.remove(&prev);
+            if let Some(item) = st.items.get(&prev) {
+                self.persist(item);
+            }
+        }
         st.stream = Some((id.clone(), kind));
         let mut offset = None;
         let CtxState { items, lens, .. } = &mut *st;
@@ -519,8 +572,8 @@ impl AgentCtx {
             delta: delta.to_string(),
             offset: offset.unwrap_or(0),
         });
-        if st.last_flush.elapsed() > FLUSH_EVERY {
-            self.flush_locked(&mut st);
+        if st.last_flush.elapsed() > STREAM_FLUSH_EVERY {
+            self.flush_streaming_locked(&mut st);
         }
         if kind == StreamKind::Message {
             drop(st);
@@ -685,6 +738,14 @@ impl AgentCtx {
             _ => return,
         };
         self.emit_output_delta_locked(&mut st, &id, old_len, delta);
+    }
+
+    /// Whether `tool_call_body` would find something, without cloning the body.
+    pub fn has_tool_call(&self, ext_id: &str) -> bool {
+        let st = self.st.lock();
+        st.ext
+            .get(ext_id)
+            .is_some_and(|id| st.items.contains_key(id))
     }
 
     pub fn tool_call_body(&self, ext_id: &str) -> Option<ItemBody> {
@@ -1157,6 +1218,10 @@ impl AgentCtx {
     }
 
     fn publish_queue(&self) {
+        // One publisher at a time, reading the queue inside: two threads that each read
+        // it and then store it could otherwise store an older reading last (a prompt put
+        // back by a dying process vanishing from the list and the saved queue).
+        let _publishing = self.publish.lock();
         let (queue, paused, stored) = {
             let st = self.st.lock();
             let queue: Vec<QueuedPrompt> = st
@@ -2712,5 +2777,29 @@ mod tests {
         assert!(is_rate_limit("Credit balance is too low"));
         assert!(is_rate_limit("RESOURCE_EXHAUSTED: quota"));
         assert!(!is_rate_limit("Exited with status (429) in file.rs:429"));
+    }
+
+    struct NullSink;
+    impl crate::EventSink for NullSink {
+        fn emit(&self, _: KvistcodeEvent) {}
+    }
+
+    /// Two Codex items stream interleaved. A flush while the first is the stream item
+    /// stores it as a draft; when the stream moves to the second the first must still
+    /// end up stored in full and searchable.
+    #[test]
+    fn an_item_the_stream_leaves_is_stored_in_full() {
+        let data = crate::testutil::scratch("stream-switch");
+        let core = crate::Core::open(data, std::sync::Arc::new(NullSink)).unwrap();
+        let ctx = AgentCtx::new(core.weak(), "agent".into(), 0);
+        ctx.append_text(StreamKind::Message, Some("a"), "alpha");
+        ctx.append_text(StreamKind::Message, Some("b"), "beta");
+        ctx.append_text(StreamKind::Message, Some("a"), " first");
+        std::thread::sleep(STREAM_FLUSH_EVERY + Duration::from_millis(100));
+        // Flushes while A streams: A is saved as a draft.
+        ctx.append_text(StreamKind::Message, Some("a"), " second");
+        assert!(core.db().search("second").unwrap().is_empty());
+        ctx.append_text(StreamKind::Message, Some("b"), " more");
+        assert_eq!(core.db().search("second").unwrap().len(), 1);
     }
 }

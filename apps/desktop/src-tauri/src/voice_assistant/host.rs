@@ -1177,7 +1177,7 @@ impl KvistcodeTools {
             Ok(a) => a,
             Err(o) => return *o,
         };
-        let items = self.core.items(&agent.id).unwrap_or_default();
+        let items = self.core.pending_requests(&agent.id).unwrap_or_default();
         let pending: Vec<Value> = items
             .iter()
             .filter_map(|i| match &i.body {

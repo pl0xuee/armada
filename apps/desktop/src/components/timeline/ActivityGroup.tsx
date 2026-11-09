@@ -106,15 +106,15 @@ export const ActivityGroup = memo(function ActivityGroup({
             <CircleCheck className="h-3.5 w-3.5 text-ok/60" aria-hidden />
           )}
         </span>
-        <span className={cn("min-w-0 truncate text-[12.5px]", live && "text-muted")} title={text}>
+        <span className={cn("min-w-0 truncate text-small", live && "text-muted")} title={text}>
           {text}
         </span>
         {!live && failed > 0 && (
-          <span className="shrink-0 text-[11.5px] text-err/90" aria-label={`${failed} failed`}>
+          <span className="shrink-0 text-meta text-err/90" aria-label={`${failed} failed`}>
             · {failed} failed
           </span>
         )}
-        <span className="shrink-0 text-[11.5px] tabular-nums text-steel">· {pluralize(items.length, "step")}</span>
+        <span className="shrink-0 text-meta tabular-nums text-steel">· {pluralize(items.length, "step")}</span>
         <ChevronRight
           className={cn(
             "h-3 w-3 shrink-0 text-steel transition-transform duration-150 group-hover/trace:text-muted",

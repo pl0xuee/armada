@@ -70,12 +70,12 @@ export const WorkflowCard = memo(function WorkflowCard({ item, agentId }: { item
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="inline-flex h-5 items-center rounded-md border border-violet/30 bg-violet/10 px-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-violet">
+            <span className="inline-flex h-5 items-center rounded-md border border-violet/30 bg-violet/10 px-1.5 eyebrow text-violet">
               Workflow
             </span>
-            {running && <span className="text-[11.5px] leading-4 text-accent">Running in background</span>}
+            {running && <span className="text-meta leading-4 text-accent">Running in background</span>}
           </div>
-          <p className="mt-1 break-words text-[13px] font-medium leading-snug text-fg">{summary}</p>
+          <p className="mt-1 break-words text-body font-medium leading-snug text-fg">{summary}</p>
         </div>
         <span className="mt-1 shrink-0" aria-live="off">
           {running ? (
@@ -93,7 +93,7 @@ export const WorkflowCard = memo(function WorkflowCard({ item, agentId }: { item
         aria-expanded={open}
         aria-controls={listId}
         onClick={() => setOpen((v) => !v)}
-        className="flex h-8 w-full items-center gap-1.5 border-t border-line px-3 text-left text-[11.5px] leading-4 text-muted transition-colors enabled:hover:bg-raised/40 enabled:hover:text-fg"
+        className="flex h-8 w-full items-center gap-1.5 border-t border-line px-3 text-left text-meta leading-4 text-muted transition-colors enabled:hover:bg-raised/40 enabled:hover:text-fg"
       >
         <ChevronRight
           className={cn(

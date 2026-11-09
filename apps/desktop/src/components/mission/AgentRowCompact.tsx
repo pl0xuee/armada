@@ -102,7 +102,7 @@ export const AgentRowCompact = memo(function AgentRowCompact({
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-1.5">
             <span
-              className={cn("truncate text-[13px]", agent.unread ? "font-semibold text-fg" : "font-medium text-fg/90")}
+              className={cn("truncate text-body", agent.unread ? "font-semibold text-fg" : "font-medium text-fg/90")}
             >
               {agent.title}
             </span>
@@ -111,7 +111,7 @@ export const AgentRowCompact = memo(function AgentRowCompact({
               <Tooltip content="Hit its rate limit">
                 <span className="flex min-w-0 shrink-[2] items-center gap-1 text-warn" aria-label="Rate limit">
                   <Gauge className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate text-[11px]">
+                  <span className="truncate text-micro">
                     <ResumesAt agent={agent} />
                   </span>
                 </span>
@@ -119,14 +119,14 @@ export const AgentRowCompact = memo(function AgentRowCompact({
             )}
             {summary.subagents > 0 && (
               <Tooltip content={`${summary.subagents} sub-agent${summary.subagents === 1 ? "" : "s"} running`}>
-                <span className="flex shrink-0 items-center gap-0.5 text-[11px] text-accent">
+                <span className="flex shrink-0 items-center gap-0.5 text-micro text-accent">
                   <Workflow className="h-3 w-3" />
                   {summary.subagents}
                 </span>
               </Tooltip>
             )}
           </div>
-          <div className="truncate text-[11.5px] text-steel">
+          <div className="truncate text-meta text-steel">
             {account?.name ?? identity.short} · {basename(agent.projectPath)}
             <span className="@3xl:hidden">
               {line && (
@@ -141,7 +141,7 @@ export const AgentRowCompact = memo(function AgentRowCompact({
 
         <div
           className={cn(
-            "hidden min-w-0 items-center gap-1.5 font-mono text-[11.5px] @3xl:flex",
+            "hidden min-w-0 items-center gap-1.5 font-mono text-meta @3xl:flex",
             pending || asking ? "text-warn" : working ? "text-fg/85" : "text-muted",
           )}
         >
@@ -206,12 +206,12 @@ export const AgentRowCompact = memo(function AgentRowCompact({
         ) : needsRecovery(agent) ? (
           <RecoveryActions agent={agent} compact />
         ) : (
-          <span className="hidden items-center justify-end gap-1.5 text-right text-[11.5px] tabular text-steel @xl:inline-flex">
+          <span className="hidden items-center justify-end gap-1.5 text-right text-meta tabular text-steel @xl:inline-flex">
             <BudgetChip agent={agent} compact />
             {agentCostText(agent)}
           </span>
         )}
-        <span className="w-9 text-right text-[11px] text-steel">
+        <span className="w-9 text-right text-micro text-steel">
           <RelTime ts={agent.lastActivityAt} />
         </span>
       </div>

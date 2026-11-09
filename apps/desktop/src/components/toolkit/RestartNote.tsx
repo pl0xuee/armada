@@ -26,7 +26,7 @@ export function RestartNote({
     <p
       role="note"
       className={cn(
-        "flex items-start gap-2 rounded-lg border px-3 py-2 text-[12px] leading-[18px]",
+        "flex items-start gap-2 rounded-lg border px-3 py-2 text-caption leading-[18px]",
         changed && who ? "border-warn/30 bg-warn/8 text-fg" : "border-line bg-card/40 text-muted",
         className,
       )}

@@ -97,18 +97,18 @@ export function WorkflowAgentList({ agents, compact }: { agents: readonly Workfl
               <WorkflowDot status={a.status} />
               <span
                 className={cn(
-                  "min-w-0 truncate text-[12px] font-medium leading-4",
+                  "min-w-0 truncate text-caption font-medium leading-4",
                   compact ? "flex-1" : "w-[136px] shrink-0",
                   !working && "text-muted",
                 )}
               >
                 {a.label}
               </span>
-              {compact && <span className="shrink-0 text-[11.5px] leading-4 text-steel tabular">{calls}</span>}
+              {compact && <span className="shrink-0 text-meta leading-4 text-steel tabular">{calls}</span>}
             </div>
             <div
               className={cn(
-                "min-w-0 truncate text-[11.5px] leading-4",
+                "min-w-0 truncate text-meta leading-4",
                 working ? "text-steel" : "text-steel",
                 compact ? "pl-4" : "flex-1",
                 a.status === "failed" && "text-err",
@@ -119,9 +119,9 @@ export function WorkflowAgentList({ agents, compact }: { agents: readonly Workfl
             </div>
             {!compact && (
               <>
-                <span className="w-[52px] shrink-0 text-right text-[11.5px] leading-4 text-steel tabular">{calls}</span>
+                <span className="w-[52px] shrink-0 text-right text-meta leading-4 text-steel tabular">{calls}</span>
                 <span
-                  className="w-[52px] shrink-0 text-right text-[11.5px] leading-4 text-steel tabular"
+                  className="w-[52px] shrink-0 text-right text-meta leading-4 text-steel tabular"
                   title={a.idleSecs !== null ? `Last activity ${formatElapsed(a.idleSecs * 1000)} ago` : undefined}
                 >
                   {idle ?? ""}
@@ -168,9 +168,9 @@ export function WorkflowSection({ agentId, call, compact }: { agentId: string; c
           ) : (
             <CircleCheck className="h-3.5 w-3.5 shrink-0 text-ok" aria-hidden />
           )}
-          <span className="min-w-0 truncate text-[12px] font-medium leading-4 text-fg">{sum.headline}</span>
+          <span className="min-w-0 truncate text-caption font-medium leading-4 text-fg">{sum.headline}</span>
           {!finished && sum.step && !compact && (
-            <span className="min-w-0 truncate text-[11.5px] leading-4 text-steel" title={sum.step}>
+            <span className="min-w-0 truncate text-meta leading-4 text-steel" title={sum.step}>
               <span aria-hidden className="mr-2 text-line-strong">
                 ·
               </span>

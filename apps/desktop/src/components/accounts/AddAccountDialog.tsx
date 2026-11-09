@@ -77,6 +77,7 @@ export function AddAccountDialog({
         : `Account ${existing + 1}`;
   const finalName = name.trim() || placeholder;
   const valid = isLocal ? localServer !== null : auth === "oauth" || apiKey.trim().length >= 8;
+  const keyTooShort = !isLocal && auth === "api_key" && apiKey.trim().length > 0 && !valid;
 
   const submit = async () => {
     if (!valid || busy) return;
@@ -208,6 +209,7 @@ export function AddAccountDialog({
                         onChange={(e) => setApiKey(e.target.value)}
                         placeholder={KEY_HINT[provider as CloudProvider].placeholder}
                         autoComplete="off"
+                        aria-describedby={keyTooShort ? "add-acc-key-hint" : undefined}
                         className="pr-10 font-mono"
                       />
                       <button
@@ -219,13 +221,18 @@ export function AddAccountDialog({
                         {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
-                    <p className="mt-2 flex items-center gap-1.5 text-[11.5px] text-steel">
+                    {keyTooShort && (
+                      <p id="add-acc-key-hint" className="mt-1.5 text-meta text-muted">
+                        Paste the whole API key (at least 8 characters).
+                      </p>
+                    )}
+                    <p className="mt-2 flex items-center gap-1.5 text-meta text-steel">
                       <ShieldCheck className="h-3.5 w-3.5 text-ok" />
                       Stored in your OS keychain, only injected into this account's agents.
                     </p>
                   </div>
                 ) : (
-                  <p className="rounded-lg border border-line bg-base/50 px-3 py-2.5 text-[12px] leading-relaxed text-muted">
+                  <p className="rounded-lg border border-line bg-base/50 px-3 py-2.5 text-caption leading-relaxed text-muted">
                     After you click <span className="text-fg">Add & sign in</span>, {PROVIDERS[provider].tagline}'s own
                     login runs in a terminal and opens your browser. Kvistcode never sees your password or tokens.
                   </p>
@@ -284,8 +291,8 @@ function AuthOption({
     >
       {icon}
       <span className="min-w-0">
-        <span className="block text-[13px] font-medium text-fg">{title}</span>
-        <span className="block text-[11.5px] text-muted">{description}</span>
+        <span className="block text-body font-medium text-fg">{title}</span>
+        <span className="block text-meta text-muted">{description}</span>
       </span>
     </button>
   );

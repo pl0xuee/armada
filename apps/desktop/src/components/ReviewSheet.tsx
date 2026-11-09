@@ -80,7 +80,7 @@ export function ReviewSheet() {
   return (
     <D.Root open={!!agent} onOpenChange={(o) => !o && setReviewAgent(null)}>
       <D.Portal>
-        <D.Overlay className="anim-fade fixed inset-0 z-50 bg-[var(--scrim)] backdrop-blur-[2px]" />
+        <D.Overlay className="anim-fade fixed inset-0 z-50 bg-[var(--scrim)]" />
         <D.Content
           aria-describedby={undefined}
           onOpenAutoFocus={focus.onOpenAutoFocus}
@@ -383,8 +383,19 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
     setRevertError(null);
     try {
       await api.revertPatch(agent.id, patch);
+      const undo = () => {
+        api.applyPatch(agent.id, patch).then(
+          () => {
+            toast.success("Revert undone");
+            void load();
+          },
+          (e) => toast.error("Couldn't undo the revert", { description: errorMessage(e) }),
+        );
+      };
       toast.success(revertTarget.hunk === null ? `Reverted ${basename(revertTarget.path)}` : "Reverted the hunk", {
         description: revertTarget.path,
+        duration: 12000,
+        action: { label: "Undo", onClick: undo },
       });
       setRevertTarget(null);
       void load();
@@ -567,13 +578,13 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="md" />
         <div className="min-w-0 flex-1">
           <D.Title className="truncate text-[15px] font-semibold tracking-tight">Review · {agent.title}</D.Title>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-muted">
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-caption text-muted">
             <GitBranch className="h-3.5 w-3.5 text-steel" />
-            <span className="font-mono text-[11.5px]">{agent.branch ?? "working tree"}</span>
+            <span className="font-mono text-meta">{agent.branch ?? "working tree"}</span>
             {agent.baseBranch && (
               <>
                 <span className="text-steel">into</span>
-                <span className="font-mono text-[11.5px]">{agent.baseBranch}</span>
+                <span className="font-mono text-meta">{agent.baseBranch}</span>
               </>
             )}
             {diff && (
@@ -581,8 +592,8 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
                 <span className="text-line-strong">·</span>
                 <span className="inline-flex items-center gap-2 whitespace-nowrap">
                   {pluralize(diff.files.length, "file")}
-                  <span className="font-mono text-[11px] text-ok">+{totals.add}</span>
-                  <span className="font-mono text-[11px] text-err">−{totals.del}</span>
+                  <span className="font-mono text-micro text-ok">+{totals.add}</span>
+                  <span className="font-mono text-micro text-err">−{totals.del}</span>
                 </span>
                 {diff.ahead > 0 && (
                   <>
@@ -591,7 +602,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
                   </>
                 )}
                 {uncommitted > 0 && (
-                  <span className="inline-flex h-5 items-center rounded-md border border-warn/35 bg-warn/10 px-1.5 text-[11px] font-medium text-warn">
+                  <span className="inline-flex h-5 items-center rounded-md border border-warn/35 bg-warn/10 px-1.5 text-micro font-medium text-warn">
                     {uncommitted} uncommitted
                   </span>
                 )}
@@ -611,7 +622,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
       {diff?.truncated && (
         <div
           role="note"
-          className="flex shrink-0 items-start gap-2 border-b border-warn/30 bg-warn/[0.07] px-5 py-2 text-[12.5px]"
+          className="flex shrink-0 items-start gap-2 border-b border-warn/30 bg-warn/[0.07] px-5 py-2 text-small"
         >
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
           <span className="text-muted">
@@ -625,9 +636,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         {/* Narrow windows: a file picker bar instead of the sidebar. */}
         {diff && diff.files.length > 0 && (
           <div className="hidden shrink-0 items-center gap-2.5 border-b border-line bg-panel px-3 py-2 max-[900px]:flex">
-            <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel">
-              {pluralize(diff.files.length, "file")}
-            </span>
+            <span className="shrink-0 eyebrow text-steel">{pluralize(diff.files.length, "file")}</span>
             <FilePicker files={shownFiles} selected={selected} onSelect={jump} />
           </div>
         )}
@@ -635,15 +644,13 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
           aria-label="Changed files"
           className="flex w-[250px] shrink-0 flex-col border-r border-line bg-panel max-[900px]:hidden"
         >
-          <div className="px-4 pb-1.5 pt-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel">
-            Changed files
-          </div>
+          <div className="px-4 pb-1.5 pt-3 eyebrow text-steel">Changed files</div>
           {ordered.compactCount > 0 && (
             <button
               type="button"
               onClick={() => setHideCompactChoice(!hideCompact)}
               aria-pressed={hideCompact}
-              className="mx-2 mb-1.5 rounded-md border border-line px-2 py-1 text-left text-[11.5px] text-muted transition-colors hover:bg-raised/60 hover:text-fg"
+              className="mx-2 mb-1.5 rounded-md border border-line px-2 py-1 text-left text-meta text-muted transition-colors hover:bg-raised/60 hover:text-fg"
             >
               {hideCompact
                 ? `Show ${ordered.compactCount.toLocaleString()} binary/LFS files`
@@ -669,9 +676,9 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
           className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-base px-4 outline-none max-sm:px-2.5"
         >
           {error ? (
-            <div className="m-4 rounded-xl border border-err/30 bg-err/[0.06] p-4 text-[13px]">
+            <div className="m-4 rounded-xl border border-err/30 bg-err/[0.06] p-4 text-body">
               <p className="font-medium text-err">Couldn't load the diff</p>
-              <p className="selectable mt-1 break-words font-mono text-[12px] text-muted">{error}</p>
+              <p className="selectable mt-1 break-words font-mono text-caption text-muted">{error}</p>
               <Button size="sm" variant="secondary" className="mt-3" onClick={() => void load()}>
                 <RefreshCw /> Retry
               </Button>
@@ -683,7 +690,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
               <Skeleton className="h-9 rounded-xl" />
               <Skeleton className="h-9 rounded-xl" />
               {slow && (
-                <p role="status" className="pt-2 text-center text-[12.5px] text-muted">
+                <p role="status" className="pt-2 text-center text-small text-muted">
                   Large diff, still loading…
                 </p>
               )}
@@ -692,12 +699,12 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
             <div className="flex h-full flex-col items-center justify-center text-center">
               <GitCommitHorizontal className="mb-3 h-8 w-8 text-steel" />
               <p className="text-[14px] font-medium">Nothing to review</p>
-              <p className="mt-1 text-[12.5px] text-muted">The working tree matches the base commit.</p>
+              <p className="mt-1 text-small text-muted">The working tree matches the base commit.</p>
             </div>
           ) : index ? (
             <>
               {ordered.compactCount > 0 && hideCompact && ordered.textCount === 0 && (
-                <p className="pt-4 text-center text-[12.5px] text-muted">
+                <p className="pt-4 text-center text-small text-muted">
                   Only binary/LFS files changed. Use “Show {ordered.compactCount.toLocaleString()} binary/LFS files” to
                   list them.
                 </p>
@@ -715,14 +722,14 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
                 isViewed={isViewed}
                 openState={openState}
               />
-              <p className="px-1 pb-3 text-center text-[11.5px] text-steel">
+              <p className="px-1 pb-3 text-center text-meta text-steel">
                 Click a line number (or focus a line and press Enter) to leave a comment for the agent.
               </p>
             </>
           ) : null}
           {orphaned.length > 0 && (
             <div className="mt-3 rounded-xl border border-line-strong bg-card/80 p-3">
-              <p className="mb-2 text-[12px] font-medium text-muted">
+              <p className="mb-2 text-caption font-medium text-muted">
                 {pluralize(orphaned.length, "comment")} no longer {orphaned.length === 1 ? "matches" : "match"} a line
                 in this diff (the code changed). {orphaned.length === 1 ? "It's" : "They're"} still sent with the line
                 as you saw it.
@@ -742,8 +749,8 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
           {comments.length > 0 && (
             <div className="sticky bottom-0 z-[2] mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-warn/35 bg-raised/95 px-3 py-2 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.6)] backdrop-blur-xl edge">
               <MessageSquare className="h-4 w-4 shrink-0 text-warn" />
-              <span className="text-[13px] font-medium">{pluralize(comments.length, "comment")}</span>
-              <span className="hidden truncate text-[12px] text-steel sm:inline">
+              <span className="text-body font-medium">{pluralize(comments.length, "comment")}</span>
+              <span className="hidden truncate text-caption text-steel sm:inline">
                 in {pluralize(new Set(comments.map((c) => c.path)).size, "file")}
               </span>
               <Button
@@ -770,7 +777,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         <div
           role="status"
           className={cn(
-            "flex shrink-0 flex-wrap items-center gap-2 border-t px-4 py-2.5 text-[12.5px]",
+            "flex shrink-0 flex-wrap items-center gap-2 border-t px-4 py-2.5 text-small",
             afterMerge.kind === "merged" ? "border-ok/25 bg-ok/[0.07]" : "border-warn/30 bg-warn/[0.08]",
           )}
         >
@@ -944,8 +951,8 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
           <>
             Commit {pluralize(uncommitted, "uncommitted file")} as{" "}
             <span className="font-medium text-fg">“{message}”</span>, then merge{" "}
-            <span className="font-mono text-[12px] text-fg">{agent.branch ?? "this branch"}</span> into{" "}
-            <span className="font-mono text-[12px] text-fg">{agent.baseBranch ?? "the base branch"}</span>.
+            <span className="font-mono text-caption text-fg">{agent.branch ?? "this branch"}</span> into{" "}
+            <span className="font-mono text-caption text-fg">{agent.baseBranch ?? "the base branch"}</span>.
           </>
         }
         confirmLabel="Commit & merge"
@@ -960,8 +967,8 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         title={`Merge into ${agent.baseBranch ?? "the base branch"}?`}
         description={
           <>
-            Merges <span className="font-mono text-[12px] text-fg">{agent.branch ?? "this branch"}</span> into{" "}
-            <span className="font-mono text-[12px] text-fg">{agent.baseBranch ?? "the base branch"}</span> in your
+            Merges <span className="font-mono text-caption text-fg">{agent.branch ?? "this branch"}</span> into{" "}
+            <span className="font-mono text-caption text-fg">{agent.baseBranch ?? "the base branch"}</span> in your
             project folder.
           </>
         }
@@ -992,7 +999,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
           if (cur) (cur.then === "commit" ? doCommit : doShip)(cur.files);
         }}
       >
-        <ul className="max-h-40 space-y-0.5 overflow-y-auto rounded-lg border border-line bg-base/40 px-3 py-2 font-mono text-[12px]">
+        <ul className="max-h-40 space-y-0.5 overflow-y-auto rounded-lg border border-line bg-base/40 px-3 py-2 font-mono text-caption">
           {secrets?.files.map((f) => (
             <li key={f} className="truncate" title={f}>
               {f}
@@ -1026,7 +1033,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         confirmLabel="Discard worktree"
         busy={busy === "discard"}
         onConfirm={async () => {
-          setConfirmDiscard(false);
+          // Stays open with a spinner while the worktree is deleted; an error shows as a toast.
           await run(
             "discard",
             () => api.discardWorktree(agent.id),
@@ -1035,6 +1042,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
               onClose();
             },
           );
+          setConfirmDiscard(false);
         }}
       />
       <ConfirmDialog
@@ -1052,7 +1060,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
           revertTarget && (
             <>
               This discards the agent's change to <span className="font-mono text-fg">{revertTarget.path}</span>
-              {revertTarget.hunk !== null && " (this hunk only)"}; it can't be undone.
+              {revertTarget.hunk !== null && " (this hunk only)"}. You can undo it right after.
             </>
           )
         }
@@ -1060,7 +1068,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         onConfirm={doRevert}
       >
         {revertError && (
-          <div role="alert" className="rounded-lg border border-err/30 bg-err/[0.07] px-3 py-2 text-[12.5px]">
+          <div role="alert" className="rounded-lg border border-err/30 bg-err/[0.07] px-3 py-2 text-small">
             <p className="font-medium text-err">{revertError}</p>
             {/changed since|couldn't find/i.test(revertError) && (
               <Button
@@ -1104,7 +1112,7 @@ function MoreItem({
       {icon}
       <span className="flex min-w-0 flex-col">
         <span>{label}</span>
-        {reason && <span className="whitespace-normal text-[11.5px] leading-snug text-steel">{reason}</span>}
+        {reason && <span className="whitespace-normal text-meta leading-snug text-steel">{reason}</span>}
       </span>
     </DropdownMenuItem>
   );
@@ -1214,7 +1222,7 @@ function PrPopover({
               id="pr-body"
               value={body}
               onChange={(e) => setBody(e.target.value)}
-              className="min-h-28 font-mono text-[12px]"
+              className="min-h-28 font-mono text-caption"
             />
           </div>
           <div className="flex items-center justify-between gap-3">
@@ -1225,19 +1233,19 @@ function PrPopover({
               <Select
                 id="pr-base"
                 aria-label="Base branch"
-                className="h-8 max-w-[190px] font-mono text-[12px]"
+                className="h-8 max-w-[190px] font-mono text-caption"
                 value={base || undefined}
                 onValueChange={setBase}
                 options={(branches?.length ? branches : base ? [base] : []).map((b) => ({ value: b, label: b }))}
               />
             </div>
-            <label className="flex shrink-0 items-center gap-2 text-[12.5px] text-muted">
+            <label className="flex shrink-0 items-center gap-2 text-small text-muted">
               Draft
               <Switch checked={draft} onCheckedChange={setDraft} aria-label="Open as a draft" />
             </label>
           </div>
           {formError && (
-            <p role="alert" className="rounded-lg border border-err/30 bg-err/[0.07] px-2.5 py-2 text-[12px] text-err">
+            <p role="alert" className="rounded-lg border border-err/30 bg-err/[0.07] px-2.5 py-2 text-caption text-err">
               {formError}
             </p>
           )}

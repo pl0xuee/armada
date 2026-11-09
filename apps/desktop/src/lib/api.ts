@@ -18,6 +18,7 @@ import type {
   AgentDiff,
   AppState,
   Attachment,
+  NewProject,
   KvistcodeEvent,
   AttentionReason,
   CreateAccountRequest,
@@ -117,6 +118,13 @@ const tauriApi = {
     invoke<void>("send_prompt", { agentId, text, attachments: attachments ?? [], deliver: deliver ?? false }),
   /** Loads an image file an agent referenced (relative to its cwd; images ≤10 MB in the agent's folders or temp dir). */
   readImage: (agentId: string, path: string) => invoke<Attachment>("read_image", { agentId, path }),
+  /** Loads a picture stored for a timeline item, by the file name in its `path`. */
+  readPicture: (path: string) => invoke<Attachment>("read_picture", { path }),
+  /** Where new projects go by default (`~/Projects`); empty when unknown. */
+  defaultProjectsFolder: () => invoke<string>("default_projects_folder"),
+  /** Makes `<parent>/<name>` (and a git repo with a first commit when `git`); never touches a folder that has files in it. */
+  createProject: (parent: string, name: string, git: boolean) =>
+    invoke<NewProject>("create_project", { parent, name, git }),
   /** Images on the system clipboard, read natively (fallback when a paste event carries no image file; Linux only). */
   readClipboardImages: (agentId?: string) =>
     invoke<{ attachments: Attachment[]; problems: string[] }>("read_clipboard_images", { agentId: agentId ?? null }),
@@ -266,6 +274,8 @@ const tauriApi = {
    * (from `diff --git` to the first `@@`) plus one hunk. All or nothing.
    */
   revertPatch: (agentId: string, patch: string) => invoke<void>("revert_patch", { agentId, patch }),
+  /** Undo of a revert: applies the same patch slice forward again. */
+  applyPatch: (agentId: string, patch: string) => invoke<void>("apply_patch", { agentId, patch }),
   /** Commits anything uncommitted (message defaults to the title), then merges into the base branch. */
   shipAgent: (agentId: string, message: string, exclude?: string[]) =>
     invoke<ShipResult>("ship_agent", { agentId, message, exclude }),
@@ -340,14 +350,11 @@ const tauriApi = {
   /** Version, loaded models, and problems with fixes, for a local account's server. */
   localHealth: (accountId: string) => invoke<LocalHealth>("local_health_account", { accountId }),
   /** Generates a few tokens to measure speed. */
-  localSpeedTest: (accountId: string, model: string) =>
-    invoke<SpeedResult>("local_speed_test", { accountId, model }),
+  localSpeedTest: (accountId: string, model: string) => invoke<SpeedResult>("local_speed_test", { accountId, model }),
   /** Frees a loaded model's memory. */
-  localUnloadModel: (accountId: string, model: string) =>
-    invoke<void>("local_unload_model", { accountId, model }),
+  localUnloadModel: (accountId: string, model: string) => invoke<void>("local_unload_model", { accountId, model }),
   /** Deletes an Ollama model from disk. */
-  localDeleteModel: (accountId: string, model: string) =>
-    invoke<void>("local_delete_model", { accountId, model }),
+  localDeleteModel: (accountId: string, model: string) => invoke<void>("local_delete_model", { accountId, model }),
   getLocalPrefs: () => invoke<LocalPrefs>("get_local_prefs"),
   setLocalPrefs: (prefs: LocalPrefs) => invoke<void>("set_local_prefs", { prefs }),
 

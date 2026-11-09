@@ -321,10 +321,12 @@ impl Db {
     }
 
     pub fn put_account(&self, account: &Account) -> anyhow::Result<()> {
+        // Encode before taking the writer lock, not while other writes wait on it.
+        let data = serde_json::to_string(account)?;
         self.conn.lock().execute(
             "INSERT INTO accounts (id, data) VALUES (?1, ?2)
              ON CONFLICT(id) DO UPDATE SET data = excluded.data",
-            params![account.id, serde_json::to_string(account)?],
+            params![account.id, data],
         )?;
         Ok(())
     }
@@ -354,10 +356,11 @@ impl Db {
     }
 
     pub fn put_agent(&self, agent: &Agent) -> anyhow::Result<()> {
+        let data = serde_json::to_string(agent)?;
         self.conn.lock().execute(
             "INSERT INTO agents (id, data) VALUES (?1, ?2)
              ON CONFLICT(id) DO UPDATE SET data = excluded.data",
-            params![agent.id, serde_json::to_string(agent)?],
+            params![agent.id, data],
         )?;
         Ok(())
     }
@@ -390,6 +393,19 @@ impl Db {
             }
         }
         Ok(())
+    }
+
+    /// Whether some stored item still mentions this picture file (a bare file name).
+    pub fn picture_in_use(&self, name: &str) -> bool {
+        self.reader
+            .lock()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM items WHERE instr(data, ?1) > 0)",
+                params![name],
+                |r| r.get(0),
+            )
+            // When unsure, keep the file.
+            .unwrap_or(true)
     }
 
     // ---- checkpoints ----
@@ -488,6 +504,9 @@ impl Db {
     // ---- items ----
 
     pub fn put_item(&self, item: &TimelineItem) -> anyhow::Result<()> {
+        // Encode and extract the search text before taking the writer lock.
+        let data = serde_json::to_string(item)?;
+        let search_text = search::item_text(item);
         self.conn.lock().execute(
             "INSERT INTO items (id, agent_id, seq, ts, kind, data, search_text, idx_ver)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)
@@ -499,8 +518,30 @@ impl Db {
                 item.seq,
                 item.ts,
                 item.body.kind_str(),
-                serde_json::to_string(item)?,
-                search::item_text(item)
+                data,
+                search_text
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Saves a text item that is still streaming: the stored text only, without
+    /// re-deriving and re-indexing its search text on every flush. The row is marked
+    /// unindexed (`idx_ver = -1`, so search doesn't report a backfill while an agent
+    /// streams), and the final `put_item` (or the startup backfill, after a crash) indexes it.
+    pub fn put_item_draft(&self, item: &TimelineItem) -> anyhow::Result<()> {
+        let data = serde_json::to_string(item)?;
+        self.conn.lock().execute(
+            "INSERT INTO items (id, agent_id, seq, ts, kind, data, idx_ver)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, -1)
+             ON CONFLICT(id) DO UPDATE SET data = excluded.data, idx_ver = -1",
+            params![
+                item.id,
+                item.agent_id,
+                item.seq,
+                item.ts,
+                item.body.kind_str(),
+                data
             ],
         )?;
         Ok(())
@@ -552,6 +593,36 @@ impl Db {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
         })?;
         Db::rows_to_items(agent_id, rows)
+    }
+
+    /// One agent's approvals and questions still waiting for an answer, oldest first,
+    /// without parsing the rest of its timeline.
+    pub fn pending_requests(&self, agent_id: &str) -> anyhow::Result<Vec<TimelineItem>> {
+        let conn = self.reader.lock();
+        // `resolution` is always serialized, so a pending row has `"resolution":null`.
+        let mut stmt = conn.prepare(
+            "SELECT data FROM items WHERE agent_id = ?1 AND kind IN ('permission', 'question')
+             AND instr(data, '\"resolution\":null') > 0 ORDER BY seq",
+        )?;
+        let rows = stmt.query_map(params![agent_id], |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for row in rows {
+            if let Ok(item) = serde_json::from_str::<TimelineItem>(&row?) {
+                if matches!(
+                    item.body,
+                    crate::model::ItemBody::Permission {
+                        resolution: None,
+                        ..
+                    } | crate::model::ItemBody::Question {
+                        resolution: None,
+                        ..
+                    }
+                ) {
+                    out.push(item);
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// The newest tool call of an agent with this tool-call id.
@@ -641,8 +712,13 @@ impl Db {
     /// Permission items still waiting for an answer (used to expire them after a restart).
     pub fn unresolved_permissions(&self) -> anyhow::Result<Vec<TimelineItem>> {
         let conn = self.conn.lock();
-        // Served by the partial index items_pending_perm, not a full scan.
-        let mut stmt = conn.prepare("SELECT data FROM items WHERE kind = 'permission'")?;
+        // The kind index narrows it to approvals; the text check skips resolved ones (whose
+        // diffs can be large) without parsing them. `resolution` is always serialized, so a
+        // pending row always has `"resolution":null`.
+        let mut stmt = conn.prepare(
+            "SELECT data FROM items WHERE kind = 'permission'
+             AND instr(data, '\"resolution\":null') > 0",
+        )?;
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         let mut out = Vec::new();
         for row in rows {
@@ -661,7 +737,10 @@ impl Db {
     /// Questions still waiting for an answer (served by items_pending_question).
     pub fn unresolved_questions(&self) -> anyhow::Result<Vec<TimelineItem>> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare("SELECT data FROM items WHERE kind = 'question'")?;
+        let mut stmt = conn.prepare(
+            "SELECT data FROM items WHERE kind = 'question'
+             AND instr(data, '\"resolution\":null') > 0",
+        )?;
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         let mut out = Vec::new();
         for row in rows {

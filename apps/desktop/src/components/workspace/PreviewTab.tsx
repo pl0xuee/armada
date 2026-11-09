@@ -95,7 +95,15 @@ type Probe = "probing" | "up" | "down";
  * agent view (maximized, or the window is too narrow for chat and preview side by side); `forced` is
  * the latter, where there is nothing to maximize.
  */
-export function PreviewTab({ agent, full = false, forced = false }: { agent: Agent; full?: boolean; forced?: boolean }) {
+export function PreviewTab({
+  agent,
+  full = false,
+  forced = false,
+}: {
+  agent: Agent;
+  full?: boolean;
+  forced?: boolean;
+}) {
   const st = usePreview((s) => previewOf(s, agent.id));
   const [text, setText] = useState(st.url);
   const [reload, setReload] = useState(0);
@@ -148,7 +156,9 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
         .then((fams) => {
           if (cancelled) return;
           const cur = urlRef.current;
-          const eff = cur ? effectiveLoopbackUrl(cur, fams.find((f) => f.port === port) ?? { v4: false, v6: false }) : null;
+          const eff = cur
+            ? effectiveLoopbackUrl(cur, fams.find((f) => f.port === port) ?? { v4: false, v6: false })
+            : null;
           if (eff) {
             // Load the family that answers (e.g. a server bound only to ::1): show it in the field.
             if (eff !== cur) patchPreview(agent.id, { url: eff });
@@ -301,7 +311,9 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
     if (!full) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
-      if (document.querySelector('[role="dialog"][data-state="open"], [role="menu"][data-state="open"], [role="listbox"]'))
+      if (
+        document.querySelector('[role="dialog"][data-state="open"], [role="menu"][data-state="open"], [role="listbox"]')
+      )
         return;
       e.preventDefault();
       exit();
@@ -402,7 +414,7 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
           <div className="relative min-w-0 flex-1">
             <Globe className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-steel" />
             <Input
-              className="h-7 min-w-0 pl-7 pr-2 font-mono text-[12px]"
+              className="h-7 min-w-0 pl-7 pr-2 font-mono text-caption"
               aria-label="Preview URL"
               placeholder="localhost:3000"
               spellCheck={false}
@@ -433,7 +445,7 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
                     onSelect={() => go(u)}
                     description={i === 0 ? "Most recently mentioned" : null}
                   >
-                    <span className="font-mono text-[12px]">{label}</span>
+                    <span className="font-mono text-caption">{label}</span>
                   </DropdownMenuCheckItem>
                 ))}
             </DropdownMenuContent>
@@ -481,7 +493,13 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
           </Button>
         </Tooltip>
         <Tooltip
-          content={toolsReady ? (page.inspecting ? "Stop picking" : "Pick an element to send to the agent") : `Inspect: ${toolsWhy}`}
+          content={
+            toolsReady
+              ? page.inspecting
+                ? "Stop picking"
+                : "Pick an element to send to the agent"
+              : `Inspect: ${toolsWhy}`
+          }
           shortcut={page.inspecting ? ["Esc"] : undefined}
         >
           <Button
@@ -504,7 +522,14 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
           className="hidden @[420px]:inline-flex"
         />
         <Tooltip content="Add the preview URL to your message">
-          <Button size="xs" variant="secondary" aria-label="Send to agent" disabled={!url} onClick={send} className="ml-0.5">
+          <Button
+            size="xs"
+            variant="secondary"
+            aria-label="Send to agent"
+            disabled={!url}
+            onClick={send}
+            className="ml-0.5"
+          >
             <MessageSquarePlus className="!h-3 !w-3" />
             <span className="hidden @[620px]:inline">Send to agent</span>
           </Button>
@@ -523,10 +548,16 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
             </DropdownMenuItem>
             {body.w < 520 && (
               <>
-                <DropdownMenuItem disabled={!url || !toolsReady || !page.canBack} onSelect={() => page.navigate("back")}>
+                <DropdownMenuItem
+                  disabled={!url || !toolsReady || !page.canBack}
+                  onSelect={() => page.navigate("back")}
+                >
                   <ChevronLeft /> Back
                 </DropdownMenuItem>
-                <DropdownMenuItem disabled={!url || !toolsReady || !page.canForward} onSelect={() => page.navigate("forward")}>
+                <DropdownMenuItem
+                  disabled={!url || !toolsReady || !page.canForward}
+                  onSelect={() => page.navigate("forward")}
+                >
                   <ChevronRight /> Forward
                 </DropdownMenuItem>
               </>
@@ -589,7 +620,7 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
           preset.width
             ? {
                 background:
-                  "radial-gradient(color-mix(in srgb, var(--text-3, #888) 22%, transparent) 1px, transparent 1px) 0 0 / 14px 14px, color-mix(in srgb, var(--bg-2) 70%, var(--bg-0, #000))",
+                  "radial-gradient(color-mix(in srgb, var(--steel) 22%, transparent) 1px, transparent 1px) 0 0 / 14px 14px, color-mix(in srgb, var(--bg-2) 70%, var(--bg-0, #000))",
               }
             : undefined
         }
@@ -652,7 +683,7 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
                   {frame}
                 </div>
               </div>
-              <div className="mt-1.5 flex h-[14px] items-center text-[11px] leading-none text-steel tabular">
+              <div className="mt-1.5 flex h-[14px] items-center text-micro leading-none text-steel tabular">
                 {innerW}px{scale < 1 && <> · {Math.round(scale * 100)}%</>}
               </div>
             </div>
@@ -668,7 +699,7 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
             aria-label="Loading preview"
           >
             <Spinner className="h-5 w-5" />
-            <p className="font-mono text-[11.5px] text-muted">{new URL(url).host}</p>
+            <p className="font-mono text-meta text-muted">{new URL(url).host}</p>
           </div>
         )}
 
@@ -676,7 +707,7 @@ export function PreviewTab({ agent, full = false, forced = false }: { agent: Age
           <button
             type="button"
             onClick={exit}
-            className="glass edge-strong absolute bottom-4 left-4 z-20 inline-flex h-8 items-center gap-2 rounded-full border border-line-strong pl-2.5 pr-2 text-[12px] font-medium text-fg shadow-lg shadow-black/30 outline-none transition-[background-color,transform] hover:bg-raised focus-visible:ring-2 focus-visible:ring-accent/60 active:scale-[0.98]"
+            className="glass edge-strong absolute bottom-4 left-4 z-20 inline-flex h-8 items-center gap-2 rounded-full border border-line-strong pl-2.5 pr-2 text-caption font-medium text-fg shadow-lg shadow-black/30 outline-none transition-[background-color,transform] hover:bg-raised focus-visible:ring-2 focus-visible:ring-accent/60 active:scale-[0.98]"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             {forced ? "Close preview" : "Back to chat"}
@@ -704,8 +735,8 @@ function Empty({
       <div className="mb-1 flex h-11 w-11 items-center justify-center rounded-xl border border-line-strong bg-gradient-to-b from-raised to-card text-steel edge">
         {icon}
       </div>
-      <p className="text-[13px] font-medium text-fg">{title}</p>
-      <p className="max-w-[300px] text-[12.5px] leading-relaxed text-steel">{body}</p>
+      <p className="text-body font-medium text-fg">{title}</p>
+      <p className="max-w-[300px] text-small leading-relaxed text-steel">{body}</p>
       {children && <div className="mt-1.5 flex items-center gap-2">{children}</div>}
     </div>
   );

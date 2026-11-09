@@ -23,7 +23,7 @@ export function AttachButton({
         disabled={full}
         aria-label="Attach images"
         className={cn(
-          "inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11.5px] text-muted transition-colors hover:bg-raised hover:text-fg disabled:opacity-40",
+          "inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-meta text-muted transition-colors hover:bg-raised hover:text-fg disabled:opacity-45",
           className,
         )}
       >
@@ -39,7 +39,7 @@ export function DropOverlay({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-[inherit] border-2 border-dashed border-accent/60 bg-accent/[0.08] text-[12.5px] font-medium text-accent backdrop-blur-[1px]",
+        "pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-[inherit] border-2 border-dashed border-accent/60 bg-accent/[0.08] text-small font-medium text-accent backdrop-blur-[1px]",
         className,
       )}
     >

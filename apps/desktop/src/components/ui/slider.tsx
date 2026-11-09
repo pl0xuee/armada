@@ -32,7 +32,7 @@ export function Slider({
       onValueChange={(v) => onValueChange(v[0])}
       onValueCommit={(v) => onValueCommit?.(v[0])}
       className={cn(
-        "relative flex h-5 w-full touch-none select-none items-center data-[disabled]:opacity-40",
+        "relative flex h-5 w-full touch-none select-none items-center data-[disabled]:opacity-45",
         className,
       )}
     >

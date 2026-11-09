@@ -221,7 +221,7 @@ export function UsageView() {
       <PageHeader
         icon={<ChartColumn />}
         title="Usage"
-        subtitle="Cost and tokens as reported by each agent runtime, since your agents were created"
+        subtitle="What your agents used since they were created, and what it would cost at API prices."
         right={
           <Segmented<Metric>
             size="sm"
@@ -251,7 +251,7 @@ export function UsageView() {
             />
             <KpiTile
               icon={<Gauge />}
-              label="API-equivalent cost"
+              label="Cost at API prices"
               value={formatCost(split.equivalent)}
               sub={
                 split.equivalent > 0
@@ -285,11 +285,11 @@ export function UsageView() {
                     <div className="flex min-w-[180px] flex-1 items-center gap-2.5">
                       <AccountAvatar account={acc} size={24} />
                       <div className="min-w-0">
-                        <div className="truncate text-[13px] font-medium text-fg">
+                        <div className="truncate text-body font-medium text-fg">
                           {acc.name}
                           <span className="ml-1.5 font-normal text-steel">{PROVIDERS[acc.provider].short}</span>
                         </div>
-                        <div className="truncate text-[11.5px] text-steel">
+                        <div className="truncate text-meta text-steel">
                           {[
                             acc.usage?.plan ? capitalize(acc.usage.plan) : acc.status?.plan,
                             `updated ${relativeTimeLong(acc.usage?.updatedAt ?? Date.now())}`,
@@ -303,7 +303,7 @@ export function UsageView() {
                   </li>
                 ))}
               </ul>
-              <p className="border-t border-line/70 px-4 py-2 text-[11.5px] text-steel">
+              <p className="border-t border-line/70 px-4 py-2 text-meta text-steel">
                 Reported by the provider runtime for accounts that expose rate-limit windows (Codex and Claude).
               </p>
             </Panel>
@@ -350,9 +350,9 @@ export function UsageView() {
             onToggle={() => setTopOpen((o) => !o)}
             hint={top[0] ? `${top[0].title} · ${formatCost(top[0].costUsd)}` : undefined}
           >
-            <table className="w-full text-[12.5px]">
+            <table className="w-full text-small">
               <thead>
-                <tr className="border-b border-line text-left text-[11px] uppercase tracking-[0.06em] text-steel">
+                <tr className="border-b border-line text-left eyebrow text-steel">
                   <th className="w-10 py-2 pl-4 font-medium">#</th>
                   <th className="py-2 font-medium">Agent</th>
                   <th className="hidden w-[150px] py-2 font-medium @2xl:table-cell">Account</th>
@@ -379,7 +379,7 @@ export function UsageView() {
                           <ProviderGlyph provider={a.provider} customAgentId={a.customAgentId} size="xs" />
                           <span className="truncate text-fg">{a.title}</span>
                           <StatusDot status={a.status} size={6} />
-                          <span className="hidden truncate text-[11.5px] text-steel @4xl:inline">
+                          <span className="hidden truncate text-meta text-steel @4xl:inline">
                             {basename(a.projectPath)}
                           </span>
                         </div>
@@ -457,14 +457,13 @@ function Panel({
       {icon}
       {title}
       {onToggle && !open && hint && (
-        <span className="ml-1 min-w-0 truncate text-[11.5px] font-normal normal-case tracking-normal text-muted">
+        <span className="ml-1 min-w-0 truncate text-meta font-normal normal-case tracking-normal text-muted">
           {hint}
         </span>
       )}
     </>
   );
-  const headingClass =
-    "flex min-w-0 items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-steel [&_svg]:h-3.5 [&_svg]:w-3.5";
+  const headingClass = "flex min-w-0 items-center gap-2 eyebrow text-steel [&_svg]:h-3.5 [&_svg]:w-3.5";
   return (
     <section className="rounded-xl border border-line bg-card edge">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 pb-2 pt-3.5">

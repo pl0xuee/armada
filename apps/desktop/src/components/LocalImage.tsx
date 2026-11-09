@@ -50,7 +50,7 @@ function useLazyAgentImage(agentId: string, path: string) {
 
 function Chip({ path, alt, error, onRetry }: { path: string; alt: string; error: string; onRetry: () => void }) {
   return (
-    <span className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-md border border-line-strong bg-raised py-0.5 pl-1.5 pr-0.5 align-middle text-[12px] text-muted">
+    <span className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-md border border-line-strong bg-raised py-0.5 pl-1.5 pr-0.5 align-middle text-caption text-muted">
       <Tooltip content={error}>
         <span className="inline-flex min-w-0 items-center gap-1.5">
           <ImageOff className="h-3.5 w-3.5 shrink-0 text-steel" />
@@ -63,7 +63,7 @@ function Chip({ path, alt, error, onRetry }: { path: string; alt: string; error:
         type="button"
         onClick={onRetry}
         aria-label={`Retry loading ${alt || path}`}
-        className="inline-flex h-5 shrink-0 items-center gap-1 rounded px-1 text-[11px] text-accent transition-colors hover:bg-gunmetal"
+        className="inline-flex h-5 shrink-0 items-center gap-1 rounded px-1 text-micro text-accent transition-colors hover:bg-gunmetal"
       >
         <RotateCw className="h-3 w-3" /> Retry
       </button>
@@ -142,7 +142,7 @@ export function LocationThumb({
             type="button"
             onClick={retry}
             aria-label={`Couldn't load ${name}. Retry`}
-            className="flex h-[88px] w-[120px] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-line-strong px-2 text-center text-[10.5px] text-steel transition-colors hover:border-accent/50 hover:text-fg"
+            className="flex h-[88px] w-[120px] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-line-strong px-2 text-center text-micro text-steel transition-colors hover:border-accent/50 hover:text-fg"
           >
             <ImageOff className="h-4 w-4" />
             <span className="max-w-full truncate">{name}</span>

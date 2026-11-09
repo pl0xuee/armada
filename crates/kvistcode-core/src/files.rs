@@ -48,6 +48,7 @@ pub fn read_image_file(path: &Path) -> anyhow::Result<Attachment> {
             .unwrap_or_default(),
         mime_type: mime.to_string(),
         data: base64::engine::general_purpose::STANDARD.encode(bytes),
+        path: None,
     })
 }
 use std::process::{Command, Stdio};
@@ -377,18 +378,31 @@ pub fn fuzzy_filter(files: &[String], query: &str, limit: usize) -> Vec<String> 
     let q = query.trim().trim_start_matches('@').to_lowercase();
     if q.is_empty() {
         let mut by_len: Vec<&String> = files.iter().collect();
-        by_len.sort_by_key(|f| (f.matches('/').count(), f.len()));
+        by_len.sort_by_cached_key(|f| (f.matches('/').count(), f.len()));
         return by_len.into_iter().take(limit).cloned().collect();
     }
-    let mut scored: Vec<(i64, &String)> = files
+    // (score, position in the file list, path): the position keeps ties in list order,
+    // which `select_nth_unstable_by` alone would not.
+    let mut scored: Vec<(i64, usize, &String)> = files
         .iter()
-        .filter_map(|f| score(f, &q).map(|s| (s, f)))
+        .enumerate()
+        .filter_map(|(i, f)| score(f, &q).map(|s| (s, i, f)))
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.len().cmp(&b.1.len())));
+    let better = |a: &(i64, usize, &String), b: &(i64, usize, &String)| {
+        b.0.cmp(&a.0)
+            .then(a.2.len().cmp(&b.2.len()))
+            .then(a.1.cmp(&b.1))
+    };
+    // Only the best `limit` need sorting, not every match.
+    if scored.len() > limit && limit > 0 {
+        scored.select_nth_unstable_by(limit, better);
+        scored.truncate(limit);
+    }
+    scored.sort_by(better);
     scored
         .into_iter()
         .take(limit)
-        .map(|(_, f)| f.clone())
+        .map(|(_, _, f)| f.clone())
         .collect()
 }
 
@@ -560,5 +574,12 @@ mod tests {
             fuzzy_filter(&files, "", 2),
             vec!["README.md", "docs/agents.md"]
         );
+    }
+
+    #[test]
+    fn equal_matches_keep_file_list_order_at_the_cutoff() {
+        let files: Vec<String> = (0..200).map(|i| format!("src/d{i:03}/index.ts")).collect();
+        let r = fuzzy_filter(&files, "index", 50);
+        assert_eq!(r, files[..50].to_vec());
     }
 }

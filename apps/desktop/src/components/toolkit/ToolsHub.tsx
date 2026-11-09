@@ -71,7 +71,7 @@ export function ToolsHub({ servers }: { servers: McpServer[] }) {
             }))}
           />
         </div>
-        <span className="min-w-0 flex-1 truncate text-[12px] text-steel" title={project ?? undefined}>
+        <span className="min-w-0 flex-1 truncate text-caption text-steel" title={project ?? undefined}>
           {project ? prettyPath(project) : "Start an agent in a folder to see its instructions here."}
         </span>
         {project && (
@@ -108,7 +108,7 @@ export function ToolsHub({ servers }: { servers: McpServer[] }) {
             label: (
               <>
                 <Plug className="h-3.5 w-3.5" /> MCP
-                <span className="tabular text-[11px] text-steel">{scoped.global.length + scoped.project.length}</span>
+                <span className="tabular text-micro text-steel">{scoped.global.length + scoped.project.length}</span>
               </>
             ),
           },

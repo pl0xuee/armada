@@ -100,7 +100,7 @@ export function HotkeyRecorder({
         <Keyboard />
         {recording ? "Press keys…" : "Record"}
       </Button>
-      <span role="status" className="text-[11.5px] text-steel">
+      <span role="status" className="text-meta text-steel">
         {recording ? (hint ?? "Press the shortcut, or Esc to cancel") : ""}
       </span>
     </div>

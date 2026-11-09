@@ -112,7 +112,7 @@ export function VoiceAssistantSection({ settings }: { settings: Settings }) {
         }
       />
 
-      <div className="flex items-start gap-3 rounded-xl border border-warn/30 bg-warn/[0.07] px-4 py-3 text-[12.5px] leading-relaxed text-fg">
+      <div className="flex items-start gap-3 rounded-xl border border-warn/30 bg-warn/[0.07] px-4 py-3 text-small leading-relaxed text-fg">
         <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
         <p>
           <strong className="font-medium">{VA_PRIVACY_NOTICE}</strong> Unlike dictation, this is not processed on your
@@ -145,7 +145,7 @@ export function VoiceAssistantSection({ settings }: { settings: Settings }) {
                   ))}
                 </span>
               ) : (
-                <span className="text-[12px] text-steel">Off</span>
+                <span className="text-caption text-steel">Off</span>
               )}
               {va.hotkey && (
                 <button
@@ -162,7 +162,7 @@ export function VoiceAssistantSection({ settings }: { settings: Settings }) {
               <HotkeyRecorder disabled={hotkeySaving} onRecord={(acc) => void saveHotkey(acc)} />
             </div>
             {hotkeyError && (
-              <p role="alert" className="max-w-[300px] text-right text-[11.5px] leading-snug text-err">
+              <p role="alert" className="max-w-[300px] text-right text-meta leading-snug text-err">
                 {hotkeyError}
               </p>
             )}
@@ -277,7 +277,7 @@ export function VoiceAssistantSection({ settings }: { settings: Settings }) {
               type="button"
               aria-expanded={advanced}
               onClick={() => setAdvanced((v) => !v)}
-              className="flex w-full items-center gap-1.5 px-4 py-3 text-left text-[13px] font-medium text-muted transition-colors hover:text-fg"
+              className="flex w-full items-center gap-1.5 px-4 py-3 text-left text-body font-medium text-muted transition-colors hover:text-fg"
             >
               <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", advanced && "rotate-90")} />
               Advanced
@@ -313,7 +313,7 @@ export function VoiceAssistantSection({ settings }: { settings: Settings }) {
           title={`${minutes} min used`}
           description="The cost is an estimate from the token usage OpenAI reports, at published gpt-realtime audio rates. Your OpenAI usage page has the real figure."
         >
-          <span className="tabular text-[13px] text-fg">
+          <span className="tabular text-body text-fg">
             ~{formatCost(usage?.costUsd ?? 0)} <span className="text-steel">estimate</span>
           </span>
         </SettingRow>
@@ -333,7 +333,7 @@ export function VoiceAssistantSection({ settings }: { settings: Settings }) {
           }
         }}
       >
-        <p className="text-[12.5px] text-muted">
+        <p className="text-small text-muted">
           You'll also need to pick an OpenAI API key account below. You can turn this off any time.
         </p>
       </ConfirmDialog>

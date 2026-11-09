@@ -1,4 +1,4 @@
-import { Check, ChevronDown, CircleDot, Columns3, FolderOpen, GitBranch, Rocket } from "lucide-react";
+import { Check, ChevronDown, CircleDot, Columns3, FolderOpen, FolderPlus, GitBranch, Rocket } from "lucide-react";
 import { PermissionModeChip, usePermissionMode } from "./home/PermissionModeChip";
 import { PreflightNotes, usePreflight } from "./home/PreflightNotes";
 import { ProjectPicker } from "./home/ProjectPicker";
@@ -21,6 +21,7 @@ import {
 import { useApp } from "@/store/app";
 import { useUi, type NewAgentPreset } from "@/store/ui";
 import { AccountAvatar } from "./AccountAvatar";
+import { NewProjectDialog } from "./NewProjectDialog";
 import { AgentCount } from "./home/AgentCount";
 import { useAttachments } from "@/hooks/useAttachments";
 import { AttachButton, DropOverlay } from "./AttachControls";
@@ -205,6 +206,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
     const p = await pickFolder(project || undefined);
     if (p) setProject(p);
   };
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
 
   /** Everything that will be launched: sign-in accounts and/or custom agents. */
   const chosen: LaunchTarget[] = compare
@@ -359,6 +361,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
 
   return (
     <>
+      <NewProjectDialog open={newProjectOpen} onOpenChange={setNewProjectOpen} onCreated={setProject} />
       <DialogBody className="space-y-4 pt-2 max-sm:flex max-sm:flex-col">
         {/* Project */}
         <div>
@@ -371,11 +374,15 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                 value={project}
                 onChange={(e) => setProject(e.target.value)}
                 placeholder="/path/to/project"
-                className="pl-9 font-mono text-[12.5px]"
+                className="pl-9 font-mono text-small"
               />
             </div>
             <Button variant="secondary" className="h-9" onClick={() => void browse()}>
               Browse…
+            </Button>
+            <Button variant="secondary" className="h-9" onClick={() => setNewProjectOpen(true)}>
+              <FolderPlus />
+              New…
             </Button>
             <Button
               variant="secondary"
@@ -406,7 +413,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                 </span>
               )}
             </span>
-            <label className="flex cursor-default items-center gap-2 text-[12px] text-muted">
+            <label className="flex cursor-default items-center gap-2 text-caption text-muted">
               <Columns3 className="h-3.5 w-3.5 text-steel" />
               Compare mode
               <Switch checked={compare} onCheckedChange={setCompare} aria-label="Compare mode" />
@@ -449,11 +456,11 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                 ]}
               />
               {custom ? (
-                <div className="flex h-9 min-w-[200px] flex-1 items-center gap-2 rounded-lg border border-line bg-base/40 px-3 text-[12.5px] text-muted">
-                  <span className="truncate font-mono text-[11.5px] text-fg/80">
+                <div className="flex h-9 min-w-[200px] flex-1 items-center gap-2 rounded-lg border border-line bg-base/40 px-3 text-small text-muted">
+                  <span className="truncate font-mono text-meta text-fg/80">
                     {[custom.command, ...custom.args].join(" ")}
                   </span>
-                  <span className="ml-auto shrink-0 text-[11px] text-steel">No sign-in needed</span>
+                  <span className="ml-auto shrink-0 text-micro text-steel">No sign-in needed</span>
                 </div>
               ) : providerAccounts.length > 0 ? (
                 <div className="min-w-[200px] flex-1">
@@ -468,7 +475,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                         <span className="flex items-center gap-2">
                           <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: a.color }} />
                           <span className="truncate">{a.name}</span>
-                          <span className={cn("text-[11px]", a.status?.loggedIn ? "text-steel" : "text-warn")}>
+                          <span className={cn("text-micro", a.status?.loggedIn ? "text-steel" : "text-warn")}>
                             {accountStateText(a)}
                           </span>
                         </span>
@@ -483,7 +490,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                     onDone();
                     setView("accounts");
                   }}
-                  className="h-9 min-w-[200px] flex-1 rounded-lg border border-dashed border-line-strong px-3 text-left text-[12.5px] text-muted hover:text-fg"
+                  className="h-9 min-w-[200px] flex-1 rounded-lg border border-dashed border-line-strong px-3 text-left text-small text-muted hover:text-fg"
                 >
                   {provider === "local"
                     ? "No local model servers. Add one →"
@@ -509,11 +516,11 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                   >
                     <AccountAvatar account={a} size={24} />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[12.5px] font-medium">
+                      <span className="block truncate text-small font-medium">
                         {PROVIDERS[a.provider].short} · {a.name}
                       </span>
                       <span
-                        className={cn("block truncate text-[11px]", a.status?.loggedIn ? "text-steel" : "text-warn")}
+                        className={cn("block truncate text-micro", a.status?.loggedIn ? "text-steel" : "text-warn")}
                       >
                         {accountStateText(a)}
                       </span>
@@ -546,8 +553,8 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                   >
                     <ProviderGlyph provider="custom" customAgentId={c.id} size="md" />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[12.5px] font-medium">{c.name}</span>
-                      <span className="block truncate font-mono text-[11px] text-steel">
+                      <span className="block truncate text-small font-medium">{c.name}</span>
+                      <span className="block truncate font-mono text-micro text-steel">
                         {[c.command, ...c.args].join(" ")}
                       </span>
                     </span>
@@ -570,12 +577,12 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
           )}
           {!compare && <PreflightNotes issues={issues} className="mt-2" />}
           {notGit && (
-            <p className="mt-1 text-[12px] text-warn">
+            <p className="mt-1 text-caption text-warn">
               Starting several agents needs a git repository, so each can have its own worktree.
             </p>
           )}
           {compare && chosen.length < 2 && launched.length === 0 && (
-            <p className="mt-2 text-[12px] text-steel">Pick at least two agents to compare.</p>
+            <p className="mt-2 text-caption text-steel">Pick at least two agents to compare.</p>
           )}
         </div>
 
@@ -622,7 +629,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
 
         {/* Options */}
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          <label className="flex items-center gap-2 text-[12.5px] text-fg">
+          <label className="flex items-center gap-2 text-small text-fg">
             <Switch
               checked={worktree || parallel}
               disabled={parallel}
@@ -631,7 +638,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
             />
             <GitBranch className="h-3.5 w-3.5 text-steel" />
             Isolated worktree
-            <span className="text-[11.5px] text-steel">
+            <span className="text-meta text-steel">
               {parallel ? "(each agent gets its own)" : "(own branch, no conflicts)"}
             </span>
           </label>
@@ -641,7 +648,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
             type="button"
             onClick={() => setShowAdvanced((v) => !v)}
             aria-expanded={showAdvanced}
-            className="ml-auto flex items-center gap-1 text-[12px] text-muted hover:text-fg"
+            className="ml-auto flex items-center gap-1 text-caption text-muted hover:text-fg"
           >
             Title & model
             <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", showAdvanced && "rotate-180")} />
@@ -672,14 +679,14 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
                       ? "Agent default"
                       : "e.g. opus, gpt-5.1-codex"
                 }
-                className="font-mono text-[12.5px]"
+                className="font-mono text-small"
               />
             </div>
           </div>
         )}
       </DialogBody>
       <DialogFooter>
-        <span className="mr-auto hidden items-center gap-1 text-[11.5px] text-steel sm:flex">
+        <span className="mr-auto hidden items-center gap-1 text-meta text-steel sm:flex">
           <Kbd>{modKey}</Kbd>
           <Kbd>⏎</Kbd> to launch
         </span>

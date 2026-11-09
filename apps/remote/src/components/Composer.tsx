@@ -336,7 +336,8 @@ export const Composer = memo(function Composer({
               }
             }}
             placeholder={placeholder}
-            enterKeyHint="send"
+            // Return sends only with a mouse and keyboard; on touch it is a line break.
+            enterKeyHint={window.matchMedia("(pointer: fine)").matches ? "send" : "enter"}
             autoComplete="off"
             autoCorrect="on"
             spellCheck

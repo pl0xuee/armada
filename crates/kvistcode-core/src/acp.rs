@@ -1488,6 +1488,7 @@ fn message_image(ctx: &AgentCtx, c: &Value) {
                 name: "image".into(),
                 mime_type: mime.to_string(),
                 data: data.to_string(),
+                path: None,
             });
         }
         Some(_) => ctx.notice(
@@ -1527,6 +1528,7 @@ fn collect_images(content: &[Value], images: &mut Vec<Attachment>) {
             name: format!("image-{}", images.len() + 1),
             mime_type: mime.to_string(),
             data: data.to_string(),
+            path: None,
         });
     }
 }

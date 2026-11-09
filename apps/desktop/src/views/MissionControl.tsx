@@ -29,7 +29,7 @@ function chip(label: string, n: number, tone?: string) {
     <span className="flex items-center gap-1.5 whitespace-nowrap">
       {label}
       <span
-        className="rounded-md bg-base/70 px-1 text-[10.5px] tabular text-steel"
+        className="rounded-md bg-base/70 px-1 text-micro tabular text-steel"
         style={tone && n > 0 ? { color: tone } : undefined}
       >
         {n}

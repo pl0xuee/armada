@@ -56,6 +56,8 @@ axum = "0.8"
 hyper = { version = "1", features = ["server", "client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 tower = { version = "0.5", features = ["util"] }
+# Gzip for the phone app (one inlined HTML file plus JSON); SSE is left alone by the default predicate.
+tower-http = { version = "0.6", default-features = false, features = ["compression-gzip"] }
 futures-util = "0.3"
 # Preview pane reverse proxy: body streaming/limits, bytes, and decoding of compressed HTML.
 http-body-util = "0.1"

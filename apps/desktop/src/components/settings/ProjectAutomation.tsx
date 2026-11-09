@@ -23,10 +23,10 @@ function Group({
     <section className="overflow-hidden rounded-xl border border-line bg-card edge" aria-label={title}>
       <header className="flex items-center gap-2 border-b border-line px-4 py-2.5 [&_svg]:h-4 [&_svg]:w-4 [&_svg]:text-steel">
         {icon}
-        <h3 className="text-[13px] font-semibold text-fg">{title}</h3>
-        <span className="ml-auto text-[11.5px] tabular text-steel">{count}</span>
+        <h3 className="text-body font-semibold text-fg">{title}</h3>
+        <span className="ml-auto text-meta tabular text-steel">{count}</span>
       </header>
-      {count === 0 ? <p className="px-4 py-3 text-[12.5px] leading-relaxed text-steel">{hint}</p> : children}
+      {count === 0 ? <p className="px-4 py-3 text-small leading-relaxed text-steel">{hint}</p> : children}
     </section>
   );
 }
@@ -51,8 +51,8 @@ function EntryRows({ entries }: { entries: ConfigEntry[] }) {
       {entries.map((e) => (
         <li key={e.path} className="group flex items-start gap-2 px-4 py-2 hover:bg-raised/40">
           <div className="min-w-0 flex-1">
-            <code className="font-mono text-[12.5px] text-fg">{e.name}</code>
-            {e.description && <p className="mt-0.5 text-[12px] leading-snug text-muted">{e.description}</p>}
+            <code className="font-mono text-small text-fg">{e.name}</code>
+            {e.description && <p className="mt-0.5 text-caption leading-snug text-muted">{e.description}</p>}
           </div>
           <Revealer path={e.path} label={e.name} />
         </li>
@@ -75,7 +75,7 @@ export function ProjectAutomation({
 }) {
   return (
     <div className="space-y-4">
-      <p className="text-[12px] leading-relaxed text-muted">
+      <p className="text-caption leading-relaxed text-muted">
         Read-only. These are picked up from the project's <code className="font-mono text-fg">.claude</code> folder
         automatically; edit them in your editor.
       </p>
@@ -95,7 +95,7 @@ export function ProjectAutomation({
         <div className="divide-y divide-line">
           {groupHooks(hooks).map((g) => (
             <div key={g.event} className="px-4 py-2.5">
-              <h4 className="font-mono text-[12px] font-semibold text-accent">{g.event}</h4>
+              <h4 className="font-mono text-caption font-semibold text-accent">{g.event}</h4>
               <ul className="mt-1.5 space-y-1.5">
                 {g.hooks.map((h, i) => (
                   <li key={i} className="group flex items-start gap-2">
@@ -104,7 +104,7 @@ export function ProjectAutomation({
                         {h.matcher}
                       </Badge>
                     )}
-                    <code className="min-w-0 flex-1 break-all font-mono text-[12.5px] text-fg">{h.command}</code>
+                    <code className="min-w-0 flex-1 break-all font-mono text-small text-fg">{h.command}</code>
                     <Badge tone={h.scope === "local" ? "violet" : "neutral"}>{h.scope}</Badge>
                     {files[h.scope] && <Revealer path={files[h.scope]} label={`${h.event} hook file`} />}
                   </li>

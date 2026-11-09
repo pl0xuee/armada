@@ -1,14 +1,15 @@
-import { ArrowUp, Check, ChevronDown, FolderOpen, GitBranch } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, FolderOpen, FolderPlus, GitBranch } from "lucide-react";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useIdentity } from "@/hooks/useIdentity";
 import { launchAgents, needsWorktree, resolveLaunch, type ResolvedLaunch } from "@/lib/launchDefaults";
 import { CUSTOM_ACCOUNT_ID, PROVIDER_ORDER, PROVIDERS } from "@/lib/providers";
-import { basename, cn, errorMessage, isMac, modKey, prettyPath } from "@/lib/utils";
+import { basename, cn, errorMessage, prettyPath } from "@/lib/utils";
 import { pickFolder } from "@/lib/window";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { AccountAvatar } from "../AccountAvatar";
+import { NewProjectDialog } from "../NewProjectDialog";
 import { ComposerVoiceButtons } from "../voice/ComposerVoiceButtons";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { Button } from "../ui/button";
@@ -31,7 +32,7 @@ import { PreflightNotes, usePreflight } from "./PreflightNotes";
 import { ProjectPicker } from "./ProjectPicker";
 
 const chipClass =
-  "inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-line bg-base/50 px-2 text-[12px] text-fg/90 transition-colors hover:border-line-strong hover:bg-raised data-[state=open]:border-line-strong data-[state=open]:bg-raised";
+  "inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-line bg-base/50 px-2 text-caption text-fg/90 transition-colors hover:border-line-strong hover:bg-raised data-[state=open]:border-line-strong data-[state=open]:bg-raised";
 
 /**
  * Prompt-first home: type what an agent should do, pick where, press ⌘⏎.
@@ -44,10 +45,12 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
   const openAgent = useUi((s) => s.openAgent);
   const openAgents = useUi((s) => s.openAgents);
   const [target, setTarget] = useState<ResolvedLaunch>(() => resolveLaunch(accounts, settings));
-  const [prompt, setPrompt] = useState("");
-  const [count, setCount] = useState(1);
-  /** The agents already started for this prompt when some failed, so a retry joins them. */
-  const batchRef = useRef<{ groupId: string; ids: string[] } | null>(null);
+  // In the store so a trip to Accounts (which remounts this view) keeps what was typed.
+  const prompt = useUi((s) => s.homePrompt);
+  const setPrompt = useUi((s) => s.setHomePrompt);
+  // The agents already started for this prompt when some failed, so a retry joins them (kept like the prompt).
+  const batch = useUi((s) => s.homeBatch);
+  const [count, setCount] = useState(() => useUi.getState().homeBatch?.count ?? 1);
   const [busy, setBusy] = useState(false);
   const [focused, setFocused] = useState(false);
   const busyRef = useRef(false);
@@ -91,7 +94,7 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
   const firstRun = useApp(hasNoAgents);
   const [folderOpen, setFolderOpen] = useState(false);
   // Several agents, or the failed ones of a batch being retried: each in its own worktree.
-  const parallel = needsWorktree(count) || batchRef.current !== null;
+  const parallel = needsWorktree(count) || batch !== null;
   const issues = usePreflight({
     provider: target.provider,
     account: target.provider === "custom" ? undefined : account,
@@ -107,18 +110,18 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
     busyRef.current = true;
     setBusy(true);
     try {
-      const batch = batchRef.current;
-      const { groupId, created, failed } = await launchAgents(target, prompt, mode, count, batch?.groupId);
-      const ids = [...(batch?.ids ?? []), ...created.map((a) => a.id)];
+      const prior = useUi.getState().homeBatch;
+      const { groupId, created, failed } = await launchAgents(target, prompt, mode, count, prior?.groupId);
+      const ids = [...(prior?.ids ?? []), ...created.map((a) => a.id)];
       for (const a of created) useApp.getState().upsertAgent(a);
       if (failed.length === 0) {
         setPrompt("");
         setCount(1);
-        batchRef.current = null;
+        useUi.getState().setHomeBatch(null);
       } else {
         // Keep the prompt, and only offer to start the ones that didn't, so a retry can't duplicate the rest.
         setCount(failed.length);
-        batchRef.current = groupId && ids.length > 0 ? { groupId, ids } : null;
+        useUi.getState().setHomeBatch(groupId && ids.length > 0 ? { groupId, ids, count: failed.length } : null);
       }
       if (created.length > 0) {
         // Several agents are shown together as a grid of conversations.
@@ -132,7 +135,15 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
           created.length > 0 ? `Started ${created.length}, ${failed.length} failed` : "Couldn't start the agent",
           {
             description: [...new Set(failed)].join("\n"),
-            action: { label: "More options", onClick: () => useUi.getState().openNewAgent({ prompt }) },
+            action: {
+              label: "More options",
+              onClick: () => {
+                // The dialog takes the prompt over: don't leave it behind in the home composer.
+                useUi.getState().setHomePrompt("");
+                useUi.getState().setHomeBatch(null);
+                useUi.getState().openNewAgent({ prompt });
+              },
+            },
           },
         );
       }
@@ -163,7 +174,8 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+          // Enter starts, as it sends in an agent's chat; Shift+Enter adds a new line.
+          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
             e.preventDefault();
             void start();
           }
@@ -209,21 +221,20 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
         <PermissionModeChip value={mode} onChange={setMode} compact={compact} className="h-7 rounded-lg" />
         <div className="ml-auto flex items-center gap-2">
           <ComposerVoiceButtons onText={insertDictation} />
-          {missing && prompt.trim() && <span className="text-[11.5px] text-warn">{missing}</span>}
-          {/* Enter adds a new line here, so say how to start. */}
+          {missing && prompt.trim() && <span className="text-meta text-warn">{missing}</span>}
           {canStart && focused && (
-            <span className="text-[11.5px] text-steel">
-              <Kbd>{modKey}</Kbd> <Kbd>⏎</Kbd> to start
+            <span className="text-meta text-steel">
+              <Kbd>⏎</Kbd> to start, <Kbd>⇧</Kbd> <Kbd>⏎</Kbd> for a new line
             </span>
           )}
-          <Tooltip content="Start agent. Enter alone adds a new line." shortcut={[modKey, "⏎"]}>
+          <Tooltip content="Start agent. Shift+Enter adds a new line." shortcut={["⏎"]}>
             <Button
               variant="primary"
               size={compact ? "icon-sm" : "sm"}
               disabled={!canStart}
               onClick={() => void start()}
               aria-label={count > 1 ? `Start ${count} agents` : "Start agent"}
-              aria-keyshortcuts={isMac ? "Meta+Enter" : "Control+Enter"}
+              aria-keyshortcuts="Enter"
             >
               {busy ? (
                 <Spinner className="h-3.5 w-3.5 text-current" />
@@ -238,10 +249,10 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
       {issues.length > 0 && <PreflightNotes issues={issues} className="border-t border-line px-4 py-2" />}
       {firstRun && (needsAccount || needsFolder) && (
         <div className="flex items-center gap-3 border-t border-line px-4 py-2">
-          <p className="min-w-0 flex-1 text-[12px] leading-snug text-muted">
+          <p className="min-w-0 flex-1 text-caption leading-snug text-muted">
             {needsAccount
               ? "Sign in to an account to start your first agent."
-              : "Choose the folder your agent works in."}
+              : "Choose the folder your agent works in, or start a new project."}
           </p>
           {needsAccount ? (
             <Button size="xs" variant="secondary" onClick={() => useUi.getState().setView("accounts")}>
@@ -312,7 +323,7 @@ function AgentPicker({
                   >
                     <AccountAvatar account={a} size={18} />
                     <span className="min-w-0 flex-1 truncate">{a.name}</span>
-                    <span className={cn("truncate text-[11px]", a.status?.loggedIn ? "text-steel" : "text-warn")}>
+                    <span className={cn("truncate text-micro", a.status?.loggedIn ? "text-steel" : "text-warn")}>
                       {a.status?.loggedIn ? (a.status.label ?? "Signed in") : "Not signed in"}
                     </span>
                     {target.accountId === a.id && target.provider === p && <Check className="!text-accent" />}
@@ -340,7 +351,7 @@ function AgentPicker({
               >
                 <ProviderGlyph provider="custom" customAgentId={c.id} size="xs" />
                 <span className="min-w-0 flex-1 truncate">{c.name}</span>
-                <span className="truncate font-mono text-[11px] text-steel">{c.command}</span>
+                <span className="truncate font-mono text-micro text-steel">{c.command}</span>
                 {target.customAgentId === c.id && <Check className="!text-accent" />}
               </DropdownMenuItem>
             ))}
@@ -363,6 +374,7 @@ function FolderPicker({
   onOpenChange: (open: boolean) => void;
 }) {
   const recent = useApp((s) => s.settings?.recentProjects) ?? [];
+  const [newOpen, setNewOpen] = useState(false);
   const browse = async () => {
     const p = await pickFolder(folder || undefined);
     if (p) {
@@ -372,6 +384,7 @@ function FolderPicker({
   };
   return (
     <Popover open={open} onOpenChange={setOpen}>
+      <NewProjectDialog open={newOpen} onOpenChange={setNewOpen} onCreated={onChange} />
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -386,13 +399,26 @@ function FolderPicker({
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[min(380px,calc(100vw-16px))]">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[12px] font-medium text-muted">Project folder</span>
-          <Button size="xs" variant="secondary" onClick={() => void browse()}>
-            Browse…
-          </Button>
+          <span className="text-caption font-medium text-muted">Project folder</span>
+          <div className="flex items-center gap-1.5">
+            <Button
+              size="xs"
+              variant="secondary"
+              onClick={() => {
+                setOpen(false);
+                setNewOpen(true);
+              }}
+            >
+              <FolderPlus />
+              New project…
+            </Button>
+            <Button size="xs" variant="secondary" onClick={() => void browse()}>
+              Browse…
+            </Button>
+          </div>
         </div>
         {folder && (
-          <p className="selectable mt-1.5 truncate font-mono text-[11px] text-steel" title={folder}>
+          <p className="selectable mt-1.5 truncate font-mono text-micro text-steel" title={folder}>
             {prettyPath(folder)}
           </p>
         )}

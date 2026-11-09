@@ -921,7 +921,21 @@ impl Remote {
                 | KvistcodeEvent::AccountRemoved { .. }
         );
         if relevant {
-            if let Ok(json) = serde_json::to_string(event) {
+            // Stored pictures go to the phone inline (it has no other way to load them).
+            // Share-link viewers never get pictures, so reading the files is skipped
+            // unless a paired device is watching.
+            let json = match event {
+                KvistcodeEvent::ItemUpserted { item }
+                    if item.body.pictures().iter().any(|a| a.data.is_empty())
+                        && self.has_owner_stream() =>
+                {
+                    let mut item = item.clone();
+                    self.core.hydrate_pictures(std::slice::from_mut(&mut item));
+                    serde_json::to_string(&KvistcodeEvent::ItemUpserted { item })
+                }
+                _ => serde_json::to_string(event),
+            };
+            if let Ok(json) = json {
                 let agent_id = match event {
                     KvistcodeEvent::AgentUpdated { agent } => Some(agent.id.clone()),
                     KvistcodeEvent::AgentRemoved { agent_id }
@@ -942,6 +956,14 @@ impl Remote {
                 }));
             }
         }
+    }
+
+    /// Whether a paired device (not just a share link) has a live event stream open.
+    fn has_owner_stream(&self) -> bool {
+        let tokens: Vec<String> = self.streams.lock().keys().cloned().collect();
+        tokens
+            .iter()
+            .any(|t| self.token_scope(t) == Some(Scope::Owner))
     }
 
     fn core(&self) -> Core {
@@ -1568,6 +1590,8 @@ impl Remote {
                 per_client_cap,
             ))
             .layer(axum::middleware::map_response(no_store))
+            // Gzip for clients that ask; the default predicate skips event streams.
+            .layer(tower_http::compression::CompressionLayer::new())
             .with_state(ctx)
     }
 
@@ -2362,10 +2386,13 @@ async fn items(
         if viewer {
             return viewer_items(&core, &id, q.before_seq, q.limit, &roots);
         }
-        match q.limit {
-            Some(limit) => core.items_page(&id, q.before_seq, limit.clamp(1, 1000)),
-            None => core.items(&id),
-        }
+        // The phone shows pictures from inline bytes; the timeline stores only files.
+        let mut items = match q.limit {
+            Some(limit) => core.items_page(&id, q.before_seq, limit.clamp(1, 1000))?,
+            None => core.items(&id)?,
+        };
+        core.hydrate_pictures(&mut items);
+        Ok(items)
     })
     .await
     .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))??;
@@ -2614,18 +2641,7 @@ async fn permissions(
                 continue;
             }
             // Questions wait the same way, so they're listed with the approvals.
-            out.extend(core.items(&agent.id)?.into_iter().filter(|i| {
-                matches!(
-                    i.body,
-                    kvistcode_core::ItemBody::Permission {
-                        resolution: None,
-                        ..
-                    } | kvistcode_core::ItemBody::Question {
-                        resolution: None,
-                        ..
-                    }
-                )
-            }));
+            out.extend(core.pending_requests(&agent.id)?);
         }
         Ok(out)
     })

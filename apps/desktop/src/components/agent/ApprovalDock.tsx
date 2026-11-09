@@ -1,8 +1,9 @@
-import { ChevronsDownUp, MessageSquareX, ShieldAlert } from "lucide-react";
+import { ChevronsDownUp, MessageSquareX, ShieldAlert, Square } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useIdentity } from "@/hooks/useIdentity";
-import { respondPermission } from "@/lib/actions";
+import { useSingleKeys } from "@/hooks/useSingleKeys";
+import { cancelTurn, respondPermission } from "@/lib/actions";
 import { api } from "@/lib/api";
 import { planChoices, planTitle } from "@/lib/planApproval";
 import type { Agent, PermissionOption } from "@/lib/types";
@@ -13,6 +14,7 @@ import { Button } from "../ui/button";
 import { Textarea } from "../ui/input";
 import { Kbd } from "../ui/kbd";
 import { Spinner } from "../ui/misc";
+import { Tooltip } from "../ui/tooltip";
 import { permissionKeyOptions, type PermissionItem } from "../timeline/usePermissionKeys";
 
 /**
@@ -31,6 +33,7 @@ export function ApprovalSection({
   focused?: boolean;
 }) {
   const identity = useIdentity(agent.provider, agent.customAgentId);
+  const singleKeys = useSingleKeys();
   const [busy, setBusy] = useState<string | null>(null);
   const [reasonOpen, setReasonOpen] = useState(false);
   const requestId = item.requestId;
@@ -84,7 +87,7 @@ export function ApprovalSection({
   const labelOf = (o: PermissionOption) =>
     plan ? (approve.find((c) => c.option.id === o.id)?.label ?? o.name) : o.name;
   const hint = (o: PermissionOption): string | null => {
-    if (!focused || plan) return null;
+    if (!focused || plan || !singleKeys) return null;
     if (keyed.allow?.id === o.id) return "A";
     if (keyed.always?.id === o.id) return "⇧A";
     if (keyed.deny?.id === o.id) return "D";
@@ -99,20 +102,20 @@ export function ApprovalSection({
           <ShieldAlert className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-warn">
+          <div className="eyebrow text-warn">
             {plan ? `${identity.short} has a plan for you` : `${identity.short} needs your approval`}
           </div>
           <div
             className={cn(
               "truncate text-[13.5px] font-medium text-fg",
-              !plan && item.toolKind === "execute" && "font-mono text-[12.5px]",
+              !plan && item.toolKind === "execute" && "font-mono text-small",
             )}
             title={plan ? planTitle(item.plan ?? "") : (item.command ?? item.title)}
           >
             {plan ? planTitle(item.plan ?? "") : item.title}
           </div>
           {!plan && item.command && item.command !== item.title && (
-            <div className="mt-0.5 truncate font-mono text-[11.5px] text-steel" title={item.command}>
+            <div className="mt-0.5 truncate font-mono text-meta text-steel" title={item.command}>
               ❯ {item.command}
             </div>
           )}
@@ -152,11 +155,23 @@ export function ApprovalSection({
             {plan ? "Keep planning with a note…" : "Deny with reason…"}
           </Button>
         )}
+        <Tooltip content="Stop the whole turn instead of answering" shortcut={["Esc ×2"]}>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy !== null}
+            onClick={() => void cancelTurn(agent)}
+            aria-label="Stop this turn"
+          >
+            <Square className="!h-3 !w-3 fill-current" />
+            Stop turn
+          </Button>
+        </Tooltip>
       </div>
       {armed && keyed.always && (
         <div
           role="status"
-          className="border-t border-warn/25 bg-warn/[0.12] px-3.5 py-2 text-[12px] font-medium text-warn"
+          className="border-t border-warn/25 bg-warn/[0.12] px-3.5 py-2 text-caption font-medium text-warn"
         >
           Press <Kbd className="mx-0.5 border-warn/40 text-warn">⇧A</Kbd> again to always allow “{keyed.always.name}”.
         </div>
@@ -188,7 +203,7 @@ export function ApprovalSection({
             className="min-h-14"
           />
           <div className="mt-2 flex items-center justify-end gap-2">
-            <span className="mr-auto text-[11px] text-steel">
+            <span className="mr-auto text-micro text-steel">
               Declines this request, then sends your note as the next message.
             </span>
             <Button type="button" size="sm" variant="ghost" onClick={() => setReasonOpen(false)}>

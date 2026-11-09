@@ -707,7 +707,7 @@ impl CodexDriver {
             return;
         }
         self.on_item_body(item, completed, id);
-        if ctx.tool_call_body(id).is_none() {
+        if !ctx.has_tool_call(id) {
             return;
         }
         match (parent, sub_thread) {
@@ -1035,7 +1035,7 @@ impl CodexDriver {
                 .filter(|(_, c)| **c == call)
                 .map(|(t, _)| t.clone())
                 .collect();
-            if self.any_running(&siblings) || self.ctx.tool_call_body(&call).is_none() {
+            if self.any_running(&siblings) || !self.ctx.has_tool_call(&call) {
                 continue;
             }
             self.ctx.tool_call(&call, |b| {
@@ -1154,7 +1154,7 @@ impl CodexDriver {
                 calls.dedup();
                 // (`tool_call` would create an item for an unknown id: only patch known ones.)
                 for call in calls {
-                    if self.ctx.tool_call_body(&call).is_none() {
+                    if !self.ctx.has_tool_call(&call) {
                         continue;
                     }
                     self.ctx.tool_call(&call, |b| {

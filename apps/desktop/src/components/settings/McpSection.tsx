@@ -85,8 +85,8 @@ export function McpSection({ servers, project }: { servers: McpServer[]; project
     <section aria-label={title} className="mb-6">
       <div className="mb-2 flex flex-wrap items-end justify-between gap-x-3 gap-y-2">
         <div className="min-w-0">
-          <h3 className="text-[13px] font-semibold leading-[18px] tracking-tight text-fg">{title}</h3>
-          <p className="text-[12px] leading-[18px] text-muted">{hint}</p>
+          <h3 className="text-body font-semibold leading-[18px] tracking-tight text-fg">{title}</h3>
+          <p className="text-caption leading-[18px] text-muted">{hint}</p>
         </div>
         <div className="flex shrink-0 gap-1.5">
           <Button size="sm" variant="ghost" onClick={() => setPasting(scope)}>
@@ -100,7 +100,7 @@ export function McpSection({ servers, project }: { servers: McpServer[]; project
       {list.length === 0 ? (
         <div className="flex items-center gap-3 rounded-xl border border-dashed border-line-strong bg-card/40 px-4 py-4">
           <Plug className="h-4 w-4 shrink-0 text-steel" />
-          <p className="text-[12.5px] leading-[18px] text-muted">
+          <p className="text-small leading-[18px] text-muted">
             {scope
               ? `No servers only for ${projectName}. Add one that this project's agents should get on top of the shared ones.`
               : "No shared servers. Connect databases, issue trackers and internal tools once and every agent can use them."}
@@ -130,7 +130,7 @@ export function McpSection({ servers, project }: { servers: McpServer[]; project
   return (
     <>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <p className="min-w-0 flex-1 basis-[260px] text-[13px] leading-[20px] text-muted">
+        <p className="min-w-0 flex-1 basis-[260px] text-body leading-[20px] text-muted">
           Every agent, on every provider, can use these.
           {visible.length > 0 && (
             <>
@@ -152,7 +152,7 @@ export function McpSection({ servers, project }: { servers: McpServer[]; project
       {group("", scoped.global, "All projects", "Every agent gets these, wherever it runs.")}
 
       {scoped.elsewhere > 0 && (
-        <p className="-mt-2 mb-4 text-[12px] leading-[18px] text-steel">
+        <p className="-mt-2 mb-4 text-caption leading-[18px] text-steel">
           {scoped.elsewhere} more {scoped.elsewhere === 1 ? "server belongs" : "servers belong"} to other projects.
         </p>
       )}
@@ -225,7 +225,7 @@ function ServerRow({
           aria-label={`Edit ${server.name}`}
         >
           <span className="flex items-center gap-2">
-            <span className={cn("truncate text-[13px] font-medium", server.enabled ? "text-fg" : "text-muted")}>
+            <span className={cn("truncate text-body font-medium", server.enabled ? "text-fg" : "text-muted")}>
               {server.name}
             </span>
             <Badge tone={stdio ? "neutral" : "accent"}>{stdio ? "stdio" : "HTTP"}</Badge>
@@ -237,20 +237,20 @@ function ServerRow({
               <Badge tone="err">Failed</Badge>
             ) : null}
           </span>
-          <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted">
+          <span className="mt-1 flex min-w-0 items-center gap-1.5 text-meta text-muted">
             {stdio ? (
               <>
                 <span className="shrink-0 font-mono text-fg/85">{server.command}</span>
                 {shownArgs.map((a, i) => (
                   <span
                     key={i}
-                    className="min-w-0 max-w-[180px] truncate rounded border border-line bg-base/50 px-1 font-mono text-[11px] text-muted"
+                    className="min-w-0 max-w-[180px] truncate rounded border border-line bg-base/50 px-1 font-mono text-micro text-muted"
                   >
                     {a}
                   </span>
                 ))}
                 {server.args.length > shownArgs.length && (
-                  <span className="shrink-0 text-[11px] text-steel">+{server.args.length - shownArgs.length}</span>
+                  <span className="shrink-0 text-micro text-steel">+{server.args.length - shownArgs.length}</span>
                 )}
               </>
             ) : (
@@ -262,10 +262,7 @@ function ServerRow({
               </span>
             )}
           </span>
-          <span
-            className="mt-0.5 block truncate text-[11.5px] leading-[16px] text-steel"
-            title={pickup.note ?? undefined}
-          >
+          <span className="mt-0.5 block truncate text-meta leading-[16px] text-steel" title={pickup.note ?? undefined}>
             {pickup.agents.length > 0 ? `Used by ${pickupSummary(pickup.agents)}` : pickup.note}
             {pickup.agents.length > 0 && pickup.note && " · " + pickup.note}
           </span>
@@ -486,7 +483,7 @@ function McpDialog({
                   },
                 ]}
               />
-              <p className="mt-1.5 text-[12px] text-steel">
+              <p className="mt-1.5 text-caption text-steel">
                 {stdio
                   ? "Kvistcode starts the server as a subprocess next to each agent."
                   : "Agents connect to a server that's already running, locally or in the cloud."}
@@ -504,12 +501,12 @@ function McpDialog({
                     aria-invalid={show("command") && !!errors.command}
                     onChange={(e) => setCommand(e.target.value)}
                     onBlur={touch("command")}
-                    className={cn("font-mono text-[12.5px]", show("command") && errors.command && errClass)}
+                    className={cn("font-mono text-small", show("command") && errors.command && errClass)}
                   />
                   {show("command") && errors.command ? (
                     <FieldError>{errors.command}</FieldError>
                   ) : commandHasSpaces ? (
-                    <p className="mt-1.5 text-[12px] text-warn">
+                    <p className="mt-1.5 text-caption text-warn">
                       Put each argument on its own line below so paths with spaces stay intact.
                     </p>
                   ) : null}
@@ -521,10 +518,10 @@ function McpDialog({
                     value={args}
                     onChange={(e) => setArgs(e.target.value)}
                     placeholder={"-y\n@modelcontextprotocol/server-postgres\npostgresql://localhost/mydb"}
-                    className="min-h-[92px] font-mono text-[12px]"
+                    className="min-h-[92px] font-mono text-caption"
                     spellCheck={false}
                   />
-                  <p className="mt-1.5 text-[12px] text-steel">One argument per line. Blank lines are ignored.</p>
+                  <p className="mt-1.5 text-caption text-steel">One argument per line. Blank lines are ignored.</p>
                 </div>
                 <div>
                   <span className="mb-1.5 block text-xs font-medium text-muted">Environment variables</span>
@@ -553,7 +550,7 @@ function McpDialog({
                     aria-invalid={show("url") && !!errors.url}
                     onChange={(e) => setUrl(e.target.value)}
                     onBlur={touch("url")}
-                    className={cn("font-mono text-[12.5px]", show("url") && errors.url && errClass)}
+                    className={cn("font-mono text-small", show("url") && errors.url && errClass)}
                   />
                   {show("url") && errors.url && <FieldError>{errors.url}</FieldError>}
                 </div>
@@ -576,8 +573,8 @@ function McpDialog({
             <div className="rounded-xl border border-line bg-card/60 p-3">
               <div className="flex flex-wrap items-center gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium">Connection test</p>
-                  <p className="text-[12px] text-steel">Starts the server, lists its tools, then stops it.</p>
+                  <p className="text-body font-medium">Connection test</p>
+                  <p className="text-caption text-steel">Starts the server, lists its tools, then stops it.</p>
                 </div>
                 <McpTestButton testKey={draftId} server={draft} label="Test connection" disabled={!testable} />
               </div>

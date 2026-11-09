@@ -47,7 +47,7 @@ export function ProviderCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[14px] font-semibold tracking-tight">{info.displayName}</span>
-            <span className="text-[12px] text-steel">
+            <span className="text-caption text-steel">
               {meta.tagline} · {meta.vendor}
             </span>
           </div>
@@ -67,17 +67,15 @@ export function ProviderCard({
                 Helper {info.adapterInstalled ? "ready" : info.installed ? "needs update" : "missing"}
               </Badge>
             )}
-            {!ready && !info.nodeAvailable && <Badge>Node.js will be downloaded privately</Badge>}
+            {!ready && !info.nodeAvailable && <Badge>Kvistcode will download what it needs</Badge>}
           </div>
-          {needsAdapter && (
-            <p className="mt-2 text-[12px] text-muted">Its helper needs an update.</p>
-          )}
+          {needsAdapter && <p className="mt-2 text-caption text-muted">Its helper needs an update.</p>}
           {!compact && info.path && (
-            <p className="selectable mt-2 truncate font-mono text-[11.5px] text-steel">{info.path}</p>
+            <p className="selectable mt-2 truncate font-mono text-meta text-steel">{info.path}</p>
           )}
           {!ready && (
             <div className="mt-3 flex items-center gap-1 rounded-lg border border-line bg-code py-1 pl-3 pr-1">
-              <code className="selectable min-w-0 flex-1 truncate font-mono text-[11.5px] text-muted">
+              <code className="selectable min-w-0 flex-1 truncate font-mono text-meta text-muted">
                 {info.installCommand}
               </code>
               <CopyButton text={info.installCommand} />
@@ -105,7 +103,7 @@ export function ProviderCard({
             <a
               href={info.docsUrl}
               rel="noreferrer noopener"
-              className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11.5px] text-steel transition-colors hover:text-fg"
+              className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-meta text-steel transition-colors hover:text-fg"
             >
               Docs <ExternalLink className="h-3 w-3" />
             </a>

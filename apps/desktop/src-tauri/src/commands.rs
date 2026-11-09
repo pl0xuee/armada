@@ -56,6 +56,9 @@ fn platform() -> &'static str {
 
 // ---- state -------------------------------------------------------------------
 
+/// How long `get_state` waits for the provider check before answering without it.
+const PROVIDERS_BOOT_WAIT: std::time::Duration = std::time::Duration::from_millis(1500);
+
 #[tauri::command]
 pub async fn get_state(
     app: AppHandle,
@@ -65,7 +68,11 @@ pub async fn get_state(
     Ok(AppState {
         agents: core.agents().map_err(err)?,
         accounts: core.accounts().map_err(err)?,
-        providers: shell.providers().await,
+        // Detection runs every CLI's --version, which can be slow: the window doesn't wait
+        // for it past a short while. The setup task sends ProvidersChanged when it ends.
+        providers: tokio::time::timeout(PROVIDERS_BOOT_WAIT, shell.providers())
+            .await
+            .unwrap_or_default(),
         settings: core.settings().map_err(err)?,
         version: app.package_info().version.to_string(),
         platform: platform(),
@@ -670,6 +677,13 @@ pub async fn revert_patch(core: State<'_, Core>, agent_id: String, patch: String
     revert_impl(&core, &agent_id, &patch).await.map_err(err)
 }
 
+/// Undo of a revert: applies the same slice forward again.
+#[tauri::command]
+pub async fn apply_patch(core: State<'_, Core>, agent_id: String, patch: String) -> CmdResult<()> {
+    let (_guard, agent) = lock_idle_agent(&core, &agent_id, "restoring changes").map_err(err)?;
+    git_review::reapply_patch(&agent, &patch).await.map_err(err)
+}
+
 #[tauri::command]
 pub async fn acknowledge_agent(core: State<'_, Core>, agent_id: String) -> CmdResult<()> {
     core.acknowledge_agent(&agent_id).map_err(err)
@@ -975,7 +989,7 @@ pub async fn login_account(
         })?;
     let exe = kvistcode_core::providers::resolve_program(&program).ok_or_else(|| {
         format!(
-            "{} is not installed (could not find `{program}` on PATH). Install it from Settings → Providers.",
+            "{} isn't installed. Install it from Settings → Providers, then try again.",
             account.provider.display_name()
         )
     })?;
@@ -1795,6 +1809,38 @@ mod tests {
         assert_eq!(export_file_stem("console.log"), "console.log");
         assert_eq!(export_file_stem(&"x".repeat(200)).chars().count(), 80);
     }
+}
+
+/// A picture stored for a timeline item (by the file name in its `path`), as base64.
+/// The timeline carries only the name; the window loads each picture when it shows it.
+#[tauri::command]
+pub async fn read_picture(core: State<'_, Core>, path: String) -> CmdResult<Attachment> {
+    let core = core.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || core.read_picture(&path))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(err)
+}
+
+/// Where new projects go by default (`~/Projects`); empty when the home folder is unknown.
+#[tauri::command]
+pub fn default_projects_folder() -> String {
+    kvistcode_core::newproject::default_parent()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Makes a new project folder (`<parent>/<name>`), a git repo with a first commit when
+/// `git` is set. Never touches a folder that already has files in it.
+#[tauri::command]
+pub async fn create_project(
+    parent: String,
+    name: String,
+    git: bool,
+) -> CmdResult<kvistcode_core::newproject::NewProject> {
+    kvistcode_core::newproject::create(&parent, &name, git)
+        .await
+        .map_err(err)
 }
 
 /// An image an agent referenced (screenshot, render), as base64 for inline display.

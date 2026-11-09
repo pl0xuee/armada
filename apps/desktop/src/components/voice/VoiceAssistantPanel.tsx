@@ -150,7 +150,7 @@ function PanelBody() {
               >
                 {confirming ? "Needs your OK" : phase === "off" ? "Ended" : PHASE_LABEL[phase]}
               </div>
-              <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] leading-[16px] text-steel">
+              <div className="mt-0.5 flex items-center gap-1.5 text-meta leading-[16px] text-steel">
                 {paused ? (
                   <span>Not listening. Nothing is sent.</span>
                 ) : live ? (
@@ -207,13 +207,13 @@ function PanelBody() {
             role="group"
             aria-label="Confirm action"
           >
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase leading-[16px] tracking-wide text-accent">
+            <div className="flex items-center gap-1.5 eyebrow text-accent">
               <ShieldQuestion className="size-3.5" />
               Waiting for your OK{confirms.length > 1 ? ` (${confirms.length})` : ""}
             </div>
             {confirms.map((c, i) => (
               <div key={c.id} className="rounded-xl border border-accent/35 bg-base/60 p-3">
-                <p className="selectable max-h-[120px] overflow-y-auto whitespace-pre-wrap break-words border-l-2 border-accent/70 pl-2.5 text-[13px] leading-[19px] text-fg">
+                <p className="selectable max-h-[120px] overflow-y-auto whitespace-pre-wrap break-words border-l-2 border-accent/70 pl-2.5 text-body leading-[19px] text-fg">
                   {c.summary}
                 </p>
                 <div className="mt-3 flex items-center gap-2">
@@ -238,7 +238,7 @@ function PanelBody() {
         {notice && live && (
           <p
             role="status"
-            className="border-t border-warn/25 bg-warn/[0.06] px-4 py-2 text-[12px] leading-[18px] text-warn"
+            className="border-t border-warn/25 bg-warn/[0.06] px-4 py-2 text-caption leading-[18px] text-warn"
           >
             {notice}
           </p>
@@ -258,14 +258,10 @@ function PanelBody() {
                   key={`${c.role}-${c.itemId}`}
                   className={cn("flex flex-col", mine ? "items-end" : "items-start", first && i > 0 && "pt-1.5")}
                 >
-                  {first && (
-                    <span className="mb-0.5 px-1 text-[10.5px] font-medium uppercase leading-[14px] tracking-wide text-steel">
-                      {mine ? "You" : "Kvistcode"}
-                    </span>
-                  )}
+                  {first && <span className="mb-0.5 px-1 eyebrow text-steel">{mine ? "You" : "Kvistcode"}</span>}
                   <p
                     className={cn(
-                      "max-w-[90%] break-words rounded-2xl border px-3 py-1.5 text-[12.5px] leading-[18px]",
+                      "max-w-[90%] break-words rounded-2xl border px-3 py-1.5 text-small leading-[18px]",
                       mine
                         ? "rounded-br-md border-accent/25 bg-accent/12 text-fg"
                         : "rounded-bl-md border-line bg-card text-fg",
@@ -282,7 +278,7 @@ function PanelBody() {
                 {actions.map((a) => (
                   <li
                     key={a.id}
-                    className="flex items-start gap-2 rounded-lg border border-line bg-panel/80 px-2.5 py-1.5 text-[12px] leading-[18px] text-muted"
+                    className="flex items-start gap-2 rounded-lg border border-line bg-panel/80 px-2.5 py-1.5 text-caption leading-[18px] text-muted"
                   >
                     <span
                       className={cn(
@@ -302,7 +298,7 @@ function PanelBody() {
                       <button
                         type="button"
                         onClick={() => openAgent(a.agentId!)}
-                        className="inline-flex h-[18px] shrink-0 items-center gap-0.5 rounded-full bg-accent/12 px-2 text-[11px] font-medium leading-[16px] text-accent transition-colors hover:bg-accent/20"
+                        className="inline-flex h-[18px] shrink-0 items-center gap-0.5 rounded-full bg-accent/12 px-2 text-micro font-medium leading-[16px] text-accent transition-colors hover:bg-accent/20"
                       >
                         Open <ArrowUpRight className="size-3" />
                       </button>
@@ -314,13 +310,13 @@ function PanelBody() {
           </div>
         )}
         {paused && (
-          <p className="border-t border-line px-4 py-2.5 text-[12px] leading-[18px] text-steel">
+          <p className="border-t border-line px-4 py-2.5 text-caption leading-[18px] text-steel">
             Press Unmute or {modKey}+Shift+A to listen again. Kvistcode can't hear you while paused, so waking by voice
             isn't possible yet.
           </p>
         )}
         {live && captions.length === 0 && phase === "listening" && (
-          <p className="border-t border-line px-4 py-2.5 text-[12px] leading-[18px] text-steel">
+          <p className="border-t border-line px-4 py-2.5 text-caption leading-[18px] text-steel">
             Try “what are my agents doing?” or “start an agent in storefront to fix the flaky test”.
           </p>
         )}
@@ -346,7 +342,7 @@ function SeesRow() {
     shownCount,
   );
   return (
-    <div className="flex items-center gap-1.5 border-t border-line px-4 py-1.5 text-[11.5px] leading-[16px] text-steel">
+    <div className="flex items-center gap-1.5 border-t border-line px-4 py-1.5 text-meta leading-[16px] text-steel">
       <span className="shrink-0">Sees:</span>
       <Tooltip content={seen.full} side="top">
         <span className="min-w-0 flex-1 cursor-default truncate text-fg">{seen.label}</span>
@@ -366,7 +362,7 @@ function Kbd({ children, dim }: { children: string; dim?: boolean }) {
   return (
     <kbd
       className={cn(
-        "ml-1 rounded border px-1 font-sans text-[10.5px] font-medium leading-[16px]",
+        "ml-1 rounded border px-1 font-sans text-micro font-medium leading-[16px]",
         dim ? "border-current/30 opacity-70" : "border-line-strong text-steel",
       )}
     >

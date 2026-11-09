@@ -115,11 +115,11 @@ export function RateLimitBanner({ agent, embedded = false }: { agent: Agent; emb
           <Gauge className="h-4 w-4" />
         </span>
         <div className="min-w-[200px] flex-1">
-          <div className="text-[13px] font-semibold leading-snug" data-testid="limit-headline">
+          <div className="text-body font-semibold leading-snug" data-testid="limit-headline">
             {copy.headline}
           </div>
           {sub && (
-            <div className="line-clamp-2 text-[12px] leading-snug text-muted" data-testid="resume-line">
+            <div className="line-clamp-2 text-caption leading-snug text-muted" data-testid="resume-line">
               {sub}
             </div>
           )}
@@ -152,7 +152,7 @@ export function RateLimitBanner({ agent, embedded = false }: { agent: Agent; emb
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-72">
-              <div className="px-2 py-1.5 text-[12px] leading-snug text-muted">
+              <div className="px-2 py-1.5 text-caption leading-snug text-muted">
                 <div className="text-fg">{current ? `${provider} · ${current.name}` : provider}</div>
                 {detail && <div className="mt-0.5 line-clamp-3">{detail}</div>}
                 {!first && <div className="mt-0.5">No other signed-in {provider} accounts.</div>}
@@ -192,7 +192,7 @@ export function RateLimitBanner({ agent, embedded = false }: { agent: Agent; emb
                       <AccountAvatar account={a} size={20} />
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate">{a.name}</span>
-                        <span className="truncate text-[11px] text-steel">{accountDetail(a)}</span>
+                        <span className="truncate text-micro text-steel">{accountDetail(a)}</span>
                       </span>
                     </DropdownMenuItem>
                   ))}

@@ -130,7 +130,7 @@ export function InstructionsPanel({ project }: { project: string }) {
               {dirtyFiles.includes(f) ? (
                 <span className="h-1.5 w-1.5 rounded-full bg-warn" role="img" aria-label="unsaved changes" />
               ) : docs[f] && !docs[f]!.exists ? (
-                <span className="text-[11px] text-steel">new</span>
+                <span className="text-micro text-steel">new</span>
               ) : null}
             </>
           ),
@@ -238,7 +238,7 @@ function InstructionEditor({
         <FileText className="h-4 w-4 shrink-0 text-steel" />
         <div className="min-w-0 flex-1 basis-[220px]">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="font-mono text-[13px] font-semibold leading-[20px] text-fg">{file}</h3>
+            <h3 className="font-mono text-body font-semibold leading-[20px] text-fg">{file}</h3>
             {!doc.exists && !dirty && <Badge>Not created yet</Badge>}
             {dirty && <Badge tone="warn">Unsaved changes</Badge>}
             {justSaved && !dirty && (
@@ -247,7 +247,7 @@ function InstructionEditor({
               </Badge>
             )}
           </div>
-          <p className="mt-0.5 text-[12px] leading-[18px] text-muted">
+          <p className="mt-0.5 text-caption leading-[18px] text-muted">
             {info.blurb}{" "}
             <span className="text-steel">
               Read by <span className="text-muted">{info.readers.join(", ")}</span>.
@@ -268,16 +268,16 @@ function InstructionEditor({
 
       {conflict && (
         <div role="alert" className="border-b border-warn/30 bg-warn/[0.07] px-4 py-3">
-          <p className="flex items-start gap-2 text-[12.5px] leading-[18px] text-fg">
+          <p className="flex items-start gap-2 text-small leading-[18px] text-fg">
             <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0 text-warn" />
             <span>
               <span className="font-medium">{file} changed on disk</span> since you opened it
               {dirty ? ", and you have unsaved edits" : ""}. Saving now would overwrite that change.
             </span>
           </p>
-          <details className="mt-2 text-[12px] text-muted">
+          <details className="mt-2 text-caption text-muted">
             <summary className="cursor-pointer select-none text-steel hover:text-fg">Show what is on disk</summary>
-            <pre className="selectable mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-base/60 p-2.5 font-mono text-[12px] leading-[18px] text-muted">
+            <pre className="selectable mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-base/60 p-2.5 font-mono text-caption leading-[18px] text-muted">
               {conflict.content || "(empty)"}
             </pre>
           </details>
@@ -313,7 +313,7 @@ function InstructionEditor({
                   void save();
                 }
               }}
-              className={cn(fieldClass, "min-h-[280px] resize-y py-2.5 font-mono text-[12.5px] leading-[20px]")}
+              className={cn(fieldClass, "min-h-[280px] resize-y py-2.5 font-mono text-small leading-[20px]")}
             />
             {empty && !locked && (
               <div className="mt-2.5 flex flex-wrap gap-2">
@@ -328,18 +328,18 @@ function InstructionEditor({
           </>
         ) : (
           <div
-            className="selectable min-h-[280px] max-h-[520px] overflow-y-auto rounded-lg border border-line bg-base/40 px-4 py-3 text-[13px]"
+            className="selectable min-h-[280px] max-h-[520px] overflow-y-auto rounded-lg border border-line bg-base/40 px-4 py-3 text-body"
             aria-label={`${file} preview`}
           >
             {text.trim() ? (
               <Markdown text={text} />
             ) : (
-              <p className="text-[13px] leading-[20px] text-steel">Nothing to preview yet.</p>
+              <p className="text-body leading-[20px] text-steel">Nothing to preview yet.</p>
             )}
           </div>
         )}
         {file === "CLAUDE.md" && !doc.exists && siblingExists && (
-          <p className="mt-2.5 text-[12px] leading-[18px] text-steel">
+          <p className="mt-2.5 text-caption leading-[18px] text-steel">
             Claude doesn't read AGENTS.md. To share it, put <code className="font-mono text-muted">@AGENTS.md</code> in
             this file.
           </p>
@@ -348,13 +348,10 @@ function InstructionEditor({
       </div>
 
       <footer className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line px-4 py-2.5">
-        <span
-          className="min-w-0 flex-1 basis-[180px] truncate text-[11.5px] leading-[16px] text-steel"
-          title={doc.path}
-        >
+        <span className="min-w-0 flex-1 basis-[180px] truncate text-meta leading-[16px] text-steel" title={doc.path}>
           {prettyPath(doc.path)}
         </span>
-        <span className="hidden items-center gap-1.5 text-[11.5px] text-steel sm:inline-flex">
+        <span className="hidden items-center gap-1.5 text-meta text-steel sm:inline-flex">
           <Kbd>{modKey}</Kbd>
           <Kbd>S</Kbd> to save
         </span>

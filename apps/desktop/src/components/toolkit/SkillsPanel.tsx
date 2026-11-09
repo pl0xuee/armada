@@ -96,7 +96,7 @@ export function SkillsPanel({ project }: { project: string | null }) {
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <p className="min-w-0 flex-1 basis-[260px] text-[13px] leading-[20px] text-muted">
+        <p className="min-w-0 flex-1 basis-[260px] text-body leading-[20px] text-muted">
           Skills Claude Code can load on demand. Switch one off to hide it from Claude agents; Kvistcode only keeps a
           list, so your skill files are never moved, renamed or changed.
         </p>
@@ -144,7 +144,7 @@ export function SkillsPanel({ project }: { project: string | null }) {
       ) : skills.length === 0 ? (
         <div className="flex items-center gap-3 rounded-xl border border-dashed border-line-strong bg-card/40 px-4 py-5">
           <Puzzle className="h-4 w-4 shrink-0 text-steel" />
-          <p className="text-[12.5px] leading-[18px] text-muted">
+          <p className="text-small leading-[18px] text-muted">
             No skills yet. A skill is a folder with a SKILL.md that teaches Claude a repeatable job, like your release
             process or how to read a PDF.
           </p>
@@ -152,9 +152,9 @@ export function SkillsPanel({ project }: { project: string | null }) {
       ) : (
         groupSkills(skills).map((g) => (
           <section key={g.scope} aria-label={SKILL_SCOPE_LABEL[g.scope]} className="mb-6">
-            <h3 className="mb-2 px-0.5 text-[13px] font-semibold leading-[18px] tracking-tight text-fg">
+            <h3 className="mb-2 px-0.5 text-body font-semibold leading-[18px] tracking-tight text-fg">
               {g.scope === "project" && project ? `Only ${basename(project) || project}` : SKILL_SCOPE_LABEL[g.scope]}
-              <span className="tabular ml-2 text-[11.5px] font-normal text-steel">{g.skills.length}</span>
+              <span className="tabular ml-2 text-meta font-normal text-steel">{g.skills.length}</span>
             </h3>
             <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-card edge">
               {g.skills.map((s) => {
@@ -178,10 +178,10 @@ export function SkillsPanel({ project }: { project: string | null }) {
                       </span>
                       <span className={cn("min-w-0 flex-1", !sw.on && "opacity-60")}>
                         <span className="flex items-center gap-2">
-                          <span className="truncate text-[13px] font-medium leading-[20px] text-fg">{s.name}</span>
+                          <span className="truncate text-body font-medium leading-[20px] text-fg">{s.name}</span>
                           {s.plugin && <Badge>{s.plugin}</Badge>}
                         </span>
-                        <span className="line-clamp-2 text-[12px] leading-[18px] text-muted">
+                        <span className="line-clamp-2 text-caption leading-[18px] text-muted">
                           {s.description || "No description"}
                         </span>
                       </span>
@@ -189,7 +189,7 @@ export function SkillsPanel({ project }: { project: string | null }) {
                     <div className="flex shrink-0 flex-col items-end gap-1 py-3 pl-2 pr-4">
                       {sw.managedBy ? (
                         <Tooltip content="Turn it off from the plugin's own settings; Kvistcode can't switch plugin skills.">
-                          <span className="inline-flex h-[20px] cursor-default items-center text-[11.5px] text-steel">
+                          <span className="inline-flex h-[20px] cursor-default items-center text-meta text-steel">
                             Managed by {sw.managedBy}
                           </span>
                         </Tooltip>
@@ -201,7 +201,7 @@ export function SkillsPanel({ project }: { project: string | null }) {
                             aria-label={`${s.name} for Claude agents`}
                             onCheckedChange={(on) => void setOn(s, on)}
                           />
-                          {note && <span className="text-[11.5px] leading-[16px] text-steel">{note}</span>}
+                          {note && <span className="text-meta leading-[16px] text-steel">{note}</span>}
                         </>
                       )}
                     </div>
@@ -290,23 +290,23 @@ function SkillViewer({
                   ]}
                 />
                 {doc.files.length > 0 && (
-                  <span className="min-w-0 truncate text-[11.5px] text-steel" title={doc.files.join(", ")}>
+                  <span className="min-w-0 truncate text-meta text-steel" title={doc.files.join(", ")}>
                     Also in the folder: {doc.files.slice(0, 4).join(", ")}
                     {doc.files.length > 4 ? ` +${doc.files.length - 4}` : ""}
                   </span>
                 )}
               </div>
               {raw ? (
-                <pre className="selectable max-h-[420px] overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-base/60 p-3 font-mono text-[12px] leading-[18px] text-muted">
+                <pre className="selectable max-h-[420px] overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-base/60 p-3 font-mono text-caption leading-[18px] text-muted">
                   {doc.content}
                 </pre>
               ) : (
-                <div className="selectable max-h-[420px] overflow-y-auto rounded-lg border border-line bg-base/40 px-4 py-3 text-[13px]">
+                <div className="selectable max-h-[420px] overflow-y-auto rounded-lg border border-line bg-base/40 px-4 py-3 text-body">
                   <Markdown text={stripFrontmatter(doc.content)} />
                 </div>
               )}
               {doc.truncated && (
-                <p className="mt-2 text-[12px] leading-[18px] text-steel">Only the start of this file is shown.</p>
+                <p className="mt-2 text-caption leading-[18px] text-steel">Only the start of this file is shown.</p>
               )}
             </>
           )}
@@ -400,9 +400,9 @@ function NewSkillDialog({
                 placeholder="code-review"
                 aria-invalid={attempted && !!problem}
                 onChange={(e) => setName(slugifyWhileTyping(e.target.value))}
-                className={cn("font-mono text-[12.5px]", attempted && problem && "border-err/60")}
+                className={cn("font-mono text-small", attempted && problem && "border-err/60")}
               />
-              <p className={cn("mt-1.5 text-[12px] leading-[18px]", attempted && problem ? "text-err" : "text-steel")}>
+              <p className={cn("mt-1.5 text-caption leading-[18px]", attempted && problem ? "text-err" : "text-steel")}>
                 {attempted && problem
                   ? problem
                   : "Lowercase letters, digits and hyphens. This becomes the folder name."}
@@ -415,9 +415,9 @@ function NewSkillDialog({
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="What it does and when Claude should use it."
-                className="min-h-[72px] text-[13px]"
+                className="min-h-[72px] text-body"
               />
-              <p className="mt-1.5 text-[12px] leading-[18px] text-steel">
+              <p className="mt-1.5 text-caption leading-[18px] text-steel">
                 Claude reads this to decide when to load the skill, so be specific.
               </p>
             </div>

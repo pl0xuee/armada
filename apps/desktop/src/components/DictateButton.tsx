@@ -85,7 +85,7 @@ function ActiveDictate({
     return (
       <span
         className={cn(
-          "inline-flex items-center gap-1.5 text-[11.5px] text-muted",
+          "inline-flex items-center gap-1.5 text-meta text-muted",
           round ? "h-6 w-6 shrink-0 justify-center rounded-md" : "h-6 px-1.5",
           className,
         )}
@@ -107,7 +107,7 @@ function ActiveDictate({
           onClick={() => void toggleDictation(id)}
           aria-label="Stop dictation and transcribe"
           className={cn(
-            "inline-flex shrink-0 items-center gap-1.5 border border-err/30 bg-err/12 text-[11.5px] text-err transition-colors hover:bg-err/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-err",
+            "inline-flex shrink-0 items-center gap-1.5 border border-err/30 bg-err/12 text-meta text-err transition-colors hover:bg-err/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-err",
             round ? "h-6 rounded-md pl-2 pr-2.5" : "h-6 rounded-md pl-1.5 pr-2",
             className,
           )}
@@ -117,8 +117,8 @@ function ActiveDictate({
             {BAR_GAIN.map((g, i) => (
               <span
                 key={i}
-                className="w-[2px] rounded-full bg-current transition-[height] duration-75"
-                style={{ height: `${Math.round(3 + Math.min(1, level * g * 1.4) * 11)}px` }}
+                className="h-3.5 w-[2px] rounded-full bg-current transition-transform duration-75"
+                style={{ transform: `scaleY(${((3 + Math.min(1, level * g * 1.4) * 11) / 14).toFixed(2)})` }}
               />
             ))}
           </span>
@@ -157,7 +157,7 @@ function IdleDictate({
           aria-label={round ? `Dictate, on-device (${modKey}+Shift+D)` : "Dictate a message"}
           aria-keyshortcuts={isMac ? "Meta+Shift+D" : "Control+Shift+D"}
           className={cn(
-            "inline-flex items-center gap-1 text-[11.5px] text-muted transition-colors hover:bg-raised hover:text-fg disabled:opacity-40",
+            "inline-flex items-center gap-1 text-meta text-muted transition-colors hover:bg-raised hover:text-fg disabled:opacity-45",
             round
               ? "h-6 w-6 shrink-0 justify-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
               : "h-6 rounded-md px-1.5",
@@ -199,7 +199,7 @@ export function VoiceSetupDialog() {
         description="Speak instead of typing. Everything is transcribed on this device."
         className="w-[min(460px,calc(100vw-32px))]"
       >
-        <DialogBody className="space-y-3 text-[12.5px] text-muted">
+        <DialogBody className="space-y-3 text-small text-muted">
           <p>
             Kvistcode needs to download a speech model once
             {model ? (
@@ -221,7 +221,7 @@ export function VoiceSetupDialog() {
                   style={{ width: `${pct}%` }}
                 />
               </div>
-              <div className="tabular text-[11.5px] text-steel">
+              <div className="tabular text-meta text-steel">
                 Downloading… {pct}%
                 {dl.active &&
                   dl.active.total > 1 &&

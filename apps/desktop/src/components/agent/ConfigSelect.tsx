@@ -40,7 +40,7 @@ export function ConfigSelect({
             type="button"
             aria-label={`${option.name}: ${current?.name ?? option.currentValue}`}
             className={cn(
-              "inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11.5px] text-muted transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg",
+              "inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-meta text-muted transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg",
               warn && "text-warn hover:text-warn",
             )}
           >
@@ -68,7 +68,7 @@ export function ConfigSelect({
           </DropdownMenuCheckItem>
         ))}
         {remembered && (
-          <p className="border-t border-line-strong px-2.5 pb-1 pt-2 text-[11px] leading-snug text-steel">
+          <p className="border-t border-line-strong px-2.5 pb-1 pt-2 text-micro leading-snug text-steel">
             New {identity.short} agents start with your last choice
           </p>
         )}
@@ -105,7 +105,7 @@ export function ConfigOverflowMenu({ agent, options }: { agent: Agent; options: 
             <DropdownMenuSub key={opt.id}>
               <DropdownMenuSubTrigger>
                 <span>{opt.name}</span>
-                <span className="ml-auto max-w-[110px] truncate pl-3 text-[11.5px] text-steel">
+                <span className="ml-auto max-w-[110px] truncate pl-3 text-meta text-steel">
                   {current?.name ?? opt.currentValue}
                 </span>
               </DropdownMenuSubTrigger>

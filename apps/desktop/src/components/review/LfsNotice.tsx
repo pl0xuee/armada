@@ -25,7 +25,7 @@ export function LfsNotice({ lfs, blocking }: { lfs: LfsInfo | null; blocking: bo
   if (!lfs.toolMissing) {
     if (lfs.hidden <= 0) return null;
     return (
-      <p role="note" className="shrink-0 border-b border-line bg-panel px-5 py-1.5 text-[11.5px] text-steel">
+      <p role="note" className="shrink-0 border-b border-line bg-panel px-5 py-1.5 text-meta text-steel">
         {lfs.hidden.toLocaleString()} unchanged LFS {lfs.hidden === 1 ? "file" : "files"} hidden
       </p>
     );
@@ -34,7 +34,7 @@ export function LfsNotice({ lfs, blocking }: { lfs: LfsInfo | null; blocking: bo
   return (
     <div
       role="alert"
-      className="flex shrink-0 items-start gap-2.5 border-b border-warn/30 bg-warn/[0.08] px-5 py-2.5 text-[12.5px]"
+      className="flex shrink-0 items-start gap-2.5 border-b border-warn/30 bg-warn/[0.08] px-5 py-2.5 text-small"
     >
       <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
       <div className="min-w-0 flex-1">
@@ -48,11 +48,11 @@ export function LfsNotice({ lfs, blocking }: { lfs: LfsInfo | null; blocking: bo
         </p>
         <div className="mt-1.5 flex items-start gap-2 text-muted">
           <span className="shrink-0 pt-0.5">{hint.note ?? `Install on ${hint.label}:`}</span>
-          <code className="selectable min-w-0 whitespace-pre-wrap break-words rounded-md border border-line bg-base/60 px-2 py-0.5 font-mono text-[11.5px] text-fg">
+          <code className="selectable min-w-0 whitespace-pre-wrap break-words rounded-md border border-line bg-base/60 px-2 py-0.5 font-mono text-meta text-fg">
             {hint.command}
           </code>
           <CopyButton text={hint.command} ariaLabel="Copy install command" />
-          {hint.alt && <span className="pt-0.5 text-[11.5px] text-steel">{hint.alt}</span>}
+          {hint.alt && <span className="pt-0.5 text-meta text-steel">{hint.alt}</span>}
         </div>
       </div>
     </div>

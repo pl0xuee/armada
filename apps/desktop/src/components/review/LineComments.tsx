@@ -31,7 +31,7 @@ export function LineCommentEditor({
   };
   return (
     <div className="space-y-2" data-comment-editor>
-      <div className="flex items-center gap-1.5 text-[11.5px] text-steel">
+      <div className="flex items-center gap-1.5 text-meta text-steel">
         <MessageSquare className="h-3.5 w-3.5" />
         <span className="font-mono">
           {anchor.path}:{anchor.line}
@@ -56,10 +56,10 @@ export function LineCommentEditor({
           }
         }}
         rows={3}
-        className="block w-full resize-y rounded-lg border border-line-strong bg-base px-3 py-2 text-[13px] leading-relaxed text-fg placeholder:text-steel focus:border-accent/60 focus:outline-none focus:ring-3 focus:ring-accent/15"
+        className="block w-full resize-y rounded-lg border border-line-strong bg-base px-3 py-2 text-body leading-relaxed text-fg placeholder:text-steel focus:border-accent/60 focus:outline-none focus:ring-3 focus:ring-accent/15"
       />
       <div className="flex items-center gap-2">
-        <span className="mr-auto hidden items-center gap-1 text-[11px] text-steel sm:flex">
+        <span className="mr-auto hidden items-center gap-1 text-micro text-steel sm:flex">
           <Kbd>{modKey}</Kbd>
           <Kbd>⏎</Kbd> save <span className="mx-1 text-line-strong">·</span> <Kbd>Esc</Kbd> cancel
         </span>
@@ -98,7 +98,7 @@ export function LineCommentCard({
     >
       <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-steel">
+        <div className="flex flex-wrap items-center gap-1.5 font-mono text-micro text-steel">
           <span>
             {comment.path}:{comment.line}
             {comment.side === "old" && " (removed)"}
@@ -106,13 +106,13 @@ export function LineCommentCard({
           {outdated && (
             <span
               title="The code at this line changed since you commented; it's sent with the line as you saw it."
-              className="rounded border border-line-strong px-1 font-sans text-[11px] font-medium text-muted"
+              className="rounded border border-line-strong px-1 font-sans text-micro font-medium text-muted"
             >
               Outdated
             </span>
           )}
         </div>
-        <p className="selectable mt-0.5 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-fg">
+        <p className="selectable mt-0.5 whitespace-pre-wrap break-words text-body leading-relaxed text-fg">
           {comment.text}
         </p>
       </div>

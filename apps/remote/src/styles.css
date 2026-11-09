@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* --------------------------------------------------------------------------
- * "Gunmetal" tokens, identical to the desktop app (docs/PLAN.md §8).
+ * "Gunmetal" tokens, the desktop app's (docs/PLAN.md §8); --steel is slightly lighter here for contrast.
  * ------------------------------------------------------------------------ */
 :root {
   color-scheme: dark;

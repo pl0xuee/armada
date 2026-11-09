@@ -24,7 +24,7 @@ function ToastCard({ toast }: { toast: Toast }) {
   return (
     <div
       role={toast.tone === "err" || toast.tone === "warn" ? "alert" : "status"}
-      className="animate-toast pointer-events-auto flex w-full items-stretch overflow-hidden rounded-2xl border bg-card/95 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.7)] backdrop-blur-xl"
+      className="animate-toast pointer-events-auto flex w-full items-stretch overflow-hidden rounded-2xl border bg-card shadow-[0_18px_40px_-12px_rgba(0,0,0,0.7)]"
       style={{ borderColor: `color-mix(in srgb, ${tone.color} 28%, var(--border))` }}
       onPointerDown={() => holdToast(toast.id, true)}
       onPointerUp={() => holdToast(toast.id, false)}

@@ -25,6 +25,13 @@ interface TourStep {
 
 const STEPS: TourStep[] = [
   {
+    id: "start",
+    title: "Start an agent",
+    body: "Describe the task, pick a folder and press Enter. Approvals and questions appear above the message box. When it's done, review the changes and merge them.",
+    hint: { keys: [modKey, "N"], label: "Start a new agent" },
+    art: StartArt,
+  },
+  {
     id: "grid",
     title: "Many agents, one place",
     body: "Start up to 8 agents on the same project and watch them side by side in a grid. Mission Control shows every agent from all your projects together.",
@@ -45,9 +52,16 @@ const STEPS: TourStep[] = [
     hint: { keys: [modKey, "⇧", "F"], label: "Search every conversation" },
     art: FindArt,
   },
+  {
+    id: "palette",
+    title: "One key reaches everything",
+    body: "The command palette starts agents, opens projects and runs any command. Type > to start an agent, or ? to search every conversation.",
+    hint: { keys: [modKey, "K"], label: "Open the command palette" },
+    art: FindArt,
+  },
 ];
 
-/** The 3-step "what you can do" tour. Skippable at any point; Esc skips too. */
+/** The short "what you can do" tour. Skippable at any point; Esc skips too. */
 export function WelcomeTour() {
   const open = useTour((s) => s.open);
   const [step, setStep] = useState(0);
@@ -103,7 +117,7 @@ export function WelcomeTour() {
             <div className="min-h-[148px]">
               <h2 className="mt-5 text-[20px] font-semibold leading-[26px] tracking-[-0.02em] text-fg">{s.title}</h2>
               <p className="mt-1.5 text-[13.5px] leading-[21px] text-muted">{s.body}</p>
-              <p className="mt-3.5 flex items-center gap-2 text-[12.5px] leading-[18px] text-steel">
+              <p className="mt-3.5 flex items-center gap-2 text-small leading-[18px] text-steel">
                 <span className="inline-flex gap-0.5">
                   {s.hint.keys.map((k) => (
                     <Kbd key={k}>{k}</Kbd>
@@ -193,11 +207,52 @@ function MiniTile({ provider, name, delay }: { provider: "claude" | "codex" | "g
     >
       <div className="flex items-center gap-1.5">
         <ProviderGlyph provider={provider} size="xs" title="" />
-        <span className="text-[11px] font-medium leading-[14px] text-fg">{name}</span>
+        <span className="text-micro font-medium leading-[14px] text-fg">{name}</span>
         <span className="ml-auto h-1.5 w-1.5 rounded-full bg-accent animate-breathe" />
       </div>
       <div className={cn(line, "mt-2 w-[85%]")} />
       <div className={cn(line, "mt-1.5 w-[55%]")} />
+    </div>
+  );
+}
+
+function StartArt() {
+  return (
+    <div className="flex w-full max-w-[340px] flex-col gap-1.5">
+      <div className="tour-rise rounded-lg border border-line-strong bg-card px-2.5 py-2 edge-strong">
+        <div className="text-micro leading-[16px] text-fg">Find and fix the failing tests</div>
+        <div className="mt-2 flex items-center gap-1.5">
+          <span className="rounded-md border border-line bg-raised px-1.5 text-micro leading-[16px] text-muted">
+            atlas-api
+          </span>
+          <span className="rounded-md border border-line bg-raised px-1.5 text-micro leading-[16px] text-muted">
+            Worktree
+          </span>
+          <span className="ml-auto flex gap-0.5">
+            <Kbd className="!h-[16px] !min-w-[16px] !text-micro">⏎</Kbd>
+          </span>
+        </div>
+      </div>
+      <div
+        className="tour-rise flex items-center gap-2 rounded-lg border border-warn/30 bg-card px-2.5 py-1.5 edge"
+        style={{ animationDelay: "100ms" }}
+      >
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />
+        <span className="min-w-0 flex-1 truncate text-micro leading-[14px] text-fg">Run npm test?</span>
+        <span className="rounded-md border border-line-strong bg-raised px-1.5 text-micro leading-[16px] text-muted">
+          Allow
+        </span>
+      </div>
+      <div
+        className="tour-rise flex items-center gap-2 rounded-lg border border-line bg-card px-2.5 py-1.5 edge"
+        style={{ animationDelay: "200ms" }}
+      >
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ok" />
+        <span className="min-w-0 flex-1 truncate text-micro leading-[14px] text-muted">3 files changed</span>
+        <span className="rounded-md border border-line-strong bg-raised px-1.5 text-micro leading-[16px] text-muted">
+          Review
+        </span>
+      </div>
     </div>
   );
 }
@@ -215,9 +270,7 @@ function GridArt() {
         className="tour-rise flex-1 rounded-lg border border-line-strong bg-card/90 p-2 edge-strong"
         style={{ animationDelay: "200ms" }}
       >
-        <div className="text-[10.5px] font-semibold uppercase leading-[14px] tracking-[0.06em] text-steel">
-          Mission Control
-        </div>
+        <div className="eyebrow text-steel">Mission Control</div>
         {[
           ["atlas-api", "bg-warn"],
           ["web-app", "bg-accent"],
@@ -225,7 +278,7 @@ function GridArt() {
         ].map(([n, c]) => (
           <div key={n} className="mt-1.5 flex items-center gap-1.5">
             <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", c)} />
-            <span className="truncate text-[11px] leading-[14px] text-muted">{n}</span>
+            <span className="truncate text-micro leading-[14px] text-muted">{n}</span>
           </div>
         ))}
       </div>
@@ -244,7 +297,7 @@ function DockArt() {
         className="tour-rise rounded-lg border border-accent/30 bg-card px-2.5 py-2 edge"
         style={{ animationDelay: "60ms" }}
       >
-        <div className="flex items-center justify-between text-[11px] leading-[14px]">
+        <div className="flex items-center justify-between text-micro leading-[14px]">
           <span className="font-medium text-fg">Plan</span>
           <span className="text-steel tabular">3 of 5</span>
         </div>
@@ -259,18 +312,18 @@ function DockArt() {
         style={{ animationDelay: "120ms" }}
       >
         <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />
-        <span className="min-w-0 flex-1 truncate text-[11px] leading-[14px] text-fg">
+        <span className="min-w-0 flex-1 truncate text-micro leading-[14px] text-fg">
           Keep validation in the handler?
         </span>
-        <span className="rounded-md border border-line-strong bg-raised px-1.5 text-[10.5px] leading-[16px] text-muted">
+        <span className="rounded-md border border-line-strong bg-raised px-1.5 text-micro leading-[16px] text-muted">
           Yes
         </span>
-        <span className="rounded-md border border-line-strong bg-raised px-1.5 text-[10.5px] leading-[16px] text-muted">
+        <span className="rounded-md border border-line-strong bg-raised px-1.5 text-micro leading-[16px] text-muted">
           No
         </span>
       </div>
       <div
-        className="tour-rise flex h-7 items-center rounded-lg border border-line-strong bg-panel px-2.5 text-[11px] leading-[14px] text-steel"
+        className="tour-rise flex h-7 items-center rounded-lg border border-line-strong bg-panel px-2.5 text-micro leading-[14px] text-steel"
         style={{ animationDelay: "180ms" }}
       >
         Message Claude…
@@ -285,11 +338,11 @@ function FindArt() {
       <div className="tour-rise flex-[1.5] rounded-lg border border-line-strong bg-card p-2 edge-strong">
         <div className="flex h-6 items-center gap-1.5 rounded-md border border-line bg-base/60 px-2">
           <Search className="h-3 w-3 text-steel" />
-          <span className="text-[11px] leading-[14px] text-fg">migration</span>
+          <span className="text-micro leading-[14px] text-fg">migration</span>
           <span className="ml-auto flex gap-0.5">
-            <Kbd className="!h-[16px] !min-w-[16px] !text-[10px]">{modKey}</Kbd>
-            <Kbd className="!h-[16px] !min-w-[16px] !text-[10px]">⇧</Kbd>
-            <Kbd className="!h-[16px] !min-w-[16px] !text-[10px]">F</Kbd>
+            <Kbd className="!h-[16px] !min-w-[16px] !text-micro">{modKey}</Kbd>
+            <Kbd className="!h-[16px] !min-w-[16px] !text-micro">⇧</Kbd>
+            <Kbd className="!h-[16px] !min-w-[16px] !text-micro">F</Kbd>
           </span>
         </div>
         {[
@@ -297,8 +350,8 @@ function FindArt() {
           ["Codex #3", "Rolled back the ", " and retried"],
         ].map(([who, a, b]) => (
           <div key={who} className="mt-2 px-0.5">
-            <div className="text-[10.5px] leading-[14px] text-steel">{who}</div>
-            <div className="truncate text-[11px] leading-[15px] text-muted">
+            <div className="text-micro leading-[14px] text-steel">{who}</div>
+            <div className="truncate text-micro leading-[15px] text-muted">
               {a}
               <mark className="rounded-[3px] bg-accent/20 px-0.5 text-fg">migration</mark>
               {b}
@@ -310,16 +363,14 @@ function FindArt() {
         className="tour-rise flex-1 rounded-lg border border-line bg-card p-2.5 edge"
         style={{ animationDelay: "100ms" }}
       >
-        <div className="text-[10.5px] font-semibold uppercase leading-[14px] tracking-[0.06em] text-steel">
-          Spending limit
-        </div>
+        <div className="eyebrow text-steel">Spending limit</div>
         <div className="mt-1.5 text-[15px] font-semibold leading-[20px] tracking-tight text-fg tabular">
-          $3.20 <span className="text-[11px] font-normal text-steel">of $5.00</span>
+          $3.20 <span className="text-micro font-normal text-steel">of $5.00</span>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-raised">
           <div className="h-full w-[64%] rounded-full bg-accent" />
         </div>
-        <div className="mt-2 text-[10.5px] leading-[14px] text-steel">Pauses at the limit</div>
+        <div className="mt-2 text-micro leading-[14px] text-steel">Pauses at the limit</div>
       </div>
     </div>
   );

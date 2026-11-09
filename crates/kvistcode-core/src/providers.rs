@@ -213,16 +213,63 @@ fn merge_paths(login: Vec<PathBuf>, inherited: Vec<PathBuf>, extra: Vec<PathBuf>
 }
 
 pub fn augment_path() {
+    let _ = augment_path_cached(None);
+}
+
+/// The login shell's output from the last run, kept in `cache_dir` with the shell it came
+/// from (a different `$SHELL` makes it stale). Reading a small file keeps the shell
+/// profile off the startup path; [`spawn_login_path_refresh`] keeps it current.
+#[cfg(unix)]
+fn read_login_path_cache(cache_dir: &Path) -> Option<Vec<u8>> {
+    let raw = std::fs::read(cache_dir.join("login-path.txt")).ok()?;
+    let split = raw.iter().position(|b| *b == b'\n')?;
+    (raw[..split] == *login_shell().as_bytes()).then(|| raw[split + 1..].to_vec())
+}
+
+#[cfg(unix)]
+fn write_login_path_cache(cache_dir: &Path, out: &[u8]) {
+    let mut raw = login_shell().into_bytes();
+    raw.push(b'\n');
+    raw.extend_from_slice(out);
+    let tmp = cache_dir.join("login-path.txt.tmp");
+    let _ = std::fs::create_dir_all(cache_dir);
+    if std::fs::write(&tmp, raw).is_ok() {
+        let _ = std::fs::rename(&tmp, cache_dir.join("login-path.txt"));
+    }
+}
+
+/// Like [`augment_path`], but with a data folder to cache the login shell's PATH in. With a
+/// cache, startup reads one file instead of running the shell profile. Without one
+/// (a first launch, or a different shell) it probes the shell and waits, as before.
+/// Returns true when the cache was used; call [`spawn_login_path_refresh`] once every
+/// `set_var` at startup is done, so the probe thread can't race the environment.
+pub fn augment_path_cached(cache_dir: Option<&Path>) -> bool {
+    #[cfg(not(unix))]
+    let _ = cache_dir;
     let inherited: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect())
         .unwrap_or_default();
 
     #[cfg(unix)]
-    let login = login_shell_path()
-        .map(|out| parse_shell_path(&out))
-        .unwrap_or_default();
+    let (login, refresh) = {
+        let cached = cache_dir.and_then(read_login_path_cache);
+        let refresh = cached.is_some();
+        let out = cached.or_else(|| {
+            let out = login_shell_path()?;
+            if let Some(dir) = cache_dir {
+                if !parse_shell_path(&out).is_empty() {
+                    write_login_path_cache(dir, &out);
+                }
+            }
+            Some(out)
+        });
+        (
+            out.map(|out| parse_shell_path(&out)).unwrap_or_default(),
+            refresh,
+        )
+    };
     #[cfg(not(unix))]
-    let login: Vec<PathBuf> = Vec::new();
+    let (login, refresh): (Vec<PathBuf>, bool) = (Vec::new(), false);
 
     let mut extra = Vec::new();
     if let Some(home) = home_dir() {
@@ -249,6 +296,29 @@ pub fn augment_path() {
     if let Ok(joined) = std::env::join_paths(parts) {
         std::env::set_var("PATH", joined);
     }
+
+    refresh
+}
+
+/// Re-reads the login shell's PATH in the background and stores it for the next launch.
+/// It never touches the environment, but it reads it, so start it only after the last
+/// startup `set_var` (it is a no-op on Windows, where there is no cache).
+pub fn spawn_login_path_refresh(cache_dir: &Path) {
+    #[cfg(unix)]
+    {
+        let dir = cache_dir.to_path_buf();
+        let _ = std::thread::Builder::new()
+            .name("login-path-refresh".into())
+            .spawn(move || {
+                if let Some(out) = login_shell_path() {
+                    if !parse_shell_path(&out).is_empty() {
+                        write_login_path_cache(&dir, &out);
+                    }
+                }
+            });
+    }
+    #[cfg(not(unix))]
+    let _ = cache_dir;
 }
 
 /// The user's home folder: USERPROFILE on Windows (HOME there is often set by
@@ -587,6 +657,29 @@ mod tests {
         for name in ["codex", "claude", "grok", "gh", "git"] {
             println!("{name}: {:?}", resolve_program(name));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn login_path_cache_round_trips_and_ignores_other_shells() {
+        let root = crate::testutil::scratch("login-cache");
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(read_login_path_cache(&root).is_none());
+        write_login_path_cache(&root, b"__KVISTCODE_PATH__/x/bin:/usr/bin");
+        let got = read_login_path_cache(&root).unwrap();
+        assert_eq!(
+            parse_shell_path(&got),
+            vec![PathBuf::from("/x/bin"), PathBuf::from("/usr/bin")]
+        );
+        // A cache written by another shell is stale.
+        std::fs::write(
+            root.join("login-path.txt"),
+            b"/not/my/shell
+__KVISTCODE_PATH__/y",
+        )
+        .unwrap();
+        assert!(read_login_path_cache(&root).is_none());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[cfg(unix)]

@@ -90,7 +90,7 @@ export function RestoreAction({ item }: { item: UserItem }) {
         disabled={working}
         onClick={() => setOpen(true)}
         className={cn(
-          "inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] text-steel transition-colors hover:bg-raised hover:text-fg disabled:pointer-events-none disabled:opacity-40",
+          "inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-micro text-steel transition-colors hover:bg-raised hover:text-fg disabled:pointer-events-none disabled:opacity-45",
         )}
       >
         <RotateCcw className="h-3.5 w-3.5" />
@@ -103,45 +103,45 @@ export function RestoreAction({ item }: { item: UserItem }) {
         >
           <DialogBody className="space-y-3">
             {error ? (
-              <p className="text-[12.5px] text-err">{error}</p>
+              <p className="text-small text-err">{error}</p>
             ) : !preview ? (
-              <div className="flex items-center gap-2 text-[12.5px] text-steel">
+              <div className="flex items-center gap-2 text-small text-steel">
                 <Spinner className="h-3.5 w-3.5" /> Comparing with the current files…
               </div>
             ) : preview.totalFiles === 0 ? (
-              <p className="text-[12.5px] text-muted">The files already match this point. Nothing would change.</p>
+              <p className="text-small text-muted">The files already match this point. Nothing would change.</p>
             ) : (
               <div className="rounded-lg border border-line bg-base/40">
-                <div className="flex items-center justify-between border-b border-line px-3 py-2 text-[12px] text-muted">
+                <div className="flex items-center justify-between border-b border-line px-3 py-2 text-caption text-muted">
                   <span>
                     {preview.totalFiles} file{preview.totalFiles === 1 ? "" : "s"} will change
                   </span>
-                  <span className="font-mono text-[11.5px]">
+                  <span className="font-mono text-meta">
                     <span className="text-ok">+{preview.additions}</span>{" "}
                     <span className="text-err">−{preview.deletions}</span>
                   </span>
                 </div>
                 <ul className="max-h-56 overflow-y-auto py-1">
                   {preview.files.map((f) => (
-                    <li key={f.path} className="flex items-center gap-2 px-3 py-1 text-[12px]">
+                    <li key={f.path} className="flex items-center gap-2 px-3 py-1 text-caption">
                       <span className="min-w-0 flex-1 truncate font-mono" title={f.path}>
                         {f.path}
                       </span>
-                      <span className="shrink-0 text-[11px] text-steel">{STATUS_LABEL[f.status]}</span>
-                      <span className="shrink-0 font-mono text-[11px]">
+                      <span className="shrink-0 text-micro text-steel">{STATUS_LABEL[f.status]}</span>
+                      <span className="shrink-0 font-mono text-micro">
                         <span className="text-ok">+{f.additions}</span> <span className="text-err">−{f.deletions}</span>
                       </span>
                     </li>
                   ))}
                   {preview.totalFiles > preview.files.length && (
-                    <li className="px-3 py-1 text-[11.5px] text-steel">
+                    <li className="px-3 py-1 text-meta text-steel">
                       and {preview.totalFiles - preview.files.length} more
                     </li>
                   )}
                 </ul>
               </div>
             )}
-            <p className="text-[11.5px] text-steel">
+            <p className="text-meta text-steel">
               Git history, branches and ignored files (like node_modules) are not touched.
             </p>
           </DialogBody>
@@ -158,7 +158,11 @@ export function RestoreAction({ item }: { item: UserItem }) {
                 Restore and edit prompt
               </Button>
             )}
-            <Button variant="primary" onClick={() => void run(false)} disabled={busy || working || !!error || !preview}>
+            <Button
+              variant="primary"
+              onClick={() => void run(false)}
+              disabled={busy || working || !!error || !preview || preview.totalFiles === 0}
+            >
               {busy ? <Spinner className="h-3.5 w-3.5 text-current" /> : <RotateCcw />}
               Restore files
             </Button>

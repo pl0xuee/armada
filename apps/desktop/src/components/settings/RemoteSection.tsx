@@ -190,7 +190,7 @@ export function RemoteSection({ settings }: { settings: Settings }) {
       <div className="space-y-6">
         <div className="flex gap-3 rounded-xl border border-line bg-card/60 px-4 py-3 edge">
           <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-          <p className="text-[12.5px] leading-relaxed text-muted">{SECURITY_COPY}</p>
+          <p className="text-small leading-relaxed text-muted">{SECURITY_COPY}</p>
         </div>
 
         <SettingGroup>
@@ -200,7 +200,7 @@ export function RemoteSection({ settings }: { settings: Settings }) {
             htmlFor="remote-enabled"
           >
             {applying && (
-              <span className="flex items-center gap-1.5 text-[12px] text-steel" role="status">
+              <span className="flex items-center gap-1.5 text-caption text-steel" role="status">
                 <Spinner className="h-3.5 w-3.5" /> Applying…
               </span>
             )}
@@ -251,7 +251,7 @@ export function RemoteSection({ settings }: { settings: Settings }) {
                   }
                 }}
                 className={cn(
-                  "h-8 w-[96px] text-right font-mono text-[12.5px] tabular",
+                  "h-8 w-[96px] text-right font-mono text-small tabular",
                   (portError || portBackendError) && "border-err/60 focus:border-err/70 focus:ring-err/15",
                 )}
               />
@@ -279,8 +279,8 @@ export function RemoteSection({ settings }: { settings: Settings }) {
 
         {loadError ? (
           <div role="alert" className="flex items-center gap-3 rounded-xl border border-err/30 bg-err/[0.06] px-4 py-3">
-            <p className="min-w-0 flex-1 text-[12.5px] text-err">
-              Couldn't read the remote server status: <span className="font-mono text-[12px]">{loadError}</span>
+            <p className="min-w-0 flex-1 text-small text-err">
+              Couldn't read the remote server status: <span className="font-mono text-caption">{loadError}</span>
             </p>
             <Button size="sm" variant="secondary" onClick={() => void refresh()}>
               <RefreshCw /> Retry
@@ -395,10 +395,10 @@ function ReachNote({
     <div role="note" className="flex gap-3 rounded-xl border border-warn/30 bg-warn/[0.06] px-4 py-3">
       <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium">
+        <div className="text-body font-medium">
           {local ? "A phone can't reach this yet" : "This connection is not encrypted"}
         </div>
-        <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted">
+        <p className="mt-0.5 text-small leading-relaxed text-muted">
           {local
             ? 'Right now only this computer can connect, so there is no pairing code. To use your phone, choose "Tailscale" (safest) or "Local network" above.'
             : "Anyone on the same Wi-Fi could read what your phone sends and receives. Use it only on a network you trust, or switch to Tailscale."}
@@ -424,13 +424,13 @@ function FirewallCard({ firewall }: { firewall: NonNullable<RemoteStatus["firewa
     <div role="note" className="flex gap-3 rounded-xl border border-warn/30 bg-warn/[0.06] px-4 py-3">
       <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium">This computer's firewall may block your phone</div>
-        <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted">
+        <div className="text-body font-medium">This computer's firewall may block your phone</div>
+        <p className="mt-0.5 text-small leading-relaxed text-muted">
           {firewall.name} is on and doesn't allow Kvistcode's port, so a phone that scans the code waits on a blank
           page. Allow devices on your network by running this in a terminal:
         </p>
         <div className="mt-2 flex items-center gap-2">
-          <code className="selectable min-w-0 flex-1 truncate rounded-lg border border-line bg-base/60 px-2.5 py-1.5 font-mono text-[12px] text-fg/90">
+          <code className="selectable min-w-0 flex-1 truncate rounded-lg border border-line bg-base/60 px-2.5 py-1.5 font-mono text-caption text-fg/90">
             {firewall.command}
           </code>
           <CopyButton text={firewall.command} />
@@ -448,8 +448,8 @@ function StatusCard({ status, starting }: { status: RemoteStatus; starting: bool
           <Smartphone className="h-4 w-4" />
         </span>
         <div className="min-w-0">
-          <div className="text-[13px] font-medium">Remote access is off</div>
-          <div className="text-[12px] text-muted">Turn it on to pair your phone with a QR code.</div>
+          <div className="text-body font-medium">Remote access is off</div>
+          <div className="text-caption text-muted">Turn it on to pair your phone with a QR code.</div>
         </div>
       </div>
     );
@@ -459,8 +459,8 @@ function StatusCard({ status, starting }: { status: RemoteStatus; starting: bool
       <div role="alert" className="flex items-start gap-3 rounded-xl border border-err/30 bg-err/[0.06] px-4 py-3.5">
         <Unplug className="mt-0.5 h-4 w-4 shrink-0 text-err" />
         <div className="min-w-0">
-          <div className="text-[13px] font-medium text-err">The remote server couldn't start</div>
-          <p className="selectable mt-0.5 font-mono text-[12px] text-err/90">{status.error}</p>
+          <div className="text-body font-medium text-err">The remote server couldn't start</div>
+          <p className="selectable mt-0.5 font-mono text-caption text-err/90">{status.error}</p>
         </div>
       </div>
     );
@@ -469,7 +469,7 @@ function StatusCard({ status, starting }: { status: RemoteStatus; starting: bool
     <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-card px-4 py-3 edge">
       <span
         className={cn(
-          "inline-flex h-6 items-center gap-1.5 rounded-full border px-2 text-[11.5px] font-medium",
+          "inline-flex h-6 items-center gap-1.5 rounded-full border px-2 text-meta font-medium",
           status.running ? "border-ok/30 bg-ok/10 text-ok" : "border-line-strong bg-raised text-muted",
         )}
       >
@@ -480,8 +480,10 @@ function StatusCard({ status, starting }: { status: RemoteStatus; starting: bool
         )}
         {status.running ? "Running" : "Starting…"}
       </span>
-      {status.url && <span className="selectable min-w-0 truncate font-mono text-[12px] text-fg/90">{status.url}</span>}
-      <span className="ml-auto text-[12px] text-steel">
+      {status.url && (
+        <span className="selectable min-w-0 truncate font-mono text-caption text-fg/90">{status.url}</span>
+      )}
+      <span className="ml-auto text-caption text-steel">
         {status.lan || status.tailscale?.state === "on" ? lanLabel(status) : "This computer only"}
       </span>
     </div>
@@ -494,7 +496,7 @@ function TailscaleCard({ tailscale, onRecheck }: { tailscale: TailscaleStatus; o
     return (
       <div className="flex gap-3 rounded-xl border border-line bg-card/60 px-4 py-3 edge">
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-ok" />
-        <p className="text-[12.5px] leading-relaxed text-muted">
+        <p className="text-small leading-relaxed text-muted">
           Shared over Tailscale with HTTPS. Your phone needs the Tailscale app, signed in to the same account; then scan
           the pairing code below.
         </p>
@@ -505,7 +507,7 @@ function TailscaleCard({ tailscale, onRecheck }: { tailscale: TailscaleStatus; o
     return (
       <div role="status" className="flex items-center gap-2.5 rounded-xl border border-line bg-card/60 px-4 py-3 edge">
         <Spinner className="h-3.5 w-3.5 text-steel" />
-        <span className="text-[12.5px] text-muted">Setting up Tailscale…</span>
+        <span className="text-small text-muted">Setting up Tailscale…</span>
       </div>
     );
   }
@@ -523,13 +525,13 @@ function TailscaleCard({ tailscale, onRecheck }: { tailscale: TailscaleStatus; o
     <div role="note" className="flex gap-3 rounded-xl border border-warn/30 bg-warn/[0.06] px-4 py-3">
       <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium">{title}</div>
+        <div className="text-body font-medium">{title}</div>
         {tailscale.message && (
-          <p className="selectable mt-0.5 text-[12.5px] leading-relaxed text-muted">{tailscale.message}</p>
+          <p className="selectable mt-0.5 text-small leading-relaxed text-muted">{tailscale.message}</p>
         )}
         {tailscale.command && (
           <div className="mt-2 flex items-center gap-2">
-            <code className="selectable min-w-0 flex-1 truncate rounded-lg border border-line bg-base/60 px-2.5 py-1.5 font-mono text-[12px] text-fg/90">
+            <code className="selectable min-w-0 flex-1 truncate rounded-lg border border-line bg-base/60 px-2.5 py-1.5 font-mono text-caption text-fg/90">
               {tailscale.command}
             </code>
             <CopyButton text={tailscale.command} />
@@ -582,8 +584,8 @@ function PairingCard({
           <QrCode className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium">Pair your phone</div>
-          <div className="text-[12px] text-muted">
+          <div className="text-body font-medium">Pair your phone</div>
+          <div className="text-caption text-muted">
             The pairing code is hidden so it doesn't show up in screen shares. It works once and expires after 5
             minutes.
           </div>
@@ -613,7 +615,7 @@ function PairingCard({
             className="rounded-xl bg-white p-2.5 shadow-[0_8px_30px_-10px_rgba(0,0,0,0.6)]"
           />
         ) : (
-          <div className="flex h-[168px] w-[168px] items-center justify-center rounded-xl border border-dashed border-line-strong text-[12px] text-steel">
+          <div className="flex h-[168px] w-[168px] items-center justify-center rounded-xl border border-dashed border-line-strong text-caption text-steel">
             No QR code
           </div>
         )}
@@ -625,7 +627,7 @@ function PairingCard({
             <EyeOff className="!h-3.5 !w-3.5" /> Hide
           </Button>
         </div>
-        <ol className="mt-2 space-y-1 text-[12.5px] text-muted">
+        <ol className="mt-2 space-y-1 text-small text-muted">
           <li>
             <span className="mr-1.5 text-steel tabular">1.</span>Open the camera on your phone.
           </li>
@@ -638,13 +640,13 @@ function PairingCard({
           </li>
         </ol>
         <div className="mt-3 flex min-w-0 items-center gap-1 rounded-lg border border-line bg-base/50 py-1 pl-2.5 pr-1">
-          <span className="selectable min-w-0 flex-1 truncate font-mono text-[11.5px] text-fg/90" title={url}>
+          <span className="selectable min-w-0 flex-1 truncate font-mono text-meta text-fg/90" title={url}>
             {url}
           </span>
           <CopyButton text={url} label="Copy link" />
         </div>
         {!status.lan && (
-          <p className="mt-2 text-[12px] text-steel">
+          <p className="mt-2 text-caption text-steel">
             Only this computer can open it. Turn on LAN access to pair a phone.
           </p>
         )}
@@ -682,7 +684,7 @@ function SharesGroup({ shares, enabled, onChanged }: { shares: ShareLink[]; enab
       description="Read-only live views of a single agent: messages and a tool outline, no command output, files or local paths. Create one from an agent's menu: Share live view…"
     >
       {shares.length === 0 ? (
-        <div className="flex items-center gap-3 px-4 py-4 text-[12.5px] text-steel">
+        <div className="flex items-center gap-3 px-4 py-4 text-small text-steel">
           <Link2 className="h-4 w-4 shrink-0" />
           {enabled ? "No active share links." : "Share links work while remote access is on."}
         </div>
@@ -695,8 +697,8 @@ function SharesGroup({ shares, enabled, onChanged }: { shares: ShareLink[]; enab
                 <Link2 className="h-4 w-4" />
               </span>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] font-medium">{title}</div>
-                <div className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-steel">
+                <div className="truncate text-body font-medium">{title}</div>
+                <div className="flex min-w-0 items-center gap-1.5 text-meta text-steel">
                   <span className="shrink-0">Created {relativeTimeLong(s.createdAt, now)}</span>
                   <span className="text-line-strong">·</span>
                   <span className="shrink-0">Expires {new Date(s.expiresAt).toLocaleString()}</span>
@@ -754,7 +756,7 @@ function DevicesGroup({
       description="Each phone has its own key. Revoke one to sign that device out right away."
     >
       {devices.length === 0 ? (
-        <div className="flex items-center gap-3 px-4 py-4 text-[12.5px] text-steel">
+        <div className="flex items-center gap-3 px-4 py-4 text-small text-steel">
           <Smartphone className="h-4 w-4 shrink-0" />
           No paired devices. Scan the pairing code with your phone.
         </div>
@@ -766,8 +768,8 @@ function DevicesGroup({
                 <Smartphone className="h-4 w-4" />
               </span>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] font-medium">{d.name}</div>
-                <div className="text-[11.5px] text-steel">
+                <div className="truncate text-body font-medium">{d.name}</div>
+                <div className="text-meta text-steel">
                   {d.lastSeen > 0 ? `Last seen ${relativeTimeLong(d.lastSeen, now)}` : "Not seen yet"} · paired{" "}
                   {relativeTimeLong(d.createdAt, now)}
                 </div>

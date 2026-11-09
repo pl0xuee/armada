@@ -31,8 +31,16 @@ const BLOCKING_ROLES = new Set([
   "radio",
 ]);
 
+// Mirrors Settings.singleKeyShortcuts (set from App); on until settings say otherwise.
+let singleKeys = true;
+export function setSingleKeyShortcuts(on: boolean) {
+  singleKeys = on;
+}
+export const singleKeyShortcutsOn = () => singleKeys;
+
 /** True when a key event must not be treated as an approval shortcut. */
 export function shouldIgnoreApprovalKey(e: KeyboardEvent): boolean {
+  if (!singleKeys) return true;
   if (e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return true;
   if (e.isComposing || e.keyCode === 229) return true;
   const t = e.target;

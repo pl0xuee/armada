@@ -13,6 +13,7 @@ import { Button } from "./ui/button";
 import { Dialog, DialogBody, DialogContent, DialogFooter } from "./ui/dialog";
 import { Skeleton } from "./ui/skeleton";
 import { Spinner } from "./ui/misc";
+import { Select } from "./ui/select";
 
 /** "Share live view…": read-only link to one agent, served by the remote-control server. */
 export function ShareDialog() {
@@ -79,7 +80,10 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
     try {
       await useApp
         .getState()
-        .setSettings({ ...settings, remote: { ...settings.remote, enabled: true, lan: scope === "lan", tailscale: false } });
+        .setSettings({
+          ...settings,
+          remote: { ...settings.remote, enabled: true, lan: scope === "lan", tailscale: false },
+        });
       // The server starts asynchronously: wait for it so we don't flash an error or a stale "off".
       await pollRemoteStatus((st) => setStatus(st));
       setLoadError(null);
@@ -107,7 +111,7 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
     <>
       <DialogBody className="space-y-4">
         {loadError ? (
-          <div className="rounded-xl border border-err/30 bg-err/[0.06] p-3 text-[12.5px] text-err">
+          <div className="rounded-xl border border-err/30 bg-err/[0.06] p-3 text-small text-err">
             Couldn't read remote status: <span className="font-mono">{loadError}</span>
           </div>
         ) : !status ? (
@@ -123,8 +127,8 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
                 <Radio className="h-4 w-4" />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-medium">Remote access is off</p>
-                <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted">
+                <p className="text-body font-medium">Remote access is off</p>
+                <p className="mt-0.5 text-small leading-relaxed text-muted">
                   Share links are served by Kvistcode's built-in remote server. Choose who can reach it:
                 </p>
                 <div role="radiogroup" aria-label="Who can open the link" className="mt-3 space-y-2">
@@ -156,7 +160,7 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
             </div>
           </fieldset>
         ) : !status.running ? (
-          <div className="flex items-start gap-2.5 rounded-xl border border-err/30 bg-err/[0.06] p-3.5 text-[12.5px]">
+          <div className="flex items-start gap-2.5 rounded-xl border border-err/30 bg-err/[0.06] p-3.5 text-small">
             <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-err" />
             <div>
               <p className="font-medium text-err">The remote server isn't running</p>
@@ -178,12 +182,12 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
           <div className="space-y-2">
             {links.length === 0 &&
               (busy === "create" ? (
-                <div className="flex items-center gap-2 text-[12.5px] text-muted" role="status">
+                <div className="flex items-center gap-2 text-small text-muted" role="status">
                   <Spinner className="h-3.5 w-3.5" /> Creating link…
                 </div>
               ) : createError ? (
                 <div
-                  className="flex items-start gap-2.5 rounded-xl border border-err/30 bg-err/[0.06] p-3 text-[12.5px]"
+                  className="flex items-start gap-2.5 rounded-xl border border-err/30 bg-err/[0.06] p-3 text-small"
                   role="alert"
                 >
                   <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-err" />
@@ -197,7 +201,7 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
                 </div>
               ) : (
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed border-line-strong px-3.5 py-3">
-                  <span className="text-[12.5px] text-muted">No active link for this agent.</span>
+                  <span className="text-small text-muted">No active link for this agent.</span>
                   <div className="flex items-center gap-2">
                     <ExpiryPicker hours={hours} onChange={setHours} disabled={busy !== null} />
                     <Button size="sm" variant="primary" disabled={busy !== null} onClick={() => void create()}>
@@ -212,12 +216,12 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
                 <div key={l.id} className="rounded-xl border border-line-strong bg-card/70 p-3">
                   <div className="flex items-center gap-2">
                     <Link2 className="h-4 w-4 shrink-0 text-accent" />
-                    <span className="selectable min-w-0 flex-1 truncate font-mono text-[12px] text-fg">
+                    <span className="selectable min-w-0 flex-1 truncate font-mono text-caption text-fg">
                       {url ?? "The link was shown when it was created. Revoke it and create a new one to copy it."}
                     </span>
                     {url && <CopyButton text={url} label="Copy link" />}
                   </div>
-                  <div className="mt-2 flex items-center justify-between text-[11.5px] text-steel">
+                  <div className="mt-2 flex items-center justify-between text-meta text-steel">
                     <span>
                       Created {relativeTimeLong(l.createdAt)} · expires {new Date(l.expiresAt).toLocaleString()}
                     </span>
@@ -230,7 +234,7 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
               );
             })}
             {links.length > 0 && createError && (
-              <p className="text-[12px] text-err" role="alert">
+              <p className="text-caption text-err" role="alert">
                 Couldn't create another link: {createError}
               </p>
             )}
@@ -245,7 +249,7 @@ function ShareBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
             )}
           </div>
         )}
-        <p className="flex items-start gap-2 text-[11.5px] leading-relaxed text-steel">
+        <p className="flex items-start gap-2 text-meta leading-relaxed text-steel">
           <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           Viewers see this agent's messages (secrets hidden) and a short outline of the tools it ran. They can't see
           command output, file contents, diffs, approval requests or local paths, and can't change anything. The link
@@ -272,19 +276,21 @@ function ExpiryPicker({
   disabled?: boolean;
 }) {
   return (
-    <label className="flex items-center gap-1.5 text-[11.5px] text-steel">
+    <div className="flex items-center gap-1.5 text-meta text-steel">
       Expires after
-      <select
-        value={hours}
+      <Select
+        value={String(hours)}
+        onValueChange={(v) => onChange(Number(v))}
+        options={[
+          { value: "1", label: "1 hour" },
+          { value: "24", label: "24 hours" },
+          { value: "168", label: "7 days" },
+        ]}
+        aria-label="Link expires after"
         disabled={disabled}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="h-7 rounded-md border border-line-strong bg-card px-1.5 text-[12px] text-fg outline-none focus:border-accent/60"
-      >
-        <option value={1}>1 hour</option>
-        <option value={24}>24 hours</option>
-        <option value={168}>7 days</option>
-      </select>
-    </label>
+        className="h-7 w-auto min-w-[104px] rounded-md border-line-strong bg-card px-2 text-caption"
+      />
+    </div>
   );
 }
 
@@ -323,8 +329,8 @@ function ScopeOption({
         {checked && <span className={cn("h-2 w-2 rounded-full", warn ? "bg-warn" : "bg-accent")} />}
       </span>
       <span className="min-w-0">
-        <span className="block text-[12.5px] font-medium text-fg">{title}</span>
-        <span className="block text-[11.5px] leading-snug text-muted">{hint}</span>
+        <span className="block text-small font-medium text-fg">{title}</span>
+        <span className="block text-meta leading-snug text-muted">{hint}</span>
       </span>
     </label>
   );
