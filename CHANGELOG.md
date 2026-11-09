@@ -5,6 +5,25 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.4.7 — 2026-11-09
+
+### New
+- **Start a brand-new project from Kvistcode.** Choose New project… next to the folder picker (on the start screen, or New agent), type a name, and Kvistcode makes the folder for you, in `~/Projects` unless you pick another place. It also sets up git with a first commit by default, so several agents can work in it without overwriting each other. It never touches a folder that already has files in it.
+- **Undo for reverting a change.** After you revert a file or a hunk an agent changed, a toast offers Undo for a few seconds.
+- **Move between agents from the keyboard** with Alt+↑ and Alt+↓ (⌥ on a Mac), and open Review for the agent you are on with Ctrl+Shift+R (⌘⇧R). The welcome tour now shows how to start, approve and review an agent, and mentions the command palette.
+
+### Changed
+- **Kvistcode opens faster.** It no longer waits for the shell scan or every agent's version check before showing the window, and light themes no longer flash dark at launch.
+- **Long replies and busy screens stay smoother.** Streaming text is saved less often, search indexing and the database no longer hold things up while agents stream, and background timers do less work.
+- **Pictures are stored as files.** Screenshots and images in conversations load only when you scroll to them, so big conversations open and scroll faster. Existing conversations keep working as they are. Pictures are deleted with the agent that owns them.
+- **A tidier look.** One set of text sizes and one style for small uppercase labels across the app, nothing smaller than 11 px, and better contrast on the red Delete buttons and the warning count.
+- **Clearer wording.** The Settings page is called Providers everywhere, the first-run screens and error messages use plain words, and buttons that are off now say why.
+
+### Fixed
+- **Your first prompt is no longer lost** when you leave the start screen to add an account.
+- **The sign-in message now has a button that goes to Accounts,** where you actually sign in.
+- **The phone is smaller and quicker to load** with compression, and on a touch keyboard the return key now says it adds a new line instead of promising to send.
+
 ## v0.4.6 — 2026-11-04
 
 ### Fixed
