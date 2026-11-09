@@ -24,6 +24,7 @@ thread_local! {
 /// A new, empty, uniquely named folder in the temp folder, removed when the calling
 /// test's thread ends. Call it from the test's own thread (not a spawned task).
 pub fn scratch(prefix: &str) -> PathBuf {
+    keep_off_the_real_keychain();
     let dir = std::env::temp_dir().join(format!(
         "kvistcode-{prefix}-{}",
         uuid::Uuid::new_v4().simple()
@@ -31,4 +32,11 @@ pub fn scratch(prefix: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).expect("creating a scratch folder");
     DIRS.with(|d| d.borrow_mut().0.push(dir.clone()));
     dir
+}
+
+/// Settings secrets go to memory, never the developer's OS keychain (a desktop prompt
+/// "create a new keyring" is what the real one does on a fresh machine).
+pub fn keep_off_the_real_keychain() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| std::env::set_var("KVISTCODE_SECRETS", "memory"));
 }

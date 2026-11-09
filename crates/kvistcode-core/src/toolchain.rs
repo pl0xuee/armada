@@ -94,11 +94,23 @@ fn managed_npm_cli(data_dir: &Path) -> PathBuf {
     modules.join("npm").join("bin").join("npm-cli.js")
 }
 
+/// Where Kvistcode keeps its private installs (set by [`add_managed_paths`]).
+static MANAGED_DIRS: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+
+/// Whether `path` is inside Kvistcode's private installs (its own Node, agent CLIs), which
+/// are not the person's: they don't count as having a tool installed.
+pub fn is_managed_path(path: &Path) -> bool {
+    MANAGED_DIRS
+        .get()
+        .is_some_and(|dirs| dirs.iter().any(|d| path.starts_with(d)))
+}
+
 /// Puts Kvistcode-managed Node (first: it only gets downloaded when the system one is
 /// missing or too old) and managed agent CLIs (last, so the user's own installs
 /// win) on PATH. Call once at startup, before any other threads exist: changing the
 /// environment of a running multi-threaded process isn't safe.
 pub fn add_managed_paths(data_dir: &Path) {
+    let _ = MANAGED_DIRS.set(vec![runtime_dir(data_dir), tools_dir(data_dir)]);
     let mut parts: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect())
         .unwrap_or_default();
@@ -159,6 +171,7 @@ pub async fn usable_node(data_dir: &Path) -> Option<PathBuf> {
 }
 
 /// How to invoke npm: (program, leading args).
+#[derive(Clone)]
 struct Npm {
     program: PathBuf,
     args: Vec<String>,
@@ -638,19 +651,88 @@ async fn lock_installs(log: &Log) -> tokio::sync::MutexGuard<'static, ()> {
 }
 
 async fn install_unlocked(provider: Provider, data_dir: &Path, log: Log) -> anyhow::Result<()> {
+    install_with(
+        provider,
+        data_dir,
+        log,
+        &tokio::sync::Mutex::new(NodeSetup::default()),
+    )
+    .await
+}
+
+/// The npm a run of installs uses. Node.js is set up the first time it is needed; if that
+/// fails, every later install gets the same reason at once instead of trying the download again.
+#[derive(Default)]
+struct NodeSetup {
+    npm: Option<Npm>,
+    failed: Option<String>,
+}
+
+impl NodeSetup {
+    async fn get<F, Fut>(&mut self, ensure: F) -> anyhow::Result<Npm>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = anyhow::Result<Npm>>,
+    {
+        if let Some(reason) = &self.failed {
+            bail!("{reason}");
+        }
+        if let Some(npm) = &self.npm {
+            return Ok(npm.clone());
+        }
+        match ensure().await {
+            Ok(npm) => {
+                self.npm = Some(npm.clone());
+                Ok(npm)
+            }
+            Err(e) => {
+                self.failed = Some(format!("{e:#}"));
+                Err(e)
+            }
+        }
+    }
+}
+
+// The installer's log lines. The first-run screen reads them (lib/firstRun.ts
+// `applyLogLine`), so change them together; the test `log_lines_match_what_the_app_reads`
+// and the matching test in firstRun.test.ts pin the wording.
+fn line_setting_up(name: &str) -> String {
+    format!("Setting up {name}")
+}
+fn line_ready(name: &str, version: &str) -> String {
+    format!("✓ {name} is ready ({version})")
+}
+fn line_already(name: &str) -> String {
+    format!("✓ {name} is already installed.")
+}
+fn line_failed(name: &str, reason: &dyn std::fmt::Display) -> String {
+    format!("✗ {name}: {reason}")
+}
+
+/// Installs one provider, taking Node.js from `setup` (set up once for a run of installs).
+async fn install_with(
+    provider: Provider,
+    data_dir: &Path,
+    log: Log,
+    setup: &tokio::sync::Mutex<NodeSetup>,
+) -> anyhow::Result<()> {
     let name = provider.display_name();
     let pkgs = packages_for(provider, data_dir);
     if pkgs.is_empty() {
-        log(&format!("✓ {name} is already installed."));
+        log(&line_already(name));
         return Ok(());
     }
-    log(&format!("Setting up {name}"));
-    let npm = ensure_npm(data_dir, &log).await?;
+    log(&line_setting_up(name));
+    let npm = setup
+        .lock()
+        .await
+        .get(|| ensure_npm(data_dir, &log))
+        .await?;
     log(&format!("▸ Installing {}…", pkgs.join(", ")));
     npm_install(&npm, data_dir, &pkgs, &log).await?;
 
     let version = check_runs(provider, data_dir).await?;
-    log(&format!("✓ {name} is ready ({version})"));
+    log(&line_ready(name, &version));
     Ok(())
 }
 
@@ -970,6 +1052,74 @@ pub async fn install_missing(data_dir: &Path, log: Log) -> anyhow::Result<()> {
     }
 }
 
+/// The tools to install for a chosen set of providers: each once, in the order asked.
+/// Custom and local agents have nothing Kvistcode installs.
+pub fn plan_set(requested: &[Provider]) -> anyhow::Result<Vec<Provider>> {
+    if requested.is_empty() {
+        bail!("Pick at least one tool to install.");
+    }
+    let mut plan = Vec::new();
+    for &provider in requested {
+        if !Provider::ALL.contains(&provider) {
+            bail!(
+                "{} has no tool that Kvistcode installs",
+                provider.display_name()
+            );
+        }
+        if !plan.contains(&provider) {
+            plan.push(provider);
+        }
+    }
+    Ok(plan)
+}
+
+/// Installs the chosen providers one after the other, setting Node.js up once; keeps going
+/// past failures. `on_each` runs after every one (done or failed) so the app can refresh
+/// what it shows.
+pub async fn install_set(
+    requested: &[Provider],
+    data_dir: &Path,
+    log: Log,
+    on_each: impl Fn(Provider) + Send,
+) -> anyhow::Result<()> {
+    let plan = plan_set(requested)?;
+    let _guard = lock_installs(&log).await;
+    sweep_scratch(data_dir);
+    let setup = tokio::sync::Mutex::new(NodeSetup::default());
+    run_set(plan, &log, on_each, |provider| {
+        install_with(provider, data_dir, log.clone(), &setup)
+    })
+    .await
+}
+
+/// Runs `one` for each provider in order and keeps going past failures (each is logged as
+/// `✗ name: reason`); `on_each` follows every one, done or failed.
+async fn run_set<F, Fut>(
+    plan: Vec<Provider>,
+    log: &Log,
+    on_each: impl Fn(Provider),
+    mut one: F,
+) -> anyhow::Result<()>
+where
+    F: FnMut(Provider) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<()>>,
+{
+    let mut failed = Vec::new();
+    for provider in plan {
+        if let Err(e) = one(provider).await {
+            log(&line_failed(provider.display_name(), &format!("{e:#}")));
+            failed.push(provider.display_name());
+        }
+        on_each(provider);
+        log("");
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        bail!("Some installs failed: {}", failed.join(", "))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1168,5 +1318,190 @@ mod tests {
         sweep_scratch(&data);
         assert_eq!(std::fs::read_dir(&runtime).unwrap().count(), 1);
         let _ = std::fs::remove_dir_all(&data);
+    }
+}
+
+#[cfg(test)]
+mod install_set_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    fn quiet() -> Log {
+        Arc::new(|_| {})
+    }
+
+    #[test]
+    fn a_chosen_set_is_planned_once_each_in_the_order_asked() {
+        assert_eq!(
+            plan_set(&[Provider::Grok, Provider::Claude, Provider::Grok]).unwrap(),
+            vec![Provider::Grok, Provider::Claude]
+        );
+        assert_eq!(plan_set(&[Provider::Codex]).unwrap(), vec![Provider::Codex]);
+    }
+
+    #[test]
+    fn an_empty_set_or_one_with_nothing_to_install_is_refused() {
+        assert!(plan_set(&[])
+            .unwrap_err()
+            .to_string()
+            .contains("at least one"));
+        for other in [Provider::Custom, Provider::Local] {
+            let e = plan_set(&[Provider::Claude, other]).unwrap_err();
+            assert!(
+                e.to_string().contains("no tool that Kvistcode installs"),
+                "{e}"
+            );
+        }
+    }
+
+    /// A bad request fails before anything is touched, and a set that is already installed
+    /// finishes without setting Node.js up (no network), telling the app after each one.
+    #[tokio::test]
+    async fn installing_a_set_skips_what_is_there_and_reports_each() {
+        let data = crate::testutil::scratch("set");
+        let seen = Mutex::new(Vec::new());
+        let r = install_set(&[], &data, quiet(), |p| seen.lock().unwrap().push(p)).await;
+        assert!(r.is_err());
+        let r = install_set(&[Provider::Custom], &data, quiet(), |p| {
+            seen.lock().unwrap().push(p)
+        })
+        .await;
+        assert!(r.is_err());
+        assert!(seen.lock().unwrap().is_empty());
+
+        // Kvistcode's own Codex, already in place.
+        let pkg_dir = tools_dir(&data)
+            .join("node_modules")
+            .join("@openai")
+            .join("codex");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        std::fs::write(
+            pkg_dir.join("package.json"),
+            format!(r#"{{"version":"{}"}}"#, providers::CODEX_VERSION),
+        )
+        .unwrap();
+        let bin = tools_bin_dir(&data);
+        std::fs::create_dir_all(&bin).unwrap();
+        let launcher = bin.join(if cfg!(windows) { "codex.cmd" } else { "codex" });
+        std::fs::write(&launcher, "x").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let lines = Arc::new(Mutex::new(Vec::<String>::new()));
+        let log: Log = {
+            let lines = lines.clone();
+            Arc::new(move |l| lines.lock().unwrap().push(l.to_string()))
+        };
+        install_set(&[Provider::Codex, Provider::Codex], &data, log, |p| {
+            seen.lock().unwrap().push(p)
+        })
+        .await
+        .expect("nothing to install is fine");
+        assert_eq!(*seen.lock().unwrap(), vec![Provider::Codex]);
+        let lines = lines.lock().unwrap();
+        assert!(lines.iter().any(|l| l.contains("already installed")));
+        assert!(
+            !lines.iter().any(|l| l.contains("Node.js")),
+            "no Node.js setup for what is already there"
+        );
+    }
+
+    fn fake_npm() -> Npm {
+        Npm {
+            program: PathBuf::from("npm"),
+            args: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn node_is_set_up_once_for_a_set_of_installs() {
+        let setup = NodeSetup::default();
+        let setup = tokio::sync::Mutex::new(setup);
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        for _ in 0..3 {
+            let npm = setup
+                .lock()
+                .await
+                .get(|| async {
+                    calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(fake_npm())
+                })
+                .await
+                .unwrap();
+            assert_eq!(npm.program, PathBuf::from("npm"));
+        }
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_failed_node_setup_fails_the_rest_at_once_with_the_same_reason() {
+        let mut setup = NodeSetup::default();
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let mut reasons = Vec::new();
+        for _ in 0..3 {
+            let r = setup
+                .get(|| async {
+                    calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Err(anyhow!("couldn't reach nodejs.org: timed out"))
+                })
+                .await;
+            reasons.push(format!("{:#}", r.err().expect("setup fails")));
+        }
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(reasons
+            .iter()
+            .all(|r| r == "couldn't reach nodejs.org: timed out"));
+    }
+
+    #[tokio::test]
+    async fn a_set_goes_on_past_a_failure_and_reports_each_in_order() {
+        let lines = Arc::new(Mutex::new(Vec::<String>::new()));
+        let log: Log = {
+            let lines = lines.clone();
+            Arc::new(move |l| lines.lock().unwrap().push(l.to_string()))
+        };
+        let seen = Mutex::new(Vec::new());
+        let tried = Mutex::new(Vec::new());
+        let r = run_set(
+            vec![Provider::Claude, Provider::Codex, Provider::Grok],
+            &log,
+            |p| seen.lock().unwrap().push(p),
+            |p| {
+                tried.lock().unwrap().push(p);
+                async move {
+                    if p == Provider::Codex {
+                        bail!("couldn't reach the npm registry");
+                    }
+                    Ok(())
+                }
+            },
+        )
+        .await;
+        let err = r.unwrap_err().to_string();
+        assert_eq!(err, "Some installs failed: ChatGPT (Codex)");
+        let order = vec![Provider::Claude, Provider::Codex, Provider::Grok];
+        assert_eq!(*tried.lock().unwrap(), order);
+        assert_eq!(*seen.lock().unwrap(), order);
+        let lines = lines.lock().unwrap();
+        assert!(lines
+            .iter()
+            .any(|l| l == "✗ ChatGPT (Codex): couldn't reach the npm registry"));
+        assert_eq!(lines.iter().filter(|l| l.starts_with('✗')).count(), 1);
+    }
+
+    /// The first-run screen reads these lines (lib/firstRun.ts `applyLogLine`). The same
+    /// literals are pinned in firstRun.test.ts; change both together.
+    #[test]
+    fn log_lines_match_what_the_app_reads() {
+        assert_eq!(line_setting_up("Claude"), "Setting up Claude");
+        assert_eq!(line_ready("Claude", "2.1.3"), "✓ Claude is ready (2.1.3)");
+        assert_eq!(line_already("Claude"), "✓ Claude is already installed.");
+        assert_eq!(
+            line_failed("Claude", &"something went wrong"),
+            "✗ Claude: something went wrong"
+        );
+        assert_eq!(Provider::Codex.display_name(), "ChatGPT (Codex)");
     }
 }

@@ -12,6 +12,7 @@ import { SettingGroup, SettingRow } from "./SettingRow";
 import { saveSettingsPatch } from "./settingsErrors";
 
 const SIZES = [150_000, 200_000, 250_000, 300_000, 400_000, 500_000];
+const COMPACT_PERCENTS = [60, 70, 80, 90];
 const OUTPUT_LIMITS = [8_000, 12_000, 20_000, 30_000, 60_000];
 const HELPER_MODELS = [
   { value: "same", label: "Same as the agent" },
@@ -86,7 +87,7 @@ export function TokenSavingSettings({ settings }: { settings: Settings }) {
       </SettingRow>
       <SettingRow
         title="Summarize conversations at"
-        description="Every step an agent takes re-reads its whole conversation, so a shorter one uses far fewer tokens. Claude agents on 1M-token models otherwise grow to several hundred thousand before they summarize. Applies to Claude agents as they start."
+        description="Claude agents only: Claude Code summarizes mid-turn at a fixed size. Every step an agent takes re-reads its whole conversation, so a shorter one uses far fewer tokens. Claude agents on 1M-token models otherwise grow to several hundred thousand before they summarize. Applies to Claude agents as they start."
       >
         <Select
           aria-label="Summarize conversations at"
@@ -98,6 +99,34 @@ export function TokenSavingSettings({ settings }: { settings: Settings }) {
             )
           }
           options={options}
+        />
+      </SettingRow>
+      <SettingRow
+        title="Compact when the context is full"
+        description="Between turns, once an agent's context reaches this share of its window, Kvistcode compacts it for you (the same as typing /compact) and leaves a note in the conversation. Works for every agent that can compact, and only once until usage drops again. Off by default."
+      >
+        <Select
+          aria-label="Compact when the context is full"
+          className="h-8 w-[170px]"
+          value={settings.autoCompactPercent == null ? "off" : String(settings.autoCompactPercent)}
+          onValueChange={(v) =>
+            void saveSettingsPatch({ autoCompactPercent: v === "off" ? null : Number(v) }, (message) =>
+              toast.error("Couldn't save settings", { description: message }),
+            )
+          }
+          options={[
+            { value: "off", label: "Off" },
+            ...[
+              ...new Set([
+                ...COMPACT_PERCENTS,
+                ...(settings.autoCompactPercent && !COMPACT_PERCENTS.includes(settings.autoCompactPercent)
+                  ? [settings.autoCompactPercent]
+                  : []),
+              ]),
+            ]
+              .sort((a, b) => a - b)
+              .map((n) => ({ value: String(n), label: `${n}% full` })),
+          ]}
         />
       </SettingRow>
       <MoreRows label="More options">

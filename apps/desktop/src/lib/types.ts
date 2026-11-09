@@ -514,6 +514,26 @@ export interface UpdateInfo {
 export type NavigateTarget =
   { view: "agent"; agentId: string } | { view: "inbox" } | { view: "new_agent" } | { view: "mission_control" };
 
+/** A tool agents and projects commonly need (git, ripgrep…), from the fixed list in the core. */
+export interface CompanionInfo {
+  id: string;
+  name: string;
+  /** Section heading, e.g. "Essentials". */
+  group: string;
+  /** One plain sentence: what it is for. */
+  purpose: string;
+  recommended: boolean;
+  installed: boolean;
+  version: string | null;
+  /** A one-click install exists on this computer (otherwise the person gets the download page). */
+  installable: boolean;
+  /** The exact command the install runs. */
+  installCommand: string | null;
+  /** The package manager it uses, e.g. "Homebrew". */
+  manager: string | null;
+  downloadUrl: string;
+}
+
 export interface ProviderInfo {
   provider: Provider;
   displayName: string; // "Claude", "ChatGPT (Codex)", "Grok"
@@ -632,6 +652,8 @@ export interface Settings {
   alertTargets: AlertTarget[];
   /** Claude agents summarize their conversation at this many tokens (100k..1M); null = Claude Code's default. */
   autoCompactWindow: number | null;
+  /** Between turns, compact any agent that offers /compact once its context is this percent full (50..95); null = off. */
+  autoCompactPercent: number | null;
   /** The other "Save tokens" options. */
   tokenSaver: TokenSaverOptions;
   /** How the sidebar lists projects: the user's own order and named sections. */

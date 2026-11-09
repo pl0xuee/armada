@@ -1339,6 +1339,9 @@ pub struct Settings {
     /// (None = leave Claude Code's default; the default is `token_saver::DEFAULT_COMPACT_WINDOW`).
     /// See `token_saver`.
     pub auto_compact_window: Option<u32>,
+    /// Between turns, an agent whose context is at least this percent full is sent `/compact`
+    /// (any provider that offers it), once per crossing, with a timeline note. None = off.
+    pub auto_compact_percent: Option<u8>,
     /// The other "Save tokens" options (output tidying, command output limit, helper model).
     pub token_saver: crate::token_saver::TokenSaverOptions,
 }
@@ -1698,6 +1701,13 @@ impl Settings {
                 return Err("The auto-compact size must be between 100,000 and 1,000,000 tokens (or empty for Claude's default)".into());
             }
         }
+        if let Some(p) = self.auto_compact_percent {
+            if !crate::token_saver::COMPACT_PERCENT_RANGE.contains(&p) {
+                return Err(
+                    "Compact automatically must be between 50% and 95% full (or off)".into(),
+                );
+            }
+        }
         if let Some(problem) = self.token_saver.problem() {
             return Err(problem);
         }
@@ -1801,6 +1811,13 @@ impl Settings {
             self.auto_compact_window = None;
             reset.push("autoCompactWindow");
         }
+        if self
+            .auto_compact_percent
+            .is_some_and(|p| !crate::token_saver::COMPACT_PERCENT_RANGE.contains(&p))
+        {
+            self.auto_compact_percent = None;
+            reset.push("autoCompactPercent");
+        }
         reset.extend(self.token_saver.sanitize());
         let hd = &mut self.helper_defaults;
         for (field, name) in [
@@ -1881,6 +1898,7 @@ impl Default for Settings {
             // On by default: measured as the biggest saver (see docs/TOKEN-SAVING.md). Anyone who
             // chooses "Claude's default" in Settings saves an explicit null, which stays off.
             auto_compact_window: Some(crate::token_saver::PRESET_COMPACT_WINDOW),
+            auto_compact_percent: None,
             token_saver: Default::default(),
         }
     }

@@ -3,6 +3,7 @@ import {
   liveTail,
   needsAttention,
   runningCount,
+  stepLabel,
   subagentRuns,
   SUBAGENT_ACTIVE_WINDOW_MS,
   SUBAGENT_LAUNCH_GRACE_MS,
@@ -230,5 +231,63 @@ describe("subagentRuns", () => {
       expect(running(items, false, T0 + 1_000)).toBe(0);
       expect(running(items, true, T0 + 1_000)).toBe(1);
     });
+  });
+});
+
+describe("stopped sub-agents", () => {
+  const T0 = 1_000_000;
+  const tool = (id: string, ts: number, patch: Partial<TimelineItem & { kind: "tool_call" }>): TimelineItem =>
+    ({
+      id,
+      agentId: "a",
+      seq: ts,
+      ts,
+      kind: "tool_call",
+      toolCallId: id,
+      title: id,
+      toolKind: "other",
+      status: "completed",
+      locations: [],
+      diffs: [],
+      output: "",
+      command: null,
+      ...patch,
+    }) as TimelineItem;
+  const user: TimelineItem = { id: "u", agentId: "a", seq: 0, ts: T0 - 10, kind: "user_message", text: "go" };
+  const launch = tool("bg", T0, {
+    subagent: { description: "Fix review findings" },
+    output: "Async agent launched successfully.\nagentId: acd05b36e1d1a79c3 (use it to check on it)",
+  });
+  const openChild = tool("c1", T0 + 1_000, {
+    title: "python3 - <<'EOF'\nimport re\nprint(1)\nEOF",
+    status: "pending",
+    parentToolCallId: "bg",
+  });
+  const stop = (taskId: string) =>
+    tool("stop", T0 + 2_000, {
+      title: "TaskStop",
+      output: `{"message":"Successfully stopped task: ${taskId} (Fix review findings)","task_id":"${taskId}"}`,
+    });
+
+  it("is no longer running once TaskStop names its id, even while the agent is busy", () => {
+    const before = subagentRuns([user, launch, openChild], true, { now: T0 + 5_000, live: true });
+    expect(runningCount(before)).toBe(1);
+    const after = subagentRuns([user, launch, openChild, stop("acd05b36e1d1a79c3")], true, {
+      now: T0 + 5_000,
+      live: true,
+    });
+    expect(runningCount(after)).toBe(0);
+    expect(after[0].state).toBe("done");
+  });
+
+  it("ignores a TaskStop for another task", () => {
+    const runs = subagentRuns([user, launch, openChild, stop("someoneelse")], true, { now: T0 + 5_000, live: true });
+    expect(runningCount(runs)).toBe(1);
+  });
+
+  it("shows only the first line of a multi-line step", () => {
+    const runs = subagentRuns([user, launch, openChild], true, { now: T0 + 5_000, live: true });
+    expect(runs[0].step).toBe("python3 - <<'EOF'");
+    expect(stepLabel("\n  cargo   test\n--all")).toBe("cargo test");
   });
 });

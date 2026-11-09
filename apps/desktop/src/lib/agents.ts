@@ -250,8 +250,14 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, c
   // A sub-agent that has called SubagentHandback has reported its result: it is finished, whatever
   // else the parent is still doing.
   const handedBack = new Set<string>();
+  // Background sub-agents the agent stopped (TaskStop names the id their launch reported).
+  const stopped = new Set<string>();
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
+    if (it.kind === "tool_call" && it.status === "completed" && /^TaskStop\b/.test(it.title)) {
+      const id = /"task_id"\s*:\s*"([\w-]+)"/.exec(it.output)?.[1] ?? /stopped task:\s*([\w-]+)/i.exec(it.output)?.[1];
+      if (id) stopped.add(id);
+    }
     if (it.kind === "tool_call" && it.parentToolCallId) {
       if (/^SubagentHandback\b/i.test(it.title)) handedBack.add(it.parentToolCallId);
       lastChild.set(it.parentToolCallId, it);
@@ -280,7 +286,8 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, c
           (lastTs !== undefined && clock.now - lastTs < SUBAGENT_ACTIVE_WINDOW_MS) ||
           clock.now - it.ts < SUBAGENT_LAUNCH_GRACE_MS);
     }
-    if (reported) running = false;
+    const launchId = bg ? /\bagentId:\s*([\w-]+)/.exec(it.output)?.[1] : undefined;
+    if (reported || (launchId !== undefined && stopped.has(launchId))) running = false;
     if (!running && i <= turnStartIdx) continue;
     if (!running && unfinished(it.status)) continue; // stale: open call of an idle agent
     const child = lastChild.get(it.toolCallId);
@@ -292,7 +299,7 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, c
       description,
       startedAt: it.ts,
       state: running ? "running" : it.status === "failed" ? "failed" : "done",
-      step: child ? child.title : null,
+      step: child ? stepLabel(child.title) : null,
       background: bg,
       model: it.subagent.model?.trim() || null,
       effort: it.subagent.effort?.trim() || null,
@@ -300,6 +307,12 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, c
     });
   }
   return runs;
+}
+
+/** A child call's title on one line: a multi-line command shows only its first line. */
+export function stepLabel(title: string): string {
+  const first = title.split("\n").find((l) => l.trim()) ?? "";
+  return first.replace(/\s+/g, " ").trim();
 }
 
 /** Number of running sub-agents in `runs`. */

@@ -30,7 +30,7 @@ import { ContextRing } from "../ContextRing";
 import { RelTime } from "../RelTime";
 import { BillingSummary } from "../usage/BillingSummary";
 import { CopyButton } from "../CopyButton";
-import { PlanChecklist } from "../timeline/items";
+import { PlanChecklist } from "../timeline/PlanChecklist";
 import { PrChip } from "./PrChip";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/misc";

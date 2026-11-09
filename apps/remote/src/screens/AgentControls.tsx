@@ -10,7 +10,7 @@ import { Button } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { confirmAction } from "@/lib/confirm";
 import { navigate } from "@/lib/router";
-import { choiceName, visibleOptions } from "@/lib/config";
+import { choiceName, onOff, visibleOptions } from "@/lib/config";
 import { cancelTurn, resumeAgent, setArchived, setConfigOption, stopAgent, switchAccount } from "@/lib/controller";
 import { isBusy, isResumable, safeColor } from "@/lib/meta";
 import { accountProblem } from "@/lib/newAgent";
@@ -67,6 +67,26 @@ export const SettingsChips = memo(function SettingsChips({ agent, onPick }: { ag
       <div className="mx-auto flex w-max min-w-full max-w-none items-center gap-1.5 px-safe py-1.5 md:w-full md:max-w-[860px]">
         {options.map((o) => {
           const saving = !!busy[`config:${agent.id}:${o.id}`];
+          const toggle = onOff(o);
+          if (toggle) {
+            const on = o.currentValue === toggle.on;
+            return (
+              <button
+                key={o.id}
+                type="button"
+                aria-pressed={on}
+                disabled={saving}
+                onClick={() => void setConfigOption(agent.id, o.id, on ? toggle.off : toggle.on)}
+                className={cn(
+                  "press hit relative inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[12.5px] disabled:opacity-100",
+                  on ? "border-accent/50 bg-accent/10 font-medium text-accent" : "border-line-strong bg-card text-steel",
+                )}
+              >
+                {saving ? <Spinner size={12} /> : <span className={cn("h-1.5 w-1.5 rounded-full", on ? "bg-accent" : "bg-line-strong")} aria-hidden />}
+                {o.name}
+              </button>
+            );
+          }
           return (
             <button
               key={o.id}

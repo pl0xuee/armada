@@ -33,6 +33,8 @@ export interface TerminalSession {
   kind: "login" | "install";
   accountId?: string;
   provider?: Provider;
+  /** Companion software being installed (git, ripgrep…); the list is checked again when it ends. */
+  companionId?: string;
   /** The core reused a sign-in that was already running (its earlier output isn't replayed). */
   reused?: boolean;
   /** The program that was started (shown when it prints nothing for a while). */

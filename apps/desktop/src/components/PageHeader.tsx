@@ -26,14 +26,23 @@ export function PageHeader({
   return (
     <div
       className={cn(
-        "@container/ph shrink-0 border-b border-line bg-panel/40 px-4 pb-3.5 pt-4 @2xl/ph:px-6 @2xl/ph:pb-4 @2xl/ph:pt-5",
+        "@container/ph relative shrink-0 overflow-hidden border-b border-line bg-panel/40 px-4 pb-3.5 pt-4 @2xl/ph:px-6 @2xl/ph:pb-4 @2xl/ph:pt-5",
         className,
       )}
     >
-      <div className="flex items-center justify-between gap-3">
+      {/* A faint wash of the accent from the top left, behind the icon: static, no layer of its own. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(520px 140px at 0% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%)",
+        }}
+      />
+      <div className="relative flex items-center justify-between gap-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           {icon && (
-            <div className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-line-strong bg-gradient-to-b from-raised to-card text-steel edge-strong @md/ph:flex [&_svg]:h-[18px] [&_svg]:w-[18px]">
+            <div className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-accent/25 bg-gradient-to-b from-accent/[0.14] to-card text-accent edge-strong @md/ph:flex [&_svg]:h-[18px] [&_svg]:w-[18px]">
               {icon}
             </div>
           )}
@@ -46,7 +55,7 @@ export function PageHeader({
         </div>
         {right && <div className="flex shrink-0 items-center gap-1.5 @xl/ph:gap-2">{right}</div>}
       </div>
-      {children && <div className="mt-3.5 @2xl/ph:mt-4">{children}</div>}
+      {children && <div className="relative mt-3.5 @2xl/ph:mt-4">{children}</div>}
     </div>
   );
 }

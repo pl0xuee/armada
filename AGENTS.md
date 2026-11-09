@@ -23,6 +23,7 @@ Building needs `cmake` on PATH. Use a private `TMPDIR` for tests; the system `/t
 - **Legacy names stay.** The app id `dev.armada.app`, `KEYRING_SERVICE`, `armada.db` and every `armada.*` localStorage key are kept on purpose (installed copies key their data on them); see the table in `docs/RELEASING.md`. Never rename them without a migration.
 - **Never overwrite an existing test file** (`cat >`). Add a new file or append.
 - Tests must clean their temp dirs and never touch real user data (`~/.local/share/dev.armada.app`) or real GitHub/Slack.
+- **Never touch the real OS keyring.** Integration tests link the library without `cfg(test)`, so `tests/common` sets `KVISTCODE_SECRETS=memory` (call `common::scratch` or `keep_off_the_real_keychain()` first; a test that skips `common` must set it itself). When running tests, also point the session bus nowhere: `DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/bus`. Browser QA must launch Chromium with `--password-store=basic --use-mock-keychain` and a temp profile. A stray keychain call pops a "create a new keyring" dialog on the developer's desktop.
 - Time-sensitive tests: run them 100x under CPU load before trusting them (two busy loops per core). Races here are real.
 - Do not `pkill -f <pattern>` from a shell whose own command line contains the pattern; kill by pid. Port 1420 is the developer's own dev server: use another port.
 - Performance: whole-pixel line-heights, compositor-only animations, no polling while the window is blurred. Re-measure the 8-agent grid after UI changes.

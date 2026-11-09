@@ -288,6 +288,7 @@ export function seedSettings(onboarded: boolean): Settings {
     projectBudgets: {},
     alertTargets: [],
     autoCompactWindow: 250_000,
+    autoCompactPercent: null,
     tokenSaver: { outputFilter: false, bashOutputMaxChars: null, subagentModel: null },
     projectLayout: { customOrder: false, order: [], sections: [] },
     remote: { enabled: false, lan: false, port: 47821, tailscale: false, lanAddress: null },
@@ -446,6 +447,26 @@ export function configFor(provider: Provider, model?: string | null): ConfigOpti
           { value: "acceptEdits", name: "Accept edits", description: "Auto-approve file edits" },
           { value: "plan", name: "Plan mode", description: "Research and plan, no changes" },
           { value: "bypassPermissions", name: "Bypass permissions", description: "Never ask (careful)" },
+        ],
+      },
+      {
+        id: "fast",
+        name: "Fast mode",
+        category: "other",
+        currentValue: "off",
+        options: [
+          { value: "on", name: "On", description: "Faster replies, higher cost" },
+          { value: "off", name: "Off", description: "Normal speed" },
+        ],
+      },
+      {
+        id: "agent",
+        name: "Agent",
+        category: "other",
+        currentValue: "default",
+        options: [
+          { value: "default", name: "Default", description: "The built-in agent" },
+          { value: "reviewer", name: "reviewer", description: "Reviews diffs for bugs" },
         ],
       },
     ];

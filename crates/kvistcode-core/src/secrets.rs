@@ -65,7 +65,13 @@ pub(crate) fn vault() -> &'static Vault {
         }
         #[cfg(not(test))]
         {
-            Vault::new(Box::new(Keyring))
+            // Integration tests link the library without `cfg(test)`: this switch keeps
+            // them off the real keychain (it would pop up "create a new keyring").
+            if std::env::var_os("KVISTCODE_SECRETS").is_some_and(|v| v == "memory") {
+                Vault::new(Box::new(Memory::default()))
+            } else {
+                Vault::new(Box::new(Keyring))
+            }
         }
     })
 }
@@ -120,11 +126,11 @@ impl Vault {
     }
 }
 
-#[cfg(test)]
+/// An in-memory store: used by unit tests and, via `KVISTCODE_SECRETS=memory`, by the
+/// integration tests, so none of them ever reach the user's real OS keychain.
 #[derive(Default)]
 pub struct Memory(pub parking_lot::Mutex<std::collections::HashMap<String, String>>);
 
-#[cfg(test)]
 impl SecretStore for Memory {
     fn set(&self, account: &str, value: &str) -> anyhow::Result<()> {
         self.0.lock().insert(account.into(), value.into());

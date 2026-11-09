@@ -100,12 +100,15 @@ export function TalkHero() {
         "group flex min-w-0 flex-1 items-center gap-3 rounded-xl border px-3.5 py-2.5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
         live
           ? "border-accent/60 bg-accent/10"
-          : "border-accent/40 bg-accent/[0.07] hover:border-accent/70 hover:bg-accent/[0.12]",
+          : "border-line bg-card/70 edge hover:border-accent/50 hover:bg-accent/[0.06]",
       )}
     >
       <span
         className={cn(
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg shadow-[0_0_18px_-4px_color-mix(in_srgb,var(--accent)_80%,transparent)]",
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors",
+          live
+            ? "bg-accent text-accent-fg shadow-[0_0_18px_-4px_color-mix(in_srgb,var(--accent)_80%,transparent)]"
+            : "bg-accent/15 text-accent group-hover:bg-accent group-hover:text-accent-fg",
           live && !paused && "animate-pulse motion-reduce:animate-none",
         )}
       >

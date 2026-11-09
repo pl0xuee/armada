@@ -1,6 +1,7 @@
 // Small UI-level actions shared by several views (toasts + error handling).
 import { toast } from "sonner";
 import { markRemoved, suppressAgent, useApp } from "@/store/app";
+import { useCompanions } from "@/store/companions";
 import { useUi } from "@/store/ui";
 import { copyText } from "@/components/CopyButton";
 import { api } from "./api";
@@ -12,6 +13,7 @@ import type {
   Account,
   Agent,
   Attachment,
+  CompanionInfo,
   PermissionOption,
   PermissionOptionKind,
   Provider,
@@ -112,6 +114,29 @@ export async function startInstall(provider: Provider) {
     });
   } catch (e) {
     toast.error("Couldn't start the installer", { description: errorMessage(e) });
+  }
+}
+
+/** Installs one tool from the companion list in the terminal window. Call only after the person confirmed the command. */
+export async function startCompanionInstall(c: CompanionInfo) {
+  try {
+    if (!c.installCommand) return;
+    const terminalId = await api.installCompanion(c.id, c.installCommand);
+    useUi.getState().setTerminal({
+      terminalId,
+      kind: "install",
+      companionId: c.id,
+      command: c.installCommand ?? undefined,
+      title: `Install ${c.name}`,
+      subtitle: "If it asks for your computer's password, type it here and press Enter. Nothing shows while you type.",
+    });
+  } catch (e) {
+    toast.error("Couldn't start the installer", { description: errorMessage(e) });
+    // The options may have changed since the list was checked: show the current ones.
+    void useCompanions
+      .getState()
+      .refresh()
+      .catch(() => {});
   }
 }
 

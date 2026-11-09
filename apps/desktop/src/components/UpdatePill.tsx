@@ -1,13 +1,14 @@
 import { ArrowDownToLine, ExternalLink, FileText, Sparkles, X } from "lucide-react";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { attempt } from "@/lib/actions";
 import { useGuardedInstall } from "./settings/useGuardedInstall";
 import { api } from "@/lib/api";
 import { useApp } from "@/store/app";
-import { Markdown } from "./Markdown";
 import { Button } from "./ui/button";
 import { Dialog, DialogBody, DialogContent, DialogFooter } from "./ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+
+const Markdown = lazy(() => import("./Markdown").then((m) => ({ default: m.Markdown })));
 
 /** Title-bar pill announcing an app update, with install progress. */
 export function UpdatePill() {
@@ -135,7 +136,9 @@ export function UpdatePill() {
           }
         >
           <DialogBody>
-            <Markdown text={update.notes ?? "No release notes."} />
+            <Suspense fallback={null}>
+              <Markdown text={update.notes ?? "No release notes."} />
+            </Suspense>
           </DialogBody>
           <DialogFooter>
             <Button

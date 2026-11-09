@@ -13,6 +13,8 @@ import { themeFromCss, XTERM_FONT, XTERM_LINK_HANDLER } from "@/lib/xterm-theme"
 import { errorMessage, isMac } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
 import { useApp } from "@/store/app";
+import { companionOutcome } from "@/lib/companions";
+import { useCompanions } from "@/store/companions";
 import { useUi, type TerminalSession } from "@/store/ui";
 
 type RunState = { kind: "running" } | { kind: "exited"; code: number | null };
@@ -201,8 +203,20 @@ function TerminalDialogBody({ session, onClose }: { session: TerminalSession; on
   }, [session.terminalId, host]);
 
   const close = () => {
-    if (stateRef.current.kind === "running") void api.terminalKill(session.terminalId).catch(() => {});
+    const wasRunning = stateRef.current.kind === "running";
+    if (wasRunning) void api.terminalKill(session.terminalId).catch(() => {});
     transcripts.delete(session.terminalId);
+    // The exit handler is detached with the dialog, so a stopped install looks again here
+    // (once now, once after the process has had time to go).
+    if (session.companionId && wasRunning) {
+      const look = () =>
+        void useCompanions
+          .getState()
+          .refresh(true)
+          .catch(() => {});
+      look();
+      window.setTimeout(look, 2500);
+    }
     onClose();
   };
   // Stopping a running login/install is destructive: confirm first.
@@ -350,6 +364,18 @@ async function afterExit(session: TerminalSession, code: number | null) {
       } else if (code !== 130 && code !== 143) {
         toast.warning(`${acc.name} is still signed out`, { description: acc.status?.error ?? undefined });
       }
+    } else if (session.companionId) {
+      // Companion software (git, ripgrep…): look at what is installed now.
+      const list = await useCompanions.getState().refresh(true);
+      const c = list.find((x) => x.id === session.companionId);
+      const o = companionOutcome(c, c?.manager ?? null, code);
+      if (o.kind === "ready" && c)
+        toast.success(`${c.name} is ready`, { description: c.version ? `v${c.version}` : undefined });
+      else if (o.kind === "not-visible")
+        // The installer ran but the tool isn't visible yet (a separate window may still be working, or this
+        // app started before the computer's search path changed).
+        toast.message("The installer finished", { description: o.description });
+      else if (o.kind === "failed") toast.error("Install didn't finish", { description: o.description });
     } else if (session.kind === "install") {
       const providers = await api.detectProviders();
       store.setProviders(providers);

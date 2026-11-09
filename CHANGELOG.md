@@ -5,6 +5,17 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.4.8 — 2026-11-09
+
+- Companion software: Settings, Providers now lists tools your agents and projects often need (git, GitHub CLI, Node.js, Python, ripgrep, jq, Docker and a few more), shows which are installed and which are missing, says in one sentence what each is for, and installs the missing ones with one click using your computer's own package manager. Kvistcode shows the exact command and asks first, and nothing installs by itself.
+- First run is smoother. On the AI tools step you pick which agents to install (Claude, Codex, Grok) with a tick box each, and nothing installs until you press Install. Each tool shows when it is waiting, installing, ready or failed, with a plain reason and a Retry for just that one, and the full output is behind Show details. You can always move on with Continue (or Skip for now) and the rest keep installing; a tool only shows as Ready once its install really finished.
+- Sign in right after installing. The next step offers the tools you just installed first, with a clear Sign in to Claude (or Codex, Grok) button. It skips tools you are already signed in to, and it never opens your browser until you press the button.
+- A fresher look. The home page now greets you like the first-run screen, with a centred welcome, a soft glow and grid behind it, and the tagline in your theme's colour. Page headers (Mission Control, Usage, Schedules, Compare, Accounts) pick up a touch of your theme's colour too, and the Talk to Kvistcode card is quieter until you use it.
+- A clearer message box. On/off settings such as Fast mode and Ultracode are now named switches that light up when on, instead of two unlabelled "Off" menus; "Default" says what it is the default of ("Agent: Default"); Image and Templates are icons (hover for their names); and the ⏎ send / ⇧⏎ newline hint only shows while you type. On the phone, an on/off setting chip switches with one tap.
+- A sub-agent that was stopped no longer shows as still running in the strip above the message box, and the strip shows a short step instead of a whole multi-line command. The phone now agrees: it also counts a sub-agent as finished once it has reported back or been stopped.
+- Compact automatically when the context is full. A new setting (Settings → General → Save tokens) compacts an agent between turns once its context reaches 60–90% full, for any agent that can compact, and leaves a note in the conversation. Off unless you turn it on.
+- Faster start. The app loads about a third less code before its first screen; the conversation view and release notes load in the background right after.
+
 ## v0.4.7 — 2026-11-09
 
 ### New

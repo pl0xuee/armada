@@ -8,6 +8,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  CompanionInfo,
   ProjectRefresh,
   CheckpointList,
   QuestionAnswers,
@@ -368,6 +369,17 @@ const tauriApi = {
   updateTool: (provider: Provider, rollback?: boolean) => invoke<string>("update_tool", { provider, rollback }),
   /** Installs every missing CLI/adapter (private Node.js if needed); returns a terminal id. */
   installMissing: () => invoke<string>("install_missing"),
+  /** Installs just the chosen providers one after the other (Node.js set up once); returns a terminal id. */
+  installProviders: (providers: Provider[]) => invoke<string>("install_providers", { providers }),
+
+  // companion software (git, ripgrep…)
+  /** The fixed list of tools agents commonly need, with which are installed. Works offline. */
+  listCompanions: () => invoke<CompanionInfo[]>("list_companions"),
+  /**
+   * Runs one listed tool's install with the computer's package manager in a PTY; returns a terminal id.
+   * `command` is the one the confirm window showed: nothing runs if the install would now be a different one.
+   */
+  installCompanion: (id: string, command: string) => invoke<string>("install_companion", { id, command }),
 
   // terminals (login / install)
   terminalWrite: (terminalId: string, data: string) => invoke<void>("terminal_write", { terminalId, data }),

@@ -1113,6 +1113,32 @@ pub async fn install_missing(
     ))
 }
 
+/// Installs the chosen providers one after the other in one terminal (Node.js is set up
+/// once). The app is told after each one, so it can show who is ready while the rest go on.
+#[tauri::command]
+pub async fn install_providers(
+    app: AppHandle,
+    core: State<'_, Core>,
+    shell: State<'_, Shell>,
+    terminals: State<'_, Terminals>,
+    providers: Vec<Provider>,
+) -> CmdResult<String> {
+    // Refuse a bad request now, with a plain message, instead of inside the terminal.
+    let providers = toolchain::plan_set(&providers).map_err(err)?;
+    let data_dir = shell.data_dir.clone();
+    let each = app.clone();
+    Ok(terminals.spawn_task(
+        core.inner().clone(),
+        move |log| async move {
+            toolchain::install_set(&providers, &data_dir, log, move |_| {
+                after_install(each.clone(), None)
+            })
+            .await
+        },
+        move |code| after_install(app, code),
+    ))
+}
+
 /// Looks for newer releases of Kvistcode's agent tools now (the background check runs every
 /// few hours) and returns the providers with what was found.
 #[tauri::command]
@@ -1162,6 +1188,53 @@ fn after_install(app: AppHandle, code: Option<i32>) {
         app.state::<Core>()
             .emit(KvistcodeEvent::ProvidersChanged { providers });
     });
+}
+
+// ---- companion software ----------------------------------------------------
+
+/// Tools agents and projects commonly need (git, ripgrep…), which are installed, and how
+/// each could be installed. Checked in the background; works without a network.
+#[tauri::command]
+pub async fn list_companions() -> CmdResult<Vec<kvistcode_core::companions::CompanionInfo>> {
+    Ok(kvistcode_core::companions::list().await)
+}
+
+/// Installs one tool from the fixed list with the computer's own package manager, in a
+/// terminal the person can type into (it may ask for the computer's password). Only ids from
+/// the catalog are accepted; the command comes from the catalog, never from the caller. The
+/// caller sends the command it showed in the confirm window, and nothing runs if the fresh
+/// plan is a different one. Installs through one package manager run one at a time.
+#[tauri::command]
+pub async fn install_companion(
+    core: State<'_, Core>,
+    terminals: State<'_, Terminals>,
+    id: String,
+    command: String,
+) -> CmdResult<String> {
+    let plan = kvistcode_core::companions::confirmed_plan_for(&id, &command).await?;
+    let (exe, args) = kvistcode_core::companions::run_command(&plan)?;
+    info!(companion = %id, command = %plan.display_command, "installing companion software");
+    let spec = SpawnSpec {
+        program: exe.into_os_string(),
+        args: args.iter().map(Into::into).collect(),
+        env_remove: Vec::new(),
+        env: Vec::new(),
+        cwd: None,
+    };
+    let done_id = id.clone();
+    // Two installs through the same manager (apt, brew…) would fight over its lock.
+    let (terminal_id, running_already) = terminals
+        .spawn_unique(
+            &format!("companion:{}", plan.manager.program()),
+            core.inner().clone(),
+            spec,
+            move |code| info!(companion = %done_id, ?code, "companion install finished"),
+        )
+        .map_err(err)?;
+    if running_already {
+        return Err("Another install is running. Wait for it to finish.".into());
+    }
+    Ok(terminal_id)
 }
 
 // ---- terminals -----------------------------------------------------------------

@@ -16,7 +16,7 @@
 >   - file and hunk revert.
 > - **Also shipped since v0.1.2:** many agents per project in a grid, local models (Ollama, LM Studio, OpenAI-compatible servers), search across every conversation, spending and turn limits, pull-request merge and GitHub issues, checkpoints, the Tools & instructions page (CLAUDE.md, AGENTS.md, MCP servers, skills), alerts to Slack, Discord and any webhook, voice dictation and an optional voice assistant, and a short first-run tour.
 > - **Answered open questions:** permissions default to Auto (Ask per agent or in Settings); failover is off, ask or auto; phone push goes through ntfy, and alerts can also go to Slack, Discord or any webhook.
-> - **Not yet built:** custom themes (three built-in themes: Gunmetal, Carbon, Titanium), auto-compact controls beyond the agent's own `/compact`, the plugin API, team mode, and package-manager distribution (winget/Homebrew/AUR/Flatpak). Real-app end-to-end tests exist, but as a WebDriver smoke test (`apps/desktop/e2e`), not Playwright.
+> - **Not yet built:** custom themes (three built-in themes: Gunmetal, Carbon, Titanium), the plugin API, team mode, and package-manager distribution (winget/Homebrew/AUR/Flatpak). Real-app end-to-end tests exist, but as a WebDriver smoke test (`apps/desktop/e2e`), not Playwright.
 > - **Identifiers that kept the old name** (data folder, database file, some `armada.*` storage keys, the updater key files) are listed in [`RELEASING.md`](RELEASING.md#names-that-still-say-armada).
 
 ---

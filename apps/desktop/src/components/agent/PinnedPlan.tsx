@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { useApp } from "@/store/app";
 import { usePinnedUi } from "@/store/pinnedUi";
 import { useUi } from "@/store/ui";
-import { PlanChecklist } from "../timeline/items";
+import { PlanChecklist } from "../timeline/PlanChecklist";
 import { agentDerived } from "./derived";
 import { useRetained } from "./pinnedFold";
 

@@ -127,8 +127,9 @@ pub async fn create(parent: &str, name: &str, init_git: bool) -> anyhow::Result<
                 path,
                 git: false,
                 note: Some(
-                    "The folder is ready, but git couldn't be set up. Install git and turn on \
-                     git for this project so each agent can work on its own copy."
+                    "The folder is ready, but git couldn't be set up. Install git (Settings, \
+                     Providers, Companion software) and turn on git for this project so each \
+                     agent can work on its own copy."
                         .into(),
                 ),
             })

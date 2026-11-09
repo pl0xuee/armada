@@ -12,16 +12,16 @@ import {
 } from "lucide-react";
 import * as D from "@radix-ui/react-dialog";
 import { AnimatePresence } from "motion/react";
-import { memo } from "react";
+import { lazy, memo, Suspense } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentHeader } from "@/components/agent/AgentHeader";
 import { AgentList } from "@/components/agent/AgentList";
 import { Composer } from "@/components/agent/Composer";
 import { TileRow } from "@/components/agent/TileGroup";
-import { TimelinePane } from "@/components/agent/TimelinePane";
 import { agentDerived } from "@/components/agent/derived";
 import { Inspector } from "@/components/agent/Inspector";
 import { AppMark } from "@/components/AppMark";
+import { AccentText, HeroBackdrop } from "@/components/HeroBackdrop";
 import { HomeComposer } from "@/components/home/HomeComposer";
 import { RelTime } from "@/components/RelTime";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
@@ -58,6 +58,9 @@ import { previewOf, usePreview, usePreviewDetection } from "@/store/preview";
 import { useApp } from "@/store/app";
 import { useBackgroundIds } from "@/store/background";
 import { useUi } from "@/store/ui";
+
+// The timeline pulls in markdown and syntax highlighting; the home screen doesn't need them.
+const TimelinePane = lazy(() => import("@/components/agent/TimelinePane").then((m) => ({ default: m.TimelinePane })));
 
 export function AgentsView() {
   const selectedId = useUi((s) => s.selectedAgentId);
@@ -225,7 +228,9 @@ const Tile = memo(function Tile({
       <div ref={headerRef} className="shrink-0">
         <AgentHeader agent={agent} tile={tiled ? { focused, first, index } : undefined} />
       </div>
-      <TimelinePane agent={agent} focused={focused} />
+      <Suspense fallback={<div className="min-h-0 flex-1" />}>
+        <TimelinePane agent={agent} focused={focused} />
+      </Suspense>
       {between}
       <div ref={composerRef} className="shrink-0">
         <Composer agent={agent} focused={focused} compact={tiled} />
@@ -461,41 +466,34 @@ function Welcome() {
           </Tooltip>
         </div>
       )}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-60"
-        style={{
-          background:
-            "radial-gradient(700px 320px at 50% 22%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%)",
-        }}
-      />
+      <HeroBackdrop top="-4%" />
       {/* Anchored near the top, not centred: content that loads later (voice card, resume list) must not move the composer. */}
       <div className="relative mx-auto w-full max-w-[720px] px-5 pb-10 pt-[clamp(24px,12vh,120px)] @2xl:px-8">
-        <div className="mb-5 flex items-center gap-3.5">
-          <div className="relative">
-            <div className="absolute inset-0 -m-3 rounded-full bg-accent/20 blur-2xl" aria-hidden />
-            <div className="relative flex h-11 w-11 items-center justify-center rounded-xl border border-line-strong bg-gradient-to-b from-raised to-card edge-strong">
-              <AppMark size={24} />
+        <div className="mb-6 flex flex-col items-center text-center">
+          <div className="relative mb-4">
+            <div className="absolute inset-0 -m-4 rounded-full bg-accent/20 blur-2xl" aria-hidden />
+            <div className="relative flex h-12 w-12 items-center justify-center rounded-[14px] border border-line-strong bg-gradient-to-b from-raised to-card shadow-[0_12px_32px_-12px_rgba(0,0,0,0.6)] edge-strong">
+              <AppMark size={26} />
             </div>
           </div>
-          <div className="min-w-0">
-            <h1 className="text-[20px] font-semibold tracking-[-0.02em]">Every coding agent, one calm place</h1>
-            <div className="mt-1 flex min-h-[24px] flex-wrap items-center gap-1.5">
-              {live === 0 && needs === 0 && (
-                <span className="text-small text-muted">{list.length === 0 ? "No agents yet" : "All quiet"}</span>
-              )}
-              {live > 0 && <PulseChip tone="accent" label={`${live} working`} onClick={() => openMission("all")} />}
-              {needs > 0 && (
-                <PulseChip
-                  tone="warn"
-                  label={`${needs} need${needs === 1 ? "s" : ""} you`}
-                  onClick={() => openMission("needs")}
-                />
-              )}
-              {budget && budget.todayUsd > 0 && (
-                <PulseChip label={`${formatCost(budget.todayUsd)} today`} onClick={() => setView("usage")} />
-              )}
-            </div>
+          <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.03em]">
+            Every coding agent, <AccentText>one calm place</AccentText>
+          </h1>
+          <div className="mt-2.5 flex min-h-[24px] flex-wrap items-center justify-center gap-1.5">
+            {live === 0 && needs === 0 && (
+              <span className="text-small text-muted">{list.length === 0 ? "No agents yet" : "All quiet"}</span>
+            )}
+            {live > 0 && <PulseChip tone="accent" label={`${live} working`} onClick={() => openMission("all")} />}
+            {needs > 0 && (
+              <PulseChip
+                tone="warn"
+                label={`${needs} need${needs === 1 ? "s" : ""} you`}
+                onClick={() => openMission("needs")}
+              />
+            )}
+            {budget && budget.todayUsd > 0 && (
+              <PulseChip label={`${formatCost(budget.todayUsd)} today`} onClick={() => setView("usage")} />
+            )}
           </div>
         </div>
 
@@ -507,7 +505,7 @@ function Welcome() {
           </div>
         )}
 
-        <div className="mt-3 flex flex-wrap gap-1.5">
+        <div className="mt-3 flex flex-wrap justify-center gap-1.5">
           <QuickAction icon={<SlidersHorizontal />} label="All options" onClick={() => openNewAgent()} />
           <QuickAction icon={<Columns3 />} label="Compare providers" onClick={() => openNewAgent({ compare: true })} />
           <QuickAction icon={<LayoutGrid />} label="Mission Control" onClick={() => setView("mission")} />

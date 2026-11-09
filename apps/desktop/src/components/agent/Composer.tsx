@@ -89,6 +89,8 @@ function ComposerImpl({
   const [wrapRef, width] = useElementWidth<HTMLDivElement>();
   // The shortcut hints need about 520px; in a narrow tile they would be cut off mid-word.
   const roomForHints = width === 0 || width >= 520;
+  // The ⏎ / ⇧⏎ hint shows while you type, not on an empty composer.
+  const keyHints = roomForHints && text.length > 0;
   // Floating things anchored bottom-right (toasts, the voice assistant panel) sit above the
   // composer via --composer-clear, so they never cover Send / Queue / Stop.
   useLayoutEffect(() => {
@@ -675,31 +677,28 @@ function ComposerImpl({
                   <ConfigSelect key={opt.id} agent={agent} option={opt} compact={!roomy} />
                 ))}
                 <ConfigOverflowMenu agent={agent} options={configOptions.slice(fold.inline)} />
-                <AttachButton onClick={attach.openPicker} count={attach.attachments.length} iconOnly={!roomy} />
+                {/* Icons only: the session options are what you read here; these explain themselves on hover. */}
+                <AttachButton onClick={attach.openPicker} count={attach.attachments.length} iconOnly />
                 <TemplatePicker
                   onInsert={insertTemplate}
                   trigger={
-                    roomy ? undefined : (
-                      <button
-                        type="button"
-                        aria-label="Prompt templates"
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg"
-                      >
-                        <BookText className="h-3.5 w-3.5" />
-                      </button>
-                    )
+                    <button
+                      type="button"
+                      aria-label="Prompt templates"
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg"
+                    >
+                      <BookText className="h-3.5 w-3.5" />
+                    </button>
                   }
                 />
-                <span
-                  className={cn("mx-1.5 h-4 w-px bg-line", ((!busy && !roomForHints) || fold.bare) && "hidden")}
-                  aria-hidden
-                />
+                <span className={cn("mx-1.5 h-4 w-px bg-line", (!busy || fold.bare) && "hidden")} aria-hidden />
               </div>
               {/* Never narrower than the dot: a squeeze shows up as overflow and folds the toolbar instead of halving it. */}
               <div
                 className={cn(
                   "flex items-center gap-1.5 overflow-hidden text-meta text-steel",
-                  busy ? "min-w-2" : "min-w-0",
+                  // Idle: a container, so the key hint shows whole or not at all.
+                  busy ? "min-w-2" : "@container min-w-0 flex-1",
                   fold.bare && "hidden",
                 )}
               >
@@ -717,7 +716,8 @@ function ComposerImpl({
                     </span>
                   </>
                 ) : (
-                  <span className={cn("items-center gap-1", roomForHints ? "flex" : "hidden")}>
+                  <span className={cn("hidden items-center gap-1", keyHints && "@[12rem]:flex")}>
+                    <span className="mr-2 h-4 w-px bg-line" aria-hidden />
                     <Kbd>⏎</Kbd> send <span className="mx-1 text-line-strong">·</span> <Kbd>⇧</Kbd>
                     <Kbd>⏎</Kbd> newline
                   </span>

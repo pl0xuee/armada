@@ -6,7 +6,7 @@ import { devParam } from "@/lib/dev";
 import { basename, formatCost, formatDuration, formatTokens, plural } from "@/lib/format";
 import { isRunning, isSubagentNode, latestChild, type SubagentNode } from "@/lib/rows";
 import { setReviewFocus } from "@/lib/reviewFocus";
-import { subagentChips, type InheritedConfig } from "@/lib/subagents";
+import { isBackgroundLaunch, subagentChips, type InheritedConfig } from "@/lib/subagents";
 import { noteUserLayoutChange } from "@/lib/scroll";
 import type { TurnSummaryItem } from "@/lib/types";
 import { Icon, Spinner } from "../Icon";
@@ -87,7 +87,7 @@ export const SubagentCard = memo(function SubagentCard({
   const { call } = node;
   const [open, setOpen] = useState(EXPAND_ALL);
   const [showPrompt, setShowPrompt] = useState(false);
-  const background = !!call.subagent?.background;
+  const background = isBackgroundLaunch(call);
   const phase = phaseOf(call, agentLive, background && call.status === "completed" && !!bgRunning?.has(call.toolCallId));
   const running = phase === "running";
   const color = PHASE_COLOR[phase];

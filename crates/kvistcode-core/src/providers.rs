@@ -440,6 +440,16 @@ pub fn resolve_program(name: &str) -> Option<PathBuf> {
     resolve_program_in(name, &path, &cwd, mise_shims_dir().as_deref())
 }
 
+/// Like [`resolve_program`], but on the person's own PATH: Kvistcode's private Node and
+/// agent CLIs are skipped, so finding one there doesn't mean the tool is installed.
+pub fn resolve_user_program(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    let own = std::env::split_paths(&path).filter(|p| !crate::toolchain::is_managed_path(p));
+    let path = std::env::join_paths(own).ok()?;
+    let cwd = std::env::current_dir().unwrap_or_default();
+    resolve_program_in(name, &path, &cwd, mise_shims_dir().as_deref())
+}
+
 fn resolve_program_in(
     name: &str,
     path: &std::ffi::OsStr,

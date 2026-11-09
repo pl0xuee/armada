@@ -124,6 +124,10 @@ struct CtxState {
     /// whether the running turn's prompt was.
     next_automatic: bool,
     turn_automatic: bool,
+    /// False between our own automatic compaction and usage next being seen below the line.
+    compact_armed: bool,
+    /// The running turn is our own automatic `/compact` (never requeued as if typed).
+    turn_compacting: bool,
     /// The queue doesn't advance until the user acts (after cancel/stop/failure).
     queue_paused: bool,
     /// When the current turn started, and the agent's cost/tokens at that point.
@@ -225,6 +229,8 @@ impl AgentCtx {
                 turn_prompt: None,
                 next_automatic: false,
                 turn_automatic: false,
+                compact_armed: true,
+                turn_compacting: false,
                 queue_paused: false,
                 turn_started_at: 0,
                 turn_tree: None,
@@ -1587,6 +1593,26 @@ impl AgentCtx {
         self.core.upgrade()?.budget_gate(&self.agent_id, completed)
     }
 
+    /// The "compact automatically" line, the agent's context use and whether it offers
+    /// `/compact`; None unless the turn completed normally and the setting is on.
+    #[allow(clippy::type_complexity)]
+    fn auto_compact_inputs(
+        &self,
+        outcome: &TurnOutcome,
+    ) -> Option<(Option<u8>, Option<i64>, Option<i64>, bool)> {
+        if !matches!(
+            outcome,
+            TurnOutcome::Completed | TurnOutcome::CompletedWithNote(_)
+        ) {
+            return None;
+        }
+        let core = self.core.upgrade()?;
+        let pct = core.settings().ok()?.auto_compact_percent?;
+        let a = core.agent(&self.agent_id).ok()?;
+        let has = a.available_commands.iter().any(|c| c.name == "compact");
+        Some((Some(pct), a.context_used, a.context_size, has))
+    }
+
     fn finish_turn(
         &self,
         generation: Option<u64>,
@@ -1595,10 +1621,14 @@ impl AgentCtx {
         requeue_unheard: bool,
     ) -> Option<Prompt> {
         let hold = self.budget_gate(&outcome);
+        let auto_compact = self.auto_compact_inputs(&outcome);
+        let mut compacting: Option<u32> = None;
+        // The queue id of the message `next` came from, kept if it goes back.
+        let mut next_id: Option<String> = None;
         let mut requeued = false;
         let stale: Vec<String>;
         let dropped: usize;
-        let next: Option<Prompt>;
+        let mut next: Option<Prompt>;
         let summary;
         let launches: Vec<(WorkflowLaunch, bool)>;
         let finish_epoch: u64;
@@ -1643,15 +1673,47 @@ impl AgentCtx {
                 normal || (matches!(outcome, TurnOutcome::Cancelled) && advance_on_cancel);
             // A spending limit stops the queue from carrying on (the messages stay queued).
             next = if advance && !st.queue_paused && hold.is_none() {
-                st.queue.pop_front().map(|(_, p)| p)
+                st.queue.pop_front().map(|(id, p)| {
+                    next_id = Some(id);
+                    p
+                })
             } else {
                 None
             };
-            // Nothing from the agent after the user's message: it may never have got it.
+            // Between turns only: a finished turn with room to carry on may first compact.
+            if advance && !st.queue_paused && hold.is_none() {
+                if let Some((pct, used, size, has)) = auto_compact {
+                    compacting = crate::token_saver::auto_compact_due(
+                        pct,
+                        used,
+                        size,
+                        has,
+                        &mut st.compact_armed,
+                    );
+                }
+            }
+            if compacting.is_some() {
+                let compact = Prompt {
+                    text: "/compact".into(),
+                    attachments: Vec::new(),
+                    token: 0,
+                };
+                if let Some(queued) = next.replace(compact) {
+                    let id = next_id
+                        .take()
+                        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                    st.queue.push_front((id, queued));
+                }
+                // Not `next_automatic`: that marks the resume after a rate limit (its own note and
+                // limit handling). The notice below says where this `/compact` came from.
+            }
+            // Nothing from the agent after the user's message: it may never have got it. Our own
+            // `/compact` is not the user's message: it is never put back in their queue.
+            let ours = std::mem::take(&mut st.turn_compacting);
             let unheard = st
                 .turn_prompt
                 .take()
-                .filter(|(_, seq)| *seq == st.seq)
+                .filter(|(_, seq)| *seq == st.seq && !ours)
                 .map(|(p, _)| p);
             // This turn is over either way; its token is spent.
             finish_epoch = Self::next_token_locked(&mut st);
@@ -1727,7 +1789,20 @@ impl AgentCtx {
                 if st.turn_active && st.turn_epoch == finish_epoch {
                     st.ext.remove("__plan__");
                     next.token = Self::next_token_locked(&mut st);
+                    // Said only once it really starts (a stop in between drops it).
+                    if let Some(pct) = compacting {
+                        self.push_locked(
+                            &mut st,
+                            ItemBody::Notice {
+                                level: NoticeLevel::Info,
+                                text: format!(
+                                    "Compacting automatically: the context is {pct}% full"
+                                ),
+                            },
+                        );
+                    }
                     self.record_prompt_locked(&mut st, &next);
+                    st.turn_compacting = compacting.is_some();
                     true
                 } else {
                     false
@@ -1740,8 +1815,13 @@ impl AgentCtx {
             // Stopped in between: keep the message, on hold, at the front.
             {
                 let mut st = self.st.lock();
-                st.queue
-                    .push_front((uuid::Uuid::new_v4().to_string(), next));
+                if compacting.is_some() {
+                    // Our own compaction is dropped; the message it was ahead of is already queued.
+                    st.compact_armed = true;
+                } else {
+                    let id = next_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                    st.queue.push_front((id, next));
+                }
                 st.queue_paused = true;
             }
             self.publish_queue();

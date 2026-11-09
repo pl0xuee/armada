@@ -11,6 +11,14 @@ export function visibleOptions(options: ConfigOption[] | undefined): ConfigOptio
   return (options ?? []).filter((o) => Array.isArray(o.options) && o.options.length > 0);
 }
 
+/** The values of an option that is only On or Off: shown as a switch, not a list to pick from. */
+export function onOff(o: ConfigOption): { on: string; off: string } | null {
+  if (o.options.length !== 2) return null;
+  const on = o.options.find((c) => c.name.trim().toLowerCase() === "on");
+  const off = o.options.find((c) => c.name.trim().toLowerCase() === "off");
+  return on && off ? { on: on.value, off: off.value } : null;
+}
+
 export function applyConfigValue<T extends { id: string; currentValue: string }>(options: T[], optionId: string, value: string): T[] {
   return options.map((o) => (o.id === optionId ? { ...o, currentValue: value } : o));
 }

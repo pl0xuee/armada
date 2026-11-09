@@ -29,6 +29,7 @@ fn use_mock() {
     INIT.call_once(|| {
         let mock = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/mock_limit.py");
         std::env::set_var("KVISTCODE_GROK_COMMAND", format!("python3 {mock}"));
+        std::env::set_var("KVISTCODE_SECRETS", "memory");
     });
 }
 

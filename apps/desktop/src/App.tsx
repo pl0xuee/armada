@@ -47,6 +47,8 @@ const load = {
   review: () => import("@/components/ReviewSheet").then((m) => ({ default: m.ReviewSheet })),
   share: () => import("@/components/ShareDialog").then((m) => ({ default: m.ShareDialog })),
   terminal: () => import("@/components/TerminalModal").then((m) => ({ default: m.TerminalModal })),
+  // Loaded lazily by the agents view (it holds the markdown stack); listed here only to be prefetched.
+  timeline: () => import("@/components/agent/TimelinePane").then((m) => ({ default: m.TimelinePane })),
 };
 
 const loadMotionFeatures = () => import("@/lib/motionFeatures").then((mod) => mod.default);
@@ -71,6 +73,7 @@ const VIEWS: Record<View, ComponentType> = {
 
 /** Most likely first. The terminal (xterm) is left out: it loads when a terminal is opened. */
 const PREFETCH_ORDER = [
+  "timeline",
   "palette",
   "newAgent",
   "settings",

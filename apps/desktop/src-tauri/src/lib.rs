@@ -168,8 +168,11 @@ macro_rules! handler {
             commands::detect_providers,
             commands::install_provider,
             commands::install_missing,
+            commands::install_providers,
             commands::check_tool_updates,
             commands::update_tool,
+            commands::list_companions,
+            commands::install_companion,
             commands::terminal_write,
             commands::terminal_resize,
             commands::terminal_kill,
@@ -773,6 +776,7 @@ mod ipc_smoke {
     /// `commands_only_request_managed_state`.
     const SKIP: &[&str] = &[
         "install_missing",
+        "install_providers",
         "check_tool_updates",
         "update_tool",
         "install_update",

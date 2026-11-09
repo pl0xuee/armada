@@ -32,6 +32,32 @@ export function ConfigSelect({
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const remembered = agent.provider !== "local" && isRememberableOption(option);
   const warn = option.currentValue === "bypassPermissions" || option.currentValue === "never";
+  const toggle = onOff(option);
+  if (toggle) {
+    const on = option.currentValue === toggle.on;
+    return (
+      <Tooltip
+        content={`${option.name} is ${on ? "on" : "off"}. Click to turn it ${on ? "off" : "on"}${remembered ? `. New ${identity.short} agents start with your last choice` : ""}`}
+      >
+        <button
+          type="button"
+          aria-pressed={on}
+          aria-label={option.name}
+          onClick={() => setOption(agent, option, on ? toggle.off : toggle.on)}
+          className={cn(
+            "inline-flex h-6 items-center gap-1.5 rounded-md px-1.5 text-meta transition-colors",
+            on ? "bg-accent/10 text-accent hover:bg-accent/15" : "text-steel hover:bg-raised hover:text-fg",
+          )}
+        >
+          <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", on ? "bg-accent" : "bg-line-strong")} aria-hidden />
+          <span className={cn("truncate", compact ? "max-w-[96px]" : "max-w-[130px]")}>{option.name}</span>
+        </button>
+      </Tooltip>
+    );
+  }
+  const label = current?.name ?? option.currentValue;
+  // "Default" or "None" says nothing on its own: name the option too.
+  const bare = /^(default|none)\b/i.test(label);
   return (
     <DropdownMenu>
       <Tooltip content={option.name}>
@@ -45,7 +71,8 @@ export function ConfigSelect({
             )}
           >
             <span className={cn("truncate", compact ? "max-w-[96px]" : "max-w-[130px]")}>
-              {current?.name ?? option.currentValue}
+              {bare && <span className="text-steel">{option.name}: </span>}
+              {label}
             </span>
             <ChevronDown className="h-3 w-3 text-steel" />
           </button>
@@ -58,11 +85,7 @@ export function ConfigSelect({
             key={o.value}
             checked={o.value === option.currentValue}
             description={o.description}
-            onSelect={() =>
-              void attempt(`Couldn't change ${option.name.toLowerCase()}`, () =>
-                api.setAgentConfig(agent.id, option.id, o.value),
-              )
-            }
+            onSelect={() => setOption(agent, option, o.value)}
           >
             {o.name}
           </DropdownMenuCheckItem>
@@ -77,12 +100,21 @@ export function ConfigSelect({
   );
 }
 
+/** The values of an option that is only On or Off, shown as a named switch instead of a menu. */
+export function onOff(option: ConfigOption): { on: string; off: string } | null {
+  if (option.options.length !== 2) return null;
+  const on = option.options.find((o) => o.name.trim().toLowerCase() === "on");
+  const off = option.options.find((o) => o.name.trim().toLowerCase() === "off");
+  return on && off ? { on: on.value, off: off.value } : null;
+}
+
 function setOption(agent: Agent, option: ConfigOption, value: string) {
   void attempt(`Couldn't change ${option.name.toLowerCase()}`, () => api.setAgentConfig(agent.id, option.id, value));
 }
 
 /** "+" menu holding session options that don't fit inline on narrow composers. */
 export function ConfigOverflowMenu({ agent, options }: { agent: Agent; options: ConfigOption[] }) {
+  const identity = useIdentity(agent.provider, agent.customAgentId);
   if (options.length === 0) return null;
   return (
     <DropdownMenu>
@@ -101,6 +133,24 @@ export function ConfigOverflowMenu({ agent, options }: { agent: Agent; options: 
         <DropdownMenuLabel>Session options</DropdownMenuLabel>
         {options.map((opt) => {
           const current = opt.options.find((o) => o.value === opt.currentValue);
+          const toggle = onOff(opt);
+          if (toggle) {
+            const on = opt.currentValue === toggle.on;
+            return (
+              <DropdownMenuCheckItem
+                key={opt.id}
+                checked={on}
+                description={
+                  agent.provider !== "local" && isRememberableOption(opt)
+                    ? `New ${identity.short} agents start with your last choice`
+                    : undefined
+                }
+                onSelect={() => setOption(agent, opt, on ? toggle.off : toggle.on)}
+              >
+                {opt.name}
+              </DropdownMenuCheckItem>
+            );
+          }
           return (
             <DropdownMenuSub key={opt.id}>
               <DropdownMenuSubTrigger>

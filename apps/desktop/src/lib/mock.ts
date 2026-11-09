@@ -15,6 +15,7 @@ import { validateAlertUrl } from "./alertTargets";
 import { sameAccelerator } from "../components/settings/acceleratorLabels";
 import { WAKE_MODEL, wakePhraseProblem } from "./wakePhrase";
 import { isMac } from "./utils";
+import { seedCompanions } from "./mock-companions";
 import { mockProjectConfig, mockSaveRules } from "./mock-project-config";
 import {
   mockInstructionsSave,
@@ -131,6 +132,17 @@ const db = {
   schedules: seedSchedules(),
   items: seedItems(),
 };
+
+// ?missing=claude,grok: those agent tools aren't installed and their logins are unknown, to walk
+// the first-run install step. ?installfail=grok: that install fails the first time (then works).
+const mockInstallFails = new Set((params?.get("installfail") ?? "").split(",").filter(Boolean));
+for (const name of (params?.get("missing") ?? "").split(",").filter(Boolean)) {
+  const p = db.providers.find((x) => x.provider === name);
+  if (!p) continue;
+  Object.assign(p, { installed: false, managed: false, managedVersion: null, version: null, path: null });
+  if (p.adapterRequired) p.adapterInstalled = false;
+  for (const acc of db.accounts) if (acc.provider === p.provider) acc.status = null;
+}
 
 // ?budget=hold: an agent paused at its spending limit, to see the "Needs you" item.
 if (params?.get("budget") === "hold") {
@@ -936,6 +948,7 @@ const C = {
   cyan: "\x1b[36m",
   green: "\x1b[32m",
   yellow: "\x1b[33m",
+  red: "\x1b[31m",
   reset: "\x1b[0m",
 };
 
@@ -1018,6 +1031,48 @@ async function runInstallMissing(t: MockTerminal) {
   await termExit(t, 0);
 }
 
+/** Installs run one at a time, like the core's lock. */
+let installChain: Promise<void> = Promise.resolve();
+
+/** The chosen providers one after the other, with the core's log lines; ready ones are announced as they finish. */
+async function runInstallSet(t: MockTerminal, providers: Provider[]) {
+  const out = (s: string, ms = 250) => {
+    termOut(t.id, `${s}\r\n`);
+    return sleep(rand(ms * 0.6, ms * 1.4));
+  };
+  await sleep(300);
+  const failed: string[] = [];
+  for (const id of providers) {
+    const p = db.providers.find((x) => x.provider === id);
+    if (!p || t.done) continue;
+    if (p.installed && (!p.adapterRequired || p.adapterInstalled)) {
+      await out(`${C.green}✓${C.reset} ${p.displayName} is already installed.`, 100);
+      continue;
+    }
+    await out(`Setting up ${p.displayName}`, 300);
+    await out(`${C.green}✓${C.reset} Using Kvistcode's Node.js`, 200);
+    await out(`${C.cyan}▸${C.reset} Installing ${p.installCommand.split(" ").slice(3).join(", ")}…`, 1800);
+    if (mockInstallFails.delete(id)) {
+      await out(
+        `${C.red}✗ ${p.displayName}: couldn't reach the npm registry for ${p.cliName}: connection timed out${C.reset}`,
+        200,
+      );
+      failed.push(p.displayName);
+    } else {
+      p.installed = true;
+      p.version = p.testedVersion ?? "1.0.3";
+      p.path = `~/.local/share/kvistcode/tools/bin/${p.cliName}`;
+      markManaged(p);
+      if (p.adapterRequired) p.adapterInstalled = true;
+      await out(`${C.green}✓${C.reset} ${p.displayName} is ready (${p.version})`, 100);
+    }
+    emit({ type: "providers_changed", providers: clone(db.providers) });
+    await out("", 50);
+  }
+  if (failed.length) await out(`${C.red}✗ Some installs failed: ${failed.join(", ")}${C.reset}`, 50);
+  await termExit(t, failed.length ? 1 : 0);
+}
+
 /** Kvistcode's own copy is now the one in use. */
 function markManaged(p: ProviderInfo) {
   p.managed = true;
@@ -1058,6 +1113,22 @@ async function runToolUpdate(t: MockTerminal, rollback: boolean) {
   p.path = `~/.local/share/kvistcode/tools/node_modules/.bin/${p.cliName}`;
   termOut(t.id, `${C.green}✔ ${p.displayName} ${rollback ? "rolled back to" : "updated to"} ${target}.${C.reset}\r\n`);
   emit({ type: "providers_changed", providers: clone(db.providers) });
+  await termExit(t, 0);
+}
+
+/** Like the real install: the command, a password prompt, some package-manager output, then done. */
+async function runCompanionInstall(t: MockTerminal, id: string) {
+  const c = mockCompanions.find((x) => x.id === id);
+  if (!c?.installCommand) return termExit(t, 1);
+  await sleep(300);
+  termOut(t.id, `${C.dim}$ ${c.installCommand}${C.reset}\r\n\r\n`);
+  for (const s of ["Reading package lists... Done", "Building dependency tree... Done", `Setting up ${c.id} ...`, ""]) {
+    termOut(t.id, `${s}\r\n`);
+    await sleep(rand(200, 500));
+  }
+  c.installed = true;
+  c.version = c.version ?? "1.0.0";
+  termOut(t.id, `${C.green}✔ ${c.name} installed.${C.reset}\r\n`);
   await termExit(t, 0);
 }
 
@@ -1307,6 +1378,7 @@ let mockLoaded: LoadedModel[] = [
     expiresAt: new Date(Date.now() + 4 * 60_000).toISOString(),
   },
 ];
+const mockCompanions = seedCompanions();
 let mockLocalPrefs: LocalPrefs = { contextTokens: null, assistAccountId: null, assistModel: null };
 
 function mockHealth(kind: LocalKind, baseUrl: string): LocalHealth {
@@ -2704,10 +2776,36 @@ export const mockApi: KvistcodeApi = {
     return delay(t.id, 80);
   },
 
+  async listCompanions() {
+    await sleep(250);
+    return clone(mockCompanions);
+  },
+
+  async installCompanion(id, command) {
+    const c = mockCompanions.find((x) => x.id === id);
+    if (!c) throw new Error("That isn't on the list.");
+    if (c.installCommand !== command) throw new Error("The install options changed. Check again and try once more.");
+    if (!c.installCommand)
+      throw new Error(`${c.name} can't be installed with one click on this computer. Use the download page.`);
+    const t: MockTerminal = { id: newId("term"), kind: "install", buffer: "", stage: 0, done: false };
+    terminals.set(t.id, t);
+    void runCompanionInstall(t, id);
+    return delay(t.id, 80);
+  },
+
   async installMissing() {
     const t: MockTerminal = { id: newId("term"), kind: "install", buffer: "", stage: 0, done: false };
     terminals.set(t.id, t);
     void runInstallMissing(t);
+    return delay(t.id, 80);
+  },
+
+  async installProviders(providers) {
+    if (providers.length === 0) throw new Error("Pick at least one tool to install.");
+    const t: MockTerminal = { id: newId("term"), kind: "install", buffer: "", stage: 0, done: false };
+    terminals.set(t.id, t);
+    const run = installChain.then(() => runInstallSet(t, [...new Set(providers)]));
+    installChain = run.catch(() => {});
     return delay(t.id, 80);
   },
 
@@ -2991,7 +3089,8 @@ export const mockApi: KvistcodeApi = {
   async createProject(parent, name, git) {
     await sleep(rand(150, 350));
     const clean = name.trim();
-    if (!clean || /[\\/:*?"<>|]/.test(clean)) throw new Error("Give the project a name without slashes or special characters.");
+    if (!clean || /[\\/:*?"<>|]/.test(clean))
+      throw new Error("Give the project a name without slashes or special characters.");
     const path = `${parent.replace(/[\\/]+$/, "")}/${clean}`;
     if (git) mockNewRepos.add(path);
     return { path, git } satisfies NewProject;
@@ -3726,6 +3825,8 @@ function validateSettings(s: Settings): string | null {
     return `Unknown language “${s.defaultLanguage}”`;
   if (s.autoCompactWindow != null && (s.autoCompactWindow < 100_000 || s.autoCompactWindow > 1_000_000))
     return "The auto-compact size must be between 100,000 and 1,000,000 tokens (or empty for Claude's default)";
+  if (s.autoCompactPercent != null && (s.autoCompactPercent < 50 || s.autoCompactPercent > 95))
+    return "Compact automatically must be between 50% and 95% full (or off)";
   const ts = s.tokenSaver;
   if (ts.bashOutputMaxChars != null && (ts.bashOutputMaxChars < 4_000 || ts.bashOutputMaxChars > 128_000))
     return "The command output limit must be between 4,000 and 128,000 characters (or empty for Claude's default)";

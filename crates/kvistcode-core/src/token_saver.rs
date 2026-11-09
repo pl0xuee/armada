@@ -18,6 +18,9 @@ use crate::Result;
 /// Sizes Claude Code accepts for `CLAUDE_CODE_AUTO_COMPACT_WINDOW`.
 pub const COMPACT_WINDOW_RANGE: RangeInclusive<u32> = 100_000..=1_000_000;
 
+/// Context fullness (percent) at which Kvistcode itself compacts an agent between turns.
+pub const COMPACT_PERCENT_RANGE: RangeInclusive<u8> = 50..=95;
+
 /// What the preset sets the window to: well under the 450k+ the heaviest agents reach, with room
 /// to work in between summaries.
 pub const PRESET_COMPACT_WINDOW: u32 = 250_000;
@@ -199,6 +202,30 @@ pub fn extend_session_meta(
         json!({ "claudeCode": { "options": { "promptSuggestions": false, "settings": extra } } }),
     );
     Some(meta)
+}
+
+/// Whether an agent whose turn just ended should be compacted now, and at what percent full.
+/// `armed` is false from the moment we compact until usage is seen below the line again, so a
+/// compaction that doesn't bring usage down is never repeated.
+pub fn auto_compact_due(
+    percent: Option<u8>,
+    used: Option<i64>,
+    size: Option<i64>,
+    has_compact: bool,
+    armed: &mut bool,
+) -> Option<u32> {
+    let pct = percent?;
+    let (used, size) = (used?, size.filter(|s| *s > 0)?);
+    let now = (used.max(0) * 100 / size) as u32;
+    if now < u32::from(pct) {
+        *armed = true;
+        return None;
+    }
+    if !*armed || !has_compact {
+        return None;
+    }
+    *armed = false;
+    Some(now)
 }
 
 /// Applies the "Save tokens" preset to `settings` and returns what changed, in plain words.
@@ -434,5 +461,52 @@ mod tests {
             "model untouched"
         );
         assert!(apply_preset(&mut s).is_empty(), "nothing left to change");
+    }
+}
+
+#[cfg(test)]
+mod auto_compact_tests {
+    use super::auto_compact_due;
+
+    #[test]
+    fn fires_once_until_usage_drops_below_the_line() {
+        let mut armed = true;
+        let due =
+            |used, armed: &mut bool| auto_compact_due(Some(80), Some(used), Some(100), true, armed);
+        assert_eq!(due(79, &mut armed), None);
+        assert_eq!(due(82, &mut armed), Some(82));
+        assert_eq!(
+            due(90, &mut armed),
+            None,
+            "no second compaction for the same crossing"
+        );
+        assert_eq!(due(10, &mut armed), None);
+        assert_eq!(
+            due(85, &mut armed),
+            Some(85),
+            "re-armed after dropping below"
+        );
+    }
+
+    #[test]
+    fn needs_the_setting_usage_and_a_compact_command() {
+        let mut armed = true;
+        assert_eq!(
+            auto_compact_due(None, Some(99), Some(100), true, &mut armed),
+            None
+        );
+        assert_eq!(
+            auto_compact_due(Some(80), None, Some(100), true, &mut armed),
+            None
+        );
+        assert_eq!(
+            auto_compact_due(Some(80), Some(99), Some(0), true, &mut armed),
+            None
+        );
+        assert_eq!(
+            auto_compact_due(Some(80), Some(99), Some(100), false, &mut armed),
+            None
+        );
+        assert!(armed, "a missing command doesn't use up the crossing");
     }
 }

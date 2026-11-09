@@ -42,8 +42,47 @@ export function isSubagentLive(status: Agent["status"]): boolean {
   return status !== "stopped" && status !== "error" && status !== "interrupted";
 }
 
+/**
+ * Whether a launcher runs in the background: flagged by the request, or reported by the result
+ * ("Async agent launched"), which is all a custom agent that always runs that way shows.
+ */
+export function isBackgroundLaunch(it: ToolCallItem): boolean {
+  const sa = it.subagent;
+  if (!sa || sa.control || sa.workflow) return !!sa?.background;
+  return !!sa.background || (it.output ?? "").startsWith("Async agent launched");
+}
+
 export function hasBackgroundSubagent(items: TimelineItem[] | undefined): boolean {
-  return !!items && items.some((it) => isLauncher(it) && !!it.subagent?.background);
+  return !!items && items.some((it) => isLauncher(it) && isBackgroundLaunch(it));
+}
+
+/**
+ * Sub-agents known to be finished whatever the clock says: those that called SubagentHandback
+ * (by launcher toolCallId), and background ones the agent stopped with TaskStop (by the id their
+ * launch reported).
+ */
+function finishedSignals(items: readonly TimelineItem[]): { handedBack: Set<string>; stopped: Set<string> } {
+  const handedBack = new Set<string>();
+  const stopped = new Set<string>();
+  for (const it of items) {
+    if (it.kind !== "tool_call") continue;
+    if (it.parentToolCallId && /^SubagentHandback\b/i.test(it.title)) handedBack.add(it.parentToolCallId);
+    if (it.status === "completed" && /^TaskStop\b/.test(it.title)) {
+      const out = it.output ?? "";
+      const id = /"task_id"\s*:\s*"([\w-]+)"/.exec(out)?.[1] ?? /stopped task:\s*([\w-]+)/i.exec(out)?.[1];
+      if (id) stopped.add(id);
+    }
+  }
+  return { handedBack, stopped };
+}
+
+/** The id a background launch reported ("agentId: …"), which TaskStop names. */
+const launchId = (it: ToolCallItem) => /\bagentId:\s*([\w-]+)/.exec(it.output ?? "")?.[1];
+
+/** A step title on one line: a multi-line command shows only its first line. */
+export function stepLabel(title: string): string {
+  const first = title.split("\n").find((l) => l.trim()) ?? "";
+  return first.replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -64,7 +103,7 @@ export function clockExpiry(items: TimelineItem[] | undefined): number {
   }
   let expiry = 0;
   for (const it of items) {
-    if (!isLauncher(it) || !it.subagent?.background || it.status !== "completed") continue;
+    if (!isLauncher(it) || !isBackgroundLaunch(it) || it.status !== "completed") continue;
     const last = lastChildTs.get(it.toolCallId);
     const open = openChildTs.get(it.toolCallId);
     expiry = Math.max(
@@ -102,11 +141,12 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, c
       if (unfinished(it.status)) openChildTs.set(it.parentToolCallId, Math.max(it.ts, openChildTs.get(it.parentToolCallId) ?? 0));
     }
   }
+  const { handedBack, stopped } = finishedSignals(items);
   const runs: SubagentRun[] = [];
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     if (!isLauncher(it)) continue;
-    const bg = !!it.subagent?.background;
+    const bg = isBackgroundLaunch(it);
     const open = unfinished(it.status) || (bg && it.status === "completed" && i > turnStartIdx);
     let running = open && busy;
     if (bg && clock && it.status === "completed") {
@@ -119,6 +159,8 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, c
           (lastTs !== undefined && clock.now - lastTs < SUBAGENT_ACTIVE_WINDOW_MS) ||
           clock.now - it.ts < SUBAGENT_LAUNCH_GRACE_MS);
     }
+    const id = bg ? launchId(it) : undefined;
+    if (handedBack.has(it.toolCallId) || (id !== undefined && stopped.has(id))) running = false;
     if (!running && i <= turnStartIdx) continue;
     if (!running && unfinished(it.status)) continue; // stale: open call of an idle agent
     runs.push({ itemId: it.id, toolCallId: it.toolCallId, state: running ? "running" : it.status === "failed" ? "failed" : "done", background: bg });
@@ -211,7 +253,7 @@ export function runningSubagents(items: readonly TimelineItem[], runs: readonly 
     const kids = byParent.get(toolCallId);
     const last = kids?.[kids.length - 1];
     if (!last) return null;
-    return (last.subagent && !last.subagent.control ? newest(last.toolCallId, seen) : null) ?? last.title;
+    return (last.subagent && !last.subagent.control ? newest(last.toolCallId, seen) : null) ?? stepLabel(last.title);
   };
   const out: RunningSubagent[] = [];
   for (const it of items) {

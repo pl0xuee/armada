@@ -24,6 +24,7 @@ import { useEffect, useRef, useState, type ComponentType, type ReactNode } from 
 import { toast } from "sonner";
 import { AppMark } from "@/components/AppMark";
 import { GithubGlyph } from "@/components/settings/GithubGlyph";
+import { CompanionSection } from "@/components/settings/CompanionSection";
 import { InstallAllBanner } from "@/components/settings/InstallAllBanner";
 import { HelperSettings } from "@/components/settings/HelperSettings";
 import { ResponseStyleSettings } from "@/components/settings/ResponseStyleSettings";
@@ -1070,6 +1071,7 @@ function Providers() {
           <ProviderCard key={p.provider} info={p} />
         ))}
       </div>
+      <CompanionSection className="mt-10" />
     </>
   );
 }

@@ -51,11 +51,18 @@ struct Proc {
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     /// Set by the waiter once the child has been reaped; no signals after that.
     exited: AtomicBool,
+    /// Set as soon as a kill is asked for, before the process has actually gone.
+    killing: AtomicBool,
 }
 
 impl Proc {
     fn exited(&self) -> bool {
         self.exited.load(Ordering::SeqCst)
+    }
+
+    /// Exited, or on its way out: not something to hand to a new caller.
+    fn is_gone(&self) -> bool {
+        self.exited() || self.killing.load(Ordering::SeqCst)
     }
 
     /// Waits up to `limit` for the process to exit.
@@ -75,6 +82,7 @@ impl Proc {
     /// with TerminateProcess as the fallback. Blocks until the process is gone or
     /// every step has been tried.
     fn terminate(&self, grace: Duration) {
+        self.killing.store(true, Ordering::SeqCst);
         #[cfg(unix)]
         {
             for signal in [libc::SIGHUP, libc::SIGTERM] {
@@ -383,6 +391,7 @@ impl Terminals {
             pid: child.process_id(),
             killer: Mutex::new(child.clone_killer()),
             exited: AtomicBool::new(false),
+            killing: AtomicBool::new(false),
         });
 
         // From here on, any failure must not leave the child running unsupervised.
@@ -410,7 +419,9 @@ impl Terminals {
                 };
                 let code = match child.wait() {
                     Ok(status) if status.signal().is_none() => {
-                        Some(i32::try_from(status.exit_code()).unwrap_or(i32::MAX))
+                        // Windows codes can be 0x8A15002B-style HRESULTs: keep them as the signed
+                        // number (not clamped) so the app can tell them apart.
+                        Some(status.exit_code() as i32)
                     }
                     Ok(_) => None,
                     Err(e) => {
@@ -459,7 +470,9 @@ impl Terminals {
         let mut keys = self.keys.lock();
         {
             let live = self.inner.lock();
-            keys.retain(|_, id| live.contains_key(id));
+            // A terminal that is exiting or being killed stays in the map for a moment; a new
+            // caller must get a fresh one, never its dead id.
+            keys.retain(|_, id| live.get(id).is_some_and(|t| !t.proc.is_gone()));
             if let Some(id) = keys.get(key) {
                 return Ok((id.clone(), true));
             }
@@ -687,6 +700,7 @@ impl Terminals {
             .get(id)
             .map(|t| t.proc.clone())
             .ok_or_else(|| anyhow!("terminal not found"))?;
+        proc.killing.store(true, Ordering::SeqCst);
         std::thread::Builder::new()
             .name("kvistcode-pty-kill".into())
             .spawn(move || proc.terminate(KILL_GRACE))
@@ -1281,6 +1295,30 @@ mod tests {
             .unwrap();
         assert_ne!(next, first);
         assert!(wait_for(Duration::from_secs(10), || exited(&events, &next)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_terminal_being_killed_is_never_handed_out_again() {
+        let (core, events, dir) = test_core();
+        let terminals = Terminals::default();
+        let (first, _) = terminals
+            .spawn_unique("companion:apt", core.clone(), sh("read x"), |_| {})
+            .unwrap();
+        terminals.kill(&core, &first).unwrap();
+        // Right away, while the old one is still winding down.
+        let (second, reused) = terminals
+            .spawn_unique("companion:apt", core.clone(), sh("read x"), |_| {})
+            .unwrap();
+        assert!(!reused);
+        assert_ne!(first, second);
+        terminals.write(&second, "done\n").unwrap();
+        assert!(wait_for(Duration::from_secs(10), || exited(
+            &events, &first
+        ) && exited(
+            &events, &second
+        )));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

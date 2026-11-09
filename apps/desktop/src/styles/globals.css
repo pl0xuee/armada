@@ -415,6 +415,29 @@
   --syntax-token-link: #5a3fd0;
 }
 
+/* A headline phrase in the accent as a soft gradient. On light themes the light end would wash out, so it runs darker. */
+.accent-text {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 45%, white),
+    var(--accent),
+    color-mix(in srgb, var(--accent) 65%, black)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+[data-theme="titanium"] .accent-text,
+[data-theme="paper"] .accent-text,
+[data-theme="lilac"] .accent-text {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 75%, black),
+    var(--accent),
+    color-mix(in srgb, var(--accent) 60%, black)
+  );
+}
+
 /* The warn text colour is a dark brown for contrast on light surfaces; as a button fill it reads muddy. */
 [data-theme="titanium"] button.bg-warn.text-warn-fg,
 [data-theme="paper"] button.bg-warn.text-warn-fg,

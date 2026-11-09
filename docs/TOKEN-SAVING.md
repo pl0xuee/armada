@@ -61,6 +61,10 @@ cheapest first step. Not built: the data does not show a clear saving and it wou
 - Auto-compact: `autoCompactWindow` / `/autocompact` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, 100k-1M; compaction
   itself reads the whole context once (cheap while the cache is warm, uncached after an idle hour).
   code.claude.com/docs/en/model-config and prompt-caching.
+- Kvistcode's own "compact when the context is X% full" (`autoCompactPercent`, 50-95, off by default): after a
+  completed turn, if the agent offers `/compact` and its context use is at or above X%, Kvistcode sends `/compact`
+  before the next queued message and adds a timeline note. It fires once per crossing and re-arms only after usage is
+  seen below X%, so a compaction that doesn't help is not repeated. Works for any provider, unlike the window above.
 - Sub-agents and teams each carry their own context; Anthropic cites about 7x tokens for plan-mode teams. Use a
   smaller model for them (`CLAUDE_CODE_SUBAGENT_MODEL`, `model: haiku`). code.claude.com/docs/en/costs.
 - Keep CLAUDE.md under 200 lines; move rarely needed instructions to skills. Same page.
