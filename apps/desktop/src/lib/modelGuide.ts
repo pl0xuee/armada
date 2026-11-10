@@ -146,3 +146,32 @@ export function switchNeedsNote(agent: Agent, option: ConfigOption, value: strin
     (agent.contextUsed ?? 0) >= SWITCH_NOTE_TOKENS
   );
 }
+
+// ---------------------------------------------------------------- moving the agents you have
+
+/** An open Claude agent that is not on the recommended model and effort yet. */
+export interface SwitchTarget {
+  agent: Agent;
+  /** Its model changes and its conversation is long, so its next message costs more once. */
+  long: boolean;
+}
+
+/**
+ * Open Claude agents that are not on Opus at medium effort. One whose Claude Code doesn't offer Opus is
+ * left alone; one that hasn't reported its options yet is included (they apply when it starts).
+ */
+export function agentsOffRecommended(agents: readonly Agent[]): SwitchTarget[] {
+  const rec = WORK_TYPES[0];
+  const out: SwitchTarget[] = [];
+  for (const a of agents) {
+    if (a.provider !== "claude" || a.archived) continue;
+    const model = modelOption(a);
+    const effort = a.configOptions?.find((o) => o.id === "effort");
+    if (model && !model.options.some((c) => c.value === rec.model)) continue;
+    const onModel = model?.currentValue === rec.model;
+    const onEffort = model ? !effort || effort.currentValue === rec.effort : false;
+    if (onModel && onEffort) continue;
+    out.push({ agent: a, long: !!model && !onModel && (a.contextUsed ?? 0) >= SWITCH_NOTE_TOKENS });
+  }
+  return out;
+}

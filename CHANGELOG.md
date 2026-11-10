@@ -5,6 +5,10 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.4.11 — 2026-11-10
+
+- Move the agents you already have to the recommended setup. Settings, General, Models has a new "Agents you have now" row: one click switches every open Claude agent to Opus at medium effort, and puts helper agents on Sonnet unless you chose another helper model. Each agent keeps its conversation. If some have long conversations, it asks first and lets you skip those, because the new model has to read all of it again. An agent that is busy at the time gets the helper change when Kvistcode restarts.
+
 ## v0.4.10 — 2026-11-10
 
 - Pick the kind of work. A new Claude agent now starts on a model and effort chosen from what it is for, next to the prompt: Everyday coding (Opus, medium effort), Routine tasks (Sonnet), Quick or bulk (Haiku) or Big refactor or research (Fable), or "My usual model" to change nothing. New installs start on Everyday coding; if you have already chosen a Claude model or effort yourself, you start on "My usual model" and nothing changes behind your back. Your last pick is remembered, and a model Claude Code does not offer is hidden. The New agent dialog and the phone have the same picker, and the command palette uses your last pick.

@@ -49,3 +49,84 @@ describe("the recommended model setup", () => {
     expect(toast.success).not.toHaveBeenCalled();
   });
 });
+
+const setAgentConfig = vi.fn();
+vi.mock("@/lib/api", () => ({ api: { setAgentConfig: (...a: unknown[]) => setAgentConfig(...a) } }));
+
+import type { Agent } from "@/lib/types";
+import { switchAgentsToRecommended } from "./ModelGuideSettings";
+
+describe("switching the agents you have", () => {
+  const opt = (id: string, currentValue: string) => ({ id, name: id, category: null, currentValue, options: [] });
+  const target = (id: string, model?: string, effort?: string) => ({
+    agent: {
+      id,
+      provider: "claude",
+      configOptions: [...(model ? [opt("model", model)] : []), ...(effort ? [opt("effort", effort)] : [])],
+    } as unknown as Agent,
+    long: false,
+  });
+
+  beforeEach(() => setAgentConfig.mockReset().mockResolvedValue(undefined));
+
+  it("changes the model first, then effort, and only what differs", async () => {
+    expect(await switchAgentsToRecommended([target("a", "sonnet", "high"), target("b", "opus", "low")])).toBe(0);
+    expect(setAgentConfig.mock.calls).toEqual([
+      ["a", "model", "opus"],
+      ["b", "effort", "medium"],
+      ["a", "effort", "medium"],
+    ]);
+    expect(toast.success).toHaveBeenCalledOnce();
+  });
+
+  it("sets both on an agent that hasn't reported its options", async () => {
+    await switchAgentsToRecommended([target("c")]);
+    expect(setAgentConfig.mock.calls).toEqual([
+      ["c", "model", "opus"],
+      ["c", "effort", "medium"],
+    ]);
+  });
+
+  it("says how many failed", async () => {
+    setAgentConfig.mockImplementation(async (id: string) => {
+      if (id === "bad") throw new Error("not responding");
+    });
+    expect(await switchAgentsToRecommended([target("ok", "sonnet", "medium"), target("bad", "sonnet", "medium")])).toBe(
+      1,
+    );
+    expect(toast.error).toHaveBeenCalledWith("Couldn't switch 1 of 2 agents");
+  });
+});
+
+describe("switching agents also sets helpers", () => {
+  const sonnetAgent = {
+    agent: {
+      id: "s",
+      provider: "claude",
+      configOptions: [{ id: "model", name: "model", category: null, currentValue: "sonnet", options: [] }],
+    } as unknown as Agent,
+    long: false,
+  };
+
+  beforeEach(() => setAgentConfig.mockReset().mockResolvedValue(undefined));
+
+  it("puts helpers on Sonnet when none is chosen", async () => {
+    await switchAgentsToRecommended([sonnetAgent]);
+    expect(patchSettings).toHaveBeenCalledWith({ tokenSaver: { subagentModel: "sonnet" } });
+    expect(vi.mocked(toast.success).mock.calls[0][1]?.description).toContain("Helpers run on Sonnet");
+  });
+
+  it("keeps a helper model you already chose", async () => {
+    tokenSaver = { subagentModel: "haiku" };
+    await switchAgentsToRecommended([sonnetAgent]);
+    expect(patchSettings).not.toHaveBeenCalled();
+    expect(vi.mocked(toast.success).mock.calls[0][1]?.description).toContain("Helpers run on Haiku");
+  });
+
+  it("switches nothing when the helper setting can't be saved", async () => {
+    patchSettings.mockRejectedValue(new Error("disk full"));
+    expect(await switchAgentsToRecommended([sonnetAgent])).toBe(1);
+    expect(setAgentConfig).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledOnce();
+  });
+});

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  agentsOffRecommended,
   availableWorkTypes,
   choiceHint,
   choicesFor,
@@ -132,5 +133,42 @@ describe("switching models on a long conversation", () => {
     expect(switchNeedsNote(agent({ contextUsed: 150_000 }), model, "opus")).toBe(false);
     expect(switchNeedsNote(agent({ contextUsed: 150_000 }), option("effort", ["low", "high"]), "high")).toBe(false);
     expect(switchNeedsNote(agent({ provider: "codex", contextUsed: 150_000 }), model, "sonnet")).toBe(false);
+  });
+});
+
+describe("moving the agents you have", () => {
+  const models = ["default", "opus", "sonnet", "haiku"];
+  const efforts = ["low", "medium", "high"];
+  const on = (model: string, effort: string, over: Partial<Agent> = {}) =>
+    agent({ configOptions: [option("model", models, model), option("effort", efforts, effort)], ...over });
+
+  it("lists open Claude agents that are not on Opus at medium effort", () => {
+    const done = on("opus", "medium", { id: "done" } as Partial<Agent>);
+    const sonnet = on("sonnet", "medium", { id: "sonnet" } as Partial<Agent>);
+    const high = on("opus", "high", { id: "high" } as Partial<Agent>);
+    const ids = agentsOffRecommended([done, sonnet, high]).map((t) => t.agent.id);
+    expect(ids).toEqual(["sonnet", "high"]);
+  });
+
+  it("leaves out other providers, archived agents and a Claude Code without Opus", () => {
+    const codex = on("sonnet", "low", { provider: "codex" } as Partial<Agent>);
+    const archived = on("sonnet", "low", { archived: true } as Partial<Agent>);
+    const noOpus = agent({ configOptions: [option("model", ["sonnet", "haiku"], "sonnet")] });
+    expect(agentsOffRecommended([codex, archived, noOpus])).toEqual([]);
+  });
+
+  it("includes an agent that hasn't reported its options yet", () => {
+    expect(agentsOffRecommended([agent()])).toHaveLength(1);
+  });
+
+  it("flags a long conversation only when its model changes", () => {
+    const longSonnet = on("sonnet", "medium", { contextUsed: 150_000 });
+    const longOpusHigh = on("opus", "high", { contextUsed: 150_000 });
+    const shortSonnet = on("sonnet", "medium", { contextUsed: 20_000 });
+    expect(agentsOffRecommended([longSonnet, longOpusHigh, shortSonnet]).map((t) => t.long)).toEqual([
+      true,
+      false,
+      false,
+    ]);
   });
 });
