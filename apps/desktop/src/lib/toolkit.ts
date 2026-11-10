@@ -4,7 +4,7 @@
 import type { InstructionDoc, InstructionFileName } from "./projectConfig";
 import type { Agent, McpServer, Provider } from "./types";
 
-export type ToolkitTab = "instructions" | "mcp" | "skills";
+export type ToolkitTab = "instructions" | "mcp" | "skills" | "permissions" | "automation";
 
 // ---------------------------------------------------------------- instructions
 

@@ -9,7 +9,7 @@ import { Markdown } from "../Markdown";
 import { Spinner } from "../ui/misc";
 import { TOOL_ICON, ToolCallCard } from "./items";
 import { SubagentChips } from "./LiveStatus";
-import { inheritedOf, subagentChips } from "./thinking";
+import { helperInfo, inheritedOf, subagentChips } from "./thinking";
 
 type ToolItem = Extract<TimelineItem, { kind: "tool_call" }>;
 
@@ -52,7 +52,12 @@ export const SubagentCard = memo(function SubagentCard({
   const description = info.description?.trim() || null;
   const title = description ?? item.title;
   const configOptions = useApp((st) => st.agents[agentId]?.configOptions);
-  const chips = useMemo(() => subagentChips(info, inheritedOf(configOptions)), [info, configOptions]);
+  const provider = useApp((st) => st.agents[agentId]?.provider);
+  const helperModel = useApp((st) => st.settings?.tokenSaver.subagentModel);
+  const chips = useMemo(
+    () => subagentChips(info, inheritedOf(configOptions, helperInfo(provider, helperModel))),
+    [info, configOptions, provider, helperModel],
+  );
   const latest = childCalls[childCalls.length - 1];
   const childrenRunning = childCalls.filter((c) => c.status === "in_progress" || c.status === "pending").length;
 

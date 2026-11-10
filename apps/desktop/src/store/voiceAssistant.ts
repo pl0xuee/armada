@@ -27,7 +27,7 @@ const SCREENS: ReadonlySet<string> = new Set(["usage", "schedules", "accounts", 
 
 const SETTINGS_SECTIONS: ReadonlySet<string> = new Set([
   "appearance", "sounds", "notifications", "behavior", "budgets", "templates", "projects", "toolkit",
-  "providers", "tools", "agents", "remote", "voice", "assistant", "about",
+  "providers", "tools", "agents", "remote", "voice", "assistant", "about", "keyboard", "models",
 ]); // prettier-ignore
 
 export function applyNavigation(view: string, agentId: string | null, section: string | null = null) {

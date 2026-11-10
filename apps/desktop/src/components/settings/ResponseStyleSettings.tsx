@@ -30,7 +30,7 @@ const RESPONSE_STYLES: { value: ResponseStyle; label: string; description: strin
   },
 ];
 
-/** "Agent replies" group in Settings → Behavior. */
+/** "Agent replies" group in Settings → New agents. */
 export function ResponseStyleSettings({ settings }: { settings: Settings }) {
   const style = settings.responseStyle ?? "concise";
   return (

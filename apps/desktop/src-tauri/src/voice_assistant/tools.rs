@@ -33,6 +33,8 @@ pub const SETTINGS_SECTIONS: &[&str] = &[
     "voice",
     "assistant",
     "about",
+    "keyboard",
+    "models",
 ];
 /// Tool output handed to the model is cut to this many characters.
 pub const MAX_RESULT_CHARS: usize = 6000;

@@ -1,4 +1,4 @@
-import { FolderOpen, Puzzle, Slash, Webhook } from "lucide-react";
+import { FolderOpen, Slash, Webhook } from "lucide-react";
 import type { ReactNode } from "react";
 import { attempt } from "@/lib/actions";
 import { api } from "@/lib/api";
@@ -64,12 +64,10 @@ function EntryRows({ entries }: { entries: ConfigEntry[] }) {
 export function ProjectAutomation({
   hooks,
   commands,
-  skills,
   files,
 }: {
   hooks: HookEntry[];
   commands: ConfigEntry[];
-  skills: ConfigEntry[];
   /** Paths of the settings files hooks come from, by scope (revealing a hook shows its file). */
   files: Record<string, string>;
 }) {
@@ -126,19 +124,6 @@ export function ProjectAutomation({
         }
       >
         <EntryRows entries={commands} />
-      </Group>
-      <Group
-        icon={<Puzzle />}
-        title="Skills"
-        count={skills.length}
-        hint={
-          <>
-            No skills. Add <code className="font-mono text-muted">.claude/skills/&lt;name&gt;/SKILL.md</code> to teach
-            agents a reusable procedure.
-          </>
-        }
-      >
-        <EntryRows entries={skills} />
       </Group>
     </div>
   );

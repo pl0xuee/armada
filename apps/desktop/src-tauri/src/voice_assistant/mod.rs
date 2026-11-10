@@ -232,11 +232,11 @@ fn build_config(
     let wake_phrase = crate::wake::ready_phrase(&all, data_dir);
     let s = all.voice_assistant;
     if !s.enabled {
-        return Err("The voice assistant is off. Turn it on in Settings > Voice assistant.".into());
+        return Err("The voice assistant is off. Turn it on in Settings → Voice.".into());
     }
-    let account_id = s.account_id.ok_or(
-        "Pick the OpenAI API key account to use in Settings > Voice assistant.".to_string(),
-    )?;
+    let account_id = s
+        .account_id
+        .ok_or("Pick the OpenAI API key account to use in Settings → Voice.".to_string())?;
     let account = core.account(&account_id).map_err(|_| {
         "The selected OpenAI account no longer exists. Pick another in Settings.".to_string()
     })?;

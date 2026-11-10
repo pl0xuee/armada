@@ -13,7 +13,7 @@ export const useToolkit = create<ToolkitState>((set) => ({
   setTab: (tab) => set({ tab }),
 }));
 
-/** Opens Settings → Tools & instructions, optionally on a tab and for a project. */
+/** Opens Settings → Projects, optionally on a tab and for a project. */
 export function openToolkit(tab?: ToolkitTab, project?: string | null) {
   if (tab) useToolkit.getState().setTab(tab);
   if (project) useProjectSettings.getState().setProject(project);

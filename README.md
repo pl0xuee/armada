@@ -111,7 +111,7 @@ Pair your phone with a QR code and run the fleet from it, from anywhere over Tai
 
 <img width="100%" src="docs/screenshots/phone-companion.png" alt="Three phone screens of the companion app: the agent list with a Needs you banner, an agent working with two sub-agents and queued messages, and a finished agent with a Done summary" />
 
-> **Remote-control safety.** Choose **Tailscale** in Settings → Remote & mobile: Kvistcode stays on this computer only and Tailscale Serve shares it with your own devices over HTTPS, with nothing opened on your network. Local network access is plain HTTP, for networks you trust. Don't expose the port to the internet.
+> **Remote-control safety.** Choose **Tailscale** in Settings → Phone & remote: Kvistcode stays on this computer only and Tailscale Serve shares it with your own devices over HTTPS, with nothing opened on your network. Local network access is plain HTTP, for networks you trust. Don't expose the port to the internet.
 
 ### Automation
 

@@ -749,6 +749,7 @@ export async function refreshState() {
             : null,
         responseStyle: isResponseStyle(snap.responseStyle) ? snap.responseStyle : null,
         claudeChoicesRemembered: typeof snap.claudeChoicesRemembered === "boolean" ? snap.claudeChoicesRemembered : null,
+        helperModel: typeof snap.helperModel === "string" ? snap.helperModel : snap.helperModel === null ? null : undefined,
         timelines,
         stateStatus: "ready",
         stateError: null,

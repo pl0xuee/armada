@@ -68,7 +68,7 @@ export async function switchAgentsToRecommended(targets: readonly SwitchTarget[]
   return failed;
 }
 
-/** "Models" group in Settings → Behavior: one click for the recommended starting point. */
+/** "Models" group in Settings → Models & spending: one click for the recommended starting point. */
 export function ModelGuideSettings({ settings }: { settings: Settings }) {
   const [pick, setPick] = useState(readWorkChoice);
   const inUse = pick === RECOMMENDED.id && !!settings.tokenSaver.subagentModel;

@@ -23,7 +23,9 @@ export type SettingsSection =
   | "remote"
   | "voice"
   | "assistant"
-  | "about";
+  | "about"
+  | "keyboard"
+  | "models";
 
 export interface TerminalSession {
   terminalId: string;

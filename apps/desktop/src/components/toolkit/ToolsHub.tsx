@@ -1,6 +1,7 @@
-import { FileText, FolderOpen, Plug, Puzzle } from "lucide-react";
+import { FileText, FolderOpen, Plug, Puzzle, Shield, Workflow } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { McpSection } from "@/components/settings/McpSection";
+import { ProjectRules } from "@/components/settings/ProjectSettingsSection";
 import { SectionHeader } from "@/components/settings/SettingRow";
 import { Segmented } from "@/components/ui/segmented";
 import { Select } from "@/components/ui/select";
@@ -17,7 +18,7 @@ import { useToolkit } from "@/store/toolkit";
 import { InstructionsPanel } from "./InstructionsPanel";
 import { SkillsPanel } from "./SkillsPanel";
 
-/** Settings → Tools & instructions: project instructions, MCP servers and skills in one place. */
+/** Settings → Projects: instructions, MCP servers, skills, permission rules and hooks, for one project at a time. */
 export function ToolsHub({ servers }: { servers: McpServer[] }) {
   const tab = useToolkit((s) => s.tab);
   const setTab = useToolkit((s) => s.setTab);
@@ -40,9 +41,10 @@ export function ToolsHub({ servers }: { servers: McpServer[] }) {
   const project = chosen && options.includes(chosen) ? chosen : (options[0] ?? null);
 
   // Leaving the tab for a project that has nothing to show there is never a dead end.
+  const needsProject = tab === "instructions" || tab === "permissions" || tab === "automation";
   useEffect(() => {
-    if (!project && tab === "instructions") setTab("mcp");
-  }, [project, tab, setTab]);
+    if (!project && needsProject) setTab("mcp");
+  }, [project, needsProject, setTab]);
 
   const unsaved = project
     ? ["CLAUDE.md", "AGENTS.md"].some((f) => draftKey(project, f as "CLAUDE.md") in drafts)
@@ -52,8 +54,8 @@ export function ToolsHub({ servers }: { servers: McpServer[] }) {
   return (
     <>
       <SectionHeader
-        title="Tools & instructions"
-        description="What your agents know and can use: project instructions, MCP servers and skills. No config files to edit."
+        title="Projects"
+        description="What your agents know, can use and may do in each project. No config files to edit."
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -86,7 +88,7 @@ export function ToolsHub({ servers }: { servers: McpServer[] }) {
       </div>
 
       <Segmented<ToolkitTab>
-        aria-label="Tools and instructions"
+        aria-label="Project settings"
         className="mb-5"
         value={tab}
         onChange={setTab}
@@ -120,6 +122,24 @@ export function ToolsHub({ servers }: { servers: McpServer[] }) {
               </>
             ),
           },
+          {
+            value: "permissions",
+            disabled: !project,
+            label: (
+              <>
+                <Shield className="h-3.5 w-3.5" /> Permissions
+              </>
+            ),
+          },
+          {
+            value: "automation",
+            disabled: !project,
+            label: (
+              <>
+                <Workflow className="h-3.5 w-3.5" /> Hooks
+              </>
+            ),
+          },
         ]}
       />
 
@@ -129,6 +149,8 @@ export function ToolsHub({ servers }: { servers: McpServer[] }) {
         <McpSection servers={servers} project={project} />
       ) : tab === "skills" ? (
         <SkillsPanel project={project} />
+      ) : (tab === "permissions" || tab === "automation") && project ? (
+        <ProjectRules project={project} show={tab} />
       ) : null}
     </>
   );

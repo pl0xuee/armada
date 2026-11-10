@@ -5,6 +5,16 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.4.12 — 2026-11-10
+
+- Settings is reorganized and easier to find your way around. The sidebar is grouped (App, Agents, Workspace, Phone & voice), and a search box at the top finds any setting by name and jumps straight to it.
+  - General now holds the look, the window and updates. Keyboard is a page of its own, with the global hotkey, one-letter keys and the shortcut list.
+  - New agents holds how agents start, reply and get helpers. Models & spending puts the recommended models, Save tokens, rate limits and budgets on one page, and the helper model is no longer tucked under "More options".
+  - Projects and Tools & instructions are one page with one project picker: Instructions, MCP, Skills, Permissions and Hooks. Templates have their own page.
+  - Phone push (ntfy) moved next to pairing, on Phone & remote. The "Advanced" fold is gone; every setting is in plain view.
+  - Old links, the command palette and the voice assistant still land in the right place.
+- Sub-agent cards now show the model a helper really runs on. A general-purpose helper of a Claude agent showed "inherits Opus" even when helpers were set to Sonnet; it now shows "Sonnet, helper setting". A helper with its own definition (such as Explore or web-fetch) can pick its own model, so it no longer shows a guess; plans and forks still show the agent's model. The phone shows the same.
+
 ## v0.4.11 — 2026-11-10
 
 - Move the agents you already have to the recommended setup. Settings, General, Models has a new "Agents you have now" row: one click switches every open Claude agent to Opus at medium effort, and puts helper agents on Sonnet unless you chose another helper model. Each agent keeps its conversation. If some have long conversations, it asks first and lets you skip those, because the new model has to read all of it again. An agent that is busy at the time gets the helper change when Kvistcode restarts.

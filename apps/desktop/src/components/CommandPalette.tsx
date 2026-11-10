@@ -125,20 +125,22 @@ export function CommandPalette() {
 }
 
 const SETTINGS_SECTIONS: { id: SettingsSection; label: string; keywords: string[] }[] = [
-  { id: "appearance", label: "Appearance", keywords: ["theme", "dark", "light"] },
-  { id: "sounds", label: "Sounds", keywords: ["audio", "volume"] },
-  { id: "notifications", label: "Notifications", keywords: ["notify", "quiet hours", "dnd"] },
-  { id: "behavior", label: "Behavior", keywords: ["tray", "hotkey", "failover", "permission mode"] },
-  { id: "templates", label: "Templates", keywords: ["prompts", "snippets"] },
-  {
-    id: "toolkit",
-    label: "Tools & instructions",
-    keywords: ["mcp", "servers", "skills", "claude.md", "agents.md", "instructions"],
-  },
+  { id: "appearance", label: "General", keywords: ["theme", "dark", "light", "tray", "updates"] },
+  { id: "keyboard", label: "Keyboard", keywords: ["hotkey", "shortcuts", "keys"] },
+  { id: "notifications", label: "Alerts & sounds", keywords: ["notify", "quiet hours", "dnd", "audio", "volume"] },
+  { id: "behavior", label: "New agents", keywords: ["permission mode", "worktree", "replies", "helpers"] },
+  { id: "models", label: "Models & spending", keywords: ["opus", "sonnet", "save tokens", "failover", "budgets"] },
   { id: "providers", label: "Providers", keywords: ["install", "cli", "claude", "codex", "grok"] },
-  { id: "agents", label: "Agents (ACP)", keywords: ["custom agents", "acp", "gemini", "goose"] },
-  { id: "remote", label: "Remote & mobile", keywords: ["phone", "share", "pairing", "lan"] },
-  { id: "about", label: "About", keywords: ["version", "updates"] },
+  { id: "agents", label: "Custom agents", keywords: ["acp", "gemini", "goose"] },
+  {
+    id: "projects",
+    label: "Projects",
+    keywords: ["mcp", "servers", "skills", "claude.md", "agents.md", "instructions", "permissions", "hooks"],
+  },
+  { id: "templates", label: "Templates", keywords: ["prompts", "snippets"] },
+  { id: "remote", label: "Phone & remote", keywords: ["phone", "share", "pairing", "lan", "ntfy", "push"] },
+  { id: "voice", label: "Voice", keywords: ["dictation", "microphone", "assistant"] },
+  { id: "about", label: "About", keywords: ["version", "diagnostics", "tour"] },
 ];
 
 /** Escape a string for use inside a RegExp. */

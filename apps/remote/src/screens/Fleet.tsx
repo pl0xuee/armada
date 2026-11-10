@@ -453,7 +453,7 @@ function SettingsSheet({ open, onClose }: { open: boolean; onClose: () => void }
       )}
       {session?.scope === "owner" && <StopAll onDone={onClose} />}
       <p className="mt-4 text-[13px] leading-relaxed text-muted">
-        Anyone with this device can approve requests and send prompts. You can revoke access from Settings → Remote on your
+        Anyone with this device can approve requests and send prompts. You can revoke access from Settings → Phone & remote on your
         computer.
       </p>
       {confirm ? (

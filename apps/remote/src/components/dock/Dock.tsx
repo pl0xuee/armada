@@ -31,7 +31,7 @@ import { useNow } from "@/lib/hooks";
 import { allowOnce, confirmOption, isBusy, isResumable, primaryAllow, primaryReject, rejectOnce } from "@/lib/meta";
 import { permissionIndex } from "@/lib/selectors";
 import { useStore } from "@/lib/store";
-import { inheritedConfig, useRunningSubagentList } from "@/lib/subagents";
+import { useInheritedConfig, useRunningSubagentList } from "@/lib/subagents";
 import { formatElapsed } from "@/lib/thinking";
 import type { Agent, PermissionItem, QuestionItem, TimelineItem } from "@/lib/types";
 import { switchableAccounts } from "@/screens/AgentControls";
@@ -474,9 +474,10 @@ function SubagentsSheet({
   onClose: () => void;
 }) {
   const now = useNow(1000);
+  const inherited = useInheritedConfig(agent);
   return (
     <Sheet open={open && running.length > 0} onClose={onClose} title="Sub-agents" description={`${subagentHeadline(running)} working`}>
-      <SubagentList running={running} now={now} inherited={inheritedConfig(agent)} />
+      <SubagentList running={running} now={now} inherited={inherited} />
     </Sheet>
   );
 }

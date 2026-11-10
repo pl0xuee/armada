@@ -280,14 +280,35 @@ export function runningSubagents(items: readonly TimelineItem[], runs: readonly 
 export interface InheritedConfig {
   model: string | null;
   effort: string | null;
+  /**
+   * Set for a Claude agent when the computer says which model helpers run on (null: none set). Claude Code
+   * runs a general-purpose sub-agent the launch names no model for on it, while a sub-agent defined
+   * elsewhere may choose its own, so then the chips only say what is known.
+   */
+  claude?: { helper: string | null };
 }
 
-export function inheritedConfig(agent: Pick<Agent, "configOptions" | "model">): InheritedConfig {
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** `helperModel`: the computer's helper model (null: none; undefined: an older server didn't say). */
+export function inheritedConfig(agent: Pick<Agent, "configOptions" | "model"> & { provider?: string }, helperModel?: string | null): InheritedConfig {
   const opts = agent.configOptions ?? [];
   const pick = (o: ConfigOption | undefined) => (o?.currentValue ? choiceName(o) : null);
   const model = pick(opts.find((o) => o.category === "model"));
-  return { model: model ?? agent.model ?? null, effort: pick(opts.find((o) => o.category === "thought_level")) };
+  const base = { model: model ?? agent.model ?? null, effort: pick(opts.find((o) => o.category === "thought_level")) };
+  return agent.provider === "claude" && helperModel !== undefined ? { ...base, claude: { helper: helperModel ? capitalize(helperModel) : null } } : base;
 }
+
+/** `inheritedConfig` with the helper model the computer sent. */
+export function useInheritedConfig(agent: Pick<Agent, "configOptions" | "model"> & { provider?: string }): InheritedConfig {
+  const helperModel = useStore((s) => s.helperModel);
+  return useMemo(() => inheritedConfig(agent, helperModel), [agent.configOptions, agent.model, agent.provider, helperModel]);
+}
+
+/** Sub-agent kinds Claude Code runs on the main agent's model when the launch names none. */
+const RUNS_ON_PARENT = new Set(["plan", "fork"]);
+/** No definition of its own (a running one without a kind is labelled "Sub-agent"). */
+const GENERAL = new Set(["", "general-purpose", "sub-agent"]);
 
 export interface SubagentChip {
   key: "model" | "effort";
@@ -298,16 +319,24 @@ export interface SubagentChip {
 
 /**
  * Model and effort chips for a sub-agent. A value the launch didn't name shows as "inherits" with the
- * main agent's, or not at all when that isn't known (nothing is invented).
+ * main agent's when it runs on that, as the helper model for a Claude general-purpose one when one is
+ * set, or not at all when that isn't known (nothing is invented). Claude Code picks the launch's model,
+ * else the sub-agent definition's, else the helper model, else the main agent's.
  */
-export function subagentChips(info: Pick<SubagentInfo, "model" | "effort"> | undefined, inherited?: InheritedConfig): SubagentChip[] {
+export function subagentChips(info: Pick<SubagentInfo, "model" | "effort" | "kind"> | undefined, inherited?: InheritedConfig): SubagentChip[] {
   const out: SubagentChip[] = [];
   const model = info?.model?.trim();
+  const kind = info?.kind?.trim().toLowerCase() ?? "";
+  const helper = inherited?.claude?.helper ?? null;
+  let onParent = true;
+  if (!model && inherited?.claude) onParent = RUNS_ON_PARENT.has(kind) || (GENERAL.has(kind) && !helper);
   if (model) out.push({ key: "model", text: model, inherited: false });
-  else if (inherited?.model) out.push({ key: "model", text: `inherits ${inherited.model}`, inherited: true });
+  else if (onParent && inherited?.model) out.push({ key: "model", text: `inherits ${inherited.model}`, inherited: true });
+  else if (helper && GENERAL.has(kind)) out.push({ key: "model", text: `${helper}, helper setting`, inherited: true });
+  // The main agent's effort applies only while the sub-agent runs on the main agent's model.
   const effort = info?.effort?.trim();
   if (effort) out.push({ key: "effort", text: `${effort} effort`, inherited: false });
-  else if (inherited?.effort) out.push({ key: "effort", text: `inherits ${inherited.effort} effort`, inherited: true });
+  else if ((!inherited?.claude || (!model && onParent)) && inherited?.effort) out.push({ key: "effort", text: `inherits ${inherited.effort} effort`, inherited: true });
   return out;
 }
 

@@ -27,39 +27,3 @@ export function MoreRows({ label = "More options", children }: { label?: string;
     </>
   );
 }
-
-/** A page-level "Advanced" fold for settings most people never touch. */
-export function Advanced({
-  title = "Advanced",
-  description,
-  children,
-}: {
-  title?: string;
-  description?: string;
-  children: ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const id = useId();
-  return (
-    <section>
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={id}
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 rounded-xl border border-line bg-card/40 px-4 py-3 text-left transition-colors hover:border-line-strong hover:bg-card"
-      >
-        <ChevronRight
-          className={cn("h-4 w-4 shrink-0 text-steel transition-transform duration-150", open && "rotate-90")}
-        />
-        <span className="min-w-0">
-          <span className="block text-body font-medium text-fg">{title}</span>
-          {description && <span className="block text-caption text-muted">{description}</span>}
-        </span>
-      </button>
-      <div id={id} hidden={!open} className={cn(open && "mt-6 space-y-6")}>
-        {open && children}
-      </div>
-    </section>
-  );
-}

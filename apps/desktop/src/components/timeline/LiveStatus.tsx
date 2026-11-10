@@ -7,10 +7,12 @@ import { cn } from "@/lib/utils";
 import { useHeld, WAITING_HOLD_MS } from "@/hooks/useHeld";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useVisibleInterval } from "@/hooks/useVisibleInterval";
+import { useApp } from "@/store/app";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { useRunningSubagentCount, useSubagentRuns } from "../agent/useSubagents";
 import {
   formatElapsed,
+  helperInfo,
   inheritedOf,
   liveStep,
   stepText,
@@ -88,7 +90,11 @@ export function LiveStatus({
   const subagents = useHeld(useRunningSubagentCount(agent.id), 0, WAITING_HOLD_MS);
   const runs = useSubagentRuns(agent.id);
   const running = useMemo(() => runs.filter((r) => r.state === "running"), [runs]);
-  const inherited = useMemo(() => inheritedOf(agent.configOptions), [agent.configOptions]);
+  const helperModel = useApp((st) => st.settings?.tokenSaver.subagentModel);
+  const inherited = useMemo(
+    () => inheritedOf(agent.configOptions, helperInfo(agent.provider, helperModel)),
+    [agent.configOptions, agent.provider, helperModel],
+  );
   const starting = agent.status === "starting";
   const [verb, setVerb] = useState(0);
   const offset = useRef(Math.floor(Math.random() * THINKING_VERBS.length));

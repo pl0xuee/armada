@@ -183,7 +183,7 @@ export function RemoteSection({ settings }: { settings: Settings }) {
   return (
     <>
       <SectionHeader
-        title="Remote & mobile"
+        title="Phone & remote"
         description="Check on agents, approve requests and send prompts from your phone or another computer."
       />
 

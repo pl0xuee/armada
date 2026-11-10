@@ -231,7 +231,8 @@ try {
   // ---- settings sections (each one loads its own backend data) -----------------------
   await goRail("Settings");
   const sections = [
-    "General", "Alerts", "Budgets", "Projects", "Tools & instructions", "Providers", "Voice", "Remote & mobile", "About",
+    "General", "Keyboard", "Alerts & sounds", "New agents", "Models & spending", "Providers", "Projects", "Templates",
+    "Phone & remote", "Voice", "About",
   ];
   for (const name of sections) {
     log(`settings: ${name}`);
@@ -245,17 +246,18 @@ try {
       // The model list only renders once voice_status resolves.
       await waitText(/\((English|multilingual)\)/, "dictation model list (voice_status result)");
       check(!/Couldn.t read the dictation models/i.test(await text()), "Voice: dictation status failed to load");
-    } else if (name === "Tools & instructions") {
-      // CLAUDE.md / AGENTS.md, MCP servers and skills: walk the page's tabs.
-      await waitText(/What your agents know and can use/, "the Tools & instructions page");
+    } else if (name === "Projects") {
+      // CLAUDE.md / AGENTS.md, MCP servers, skills, permissions and hooks: walk the page's tabs
+      // (the project ones are disabled with no project yet, which a fresh e2e profile has).
+      await waitText(/What your agents know, can use and may do/, "the Projects page");
       for (const tab of ["MCP", "Skills"]) {
         const radio = await browser.$(
-          `//*[@role="radiogroup"][@aria-label="Tools and instructions"]//*[@role="radio"][contains(normalize-space(.),"${tab}")]`,
+          `//*[@role="radiogroup"][@aria-label="Project settings"]//*[@role="radio"][contains(normalize-space(.),"${tab}")]`,
         );
-        await radio.waitForExist({ timeout: 10_000, timeoutMsg: `Tools & instructions tab "${tab}" missing` });
+        await radio.waitForExist({ timeout: 10_000, timeoutMsg: `Projects tab "${tab}" missing` });
         await radio.click();
         await sleep(500);
-        await assertHealthy(`settings/Tools & instructions/${tab}`);
+        await assertHealthy(`settings/Projects/${tab}`);
       }
     } else {
       await sleep(400);

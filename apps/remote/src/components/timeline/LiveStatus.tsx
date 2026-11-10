@@ -25,6 +25,7 @@ export const LiveStatus = memo(function LiveStatus({
   since,
   open,
   onToggle,
+  inherited,
 }: {
   agent: Pick<Agent, "status" | "configOptions" | "model">;
   /** The agent's short name ("Claude"), for "Starting Claude". */
@@ -38,6 +39,8 @@ export const LiveStatus = memo(function LiveStatus({
   since: number;
   open: boolean;
   onToggle: () => void;
+  /** What its sub-agents inherit (with the helper model); worked out from `agent` when not given. */
+  inherited?: InheritedConfig;
 }) {
   const [tick, setTick] = useState(0);
   const mounted = useRef(Date.now());
@@ -94,7 +97,7 @@ export const LiveStatus = memo(function LiveStatus({
       ) : (
         <div className="flex h-9 items-center gap-2 pl-0.5 text-[13px] text-steel">{line}</div>
       )}
-      {open && expandable && <SubagentList running={running} now={now} inherited={inheritedConfig(agent)} />}
+      {open && expandable && <SubagentList running={running} now={now} inherited={inherited ?? inheritedConfig(agent)} />}
     </div>
   );
 });

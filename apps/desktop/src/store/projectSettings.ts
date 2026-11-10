@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import type { InstructionFileName } from "@/lib/projectConfig";
-import { useUi } from "./ui";
 
 /** Key of one instruction file's unsaved text. */
 export const draftKey = (project: string, file: InstructionFileName) => `${project}\u0000${file}`;
@@ -28,9 +27,3 @@ export const useProjectSettings = create<ProjectSettingsState>((set) => ({
       return { drafts };
     }),
 }));
-
-/** Opens Settings → Projects on `project`. */
-export function openProjectSettings(project: string) {
-  useProjectSettings.getState().setProject(project);
-  useUi.getState().openSettings("projects");
-}

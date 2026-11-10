@@ -1,10 +1,12 @@
 import {
   Bell,
   Bot,
+  Boxes,
+  FileText,
   Smartphone,
   FolderCog,
-  Plug,
   Info,
+  Search,
   Keyboard,
   Play,
   RefreshCw,
@@ -20,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { m } from "motion/react";
-import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { toast } from "sonner";
 import { AppMark } from "@/components/AppMark";
 import { GithubGlyph } from "@/components/settings/GithubGlyph";
@@ -31,14 +33,12 @@ import { ResponseStyleSettings } from "@/components/settings/ResponseStyleSettin
 import { ModelGuideSettings } from "@/components/settings/ModelGuideSettings";
 import { TokenSavingSettings } from "@/components/settings/TokenSavingSettings";
 import { RememberedChoicesRow } from "@/components/settings/RememberedChoicesRow";
-import { Advanced } from "@/components/settings/Disclosure";
 import { FAILOVER } from "@/components/accounts/FailoverRow";
 import { AgentsSection } from "@/components/settings/AgentsSection";
 import { AlertTargets } from "@/components/settings/AlertTargets";
 import { BudgetsSection } from "@/components/settings/BudgetsSection";
 import { CustomSoundLine } from "@/components/settings/CustomSound";
 import { ToolsHub } from "@/components/toolkit/ToolsHub";
-import { ProjectSettingsSection } from "@/components/settings/ProjectSettingsSection";
 import { ProviderCard } from "@/components/settings/ProviderCard";
 import { RemoteSection } from "@/components/settings/RemoteSection";
 import { VoiceSection } from "@/components/settings/VoiceSection";
@@ -47,7 +47,16 @@ import { SectionHeader, SettingGroup, SettingRow } from "@/components/settings/S
 import { ToolsSection } from "@/components/settings/ToolsSection";
 import { TemplatesSection } from "@/components/settings/TemplatesSection";
 import { ThemeCard } from "@/components/settings/ThemeCard";
-import { PAGE_OF, ANCHOR_OF, parseSection } from "@/lib/settingsPages";
+import {
+  ANCHOR_OF,
+  NAV_GROUPS,
+  PAGE_LABEL,
+  PAGE_OF,
+  parseSection,
+  searchSettings,
+  type SettingsEntry,
+  type SettingsPage,
+} from "@/lib/settingsPages";
 import { SYSTEM_THEME, THEMES } from "@/lib/themes";
 import { useResolvedTheme } from "@/lib/useResolvedTheme";
 import { Button } from "@/components/ui/button";
@@ -73,20 +82,22 @@ import { cn, errorMessage, isMac, modKey, scrollBehavior } from "@/lib/utils";
 import { MAX_SCALE, MIN_SCALE, DEFAULT_SCALE, SCALE_PRESETS, SCALE_STEP } from "@/lib/zoom";
 import { useApp } from "@/store/app";
 import { openTour } from "@/store/tour";
-import { useUi, type SettingsSection } from "@/store/ui";
+import { useToolkit } from "@/store/toolkit";
+import { useUi } from "@/store/ui";
 
-/** The pages in the sidebar. Older section ids still work: see lib/settingsPages.ts. */
-const PAGES: { id: SettingsSection; label: string; icon: ComponentType<{ className?: string }> }[] = [
-  { id: "appearance", label: "General", icon: SlidersHorizontal },
-  { id: "notifications", label: "Alerts", icon: Bell },
-  { id: "budgets", label: "Budgets", icon: Wallet },
-  { id: "projects", label: "Projects", icon: FolderCog },
-  { id: "toolkit", label: "Tools & instructions", icon: Plug },
-  { id: "providers", label: "Providers", icon: Bot },
-  { id: "voice", label: "Voice", icon: Mic },
-  { id: "remote", label: "Remote & mobile", icon: Smartphone },
-  { id: "about", label: "About", icon: Info },
-];
+const ICON_OF: Record<SettingsPage, ComponentType<{ className?: string }>> = {
+  appearance: SlidersHorizontal,
+  keyboard: Keyboard,
+  notifications: Bell,
+  behavior: Bot,
+  models: Wallet,
+  providers: Boxes,
+  projects: FolderCog,
+  templates: FileText,
+  remote: Smartphone,
+  voice: Mic,
+  about: Info,
+};
 
 /** Save a patch; validation errors land inline on their field, others as a toast. */
 function save(patch: Partial<Settings>): Promise<boolean> {
@@ -98,6 +109,8 @@ export function SettingsView() {
   const openSettings = useUi((s) => s.openSettings);
   const settings = useApp((s) => s.settings);
   const page = PAGE_OF[section] ?? "appearance";
+  // A spot a search result points to, further down its page (a fresh object each pick).
+  const [jump, setJump] = useState<{ anchor?: string } | null>(null);
 
   // Dev/review convenience: ?view=settings&section=sounds
   useEffect(() => {
@@ -108,31 +121,35 @@ export function SettingsView() {
       /* ignore */
     }
   }, [openSettings]);
-  // Each page starts at the top, or at the heading an older section id points to.
+  // Each page starts at the top, or at the heading an older section id or a search result points to.
   const scrollRef = useRef<HTMLDivElement>(null);
   const ready = !!settings;
   useEffect(() => {
-    const anchor = ANCHOR_OF[section];
+    const anchor = jump ? jump.anchor : ANCHOR_OF[section];
     const el = anchor ? scrollRef.current?.querySelector<HTMLElement>(`[data-settings-anchor="${anchor}"]`) : null;
     if (el) el.scrollIntoView({ block: "start" });
     else scrollRef.current?.scrollTo({ top: 0 });
-  }, [section, ready]);
+  }, [section, ready, jump]);
   if (!settings) return null;
+
+  const select = (p: SettingsPage) => {
+    setJump(null);
+    openSettings(p);
+  };
+  const pick = (e: SettingsEntry) => {
+    if (e.tab) useToolkit.getState().setTab(e.tab);
+    openSettings(e.page);
+    setJump({ anchor: e.anchor });
+  };
 
   return (
     <div className="flex h-full max-[860px]:flex-col">
-      <SettingsNav page={page} onSelect={openSettings} />
+      <SettingsNav page={page} onSelect={select} onPick={pick} />
 
       <div ref={scrollRef} className="@container min-h-0 min-w-0 flex-1 overflow-y-auto">
         <div key={page} className="view-enter mx-auto max-w-[720px] px-4 pb-16 pt-6 @md:px-6 @2xl:px-8 @2xl:pt-8">
-          {page === "appearance" && (
-            <>
-              <Appearance settings={settings} />
-              <Part id="behavior">
-                <Behavior settings={settings} />
-              </Part>
-            </>
-          )}
+          {page === "appearance" && <General settings={settings} />}
+          {page === "keyboard" && <KeyboardPage settings={settings} />}
           {page === "notifications" && (
             <>
               <Notifications settings={settings} />
@@ -141,16 +158,15 @@ export function SettingsView() {
               </Part>
             </>
           )}
-          {page === "budgets" && <BudgetsSection settings={settings} />}
-          {page === "projects" && (
+          {page === "behavior" && <NewAgents settings={settings} />}
+          {page === "models" && (
             <>
-              <ProjectSettingsSection />
-              <Part id="templates">
-                <TemplatesSection templates={settings.templates} />
+              <ModelsPage settings={settings} />
+              <Part id="budgets">
+                <BudgetsSection settings={settings} />
               </Part>
             </>
           )}
-          {page === "toolkit" && <ToolsHub servers={settings.mcpServers} />}
           {page === "providers" && (
             <>
               <Providers />
@@ -162,6 +178,16 @@ export function SettingsView() {
               </Part>
             </>
           )}
+          {page === "projects" && <ToolsHub servers={settings.mcpServers} />}
+          {page === "templates" && <TemplatesSection templates={settings.templates} />}
+          {page === "remote" && (
+            <>
+              <RemoteSection settings={settings} />
+              <Part id="push">
+                <PhonePush settings={settings} />
+              </Part>
+            </>
+          )}
           {page === "voice" && (
             <>
               <VoiceSection settings={settings} />
@@ -170,7 +196,6 @@ export function SettingsView() {
               </Part>
             </>
           )}
-          {page === "remote" && <RemoteSection settings={settings} />}
           {page === "about" && <About />}
         </div>
       </div>
@@ -187,13 +212,36 @@ function Part({ id, children }: { id: string; children: ReactNode }) {
   );
 }
 
+/** A spot partway down a page that the search can scroll to. */
+function Spot({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <div data-settings-anchor={id} className="scroll-mt-6">
+      {children}
+    </div>
+  );
+}
+
 /**
- * Section navigation: a sidebar on wide windows, a horizontally scrolling pill
- * strip below 860px (tiling window managers routinely give us narrow tiles).
+ * Section navigation: a grouped sidebar on wide windows, a horizontally scrolling pill strip
+ * below 860px (tiling window managers routinely give us narrow tiles). A search box on top finds
+ * any setting by name and jumps to it.
  */
-function SettingsNav({ page, onSelect }: { page: SettingsSection; onSelect: (s: SettingsSection) => void }) {
+function SettingsNav({
+  page,
+  onSelect,
+  onPick,
+}: {
+  page: SettingsPage;
+  onSelect: (p: SettingsPage) => void;
+  onPick: (e: SettingsEntry) => void;
+}) {
   const stripRef = useRef<HTMLDivElement>(null);
   const updates = useApp((s) => updateCount(s.providers));
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const results = useMemo(() => searchSettings(query), [query]);
+  const searching = query.trim() !== "";
+  useEffect(() => setActive(0), [query]);
 
   // Keep the active pill in view on the narrow strip (scroll only the strip itself).
   useEffect(() => {
@@ -202,7 +250,13 @@ function SettingsNav({ page, onSelect }: { page: SettingsSection; onSelect: (s: 
     if (!strip || !el || strip.scrollWidth <= strip.clientWidth) return;
     const target = el.offsetLeft - (strip.clientWidth - el.offsetWidth) / 2;
     strip.scrollTo({ left: Math.max(0, target), behavior: scrollBehavior() });
-  }, [page]);
+  }, [page, searching]);
+
+  const choose = (e: SettingsEntry | undefined) => {
+    if (!e) return;
+    setQuery("");
+    onPick(e);
+  };
 
   return (
     <nav
@@ -215,51 +269,155 @@ function SettingsNav({ page, onSelect }: { page: SettingsSection; onSelect: (s: 
       <h1 className="mb-3 px-2.5 text-[20px] font-semibold tracking-[-0.02em] max-[860px]:mb-2.5 max-[860px]:px-4 max-[860px]:text-[18px]">
         Settings
       </h1>
-      <div
-        ref={stripRef}
-        className={cn(
-          "flex flex-col gap-0.5",
-          "max-[860px]:flex-row max-[860px]:gap-1 max-[860px]:overflow-x-auto max-[860px]:px-3 max-[860px]:pb-2.5",
-          "max-[860px]:[scrollbar-width:none] max-[860px]:[&::-webkit-scrollbar]:hidden",
-          "max-[860px]:[mask-image:linear-gradient(to_right,transparent,black_14px,black_calc(100%-14px),transparent)]",
-        )}
-      >
-        {PAGES.map((s) => {
-          const active = s.id === page;
-          const Icon = s.icon;
-          return (
+      <div className="relative mb-3 max-[860px]:mx-3 max-[860px]:mb-2.5">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-steel" />
+        <Input
+          type="search"
+          aria-label="Search settings"
+          placeholder="Search settings"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              const n = results.length;
+              if (n) setActive((i) => (i + (e.key === "ArrowDown" ? 1 : n - 1)) % n);
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              choose(results[active]);
+            } else if (e.key === "Escape" && query) {
+              e.stopPropagation();
+              setQuery("");
+            }
+          }}
+          aria-controls={searching ? "settings-search-results" : undefined}
+          aria-activedescendant={searching && results[active] ? `settings-result-${active}` : undefined}
+          className="h-8 pl-8 text-caption"
+        />
+      </div>
+      {searching ? (
+        <div
+          id="settings-search-results"
+          role="listbox"
+          aria-label="Matching settings"
+          className="flex flex-col gap-0.5 max-[860px]:px-3 max-[860px]:pb-2.5"
+        >
+          {results.length === 0 && <p className="px-2.5 py-1.5 text-caption text-steel">No setting matches.</p>}
+          {results.map((r, i) => (
             <button
-              key={s.id}
+              key={`${r.page}:${r.label}`}
+              id={`settings-result-${i}`}
               type="button"
-              aria-current={active ? "page" : undefined}
-              onClick={() => onSelect(s.id)}
+              role="option"
+              aria-selected={i === active}
+              onMouseEnter={() => setActive(i)}
+              onClick={() => choose(r)}
               className={cn(
-                "relative flex h-8 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 text-body transition-colors",
-                "max-[860px]:h-8 max-[860px]:gap-2 max-[860px]:rounded-full max-[860px]:px-3",
-                active ? "text-fg" : "text-muted hover:bg-raised/60 hover:text-fg",
+                "flex flex-col items-start rounded-lg px-2.5 py-1.5 text-left transition-colors",
+                i === active ? "bg-raised text-fg" : "text-muted hover:bg-raised/60 hover:text-fg",
               )}
             >
-              {active && (
-                <m.span
-                  layoutId="settings-nav"
-                  transition={{ type: "spring", stiffness: 520, damping: 40 }}
-                  className="absolute inset-0 rounded-[inherit] border border-line-strong bg-raised edge"
-                />
-              )}
-              <Icon className={cn("relative h-4 w-4", active ? "text-accent" : "text-steel")} />
-              <span className="relative">{s.label}</span>
-              {s.id === "providers" && updates > 0 && (
-                <CountBadge count={updates} className="relative ml-auto shadow-none max-[860px]:ml-0" />
-              )}
+              <span className="text-body leading-[20px]">{r.label}</span>
+              <span className="text-meta leading-[16px] text-steel">{PAGE_LABEL[r.page]}</span>
             </button>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div
+          ref={stripRef}
+          className={cn(
+            "flex flex-col",
+            "max-[860px]:flex-row max-[860px]:gap-1 max-[860px]:overflow-x-auto max-[860px]:px-3 max-[860px]:pb-2.5",
+            "max-[860px]:[scrollbar-width:none] max-[860px]:[&::-webkit-scrollbar]:hidden",
+            "max-[860px]:[mask-image:linear-gradient(to_right,transparent,black_14px,black_calc(100%-14px),transparent)]",
+          )}
+        >
+          {NAV_GROUPS.map((g, gi) => (
+            <div
+              key={g.title ?? "more"}
+              role="group"
+              aria-label={g.title ?? undefined}
+              className={cn(
+                "flex flex-col gap-0.5 max-[860px]:contents",
+                gi > 0 && (g.title ? "mt-4" : "mt-4 border-t border-line pt-3"),
+              )}
+            >
+              {g.title && (
+                <h2 className="px-2.5 pb-1 text-micro font-medium uppercase tracking-[0.06em] text-steel max-[860px]:hidden">
+                  {g.title}
+                </h2>
+              )}
+              {g.pages.map((id) => {
+                const isActive = id === page;
+                const Icon = ICON_OF[id];
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-current={isActive ? "page" : undefined}
+                    onClick={() => onSelect(id)}
+                    className={cn(
+                      "relative flex h-8 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 text-body transition-colors",
+                      "max-[860px]:h-8 max-[860px]:gap-2 max-[860px]:rounded-full max-[860px]:px-3",
+                      isActive ? "text-fg" : "text-muted hover:bg-raised/60 hover:text-fg",
+                    )}
+                  >
+                    {isActive && (
+                      <m.span
+                        layoutId="settings-nav"
+                        transition={{ type: "spring", stiffness: 520, damping: 40 }}
+                        className="absolute inset-0 rounded-[inherit] border border-line-strong bg-raised edge"
+                      />
+                    )}
+                    <Icon className={cn("relative h-4 w-4", isActive ? "text-accent" : "text-steel")} />
+                    <span className="relative">{PAGE_LABEL[id]}</span>
+                    {id === "providers" && updates > 0 && (
+                      <CountBadge count={updates} className="relative ml-auto shadow-none max-[860px]:ml-0" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
     </nav>
   );
 }
 
 // ---------------------------------------------------------------- Appearance
+
+/** Settings → General: the look, the window and updates. */
+function General({ settings }: { settings: Settings }) {
+  return (
+    <>
+      <Appearance settings={settings} />
+      <div className="mt-8 space-y-6">
+        <Spot id="window">
+          <SettingGroup title="Window and startup">
+            <SettingRow
+              title="Close to tray"
+              description="Closing the window keeps agents running and Kvistcode in the tray."
+              htmlFor="b-tray"
+            >
+              <Switch id="b-tray" checked={settings.closeToTray} onCheckedChange={toggle("closeToTray")} />
+            </SettingRow>
+            <SettingRow
+              title="Launch at login"
+              description="Start Kvistcode quietly in the tray when you sign in."
+              htmlFor="b-login"
+            >
+              <Switch id="b-login" checked={settings.launchAtLogin} onCheckedChange={toggle("launchAtLogin")} />
+            </SettingRow>
+          </SettingGroup>
+        </Spot>
+        <Spot id="updates">
+          <UpdatesGroup settings={settings} />
+        </Spot>
+      </div>
+    </>
+  );
+}
 
 function Appearance({ settings }: { settings: Settings }) {
   // Zoom applies on release: resizing the UI under the dragged thumb would make it jump.
@@ -269,7 +427,7 @@ function Appearance({ settings }: { settings: Settings }) {
   const shown = useResolvedTheme(settings.theme);
   return (
     <>
-      <SectionHeader title="Appearance" description="Choose a look." />
+      <SectionHeader title="General" description="How Kvistcode looks, starts and updates." />
       <SettingGroup className="mb-3">
         <SettingRow
           title="Match system"
@@ -505,7 +663,6 @@ function Notifications({ settings }: { settings: Settings }) {
   const [qEnd, setQEnd] = useState(q.end);
   // While a rejected value is shown with its backend error, don't overwrite it on rollback.
   const keepQuiet = useRef(false);
-  const keepNtfy = useRef(false);
   useEffect(() => {
     if (!keepQuiet.current) setQStart(q.start);
   }, [q.start]);
@@ -535,41 +692,8 @@ function Notifications({ settings }: { settings: Settings }) {
       setTimeout(() => (keepQuiet.current = !ok), 0);
     });
   };
-  // The field keeps what the user typed even when the backend rejects it (so they can fix it).
-  const [ntfy, setNtfy] = useState(settings.ntfyUrl ?? "");
-  useEffect(() => {
-    if (!keepNtfy.current) setNtfy(settings.ntfyUrl ?? "");
-  }, [settings.ntfyUrl]);
-  const ntfyValid = ntfy.trim() === "" || /^https?:\/\/\S+$/i.test(ntfy.trim());
-  const ntfyError = useFieldError("ntfy");
-  const [push, setPush] = useState<{ state: "idle" | "sending" | "sent" } | { state: "error"; message: string }>({
-    state: "idle",
-  });
-  const sendTestPush = async () => {
-    const url = ntfy.trim();
-    if (!url || !ntfyValid) return;
-    setPush({ state: "sending" });
-    try {
-      await api.testNotification(url);
-      setPush({ state: "sent" });
-    } catch (e) {
-      setPush({ state: "error", message: errorMessage(e) });
-    }
-  };
-  useEffect(() => setPush({ state: "idle" }), [ntfy]);
-
-  const commitNtfy = () => {
-    const v = ntfy.trim();
-    if (!ntfyValid) return;
-    if ((settings.ntfyUrl ?? "") === v) return;
-    keepNtfy.current = true;
-    void save({ ntfyUrl: v || null }).then((ok) => {
-      setTimeout(() => (keepNtfy.current = !ok), 0);
-    });
-  };
   // Switching sections/views by shortcut skips the blur: commit pending edits on unmount.
   useCommitOnUnmount(() => {
-    commitNtfy();
     if (qStart !== q.start) commitQuiet("start", qStart);
     if (qEnd !== q.end) commitQuiet("end", qEnd);
   });
@@ -642,133 +766,197 @@ function Notifications({ settings }: { settings: Settings }) {
           </SettingRow>
         </SettingGroup>
 
-        <SettingGroup title="Quiet hours" description="Notifications and sounds are held during this window.">
-          <SettingRow title="Enable quiet hours" htmlFor="qh-enabled">
-            <Switch
-              id="qh-enabled"
-              checked={q.enabled}
-              onCheckedChange={(v) => void save({ quietHours: { ...q, enabled: v } })}
-            />
-          </SettingRow>
-          <SettingRow
-            title="Schedule"
-            description={
-              quietError ? (
-                <span role="alert" className="text-err">
-                  {quietError}
-                </span>
-              ) : (
-                "Overnight windows (e.g. 22:00 to 08:00) are supported."
-              )
-            }
-          >
-            <input
-              type="time"
-              aria-label="Quiet hours start"
-              value={qStart}
-              disabled={!q.enabled}
-              onChange={(e) => setQStart(e.target.value)}
-              onBlur={(e) => commitQuiet("start", e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-              className={cn(fieldClass, "h-8 w-[128px] tabular [color-scheme:inherit]")}
-            />
-            <span className="text-caption text-steel">to</span>
-            <input
-              type="time"
-              aria-label="Quiet hours end"
-              value={qEnd}
-              disabled={!q.enabled}
-              onChange={(e) => setQEnd(e.target.value)}
-              onBlur={(e) => commitQuiet("end", e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-              className={cn(fieldClass, "h-8 w-[128px] tabular [color-scheme:inherit]")}
-            />
-            <div className="basis-full">
-              <FieldError field="quietHours" />
-            </div>
-          </SettingRow>
-        </SettingGroup>
+        <Spot id="reminders">
+          <SettingGroup title="Reminders">
+            <SettingRow title="Re-ping pending approvals" description="If an approval waits this long, ping once more.">
+              <Select
+                aria-label="Re-ping pending approvals"
+                className="h-8 w-[140px]"
+                value={String(settings.escalateAfterMins)}
+                onValueChange={(v) => void save({ escalateAfterMins: Number(v) })}
+                options={ESCALATE_OPTIONS.map((m) => ({
+                  value: String(m),
+                  label: m === 0 ? "Never" : `After ${m} min`,
+                }))}
+              />
+            </SettingRow>
+          </SettingGroup>
+        </Spot>
 
-        <SettingGroup title="Phone push" description="Optional. Forward attention events to your phone with ntfy.">
-          <SettingRow
-            stack
-            title="ntfy topic URL"
-            description={
-              <>Install the ntfy app, subscribe to a hard-to-guess topic, and paste its URL. Leave empty to disable.</>
-            }
-            htmlFor="ntfy-url"
-          >
-            <div className="w-full">
-              <div className="flex flex-wrap items-center gap-2">
-                <Input
-                  id="ntfy-url"
-                  value={ntfy}
-                  placeholder="https://ntfy.sh/kvistcode-7f3k2"
-                  onChange={(e) => setNtfy(e.target.value)}
-                  onBlur={commitNtfy}
-                  onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-                  aria-invalid={!ntfyValid || !!ntfyError}
-                  aria-describedby={ntfyError ? fieldErrorId("ntfy") : undefined}
-                  className={cn(
-                    "min-w-0 flex-1 basis-[260px] font-mono text-small",
-                    (!ntfyValid || ntfyError) && "border-err/60 focus:border-err/60 focus:ring-err/15",
-                  )}
-                />
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="h-9"
-                  disabled={!ntfy.trim() || !ntfyValid || push.state === "sending"}
-                  title={!ntfy.trim() ? "Enter a topic URL first" : "Show a test notification and push it to this URL"}
-                  onClick={() => void sendTestPush()}
-                >
-                  {push.state === "sending" ? <Spinner className="h-3.5 w-3.5" /> : <Send />}
-                  Send test push
-                </Button>
+        <Spot id="quiet-hours">
+          <SettingGroup title="Quiet hours" description="Notifications and sounds are held during this window.">
+            <SettingRow title="Enable quiet hours" htmlFor="qh-enabled">
+              <Switch
+                id="qh-enabled"
+                checked={q.enabled}
+                onCheckedChange={(v) => void save({ quietHours: { ...q, enabled: v } })}
+              />
+            </SettingRow>
+            <SettingRow
+              title="Schedule"
+              description={
+                quietError ? (
+                  <span role="alert" className="text-err">
+                    {quietError}
+                  </span>
+                ) : (
+                  "Overnight windows (e.g. 22:00 to 08:00) are supported."
+                )
+              }
+            >
+              <input
+                type="time"
+                aria-label="Quiet hours start"
+                value={qStart}
+                disabled={!q.enabled}
+                onChange={(e) => setQStart(e.target.value)}
+                onBlur={(e) => commitQuiet("start", e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+                className={cn(fieldClass, "h-8 w-[128px] tabular [color-scheme:inherit]")}
+              />
+              <span className="text-caption text-steel">to</span>
+              <input
+                type="time"
+                aria-label="Quiet hours end"
+                value={qEnd}
+                disabled={!q.enabled}
+                onChange={(e) => setQEnd(e.target.value)}
+                onBlur={(e) => commitQuiet("end", e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+                className={cn(fieldClass, "h-8 w-[128px] tabular [color-scheme:inherit]")}
+              />
+              <div className="basis-full">
+                <FieldError field="quietHours" />
               </div>
-              {!ntfyValid && <p className="mt-1.5 text-meta text-err">Enter a full http(s) URL.</p>}
-              <FieldError field="ntfy" />
-              {push.state === "sent" && (
-                <p role="status" className="mt-1.5 text-meta text-ok">
-                  Sent. Check your phone.
-                </p>
-              )}
-              {push.state === "error" && (
-                <p role="alert" className="mt-1.5 break-words text-meta text-err">
-                  {push.message}
-                </p>
-              )}
-            </div>
-          </SettingRow>
-          <SettingRow
-            stack
-            title="Push detail"
-            description={
-              <>
-                {settings.ntfyDetail === "full"
-                  ? "Pushes include the agent's last message or the command awaiting approval, with secrets scrubbed. "
-                  : "Pushes only say which agent needs you and why. "}
-                The topic name is a shared secret: anyone who knows it can read your pushes, and the ntfy server sees
-                them.
-              </>
-            }
-          >
-            <Segmented
-              aria-label="Push detail"
-              value={settings.ntfyDetail}
-              onChange={(v) => void save({ ntfyDetail: v })}
-              className="w-full"
-              options={[
-                { value: "minimal", label: "Minimal" },
-                { value: "full", label: "Full text" },
-              ]}
-            />
-          </SettingRow>
-        </SettingGroup>
+            </SettingRow>
+          </SettingGroup>
+        </Spot>
 
-        <AlertTargets targets={settings.alertTargets} />
+        <Spot id="webhooks">
+          <AlertTargets targets={settings.alertTargets} />
+        </Spot>
       </div>
     </>
+  );
+}
+
+/** Settings → Phone & remote: forwards attention events to a phone with ntfy. */
+function PhonePush({ settings }: { settings: Settings }) {
+  const keepNtfy = useRef(false);
+  // The field keeps what the user typed even when the backend rejects it (so they can fix it).
+  const [ntfy, setNtfy] = useState(settings.ntfyUrl ?? "");
+  useEffect(() => {
+    if (!keepNtfy.current) setNtfy(settings.ntfyUrl ?? "");
+  }, [settings.ntfyUrl]);
+  const ntfyValid = ntfy.trim() === "" || /^https?:\/\/\S+$/i.test(ntfy.trim());
+  const ntfyError = useFieldError("ntfy");
+  const [push, setPush] = useState<{ state: "idle" | "sending" | "sent" } | { state: "error"; message: string }>({
+    state: "idle",
+  });
+  const sendTestPush = async () => {
+    const url = ntfy.trim();
+    if (!url || !ntfyValid) return;
+    setPush({ state: "sending" });
+    try {
+      await api.testNotification(url);
+      setPush({ state: "sent" });
+    } catch (e) {
+      setPush({ state: "error", message: errorMessage(e) });
+    }
+  };
+  useEffect(() => setPush({ state: "idle" }), [ntfy]);
+
+  const commitNtfy = () => {
+    const v = ntfy.trim();
+    if (!ntfyValid) return;
+    if ((settings.ntfyUrl ?? "") === v) return;
+    keepNtfy.current = true;
+    void save({ ntfyUrl: v || null }).then((ok) => {
+      setTimeout(() => (keepNtfy.current = !ok), 0);
+    });
+  };
+  // Switching sections/views by shortcut skips the blur: commit a pending edit on unmount.
+  useCommitOnUnmount(commitNtfy);
+
+  return (
+    <SettingGroup
+      title="Phone push"
+      description="Optional. Get a push on your phone when an agent needs you, with the free ntfy app. Works without pairing."
+    >
+      <SettingRow
+        stack
+        title="ntfy topic URL"
+        description={
+          <>Install the ntfy app, subscribe to a hard-to-guess topic, and paste its URL. Leave empty to disable.</>
+        }
+        htmlFor="ntfy-url"
+      >
+        <div className="w-full">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              id="ntfy-url"
+              value={ntfy}
+              placeholder="https://ntfy.sh/kvistcode-7f3k2"
+              onChange={(e) => setNtfy(e.target.value)}
+              onBlur={commitNtfy}
+              onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+              aria-invalid={!ntfyValid || !!ntfyError}
+              aria-describedby={ntfyError ? fieldErrorId("ntfy") : undefined}
+              className={cn(
+                "min-w-0 flex-1 basis-[260px] font-mono text-small",
+                (!ntfyValid || ntfyError) && "border-err/60 focus:border-err/60 focus:ring-err/15",
+              )}
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              className="h-9"
+              disabled={!ntfy.trim() || !ntfyValid || push.state === "sending"}
+              title={!ntfy.trim() ? "Enter a topic URL first" : "Show a test notification and push it to this URL"}
+              onClick={() => void sendTestPush()}
+            >
+              {push.state === "sending" ? <Spinner className="h-3.5 w-3.5" /> : <Send />}
+              Send test push
+            </Button>
+          </div>
+          {!ntfyValid && <p className="mt-1.5 text-meta text-err">Enter a full http(s) URL.</p>}
+          <FieldError field="ntfy" />
+          {push.state === "sent" && (
+            <p role="status" className="mt-1.5 text-meta text-ok">
+              Sent. Check your phone.
+            </p>
+          )}
+          {push.state === "error" && (
+            <p role="alert" className="mt-1.5 break-words text-meta text-err">
+              {push.message}
+            </p>
+          )}
+        </div>
+      </SettingRow>
+      <SettingRow
+        stack
+        title="Push detail"
+        description={
+          <>
+            {settings.ntfyDetail === "full"
+              ? "Pushes include the agent's last message or the command awaiting approval, with secrets scrubbed. "
+              : "Pushes only say which agent needs you and why. "}
+            The topic name is a shared secret: anyone who knows it can read your pushes, and the ntfy server sees them.
+          </>
+        }
+      >
+        <Segmented
+          aria-label="Push detail"
+          value={settings.ntfyDetail}
+          onChange={(v) => void save({ ntfyDetail: v })}
+          className="w-full"
+          options={[
+            { value: "minimal", label: "Minimal" },
+            { value: "full", label: "Full text" },
+          ]}
+        />
+      </SettingRow>
+    </SettingGroup>
   );
 }
 
@@ -794,7 +982,8 @@ const PERMISSION_MODES: {
   },
 ];
 
-function Behavior({ settings }: { settings: Settings }) {
+/** The global hotkey: record a shortcut, or type one. The backend refuses ones it can't register. */
+function HotkeyRow({ settings }: { settings: Settings }) {
   const [hotkey, setHotkey] = useState(settings.globalHotkey);
   const [hotkeyError, setHotkeyError] = useState<string | null>(null);
   const [hotkeySaving, setHotkeySaving] = useState(false);
@@ -832,11 +1021,7 @@ function Behavior({ settings }: { settings: Settings }) {
     if (hotkey.trim() !== (useApp.getState().settings?.globalHotkey ?? "") && !hotkeySaving) void commitHotkey(hotkey);
   });
 
-  const toggle =
-    (key: "closeToTray" | "autoResume" | "resumeAfterLimit" | "defaultWorktree" | "launchAtLogin") => (v: boolean) =>
-      void save({ [key]: v } as Partial<Settings>);
-
-  const hotkeyRow = (
+  return (
     <SettingRow
       title="Global hotkey"
       description="Bring Kvistcode forward from anywhere. Record a shortcut, or leave it empty to turn it off."
@@ -911,29 +1096,69 @@ function Behavior({ settings }: { settings: Settings }) {
       </div>
     </SettingRow>
   );
+}
 
+const toggle =
+  (key: "closeToTray" | "autoResume" | "resumeAfterLimit" | "defaultWorktree" | "launchAtLogin") => (v: boolean) =>
+    void save({ [key]: v } as Partial<Settings>);
+
+/** Settings → Keyboard: the global hotkey, one-letter keys and the shortcut list. */
+function KeyboardPage({ settings }: { settings: Settings }) {
   return (
     <>
-      <SectionHeader title="Behavior" description="How Kvistcode runs and how new agents start." />
+      <SectionHeader title="Keyboard" description="Get around Kvistcode without the mouse." />
       <div className="space-y-6">
-        <SettingGroup title="Window and startup">
+        <SettingGroup>
+          <HotkeyRow settings={settings} />
           <SettingRow
-            title="Close to tray"
-            description="Closing the window keeps agents running and Kvistcode in the tray."
-            htmlFor="b-tray"
+            title="One-letter shortcuts"
+            description="A, Y, D and N answer an approval, number keys pick an answer to a pinned question, and J, K and E step through Needs you. Turn off if a stray key press could answer by mistake."
+            htmlFor="single-keys"
           >
-            <Switch id="b-tray" checked={settings.closeToTray} onCheckedChange={toggle("closeToTray")} />
+            <Switch
+              id="single-keys"
+              checked={settings.singleKeyShortcuts}
+              onCheckedChange={(v) => void save({ singleKeyShortcuts: v })}
+            />
           </SettingRow>
           <SettingRow
-            title="Launch at login"
-            description="Start Kvistcode quietly in the tray when you sign in."
-            htmlFor="b-login"
+            title="Talk to the voice assistant"
+            description="Its hotkey is set with the rest of the voice assistant."
           >
-            <Switch id="b-login" checked={settings.launchAtLogin} onCheckedChange={toggle("launchAtLogin")} />
+            <Button size="sm" variant="ghost" onClick={() => useUi.getState().openSettings("assistant")}>
+              Open Voice
+            </Button>
           </SettingRow>
         </SettingGroup>
+        <Spot id="shortcuts">
+          <SettingGroup title="Shortcuts">
+            {SHORTCUTS.map((s) => (
+              <div key={s.label} className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-body text-muted">{s.label}</span>
+                <span className="flex gap-1">
+                  {s.keys.map((k) => (
+                    <Kbd key={k}>{k}</Kbd>
+                  ))}
+                </span>
+              </div>
+            ))}
+          </SettingGroup>
+        </Spot>
+      </div>
+    </>
+  );
+}
 
-        <SettingGroup title="New agents">
+/** Settings → New agents: how agents start, reply and get help. */
+function NewAgents({ settings }: { settings: Settings }) {
+  return (
+    <>
+      <SectionHeader
+        title="New agents"
+        description="How new agents start, how they reply, and who helps when they are busy."
+      />
+      <div className="space-y-6">
+        <SettingGroup title="Starting">
           <SettingRow
             stack
             title="Permission mode for new agents"
@@ -964,70 +1189,59 @@ function Behavior({ settings }: { settings: Settings }) {
             <Switch id="b-worktree" checked={settings.defaultWorktree} onCheckedChange={toggle("defaultWorktree")} />
           </SettingRow>
         </SettingGroup>
+        <Spot id="replies">
+          <ResponseStyleSettings settings={settings} />
+        </Spot>
+        <Spot id="helpers">
+          <HelperSettings settings={settings} />
+        </Spot>
+      </div>
+    </>
+  );
+}
 
-        <ResponseStyleSettings settings={settings} />
-
+/** Settings → Models & spending: models, token saving, rate limits (budgets follow on the page). */
+function ModelsPage({ settings }: { settings: Settings }) {
+  return (
+    <>
+      <SectionHeader
+        title="Models & spending"
+        description="Which models your agents use, how to spend fewer tokens, and what happens at a limit."
+      />
+      <div className="space-y-6">
         <ModelGuideSettings settings={settings} />
-
-        <TokenSavingSettings settings={settings} />
-
-        <SettingGroup title="Rate limits">
-          <SettingRow
-            stack
-            title="When an account hits its rate limit"
-            description={FAILOVER.find((f) => f.value === settings.failover)?.description}
-          >
-            <Segmented
-              aria-label="When an account hits its rate limit"
-              value={settings.failover}
-              onChange={(v) => void save({ failover: v })}
-              className="w-full"
-              options={FAILOVER.map((f) => ({ value: f.value, label: f.label }))}
-            />
-            <FieldError field="failover" />
-          </SettingRow>
-          <SettingRow
-            title="Resume agents automatically when a rate limit resets"
-            description="Agents a limit stopped continue by themselves shortly after it resets, a few at a time. Never one you stopped or touched."
-            htmlFor="b-limit-resume"
-          >
-            <Switch
-              id="b-limit-resume"
-              checked={settings.resumeAfterLimit ?? true}
-              onCheckedChange={toggle("resumeAfterLimit")}
-            />
-          </SettingRow>
-        </SettingGroup>
-
-        <Advanced description="Global hotkey, approval reminders and helper agents.">
-          <SettingGroup title="Shortcuts and reminders">
-            {hotkeyRow}
-            <SettingRow title="Re-ping pending approvals" description="If an approval waits this long, ping once more.">
-              <Select
-                aria-label="Re-ping pending approvals"
-                className="h-8 w-[140px]"
-                value={String(settings.escalateAfterMins)}
-                onValueChange={(v) => void save({ escalateAfterMins: Number(v) })}
-                options={ESCALATE_OPTIONS.map((m) => ({
-                  value: String(m),
-                  label: m === 0 ? "Never" : `After ${m} min`,
-                }))}
+        <Spot id="save-tokens">
+          <TokenSavingSettings settings={settings} />
+        </Spot>
+        <Spot id="rate-limits">
+          <SettingGroup title="Rate limits">
+            <SettingRow
+              stack
+              title="When an account hits its rate limit"
+              description={FAILOVER.find((f) => f.value === settings.failover)?.description}
+            >
+              <Segmented
+                aria-label="When an account hits its rate limit"
+                value={settings.failover}
+                onChange={(v) => void save({ failover: v })}
+                className="w-full"
+                options={FAILOVER.map((f) => ({ value: f.value, label: f.label }))}
               />
+              <FieldError field="failover" />
             </SettingRow>
             <SettingRow
-              title="One-letter shortcuts"
-              description="A, Y, D and N answer an approval, number keys pick an answer to a pinned question, and J, K and E step through Needs you. Turn off if a stray key press could answer by mistake."
-              htmlFor="single-keys"
+              title="Resume agents automatically when a rate limit resets"
+              description="Agents a limit stopped continue by themselves shortly after it resets, a few at a time. Never one you stopped or touched."
+              htmlFor="b-limit-resume"
             >
               <Switch
-                id="single-keys"
-                checked={settings.singleKeyShortcuts}
-                onCheckedChange={(v) => void save({ singleKeyShortcuts: v })}
+                id="b-limit-resume"
+                checked={settings.resumeAfterLimit ?? true}
+                onCheckedChange={toggle("resumeAfterLimit")}
               />
             </SettingRow>
           </SettingGroup>
-          <HelperSettings settings={settings} />
-        </Advanced>
+        </Spot>
       </div>
     </>
   );
@@ -1092,10 +1306,9 @@ const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ["Esc"], label: "Close / cancel turn" },
 ];
 
-function About() {
+/** Kvistcode's own updates: what's available, a manual check, and the automatic one. */
+function UpdatesGroup({ settings }: { settings: Settings }) {
   const version = useApp((s) => s.version);
-  const platform = useApp((s) => s.platform);
-  const settings = useApp((s) => s.settings);
   const update = useApp((s) => s.update);
   const progress = useApp((s) => s.updateProgress);
   const [checking, setChecking] = useState(false);
@@ -1112,55 +1325,7 @@ function About() {
   return (
     <>
       {guardedInstall.dialog}
-      <div className="relative mb-8 overflow-hidden rounded-2xl border border-line bg-card p-6 edge texture">
-        <div
-          className="pointer-events-none absolute -right-10 -top-16 h-56 w-56 rounded-full bg-accent/10 blur-3xl"
-          aria-hidden
-        />
-        <div className="relative flex items-center gap-4">
-          <div className="relative">
-            <div className="absolute inset-0 -m-3 rounded-full bg-accent/20 blur-xl" aria-hidden />
-            <AppMark size={52} className="relative" />
-          </div>
-          <div className="min-w-0">
-            <h2 className="text-[22px] font-semibold tracking-[-0.025em]">Kvistcode</h2>
-            <p className="text-body text-muted">Every coding agent, one calm place.</p>
-            <p className="mt-1 text-caption text-steel tabular">
-              Version {version || "dev"} ·{" "}
-              {platform === "macos" ? "macOS" : platform === "windows" ? "Windows" : "Linux"} · MIT licensed
-            </p>
-          </div>
-        </div>
-        <div className="relative mt-5 flex flex-wrap gap-2">
-          <Button asChild size="sm" variant="secondary">
-            <a href="https://github.com/pl0xuee/kvistcode" rel="noreferrer noopener">
-              <GithubGlyph /> GitHub
-            </a>
-          </Button>
-          <Button asChild size="sm" variant="ghost">
-            <a href="https://github.com/pl0xuee/kvistcode/issues/new" rel="noreferrer noopener">
-              Report an issue <ExternalLink />
-            </a>
-          </Button>
-          <Button asChild size="sm" variant="ghost">
-            <a href="https://github.com/pl0xuee/kvistcode/releases" rel="noreferrer noopener">
-              Release notes <ExternalLink />
-            </a>
-          </Button>
-          <Button asChild size="sm" variant="ghost">
-            <a href="https://github.com/sponsors/pl0xuee" rel="noreferrer noopener">
-              <Heart /> Sponsor
-            </a>
-          </Button>
-          <Button asChild size="sm" variant="ghost">
-            <a href="https://kvistcode.com/support/" rel="noreferrer noopener">
-              Other ways to support <ExternalLink />
-            </a>
-          </Button>
-        </div>
-      </div>
-
-      <SettingGroup title="Updates" className="mb-8">
+      <SettingGroup title="Updates">
         {update && (
           <div className="flex items-center gap-3 bg-accent/[0.06] px-4 py-3.5">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-accent/30 bg-accent/10 text-accent">
@@ -1214,67 +1379,105 @@ function About() {
             <RefreshCw className={cn(checking && "animate-spin")} /> Check for updates
           </Button>
         </SettingRow>
-        {settings && (
-          <SettingRow
-            title="Automatically check for updates"
-            description="Checks on launch and every few hours."
-            htmlFor="auto-upd"
-          >
-            <Switch
-              id="auto-upd"
-              checked={settings.autoCheckUpdates}
-              onCheckedChange={(v) => void save({ autoCheckUpdates: v })}
-            />
-          </SettingRow>
-        )}
-      </SettingGroup>
-
-      <SettingGroup title="Diagnostics" className="mb-8">
         <SettingRow
-          title="Copy diagnostics"
-          description="Versions, system info, settings and recent logs for a bug report. Keys, tokens, emails and prompts are left out."
+          title="Automatically check for updates"
+          description="Checks on launch and every few hours."
+          htmlFor="auto-upd"
         >
-          <div className="flex gap-2">
-            <Button size="sm" variant="secondary" onClick={() => void copyDiagnostics()}>
-              Copy diagnostics
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => void saveDiagnosticsFile()}>
-              Save to file…
-            </Button>
-          </div>
+          <Switch
+            id="auto-upd"
+            checked={settings.autoCheckUpdates}
+            onCheckedChange={(v) => void save({ autoCheckUpdates: v })}
+          />
         </SettingRow>
       </SettingGroup>
+    </>
+  );
+}
 
-      <SettingGroup title="Welcome" className="mb-8">
-        <SettingRow
-          title="Show the tour again"
-          description="A short look at agent grids, the pinned dock, search and spending limits."
-        >
-          <Button size="sm" variant="secondary" onClick={openTour}>
-            <Sparkles /> Show the tour
+function About() {
+  const version = useApp((s) => s.version);
+  const platform = useApp((s) => s.platform);
+
+  return (
+    <>
+      <div className="relative mb-8 overflow-hidden rounded-2xl border border-line bg-card p-6 edge texture">
+        <div
+          className="pointer-events-none absolute -right-10 -top-16 h-56 w-56 rounded-full bg-accent/10 blur-3xl"
+          aria-hidden
+        />
+        <div className="relative flex items-center gap-4">
+          <div className="relative">
+            <div className="absolute inset-0 -m-3 rounded-full bg-accent/20 blur-xl" aria-hidden />
+            <AppMark size={52} className="relative" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-[22px] font-semibold tracking-[-0.025em]">Kvistcode</h2>
+            <p className="text-body text-muted">Every coding agent, one calm place.</p>
+            <p className="mt-1 text-caption text-steel tabular">
+              Version {version || "dev"} ·{" "}
+              {platform === "macos" ? "macOS" : platform === "windows" ? "Windows" : "Linux"} · MIT licensed
+            </p>
+          </div>
+        </div>
+        <div className="relative mt-5 flex flex-wrap gap-2">
+          <Button asChild size="sm" variant="secondary">
+            <a href="https://github.com/pl0xuee/kvistcode" rel="noreferrer noopener">
+              <GithubGlyph /> GitHub
+            </a>
           </Button>
-        </SettingRow>
-      </SettingGroup>
+          <Button asChild size="sm" variant="ghost">
+            <a href="https://github.com/pl0xuee/kvistcode/issues/new" rel="noreferrer noopener">
+              Report an issue <ExternalLink />
+            </a>
+          </Button>
+          <Button asChild size="sm" variant="ghost">
+            <a href="https://github.com/pl0xuee/kvistcode/releases" rel="noreferrer noopener">
+              Release notes <ExternalLink />
+            </a>
+          </Button>
+          <Button asChild size="sm" variant="ghost">
+            <a href="https://github.com/sponsors/pl0xuee" rel="noreferrer noopener">
+              <Heart /> Sponsor
+            </a>
+          </Button>
+          <Button asChild size="sm" variant="ghost">
+            <a href="https://kvistcode.com/support/" rel="noreferrer noopener">
+              Other ways to support <ExternalLink />
+            </a>
+          </Button>
+        </div>
+      </div>
 
-      <SettingGroup
-        title={
-          <span className="flex items-center gap-2">
-            <Keyboard className="h-4 w-4 text-steel" />
-            Keyboard shortcuts
-          </span>
-        }
-      >
-        {SHORTCUTS.map((s) => (
-          <div key={s.label} className="flex items-center justify-between px-4 py-2.5">
-            <span className="text-body text-muted">{s.label}</span>
-            <span className="flex gap-1">
-              {s.keys.map((k) => (
-                <Kbd key={k}>{k}</Kbd>
-              ))}
-            </span>
-          </div>
-        ))}
-      </SettingGroup>
+      <Spot id="diagnostics">
+        <SettingGroup title="Diagnostics" className="mb-8">
+          <SettingRow
+            title="Copy diagnostics"
+            description="Versions, system info, settings and recent logs for a bug report. Keys, tokens, emails and prompts are left out."
+          >
+            <div className="flex gap-2">
+              <Button size="sm" variant="secondary" onClick={() => void copyDiagnostics()}>
+                Copy diagnostics
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => void saveDiagnosticsFile()}>
+                Save to file…
+              </Button>
+            </div>
+          </SettingRow>
+        </SettingGroup>
+      </Spot>
+      <Spot id="tour">
+        <SettingGroup title="Welcome" className="mb-8">
+          <SettingRow
+            title="Show the tour again"
+            description="A short look at agent grids, the pinned dock, search and spending limits."
+          >
+            <Button size="sm" variant="secondary" onClick={openTour}>
+              <Sparkles /> Show the tour
+            </Button>
+          </SettingRow>
+        </SettingGroup>
+      </Spot>
 
       <p className="mt-6 text-caption leading-relaxed text-steel">
         No telemetry. Your keys stay in your OS keychain, and every agent runs through its vendor's official CLI.

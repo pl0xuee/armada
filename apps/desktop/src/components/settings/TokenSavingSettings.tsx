@@ -129,19 +129,19 @@ export function TokenSavingSettings({ settings }: { settings: Settings }) {
           ]}
         />
       </SettingRow>
+      <SettingRow
+        title="Helper agents use"
+        description="Claude splits work into helper agents, each with its own conversation and its own usage. In one measured install, four in five tool calls came from helpers. Running them on a smaller model saves usage and rarely changes the result. Applies to Claude agents as they start."
+      >
+        <Select
+          aria-label="Helper agents use"
+          className="h-8 w-[170px]"
+          value={opts.subagentModel ?? "same"}
+          onValueChange={(v) => patch({ subagentModel: v === "same" ? null : v })}
+          options={HELPER_MODELS}
+        />
+      </SettingRow>
       <MoreRows label="More options">
-        <SettingRow
-          title="Helper agents use"
-          description="Claude splits work into helper agents, each with its own conversation and its own usage. In one measured install, four in five tool calls came from helpers. Running them on a smaller model saves usage and rarely changes the result. Applies to Claude agents as they start."
-        >
-          <Select
-            aria-label="Helper agents use"
-            className="h-8 w-[170px]"
-            value={opts.subagentModel ?? "same"}
-            onValueChange={(v) => patch({ subagentModel: v === "same" ? null : v })}
-            options={HELPER_MODELS}
-          />
-        </SettingRow>
         <SettingRow
           title="Tidy build and test output"
           description={

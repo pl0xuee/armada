@@ -130,3 +130,25 @@ describe("subagent chips", () => {
     expect(subagentChips({ effort: "max" }, { model: null, effort: null })).toEqual([{ key: "effort", text: "max effort", inherited: false }]);
   });
 });
+
+describe("sub-agent chips and the helper model", () => {
+  const claudeAgent = { provider: "claude", model: "Opus 5.5", configOptions: [] };
+
+  it("shows the helper model for a general-purpose sub-agent when the computer says one is set", () => {
+    const inh = inheritedConfig(claudeAgent, "sonnet");
+    expect(subagentChips({ kind: "general-purpose" }, inh)).toEqual([{ key: "model", text: "Sonnet, helper setting", inherited: true }]);
+    expect(subagentChips({ kind: "Sub-agent" }, inh)[0].text).toBe("Sonnet, helper setting");
+  });
+
+  it("says nothing it can't know for a sub-agent with its own definition, keeps plans on the main agent", () => {
+    const inh = inheritedConfig(claudeAgent, "sonnet");
+    expect(subagentChips({ kind: "web-fetch" }, inh)).toEqual([]);
+    expect(subagentChips({ kind: "Plan" }, inh)[0].text).toBe("inherits Opus 5.5");
+  });
+
+  it("inherits when no helper model is set, and keeps the old chips for an older server or another provider", () => {
+    expect(subagentChips({ kind: "general-purpose" }, inheritedConfig(claudeAgent, null))[0].text).toBe("inherits Opus 5.5");
+    expect(subagentChips({ kind: "web-fetch" }, inheritedConfig(claudeAgent))[0].text).toBe("inherits Opus 5.5");
+    expect(inheritedConfig({ ...claudeAgent, provider: "codex" }, "sonnet").claude).toBeUndefined();
+  });
+});

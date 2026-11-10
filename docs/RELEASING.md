@@ -1,6 +1,6 @@
 # Releasing Kvistcode
 
-Installed copies of Kvistcode check GitHub Releases for updates (15 seconds after launch, then every 6 hours, plus Settings → About → "Check for updates").
+Installed copies of Kvistcode check GitHub Releases for updates (15 seconds after launch, then every 6 hours, plus Settings → General → "Check for updates").
 
 - **Windows, macOS, Linux AppImage** install updates in place. The updater reads `latest.json` from the latest published release and verifies each download against the public key in `apps/desktop/src-tauri/tauri.conf.json` before installing.
 - **deb / rpm** installs are owned by the system package manager. Kvistcode asks the GitHub Releases API whether a newer version exists and links to the release page.
@@ -60,7 +60,7 @@ There's no tag to push: bumping the version on `main` is the release.
 3. Commit and push to `main`. Once every check passes, CI creates a **draft** release `v0.2.0` with the notes as its body, builds macOS (universal), Windows and Linux installers, signs the update bundles and uploads everything plus `latest.json` to it.
 4. [Verify the draft](#verifying-a-draft) below.
 5. Press **Publish**. Publishing creates the `v0.2.0` tag on the commit the draft was built from. Edits to the draft's notes change the GitHub page only: the in-app updater reads the copy already baked into `latest.json`, so fix notes in `CHANGELOG.md` and push. Only published releases are visible to the updater, so this is the moment the update rolls out.
-6. Run `python3 scripts/verify_release.py v0.2.0 --live` once more (see below) and check Settings → About → "Check for updates" from an older install if you can.
+6. Run `python3 scripts/verify_release.py v0.2.0 --live` once more (see below) and check Settings → General → "Check for updates" from an older install if you can.
 
 Pushing more commits to `main` before publishing replaces the draft with a fresh one built from the newest commit. Once the version is tagged (published), later pushes don't release until the version is bumped again. If a release build fails for a flaky reason, re-run the failed jobs (the `draft` job's output is kept, so the retried build uploads into the same draft, replacing assets of the same name); for a real bug, push the fix and the draft is rebuilt. "Re-run all jobs" deletes the draft and builds it again.
 

@@ -34,7 +34,7 @@ function save(patch: Partial<Settings>) {
   return saveSettingsPatch(patch, (message) => toast.error("Couldn't save settings", { description: message }));
 }
 
-/** "Helper agents" group in Settings → Behavior. */
+/** "Helper agents" group in Settings → New agents. */
 export function HelperSettings({ settings }: { settings: Settings }) {
   const accounts = useApp((s) => s.accounts);
   const d = settings.helperDefaults;

@@ -1045,7 +1045,7 @@ impl Remote {
             if tokens.devices.len() >= MAX_DEVICES {
                 return Err(ApiError(
                     StatusCode::CONFLICT,
-                    "Too many paired devices. Remove one in Kvistcode's Settings → Remote first."
+                    "Too many paired devices. Remove one in Kvistcode's Settings → Phone & remote first."
                         .into(),
                 ));
             }
@@ -2359,6 +2359,8 @@ async fn state(
             })
         })
         .transpose()?;
+    // The model Claude's general-purpose helpers run on (null: the agent's own), for sub-agent chips.
+    let helper_model = core.settings()?.token_saver.subagent_model;
     Ok(Json(json!({
         "agents": agents,
         "accounts": accounts,
@@ -2369,6 +2371,7 @@ async fn state(
         "defaultPermissionMode": default_mode,
         "responseStyle": response_style,
         "claudeChoicesRemembered": claude_remembered,
+        "helperModel": helper_model,
     })))
 }
 

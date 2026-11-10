@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { TimelineItem } from "@/lib/types";
 import {
   formatElapsed,
+  helperInfo,
   inheritedOf,
   liveStep,
   shouldShowThinking,
@@ -161,5 +162,49 @@ describe("waitingStatus", () => {
     for (const s of ["working", "starting", "idle"] as const) expect(waitingStatus(s)).toBe(true);
     for (const s of ["needs_permission", "stopped", "error", "interrupted"] as const)
       expect(waitingStatus(s)).toBe(false);
+  });
+});
+
+describe("sub-agent chips and the helper model", () => {
+  const opus = { model: "Opus 5.5", effort: "Medium" };
+  const claude = (helper: string | null) => ({ ...opus, claude: { helper } });
+
+  it("shows the helper model for a general-purpose sub-agent when one is set", () => {
+    expect(subagentChips({ kind: "general-purpose" }, claude("Sonnet"))).toEqual([
+      { key: "model", text: "Sonnet, helper setting", inherited: true },
+    ]);
+    expect(subagentChips({ kind: null }, claude("Haiku"))).toEqual([
+      { key: "model", text: "Haiku, helper setting", inherited: true },
+    ]);
+  });
+
+  it("inherits the main agent's model and effort when no helper model is set", () => {
+    expect(subagentChips({ kind: "general-purpose" }, claude(null))).toEqual([
+      { key: "model", text: "inherits Opus 5.5", inherited: true },
+      { key: "effort", text: "inherits Medium", inherited: true },
+    ]);
+  });
+
+  it("says nothing it can't know for a sub-agent with its own definition", () => {
+    expect(subagentChips({ kind: "web-fetch" }, claude("Sonnet"))).toEqual([]);
+    expect(subagentChips({ kind: "Explore" }, claude(null))).toEqual([]);
+  });
+
+  it("keeps plans and forks on the main agent", () => {
+    expect(subagentChips({ kind: "Plan" }, claude("Sonnet"))[0].text).toBe("inherits Opus 5.5");
+    expect(subagentChips({ kind: "fork" }, claude("Sonnet"))[0].text).toBe("inherits Opus 5.5");
+  });
+
+  it("still shows a model the launch named", () => {
+    expect(subagentChips({ kind: "web-fetch", model: "haiku" }, claude("Sonnet"))).toEqual([
+      { key: "model", text: "haiku", inherited: false },
+    ]);
+  });
+
+  it("only applies to Claude agents", () => {
+    expect(helperInfo("codex", "sonnet")).toBeUndefined();
+    expect(helperInfo("claude", "sonnet")).toEqual({ helper: "Sonnet" });
+    expect(subagentChips({ kind: "worker" }, inheritedOf(undefined, helperInfo("codex", "sonnet")))).toEqual([]);
+    expect(subagentChips({ kind: "worker" }, opus)[0].text).toBe("inherits Opus 5.5");
   });
 });

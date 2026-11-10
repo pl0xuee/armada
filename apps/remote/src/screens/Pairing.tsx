@@ -192,8 +192,8 @@ export function Pairing() {
       {standalone && (
         <Callout tone="warn" icon="info" title="Pair this Home Screen app">
           {isIOS()
-            ? "On iPhone the Home Screen app keeps its own storage, separate from Safari. Copy the pairing link in Kvistcode (Settings → Remote) and paste it below once."
-            : "Copy the pairing link in Kvistcode (Settings → Remote) and paste it below."}
+            ? "On iPhone the Home Screen app keeps its own storage, separate from Safari. Copy the pairing link in Kvistcode (Settings → Phone & remote) and paste it below once."
+            : "Copy the pairing link in Kvistcode (Settings → Phone & remote) and paste it below."}
         </Callout>
       )}
 
@@ -337,7 +337,7 @@ export function Blocked() {
           : unreachable
             ? "Your phone couldn't connect to Kvistcode on your computer."
             : unavailable
-              ? `${message ?? "Kvistcode isn't accepting connections."} Turn it on in Settings → Remote; this page reconnects by itself.`
+              ? `${message ?? "Kvistcode isn't accepting connections."} Turn it on in Settings → Phone & remote; this page reconnects by itself.`
               : message}
       </p>
 
@@ -345,7 +345,7 @@ export function Blocked() {
         <ul className="mt-7 space-y-3 rounded-2xl border border-line bg-panel p-4 text-[14px] text-fg edge">
           {[
             "Kvistcode is open and your computer is awake",
-            "Remote access is on in Settings → Remote",
+            "Remote access is on in Settings → Phone & remote",
             "Your phone is on the same Wi-Fi as your computer, or connected to Tailscale",
           ].map((t) => (
             <li key={t} className="flex items-start gap-2.5">

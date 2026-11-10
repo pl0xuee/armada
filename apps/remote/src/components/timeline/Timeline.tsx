@@ -1,7 +1,7 @@
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { openGroupKeys } from "@/lib/activity";
 import { discardPrompt, loadOlder, sendPrompt } from "@/lib/controller";
-import { inheritedConfig, runningSubagents, useHeld, useSubagentState, WAITING_HOLD_MS, type InheritedConfig } from "@/lib/subagents";
+import { useInheritedConfig, runningSubagents, useHeld, useSubagentState, WAITING_HOLD_MS, type InheritedConfig } from "@/lib/subagents";
 import { useStore } from "@/lib/store";
 import { Spinner } from "../Icon";
 import { agentIdentity, isBusy } from "@/lib/meta";
@@ -146,7 +146,7 @@ export const Timeline = memo(function Timeline({
   const showLive = waiting || busy;
   const name = useStore((s) => agentIdentity(agent, s.customAgents).short);
   const running = useMemo(() => runningSubagents(items, runs), [items, runs]);
-  const inherited = useMemo(() => inheritedConfig(agent), [agent.configOptions, agent.model]);
+  const inherited = useInheritedConfig(agent);
   // Kept per agent, like the open groups: the list of running sub-agents stays open across re-renders.
   const [subsOpenFor, setSubsOpenFor] = useState<string | null>(null);
   const toggleSubs = useCallback(() => setSubsOpenFor((id) => (id === agent.id ? null : agent.id)), [agent.id]);
@@ -266,6 +266,7 @@ export const Timeline = memo(function Timeline({
             since={pending.length ? 0 : turnStart(items, 0)}
             open={subsOpenFor === agent.id}
             onToggle={toggleSubs}
+            inherited={inherited}
           />
         )}
       </div>

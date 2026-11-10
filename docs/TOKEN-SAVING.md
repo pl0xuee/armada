@@ -194,6 +194,6 @@ cost; unproven for this repo).
 
 `Settings.autoCompactWindow` (new file `token_saver.rs`; one-line hook where the agent's environment is built),
 the "Save tokens" preset (`apply_token_saver`: 250k window, concise replies, medium effort for new Claude agents;
-never touches model or budgets), Settings > Behavior > Save tokens, and a Save tokens panel on the Usage page
+never touches model or budgets), Settings → Models & spending → Save tokens, and a Save tokens panel on the Usage page
 (`lib/tokenInsights.ts`) covering long contexts, missing compact size, high effort, pricey agents, parallel
 agents against the account window, and many MCP servers.

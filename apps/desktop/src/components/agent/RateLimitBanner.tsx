@@ -205,7 +205,7 @@ export function RateLimitBanner({ agent, embedded = false }: { agent: Agent; emb
               <DropdownMenuItem onSelect={() => useUi.getState().setHandoffAgent(agent)}>
                 <ArrowRightLeft /> Continue with another provider
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => useUi.getState().openSettings("behavior")}>
+              <DropdownMenuItem onSelect={() => useUi.getState().openSettings("models")}>
                 <Settings2 /> Automatic failover: {FAILOVER_LABEL[failover]}
               </DropdownMenuItem>
             </DropdownMenuContent>

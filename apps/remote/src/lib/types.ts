@@ -155,6 +155,8 @@ export interface StateSnapshot {
   responseStyle?: ResponseStyle;
   /** Owner only: whether the computer already remembers a Claude model or effort the user chose. Absent on older servers. */
   claudeChoicesRemembered?: boolean | null;
+  /** The model Claude's general-purpose helpers run on, null when none is set. Absent on older servers. */
+  helperModel?: string | null;
 }
 
 /** What GET /api/agents/{id}/pr sends of a pull request: counts and a link, no check names or logs. */
