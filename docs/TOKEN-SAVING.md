@@ -62,6 +62,9 @@ What Kvistcode does with it:
   (no change). A fresh install starts on Everyday; anyone who already chose a Claude model or effort starts on "My usual
   model", so nothing changes behind their back. Types whose model the installed Claude Code does not offer are hidden.
 - Onboarding sets helper agents to Sonnet. Existing installs get a one-click offer on the Usage page instead.
+- Settings, General, Models has "Use recommended" for existing installs: it picks Everyday coding as the starting
+  point and puts helpers on Sonnet (a helper model already chosen, Sonnet or Haiku, is kept). Running agents and the
+  remembered composer choices are untouched.
 - The model and effort menus add a "good for" line where Claude Code gives none, and a note about when to use each.
 - Changing a Claude agent's model with 100k or more tokens of conversation asks first (the cost above), and offers to compact.
 

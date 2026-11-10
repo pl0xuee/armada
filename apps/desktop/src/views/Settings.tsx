@@ -28,6 +28,7 @@ import { CompanionSection } from "@/components/settings/CompanionSection";
 import { InstallAllBanner } from "@/components/settings/InstallAllBanner";
 import { HelperSettings } from "@/components/settings/HelperSettings";
 import { ResponseStyleSettings } from "@/components/settings/ResponseStyleSettings";
+import { ModelGuideSettings } from "@/components/settings/ModelGuideSettings";
 import { TokenSavingSettings } from "@/components/settings/TokenSavingSettings";
 import { RememberedChoicesRow } from "@/components/settings/RememberedChoicesRow";
 import { Advanced } from "@/components/settings/Disclosure";
@@ -965,6 +966,8 @@ function Behavior({ settings }: { settings: Settings }) {
         </SettingGroup>
 
         <ResponseStyleSettings settings={settings} />
+
+        <ModelGuideSettings settings={settings} />
 
         <TokenSavingSettings settings={settings} />
 
