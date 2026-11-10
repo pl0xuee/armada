@@ -1,5 +1,6 @@
 /** The "new agent" form model: which agent types can be started, and request validation. */
 import { agentIdentity } from "./meta";
+import { choicesFor, readWorkChoice, resolveWorkChoice } from "./modelGuide";
 import { storage } from "./storage";
 import type { Attachment, CreateAgentRequest, PermissionMode, Provider, RemoteAccount, RemoteCustomAgent } from "./types";
 
@@ -53,6 +54,8 @@ export interface NewAgentForm {
   model: string;
   /** null = not offered (older server): the field is omitted. */
   permissionMode: PermissionMode | null;
+  /** Claude only: the kind of work (see modelGuide), which picks the model and effort; "keep" = leave them. */
+  workType: string;
 }
 
 /** Why an account probably can't start an agent right now (null = looks fine or unknown). */
@@ -94,6 +97,10 @@ export function validate(form: NewAgentForm, choices: AgentChoice[]): Validation
   const model = form.model.trim();
   if (model) request.model = model;
   if (form.permissionMode) request.permissionMode = form.permissionMode;
+  // A model typed under "Advanced" wins over the kind of work.
+  const picked = choicesFor(choice.provider, form.workType);
+  if (model) delete picked.model;
+  if (Object.keys(picked).length) request.configChoices = picked;
   return { ok: true, request };
 }
 
@@ -128,6 +135,7 @@ export function initialForm(
   defaultWorktree: boolean,
   last = loadLast(),
   defaultPermissionMode: PermissionMode | null = null,
+  claudeChoicesRemembered: boolean | null = null,
 ): NewAgentForm {
   const choice = choices.find((c) => c.key === last.choiceKey) ?? choices[0] ?? null;
   const account = choice?.accounts.find((a) => a.id === last.accountId) ?? choice?.accounts[0] ?? null;
@@ -142,5 +150,6 @@ export function initialForm(
     attachments: [],
     model: "",
     permissionMode: defaultPermissionMode,
+    workType: resolveWorkChoice(readWorkChoice(), claudeChoicesRemembered),
   };
 }

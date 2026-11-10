@@ -96,6 +96,8 @@ export interface State {
   defaultPermissionMode: PermissionMode | null;
   /** "How agents report" (owner only); null = the server doesn't send it. */
   responseStyle: ResponseStyle | null;
+  /** Whether the computer already remembers a Claude model or effort of the user's own; null = unknown (older server). */
+  claudeChoicesRemembered: boolean | null;
   /** The last PR/CI status the server gave for each agent's branch. */
   prs: Record<string, PrSnapshot>;
   /** Workflow runs still going behind an agent's finished turn, by agent id (see lib/backgroundWork). */
@@ -138,6 +140,7 @@ export const initialState: State = {
   defaultWorktree: false,
   defaultPermissionMode: null,
   responseStyle: null,
+  claudeChoicesRemembered: null,
   prs: {},
   background: {},
   timelines: {},

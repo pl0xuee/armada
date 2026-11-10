@@ -122,6 +122,7 @@ fn request(env: &Env, project: &std::path::Path, prompt: &str) -> CreateAgentReq
         custom_agent_id: Some("mock".into()),
         permission_mode: None,
         attachments: vec![],
+        config_choices: Default::default(),
     }
 }
 

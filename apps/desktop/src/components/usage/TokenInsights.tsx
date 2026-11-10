@@ -1,6 +1,7 @@
 import { Lightbulb } from "lucide-react";
 import { useMemo } from "react";
 import { toast } from "sonner";
+import { saveSettingsPatch } from "@/components/settings/settingsErrors";
 import { applyTokenSaver } from "@/components/settings/TokenSavingSettings";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
@@ -35,6 +36,15 @@ export function TokenInsights({ agents }: { agents: Agent[] }) {
       case "open-settings":
         openSettings("toolkit");
         break;
+      case "helper-model": {
+        const current = useApp.getState().settings?.tokenSaver;
+        if (!current) break;
+        const saved = await saveSettingsPatch({ tokenSaver: { ...current, subagentModel: action.model } }, (message) =>
+          toast.error("Couldn't save settings", { description: message }),
+        );
+        if (saved) toast.success("Helpers run on Sonnet", { description: "Claude agents pick this up as they start." });
+        break;
+      }
       case "lower-effort": {
         const results = await Promise.allSettled(
           action.agentIds.map((id) => api.setAgentConfig(id, "effort", "medium")),

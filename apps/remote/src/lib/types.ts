@@ -127,6 +127,8 @@ export interface CreateAgentRequest {
   model?: string;
   /** "auto" approves routine actions; "ask" asks first. Omit for the server default. */
   permissionMode?: PermissionMode;
+  /** Claude only: the model and effort to start on (a "kind of work" pick). Older servers ignore it. */
+  configChoices?: Record<string, string>;
 }
 
 export type PermissionMode = "auto" | "ask";
@@ -151,6 +153,8 @@ export interface StateSnapshot {
   defaultPermissionMode?: PermissionMode;
   /** Owner only; absent on older servers (then the setting isn't offered). */
   responseStyle?: ResponseStyle;
+  /** Owner only: whether the computer already remembers a Claude model or effort the user chose. Absent on older servers. */
+  claudeChoicesRemembered?: boolean | null;
 }
 
 /** What GET /api/agents/{id}/pr sends of a pull request: counts and a link, no check names or logs. */

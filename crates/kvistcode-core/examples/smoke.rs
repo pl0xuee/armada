@@ -41,6 +41,7 @@ async fn main() -> anyhow::Result<()> {
             custom_agent_id: None,
             permission_mode: None,
             attachments: vec![],
+            config_choices: Default::default(),
         })
         .await?;
     println!(

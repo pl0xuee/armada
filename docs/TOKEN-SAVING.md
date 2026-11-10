@@ -26,6 +26,45 @@ no conversation content was read). Treat them as one person's workload, not a be
 stored); the model used per turn; effort effects (all agents are on high); sub-agent share; whether the
 first turns of a project cost more (A4: 3-4x, A3: the opposite; inconclusive).
 
+## Which model (from Anthropic's guide, 2026-11-09)
+
+Source: "Which Claude model should you build with", claude.dev/blog, 2026-11-09. Kvistcode builds the advice in
+as the defaults (`apps/desktop/src/lib/modelGuide.ts`, mirrored on the phone); the figures live only here, because
+prices and benchmark numbers go stale and the UI never states them. Re-check the article before changing the guide.
+
+| Model | Start here for | Input / output per MTok | Cache read per MTok |
+| --- | --- | --- | --- |
+| Opus 5.5 | everyday engineering and debugging, multi-PR features, or when unsure | $4 / $20 | $0.20 |
+| Sonnet 5.5 | well-scoped, routine work (bug fixes, spec-driven features, repeated agent tasks) | $2 / $10 | $0.10 |
+| Haiku 5.5 | classification, routing, bulk extraction, cheap helper agents | $0.10 / $0.50 up to 100K prompt tokens, $0.50 / $2.50 above | $0.01 / $0.05 |
+| Fable 5.2 | big refactors and migrations, architecture, deep research, leading many helpers, when Opus at high falls short | $8 / $40 | $0.20 |
+
+All four have a 1M-token context window and 128K max output. Fable costs twice Opus per token.
+
+- **Start on Opus at medium effort**, then high. Opus at medium on SWE-bench Pro is about 2.5 points below high at about
+  70% of the cost; low is about 8 points below at about a third of the cost; xhigh is about 1.4 points above at 2.5x the
+  cost of high. Opus at high matched Fable 5.1 at max on Terminal-Bench 3.0 (58.9% vs 58.0%) with half the tokens.
+- **Raise effort before moving to a bigger model.** Order when a model is not good enough: make sure it can check its own
+  work (tests, a build, a script); raise effort one level; then try the next model up at a lower effort. Past high, one more
+  effort level can cost as much as a bigger model. Effort adds thinking time, not knowledge.
+- **Switch models at a break.** The prompt cache belongs to the model that wrote it, so the first turn on a new model pays
+  the cache-write price on the whole conversation. Use `/compact` or a fresh agent with a short summary. Thinking carries
+  over only upward (Haiku to Sonnet to Opus to Fable); moving to a smaller model, or off Fable, drops earlier reasoning.
+- **Helpers on a smaller model.** File search, log reading and summaries are cheap to check, so Sonnet or Haiku suit them
+  (`CLAUDE_CODE_SUBAGENT_MODEL`, the "Helper agents use" setting). Keep code edits and judgment on the main model.
+- **Not built in:** the advisor pairing (a bigger model advising a smaller one: +1.7 points for about 2.1x the cost) and
+  switching models mid-conversation automatically. `opusplan` is not a default.
+
+What Kvistcode does with it:
+
+- New Claude agents start on the "kind of work" you pick next to the prompt: Everyday coding (Opus, medium), Routine
+  tasks (Sonnet, medium), Quick or bulk (Haiku, medium), Big refactor or research (Fable, medium), or "My usual model"
+  (no change). A fresh install starts on Everyday; anyone who already chose a Claude model or effort starts on "My usual
+  model", so nothing changes behind their back. Types whose model the installed Claude Code does not offer are hidden.
+- Onboarding sets helper agents to Sonnet. Existing installs get a one-click offer on the Usage page instead.
+- The model and effort menus add a "good for" line where Claude Code gives none, and a note about when to use each.
+- Changing a Claude agent's model with 100k or more tokens of conversation asks first (the cost above), and offers to compact.
+
 ## Ranked ideas (reduction x confidence / effort and risk)
 
 | # | Idea | Est. reduction | Confidence | Status |

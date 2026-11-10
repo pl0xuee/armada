@@ -45,6 +45,7 @@ async fn a_turn_without_event_ids_finishes() {
             custom_agent_id: None,
             permission_mode: None,
             attachments: vec![],
+            config_choices: Default::default(),
         })
         .await
         .unwrap();

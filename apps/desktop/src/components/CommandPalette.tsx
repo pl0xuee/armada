@@ -67,7 +67,7 @@ import type { Agent, SearchResults, Settings as SettingsT } from "@/lib/types";
 import { openSearchHit, searchTerm } from "@/lib/search";
 import { ConversationHits } from "./search/ConversationHits";
 import { basename, errorMessage, isMac, modKey } from "@/lib/utils";
-import { launchAgent, resolveLaunch } from "@/lib/launchDefaults";
+import { launchAgent, resolveLaunch, savedWorkChoices } from "@/lib/launchDefaults";
 import { useIdentity } from "@/hooks/useIdentity";
 import { toast } from "sonner";
 import { openExternal } from "@/lib/external";
@@ -250,7 +250,8 @@ function Palette({ onClose }: { onClose: () => void }) {
         ui.openNewAgent({ prompt: text });
         return;
       }
-      void launchAgent(launch, text, m)
+      void savedWorkChoices(launch.provider)
+        .then((choices) => launchAgent(launch, text, m, choices))
         .then((a) => {
           useApp.getState().upsertAgent(a);
           useUi.getState().openAgent(a.id);

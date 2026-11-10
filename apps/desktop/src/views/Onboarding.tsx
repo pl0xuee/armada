@@ -92,7 +92,12 @@ export function Onboarding() {
 
   const finish = async () => {
     setFinishing(true);
-    await save({ onboarded: true });
+    // Anthropic's advice for new setups: helper agents on Sonnet, so the agent's own model does the hard part.
+    const saver = useApp.getState().settings?.tokenSaver;
+    await save({
+      onboarded: true,
+      ...(saver && !saver.subagentModel ? { tokenSaver: { ...saver, subagentModel: "sonnet" } } : {}),
+    });
     setFinishing(false);
   };
 

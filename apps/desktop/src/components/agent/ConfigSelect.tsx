@@ -1,10 +1,15 @@
 import { ChevronDown, SlidersHorizontal } from "lucide-react";
+import { useState } from "react";
 import { attempt } from "@/lib/actions";
 import { api } from "@/lib/api";
 import type { Agent, ConfigOption } from "@/lib/types";
 import { isRememberableOption } from "@/lib/configMemory";
+import { formatTokens } from "@/lib/format";
+import { choiceHint, menuNote, switchNeedsNote } from "@/lib/modelGuide";
 import { cn } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
+import { ConfirmDialog } from "../ui/alert-dialog";
+import { Button } from "../ui/button";
 import {
   DropdownMenu,
   DropdownMenuCheckItem,
@@ -16,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from "../ui/menu";
 import { Tooltip } from "../ui/tooltip";
+import { canCompact, compactContext } from "./compact";
 
 /** Compact dropdown for one of the agent's session config options (model, mode, effort…). */
 export function ConfigSelect({
@@ -32,6 +38,8 @@ export function ConfigSelect({
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const remembered = agent.provider !== "local" && isRememberableOption(option);
   const warn = option.currentValue === "bypassPermissions" || option.currentValue === "never";
+  const [pick, switchDialog] = useOptionPicker(agent);
+  const note = menuNote(agent, option);
   const toggle = onOff(option);
   if (toggle) {
     const on = option.currentValue === toggle.on;
@@ -84,18 +92,20 @@ export function ConfigSelect({
           <DropdownMenuCheckItem
             key={o.value}
             checked={o.value === option.currentValue}
-            description={o.description}
-            onSelect={() => setOption(agent, option, o.value)}
+            description={o.description || choiceHint(agent, option, o.value)}
+            onSelect={() => pick(option, o.value)}
           >
             {o.name}
           </DropdownMenuCheckItem>
         ))}
-        {remembered && (
-          <p className="border-t border-line-strong px-2.5 pb-1 pt-2 text-micro leading-snug text-steel">
-            New {identity.short} agents start with your last choice
-          </p>
+        {(note || remembered) && (
+          <div className="space-y-1 border-t border-line-strong px-2.5 pb-1 pt-2 text-micro leading-snug text-steel">
+            {note && <p>{note}</p>}
+            {remembered && <p>New {identity.short} agents start with your last choice</p>}
+          </div>
         )}
       </DropdownMenuContent>
+      {switchDialog}
     </DropdownMenu>
   );
 }
@@ -112,9 +122,48 @@ function setOption(agent: Agent, option: ConfigOption, value: string) {
   void attempt(`Couldn't change ${option.name.toLowerCase()}`, () => api.setAgentConfig(agent.id, option.id, value));
 }
 
+/**
+ * Picks an option's value. Changing a Claude agent's model on a long conversation first asks: the new
+ * model has to re-read all of it once, so compacting first is cheaper. Render `dialog` next to the menu.
+ */
+function useOptionPicker(agent: Agent) {
+  const [pending, setPending] = useState<{ option: ConfigOption; value: string } | null>(null);
+  const pick = (option: ConfigOption, value: string) => {
+    if (switchNeedsNote(agent, option, value)) setPending({ option, value });
+    else setOption(agent, option, value);
+  };
+  const dialog = pending && (
+    <ConfirmDialog
+      open
+      onOpenChange={(open) => !open && setPending(null)}
+      title="Switch model now?"
+      description={`This conversation is about ${formatTokens(agent.contextUsed ?? 0)} tokens long. The new model has to read all of it again, which costs more than a normal message. Switching at a natural break, or after compacting, is cheaper.`}
+      confirmLabel="Switch anyway"
+      onConfirm={() => {
+        setOption(agent, pending.option, pending.value);
+        setPending(null);
+      }}
+    >
+      {canCompact(agent) && (
+        <Button
+          variant="secondary"
+          onClick={() => {
+            void compactContext(agent);
+            setPending(null);
+          }}
+        >
+          Compact first
+        </Button>
+      )}
+    </ConfirmDialog>
+  );
+  return [pick, dialog] as const;
+}
+
 /** "+" menu holding session options that don't fit inline on narrow composers. */
 export function ConfigOverflowMenu({ agent, options }: { agent: Agent; options: ConfigOption[] }) {
   const identity = useIdentity(agent.provider, agent.customAgentId);
+  const [pick, switchDialog] = useOptionPicker(agent);
   if (options.length === 0) return null;
   return (
     <DropdownMenu>
@@ -164,8 +213,8 @@ export function ConfigOverflowMenu({ agent, options }: { agent: Agent; options: 
                   <DropdownMenuCheckItem
                     key={o.value}
                     checked={o.value === opt.currentValue}
-                    description={o.description}
-                    onSelect={() => setOption(agent, opt, o.value)}
+                    description={o.description || choiceHint(agent, opt, o.value)}
+                    onSelect={() => pick(opt, o.value)}
                   >
                     {o.name}
                   </DropdownMenuCheckItem>
@@ -175,6 +224,7 @@ export function ConfigOverflowMenu({ agent, options }: { agent: Agent; options: 
           );
         })}
       </DropdownMenuContent>
+      {switchDialog}
     </DropdownMenu>
   );
 }

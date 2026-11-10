@@ -32,7 +32,7 @@ describe("local provider", () => {
     const c = agentChoices(withLocal, customs).find((x) => x.key === "local");
     expect(c).toMatchObject({ provider: "local", name: "Local", color: "#4FC3F7" });
     const v = validate(
-      { choiceKey: "local", accountId: "l1", projectPath: "/home/me/p", worktree: false, title: "", prompt: "", attachments: [], model: " qwen3 ", permissionMode: null },
+      { choiceKey: "local", accountId: "l1", projectPath: "/home/me/p", worktree: false, title: "", prompt: "", attachments: [], model: " qwen3 ", permissionMode: null, workType: "keep" },
       agentChoices(withLocal, customs),
     );
     expect(v.ok && v.request).toMatchObject({ provider: "local", accountId: "l1", model: "qwen3" });
@@ -41,7 +41,7 @@ describe("local provider", () => {
 
 describe("validate", () => {
   const choices = agentChoices(accounts, customs);
-  const base: NewAgentForm = { choiceKey: "claude", accountId: "c2", projectPath: " /home/me/app ", worktree: true, title: "", prompt: "", attachments: [], model: "", permissionMode: null };
+  const base: NewAgentForm = { choiceKey: "claude", accountId: "c2", projectPath: " /home/me/app ", worktree: true, title: "", prompt: "", attachments: [], model: "", permissionMode: null, workType: "keep" };
 
   it("builds a minimal request (prompt optional)", () => {
     expect(validate(base, choices)).toEqual({
@@ -91,7 +91,7 @@ describe("initialForm", () => {
   });
   it("falls back to defaults when the last choice is gone", () => {
     saveLast({ choiceKey: "grok", accountId: "zz", projectPath: "/gone" });
-    expect(initialForm(choices, ["/p/a"], false)).toMatchObject({ choiceKey: "claude", accountId: "c1", projectPath: "/p/a", worktree: false, permissionMode: null });
+    expect(initialForm(choices, ["/p/a"], false)).toMatchObject({ choiceKey: "claude", accountId: "c1", projectPath: "/p/a", worktree: false, permissionMode: null, workType: "keep" });
     expect(initialForm(choices, ["/p/a"], false, {}, "auto").permissionMode).toBe("auto");
   });
 });

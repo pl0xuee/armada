@@ -102,6 +102,7 @@ async fn pictures_are_stored_as_files_and_read_back() {
             custom_agent_id: Some("mock".into()),
             permission_mode: None,
             attachments: vec![shot],
+            config_choices: Default::default(),
         })
         .await
         .unwrap();

@@ -27,7 +27,9 @@ export type InsightAction =
   | { kind: "preset"; label: string }
   | { kind: "open-agent"; agentId: string; label: string }
   | { kind: "lower-effort"; agentIds: string[]; label: string }
-  | { kind: "open-settings"; label: string };
+  | { kind: "open-settings"; label: string }
+  /** Only the helper-agent model, not the whole preset. */
+  | { kind: "helper-model"; model: "sonnet"; label: string };
 
 export interface Insight {
   id: string;
@@ -50,7 +52,8 @@ function claudeEffortHigh(a: Agent): boolean {
 }
 
 function windowText(percent: number, mins: number | null | undefined): string {
-  const span = mins && mins >= 1440 ? `${Math.round(mins / 1440)}-day` : mins ? `${Math.round(mins / 60)}-hour` : "usage";
+  const span =
+    mins && mins >= 1440 ? `${Math.round(mins / 1440)}-day` : mins ? `${Math.round(mins / 60)}-hour` : "usage";
   return `${span} window is ${Math.round(percent)}% used`;
 }
 
@@ -79,7 +82,10 @@ export function tokenInsights(input: {
     const tight = used != null && used >= 60 && list.length >= 2;
     if (!crowded && !tight) continue;
     const name = acc?.name ?? "this account";
-    const reset = win?.resetsAt && win.resetsAt > now ? ` Resets in ${Math.max(1, Math.round((win.resetsAt - now) / 60000))} min.` : "";
+    const reset =
+      win?.resetsAt && win.resetsAt > now
+        ? ` Resets in ${Math.max(1, Math.round((win.resetsAt - now) / 60000))} min.`
+        : "";
     out.push({
       id: `parallel:${accountId}`,
       severity: (used != null && used >= 80) || list.length >= 6 ? "high" : "medium",
@@ -124,7 +130,7 @@ export function tokenInsights(input: {
       severity: "medium",
       title: `${high.length} Claude ${high.length === 1 ? "agent runs" : "agents run"} at high effort or above`,
       detail:
-        "Higher effort means more thinking tokens on every step. Medium is Claude's own default for the 5.5 models and is enough for most routine work; raise it only for hard problems. On the 5.5 models, changing effort keeps the cache.",
+        "Higher effort means more thinking tokens on every step. Medium is Claude's own default for the 5.5 models and is enough for most routine work; raise it one step at a time for hard problems, and past High a bigger model is often the better buy. On the 5.5 models, changing effort keeps the cache.",
       action: { kind: "lower-effort", agentIds: high.map((a) => a.id), label: "Set to medium" },
     });
   }
@@ -142,7 +148,7 @@ export function tokenInsights(input: {
       id: "pricey",
       severity: "medium",
       title: `${pricey.length} ${pricey.length === 1 ? "agent costs" : "agents cost"} $${top.perM.toFixed(2)} or more per million tokens`,
-      detail: `"${top.a.title}" averages $${top.perM.toFixed(2)} per million tokens${base ? `, about ${Math.max(1, Math.round(top.perM / base))}x your cheaper agents` : ""}, which usually means a pricier model (Opus or Fable class). Keep those for hard problems and use Sonnet for routine work. Switching a long conversation re-reads all of it uncached once, so do it when starting a new agent.`,
+      detail: `"${top.a.title}" averages $${top.perM.toFixed(2)} per million tokens${base ? `, about ${Math.max(1, Math.round(top.perM / base))}x your cheaper agents` : ""}, which usually means a pricier model (Opus or Fable class). Opus at medium effort covers most everyday work; keep the biggest model for big refactors and research, and use Sonnet for routine, well-scoped tasks. Switching a long conversation re-reads all of it uncached once, so switch at a break or when starting a new agent.`,
       action: { kind: "open-agent", agentId: top.a.id, label: "Open it" },
     });
   }
@@ -195,8 +201,8 @@ export function tokenInsights(input: {
       severity: "info",
       title: "Claude's helper agents run on the same model as the agent",
       detail:
-        "Helpers (exploration, searches, test runs) each carry their own conversation and use your plan separately. Running them on Sonnet keeps the agent's own model for the hard part. The preset sets this; Settings also offers Haiku.",
-      action: { kind: "preset", label: "Save tokens" },
+        "Helpers (exploration, searches, test runs) each carry their own conversation and use your plan separately. Running them on Sonnet keeps the agent's own model for the hard part. This changes only that; the Save tokens preset sets it too, and Settings also offers Haiku.",
+      action: { kind: "helper-model", model: "sonnet", label: "Use Sonnet for helpers" },
     });
   }
 

@@ -108,6 +108,7 @@ fn request(env: &Env, prompt: &str) -> CreateAgentRequest {
         custom_agent_id: Some("mock".into()),
         permission_mode: None,
         attachments: vec![],
+        config_choices: Default::default(),
     }
 }
 
@@ -340,6 +341,7 @@ async fn codex_crash_after_failed_start_is_reported() {
             custom_agent_id: None,
             permission_mode: None,
             attachments: vec![],
+            config_choices: Default::default(),
         })
         .await
         .unwrap();

@@ -1922,6 +1922,10 @@ pub struct CreateAgentRequest {
     pub permission_mode: Option<String>,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
+    /// Model / effort the agent starts with (a Claude "kind of work" pick), over the remembered
+    /// defaults. Only `model` and `effort` are taken; see `config_memory::requested_choices`.
+    #[serde(default)]
+    pub config_choices: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

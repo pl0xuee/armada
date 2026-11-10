@@ -3,6 +3,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useIdentity } from "@/hooks/useIdentity";
 import { launchAgents, needsWorktree, resolveLaunch, type ResolvedLaunch } from "@/lib/launchDefaults";
+import { choicesFor } from "@/lib/modelGuide";
 import { CUSTOM_ACCOUNT_ID, PROVIDER_ORDER, PROVIDERS } from "@/lib/providers";
 import { basename, cn, errorMessage, prettyPath } from "@/lib/utils";
 import { pickFolder } from "@/lib/window";
@@ -29,6 +30,7 @@ import { Tooltip } from "../ui/tooltip";
 import { AgentCount } from "./AgentCount";
 import { PermissionModeChip, usePermissionMode } from "./PermissionModeChip";
 import { PreflightNotes, usePreflight } from "./PreflightNotes";
+import { useWorkChoice, WorkTypeChip } from "./WorkTypeChip";
 import { ProjectPicker } from "./ProjectPicker";
 
 const chipClass =
@@ -40,6 +42,7 @@ const chipClass =
  */
 export function HomeComposer({ compact = false, autoFocus = true }: { compact?: boolean; autoFocus?: boolean }) {
   const [mode, setMode] = usePermissionMode();
+  const [work, setWork, workTypes] = useWorkChoice();
   const accounts = useApp((s) => s.accounts);
   const settings = useApp((s) => s.settings);
   const openAgent = useUi((s) => s.openAgent);
@@ -111,7 +114,14 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
     setBusy(true);
     try {
       const prior = useUi.getState().homeBatch;
-      const { groupId, created, failed } = await launchAgents(target, prompt, mode, count, prior?.groupId);
+      const { groupId, created, failed } = await launchAgents(
+        target,
+        prompt,
+        mode,
+        count,
+        prior?.groupId,
+        choicesFor(target.provider, work),
+      );
       const ids = [...(prior?.ids ?? []), ...created.map((a) => a.id)];
       for (const a of created) useApp.getState().upsertAgent(a);
       if (failed.length === 0) {
@@ -218,6 +228,9 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
           </label>
         </Tooltip>
         <AgentCount value={count} onChange={setCount} compact={compact} disabled={busy} />
+        {target.provider === "claude" && (
+          <WorkTypeChip value={work} onChange={setWork} available={workTypes} compact={compact} />
+        )}
         <PermissionModeChip value={mode} onChange={setMode} compact={compact} className="h-7 rounded-lg" />
         <div className="ml-auto flex items-center gap-2">
           <ComposerVoiceButtons onText={insertDictation} />

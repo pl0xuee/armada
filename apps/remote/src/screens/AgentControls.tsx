@@ -13,6 +13,7 @@ import { navigate } from "@/lib/router";
 import { choiceName, onOff, visibleOptions } from "@/lib/config";
 import { cancelTurn, resumeAgent, setArchived, setConfigOption, stopAgent, switchAccount } from "@/lib/controller";
 import { isBusy, isResumable, safeColor } from "@/lib/meta";
+import { choiceHint, optionNote, switchNeedsNote } from "@/lib/modelGuide";
 import { accountProblem } from "@/lib/newAgent";
 import { useStore } from "@/lib/store";
 import type { Agent, ConfigOption, RemoteAccount } from "@/lib/types";
@@ -126,7 +127,17 @@ export function OptionSheet({ agent, optionId, onClose }: { agent: Agent; option
                   aria-checked={selected}
                   onClick={() => {
                     onClose();
-                    if (!selected) void setConfigOption(agent.id, o.id, c.value);
+                    if (selected) return;
+                    if (!switchNeedsNote(agent, o, c.value)) {
+                      void setConfigOption(agent.id, o.id, c.value);
+                      return;
+                    }
+                    // A new model re-reads the whole conversation once, which is dear on a long one.
+                    void confirmAction({
+                      title: "Switch model now?",
+                      body: `This conversation is about ${Math.round((agent.contextUsed ?? 0) / 1000)}k tokens long. The new model has to read all of it again, which costs more than a normal message. Switching at a natural break, or after /compact, is cheaper.`,
+                      confirmLabel: "Switch anyway",
+                    }).then((ok) => ok && setConfigOption(agent.id, o.id, c.value));
                   }}
                   className={cn(
                     "press flex min-h-14 w-full items-center gap-3 rounded-2xl border px-4 py-2.5 text-left",
@@ -135,12 +146,15 @@ export function OptionSheet({ agent, optionId, onClose }: { agent: Agent; option
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block text-[15px] font-medium text-fg">{c.name}</span>
-                    {c.description && <span className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted">{c.description}</span>}
+                    {(c.description || choiceHint(agent, o, c.value)) && (
+                      <span className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted">{c.description || choiceHint(agent, o, c.value)}</span>
+                    )}
                   </span>
                   {selected && <Icon name="check" size={18} strokeWidth={2.4} className="shrink-0 text-accent" />}
                 </button>
             );
           })}
+          {optionNote(agent, o) && <p className="px-1 pt-1 text-[12.5px] leading-snug text-steel">{optionNote(agent, o)}</p>}
         </div>
       )}
     </Sheet>

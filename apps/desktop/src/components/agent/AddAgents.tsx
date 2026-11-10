@@ -3,7 +3,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useIdentity } from "@/hooks/useIdentity";
 import { tileIdsFor, MAX_TILES } from "@/lib/helpers";
-import { choiceKey, launchAgents, type ResolvedLaunch } from "@/lib/launchDefaults";
+import { choiceKey, launchAgents, savedWorkChoices, type ResolvedLaunch } from "@/lib/launchDefaults";
 import type { Agent } from "@/lib/types";
 import { basename, cn, errorMessage, isMac, modKey, prettyPath } from "@/lib/utils";
 import { useApp } from "@/store/app";
@@ -54,7 +54,14 @@ export function AddAgents({ agent, showLabel }: { agent: Agent; showLabel: boole
     setBusy(true);
     setFailures([]);
     try {
-      const { created, failed } = await launchAgents(target, prompt, permissionMode, count);
+      const { created, failed } = await launchAgents(
+        target,
+        prompt,
+        permissionMode,
+        count,
+        null,
+        await savedWorkChoices(agent.provider),
+      );
       for (const a of created) useApp.getState().upsertAgent(a);
       const ui = useUi.getState();
       // Everything already on screen stays and the new agents join it, with the focus where it is now.

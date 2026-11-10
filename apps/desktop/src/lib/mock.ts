@@ -1587,7 +1587,14 @@ export const mockApi: KvistcodeApi = {
       archived: false,
       lastMessage: null,
       pendingPermissions: 0,
-      configOptions: configFor(req.provider, req.model),
+      // Like the real backend: the remembered defaults, then what this launch asked for (a kind of work).
+      configOptions: configFor(req.provider, req.model).map((o) => {
+        if (req.provider !== "claude") return o;
+        const asked = { ...configDefaultsDb[configDefaultsKey(req.provider, null)], ...req.configChoices }[o.id];
+        return asked && (o.id === "model" || o.id === "effort") && o.options.some((c) => c.value === asked)
+          ? { ...o, currentValue: asked }
+          : o;
+      }),
       steerable: req.provider === "claude" || req.provider === "codex",
       availableCommands: commandsFor(req.provider),
       rateLimited: false,
@@ -1598,7 +1605,7 @@ export const mockApi: KvistcodeApi = {
       queuePaused: false,
       acknowledgedAt: null,
       needsBriefing: false,
-      configChoices: {},
+      configChoices: req.provider === "claude" ? { ...req.configChoices } : {},
       permissionMode: req.permissionMode ?? db.settings.defaultPermissionMode,
       parentId: helperOf?.id ?? null,
       helperSync: helperOf ? { state: "pendingToMain", lastSyncAt: null, detail: null, files: 0 } : null,

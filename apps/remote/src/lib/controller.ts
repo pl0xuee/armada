@@ -748,6 +748,7 @@ export async function refreshState() {
             ? snap.defaultPermissionMode
             : null,
         responseStyle: isResponseStyle(snap.responseStyle) ? snap.responseStyle : null,
+        claudeChoicesRemembered: typeof snap.claudeChoicesRemembered === "boolean" ? snap.claudeChoicesRemembered : null,
         timelines,
         stateStatus: "ready",
         stateError: null,

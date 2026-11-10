@@ -10,6 +10,7 @@ import { createAgent } from "@/lib/controller";
 import { basename } from "@/lib/format";
 import { safeColor } from "@/lib/meta";
 import { mergeAttachments } from "@/lib/attachments";
+import { KEEP, saveWorkChoice, WORK_TYPES } from "@/lib/modelGuide";
 import { accountProblem, agentChoices, initialForm, saveLast, validate, type NewAgentForm } from "@/lib/newAgent";
 import { goBack, navigate } from "@/lib/router";
 import { useStore } from "@/lib/store";
@@ -25,6 +26,7 @@ export function NewAgent() {
   const templates = useStore((s) => s.templates);
   const defaultWorktree = useStore((s) => s.defaultWorktree);
   const defaultPermissionMode = useStore((s) => s.defaultPermissionMode);
+  const claudeChoicesRemembered = useStore((s) => s.claudeChoicesRemembered);
   const stateStatus = useStore((s) => s.stateStatus);
   const stateError = useStore((s) => s.stateError);
 
@@ -39,10 +41,10 @@ export function NewAgent() {
   // Initialise once the state (accounts, projects) is available.
   useEffect(() => {
     if (form || stateStatus !== "ready") return;
-    const f = initialForm(choices, projects, defaultWorktree, undefined, defaultPermissionMode);
+    const f = initialForm(choices, projects, defaultWorktree, undefined, defaultPermissionMode, claudeChoicesRemembered);
     setForm(f);
     setCustomPath(!projects.length);
-  }, [choices, defaultPermissionMode, defaultWorktree, form, projects, stateStatus]);
+  }, [choices, claudeChoicesRemembered, defaultPermissionMode, defaultWorktree, form, projects, stateStatus]);
 
   // One Idempotency-Key per distinct request: pressing Start again after a
   // timeout retries the same request (no duplicate agent); editing the form
@@ -207,6 +209,38 @@ export function NewAgent() {
           />
         </Section>
 
+        {choice?.provider === "claude" && (
+          <Section title="What is this agent for?" hint="Picks the model and how hard it thinks. You can change both after it starts.">
+            <RadioList
+              label="Kind of work"
+              items={[
+                ...WORK_TYPES.map((w) => ({
+                  key: w.id,
+                  selected: form.workType === w.id,
+                  onSelect: () => update({ workType: w.id }),
+                  content: (
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[15px] text-fg">{w.label}</span>
+                      <span className="block text-[12.5px] leading-snug text-muted">{w.blurb}</span>
+                    </span>
+                  ),
+                })),
+                {
+                  key: KEEP,
+                  selected: form.workType === KEEP,
+                  onSelect: () => update({ workType: KEEP }),
+                  content: (
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[15px] text-fg">My usual model</span>
+                      <span className="block text-[12.5px] leading-snug text-muted">The model and effort you used last</span>
+                    </span>
+                  ),
+                },
+              ]}
+            />
+          </Section>
+        )}
+
         {form.permissionMode && (
           <Section title="Approvals">
             <Segmented
@@ -335,6 +369,7 @@ export function NewAgent() {
       if (uploading) setProgress(0);
       const id = await createAgent(v.request, requestKey.current, uploading ? setProgress : undefined);
       saveLast({ choiceKey: form.choiceKey!, accountId: v.request.accountId, projectPath: v.request.projectPath });
+      if (v.request.provider === "claude") saveWorkChoice(form.workType);
       navigate({ name: "agent", agentId: id }, { replace: true });
     } catch (e) {
       setError({ message: errorMessage(e) });

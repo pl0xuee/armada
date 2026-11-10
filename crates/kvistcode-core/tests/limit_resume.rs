@@ -139,6 +139,7 @@ async fn new_agent(core: &Core, project: &Path, title: &str) -> Agent {
         custom_agent_id: None,
         permission_mode: None,
         attachments: vec![],
+        config_choices: Default::default(),
     })
     .await
     .unwrap()

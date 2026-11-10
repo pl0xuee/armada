@@ -5,6 +5,13 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.4.10 — 2026-11-10
+
+- Pick the kind of work. A new Claude agent now starts on a model and effort chosen from what it is for, next to the prompt: Everyday coding (Opus, medium effort), Routine tasks (Sonnet), Quick or bulk (Haiku) or Big refactor or research (Fable), or "My usual model" to change nothing. New installs start on Everyday coding; if you have already chosen a Claude model or effort yourself, you start on "My usual model" and nothing changes behind your back. Your last pick is remembered, and a model Claude Code does not offer is hidden. The New agent dialog and the phone have the same picker, and the command palette uses your last pick.
+- The model and effort menus say what each choice is good for (where Claude gives no description) and when to move up: try one effort level higher before a bigger model; switch at a break.
+- Changing the model on a long conversation (100k tokens or more) now asks first, because the new model has to read all of it again; you can compact first.
+- First-run setup now puts Claude's helper agents on Sonnet, so the agent's own model does the hard part. If yours still run on the main model, the Usage page offers "Use Sonnet for helpers" in one click, and its advice on pricey agents and high effort is reworded to match.
+
 ## v0.4.9 — 2026-11-09
 
 - Long descriptions in the composer's menus (like a sub-agent's instructions in the Agent menu) are cut to two lines, so the menu no longer fills the screen; hover to read the rest. Same on the phone.

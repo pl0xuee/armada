@@ -103,6 +103,7 @@ fn request(env: &Env, prompt: &str) -> CreateAgentRequest {
         custom_agent_id: Some("mock".into()),
         permission_mode: None,
         attachments: vec![],
+        config_choices: Default::default(),
     }
 }
 

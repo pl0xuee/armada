@@ -2349,6 +2349,16 @@ async fn state(
     let response_style = (scope == Scope::Owner)
         .then(|| core.settings().map(|s| s.response_style))
         .transpose()?;
+    // Whether Claude already has a model or effort the user chose, so the phone leaves it alone.
+    let claude_remembered = (scope == Scope::Owner)
+        .then(|| {
+            core.settings().map(|s| {
+                s.config_defaults
+                    .get("claude")
+                    .is_some_and(|d| d.contains_key("model") || d.contains_key("effort"))
+            })
+        })
+        .transpose()?;
     Ok(Json(json!({
         "agents": agents,
         "accounts": accounts,
@@ -2358,6 +2368,7 @@ async fn state(
         "defaultWorktree": default_worktree,
         "defaultPermissionMode": default_mode,
         "responseStyle": response_style,
+        "claudeChoicesRemembered": claude_remembered,
     })))
 }
 
@@ -2536,6 +2547,9 @@ struct CreateBody {
     group_id: Option<String>,
     #[serde(default)]
     attachments: Vec<Attachment>,
+    /// A Claude "kind of work" pick (model and effort); the core keeps only those two.
+    #[serde(default)]
+    config_choices: std::collections::BTreeMap<String, String>,
 }
 
 /// Starts a new agent (any provider: Claude, Codex, Grok or a custom ACP agent).
@@ -2579,6 +2593,7 @@ async fn create_agent(
                 custom_agent_id: body.custom_agent_id,
                 permission_mode: body.permission_mode,
                 attachments: body.attachments,
+                config_choices: body.config_choices,
             })
             .await?;
         if let Err(e) = crate::commands::remember_project(&core, &project) {
@@ -3775,6 +3790,7 @@ mod tests {
                 custom_agent_id: None,
                 permission_mode: None,
                 attachments: vec![],
+                config_choices: Default::default(),
             })
             .await
             .unwrap();

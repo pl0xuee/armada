@@ -1916,7 +1916,7 @@ impl Core {
             last_message: None,
             pending_permissions: 0,
             config_options: Vec::new(),
-            config_choices: Default::default(),
+            config_choices: config_memory::requested_choices(req.provider, &req.config_choices),
             available_commands: Vec::new(),
             steerable: false,
             rate_limited: false,
@@ -2969,6 +2969,7 @@ impl Core {
             custom_agent_id: custom_agent_id.map(str::to_string),
             permission_mode: None,
             attachments: Vec::new(),
+            config_choices: Default::default(),
         };
         self.create_agent_inner(req, Some(&src), None, None).await
     }
@@ -3394,6 +3395,7 @@ impl Core {
             custom_agent_id: schedule.custom_agent_id.clone(),
             permission_mode: schedule.permission_mode.clone(),
             attachments: Vec::new(),
+            config_choices: Default::default(),
         };
         let result = self
             .create_agent_inner(req, None, Some(schedule.id.clone()), None)

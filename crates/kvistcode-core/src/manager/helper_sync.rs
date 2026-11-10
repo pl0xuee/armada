@@ -179,6 +179,7 @@ impl Core {
             // Never more permissive than the main agent's own choice.
             permission_mode: parent.permission_mode.clone(),
             attachments,
+            config_choices: Default::default(),
         };
         let seed = HelperSeed {
             id: id.clone(),

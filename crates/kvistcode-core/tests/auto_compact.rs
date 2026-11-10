@@ -83,6 +83,7 @@ async fn run(stuck: bool, name: &str, percent: Option<u8>) -> (Vec<String>, Vec<
             custom_agent_id: Some("mock".into()),
             permission_mode: None,
             attachments: vec![],
+            config_choices: Default::default(),
         })
         .await
         .unwrap();

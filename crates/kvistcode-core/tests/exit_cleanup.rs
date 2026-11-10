@@ -68,6 +68,7 @@ async fn kill_all_children_takes_down_every_agent_tree() {
             custom_agent_id: Some("mock".into()),
             permission_mode: None,
             attachments: vec![],
+            config_choices: Default::default(),
         })
         .await
         .unwrap();

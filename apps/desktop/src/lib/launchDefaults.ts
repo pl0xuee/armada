@@ -3,6 +3,7 @@
 import { api } from "./api";
 import { recallLocalModel } from "./local";
 import { errorMessage, uuid } from "./utils";
+import { choicesFor, readWorkChoice, resolveWorkChoice, WORK_TYPES } from "./modelGuide";
 import { CUSTOM_ACCOUNT_ID, PROVIDER_ORDER, type BuiltinProvider } from "./providers";
 import type { Account, Agent, CreateAgentRequest, CustomAgent, Provider, ProviderInfo, Settings } from "./types";
 
@@ -129,6 +130,7 @@ function launchRequest(
   prompt: string,
   permissionMode: "auto" | "ask" | null,
   worktree: boolean,
+  configChoices: Record<string, string> = {},
 ): CreateAgentRequest {
   return {
     provider: t.provider,
@@ -142,7 +144,18 @@ function launchRequest(
     groupId: null,
     attachments: [],
     permissionMode,
+    configChoices,
   };
+}
+
+/**
+ * The model and effort a Claude launch starts on when it didn't ask the user: their last "kind of
+ * work" pick, or the recommended one. For launches with no picker (the palette, "add agents").
+ */
+export async function savedWorkChoices(provider: Provider): Promise<Record<string, string>> {
+  if (provider !== "claude") return {};
+  const remembered = await api.configDefaults().catch(() => ({}) as Record<string, Record<string, string>>);
+  return choicesFor(provider, resolveWorkChoice(readWorkChoice(), remembered.claude, WORK_TYPES));
 }
 
 /** Create one agent from a resolved target + prompt (used by home and the palette). */
@@ -150,8 +163,9 @@ export async function launchAgent(
   t: ResolvedLaunch,
   prompt: string,
   permissionMode: "auto" | "ask" | null = null,
+  configChoices: Record<string, string> = {},
 ): Promise<Agent> {
-  const agent = await api.createAgent(launchRequest(t, prompt, permissionMode, t.worktree));
+  const agent = await api.createAgent(launchRequest(t, prompt, permissionMode, t.worktree, configChoices));
   rememberLaunch(t);
   return agent;
 }
@@ -186,6 +200,7 @@ export async function launchAgents(
   permissionMode: "auto" | "ask" | null,
   count: number,
   groupId: string | null = null,
+  configChoices: Record<string, string> = {},
 ): Promise<LaunchBatch> {
   const n = clampAgentCount(count);
   // Retrying the failed ones of a batch (it has a group) keeps them isolated like their siblings.
@@ -194,7 +209,7 @@ export async function launchAgents(
   const results = await Promise.allSettled(
     // Async, so a throw while building the request is a failed agent, not an escaped exception.
     Array.from({ length: n }, async () =>
-      api.createAgent({ ...launchRequest(t, prompt, permissionMode, worktree), groupId: group }),
+      api.createAgent({ ...launchRequest(t, prompt, permissionMode, worktree, configChoices), groupId: group }),
     ),
   );
   const created: Agent[] = [];

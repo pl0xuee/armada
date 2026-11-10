@@ -119,3 +119,21 @@ describe("tokenInsights", () => {
     expect(out.map((i) => i.severity)).toEqual([...out.map((i) => i.severity)].sort((a, b) => "high medium info".indexOf(a) - "high medium info".indexOf(b)));
   });
 });
+
+describe("the helper-model insight", () => {
+  const heavy = [agent({ tokensUsed: 2_500_000, costUsd: 1 })];
+  const saver = (subagentModel: string | null) =>
+    settings({ tokenSaver: { outputFilter: false, bashOutputMaxChars: null, subagentModel } });
+
+  it("offers Sonnet for helpers on its own, not the whole preset", () => {
+    const i = tokenInsights({ agents: heavy, accounts: [account(null)], settings: saver(null), now: NOW }).find(
+      (x) => x.id === "helper-model",
+    )!;
+    expect(i.action).toEqual({ kind: "helper-model", model: "sonnet", label: "Use Sonnet for helpers" });
+  });
+
+  it("is quiet once helpers have a model, or for light use", () => {
+    expect(ids(heavy, saver("sonnet"))).not.toContain("helper-model");
+    expect(ids([agent({ tokensUsed: 100_000 })], saver(null))).not.toContain("helper-model");
+  });
+});

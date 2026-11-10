@@ -68,6 +68,7 @@ async fn prompt_permission_and_resume_flow() {
             custom_agent_id: None,
             permission_mode: None,
             attachments: vec![],
+            config_choices: Default::default(),
         })
         .await
         .unwrap();
@@ -435,6 +436,7 @@ async fn failover_mcp_commands_and_export() {
             custom_agent_id: None,
             permission_mode: None,
             attachments: vec![],
+            config_choices: Default::default(),
         })
         .await
         .unwrap();
@@ -597,6 +599,7 @@ async fn custom_agents_attachments_and_files() {
         custom_agent_id: custom.map(str::to_string),
         permission_mode: None,
         attachments,
+        config_choices: Default::default(),
     };
     assert!(
         core.create_agent(req(None, vec![])).await.is_err(),
@@ -711,6 +714,7 @@ async fn stream_offsets_and_final_item() {
             // Per-agent override of the "auto" default.
             permission_mode: Some("ask".into()),
             attachments: vec![],
+            config_choices: Default::default(),
         })
         .await
         .unwrap();
@@ -833,6 +837,7 @@ async fn subagent_calls_nest_under_their_task() {
             custom_agent_id: Some("mock".into()),
             permission_mode: None,
             attachments: vec![],
+            config_choices: Default::default(),
         })
         .await
         .unwrap();
@@ -942,6 +947,7 @@ async fn codex_server_requests_and_ask_mode() {
             custom_agent_id: None,
             permission_mode: Some("ask".into()),
             attachments: vec![],
+            config_choices: Default::default(),
         })
         .await
         .unwrap();
@@ -1126,6 +1132,7 @@ async fn agents_are_told_how_to_write_their_replies() {
                 custom_agent_id: Some("mock".into()),
                 permission_mode: None,
                 attachments: vec![],
+                config_choices: Default::default(),
             })
             .await
             .unwrap();
@@ -1233,6 +1240,7 @@ async fn agents_are_told_they_can_show_pictures() {
                 custom_agent_id: Some("mock".into()),
                 permission_mode: None,
                 attachments: vec![],
+                config_choices: Default::default(),
             })
             .await
             .unwrap();
@@ -1289,6 +1297,7 @@ async fn sent_files_show_as_a_reply() {
             custom_agent_id: Some("mock".into()),
             permission_mode: None,
             attachments: vec![],
+            config_choices: Default::default(),
         })
         .await
         .unwrap();

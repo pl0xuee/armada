@@ -105,6 +105,35 @@ pub fn plan(
     out
 }
 
+/// The options a "kind of work" pick may set at launch.
+const REQUESTABLE: &[&str] = &["model", "effort"];
+
+/// What a launch may ask a new Claude agent to start with: only the model and the effort, with
+/// plain values (an alias like `opus`, a level like `medium`). Anything else, any other
+/// provider, or a permission-looking value is dropped, so a launch can never set a mode.
+/// The values are checked against the agent's real options when its session starts
+/// (`plan`), so one Claude Code doesn't offer is simply not applied.
+pub fn requested_choices(
+    provider: Provider,
+    asked: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    if provider != Provider::Claude {
+        return BTreeMap::new();
+    }
+    asked
+        .iter()
+        .filter(|(k, v)| {
+            REQUESTABLE.contains(&k.as_str())
+                && !v.is_empty()
+                && v.len() <= 64
+                && v.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'))
+                && !is_bypass_value(v)
+        })
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
 /// First-start choices: the provider's remembered defaults, overridden by
 /// anything remembered for the agent itself.
 pub fn first_start_choices(
@@ -257,5 +286,54 @@ mod tests {
     fn identity_keys() {
         assert_eq!(identity_key(Provider::Claude, None), "claude");
         assert_eq!(identity_key(Provider::Custom, Some("abc")), "custom:abc");
+    }
+
+    #[test]
+    fn a_launch_may_only_ask_for_model_and_effort_on_claude() {
+        let ask = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let got = requested_choices(
+            Provider::Claude,
+            &ask(&[
+                ("model", "opus"),
+                ("effort", "medium"),
+                ("mode", "plan"),
+                ("fast", "on"),
+            ]),
+        );
+        assert_eq!(got, ask(&[("model", "opus"), ("effort", "medium")]));
+        // Not Claude: nothing.
+        assert!(requested_choices(Provider::Codex, &ask(&[("model", "opus")])).is_empty());
+        // Odd values are dropped (an empty one, a long one, spaces, a permission-looking one).
+        let long = "x".repeat(65);
+        assert!(
+            requested_choices(Provider::Claude, &ask(&[("model", ""), ("effort", &long)]))
+                .is_empty()
+        );
+        assert!(requested_choices(Provider::Claude, &ask(&[("model", "a b")])).is_empty());
+        assert!(
+            requested_choices(Provider::Claude, &ask(&[("model", "bypassPermissions")])).is_empty()
+        );
+    }
+
+    #[test]
+    fn a_launch_pick_beats_the_remembered_default_for_that_start_only() {
+        let remembered = map(&[("model", "sonnet"), ("effort", "high"), ("fast", "on")]);
+        let asked = requested_choices(
+            Provider::Claude,
+            &map(&[("model", "opus"), ("effort", "medium")]),
+        );
+        let start = first_start_choices(Some(&remembered), &asked);
+        assert_eq!(start["model"], "opus");
+        assert_eq!(start["effort"], "medium");
+        // What the user did not ask about still comes from what they remembered.
+        assert_eq!(start["fast"], "on");
+        // And with no pick (My usual model), the remembered choices stand.
+        let none = requested_choices(Provider::Claude, &BTreeMap::new());
+        assert_eq!(first_start_choices(Some(&remembered), &none), remembered);
     }
 }

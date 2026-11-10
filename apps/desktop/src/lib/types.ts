@@ -1028,6 +1028,8 @@ export interface CreateAgentRequest {
   attachments: Attachment[];
   /** null = settings.defaultPermissionMode. */
   permissionMode?: "auto" | "ask" | null;
+  /** Claude only: the model and effort to start on (a "kind of work" pick), over the remembered defaults. */
+  configChoices?: Record<string, string>;
 }
 
 export interface CreateAccountRequest {

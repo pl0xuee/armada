@@ -1,11 +1,13 @@
 import { Check, ChevronDown, CircleDot, Columns3, FolderOpen, FolderPlus, GitBranch, Rocket } from "lucide-react";
 import { PermissionModeChip, usePermissionMode } from "./home/PermissionModeChip";
+import { useWorkChoice, WorkTypeChip } from "./home/WorkTypeChip";
 import { PreflightNotes, usePreflight } from "./home/PreflightNotes";
 import { ProjectPicker } from "./home/ProjectPicker";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { recallLocalModel, rememberLocalModel } from "@/lib/local";
+import { choicesFor } from "@/lib/modelGuide";
 import { CUSTOM_ACCOUNT_ID, PROVIDER_ORDER, PROVIDERS } from "@/lib/providers";
 import type { Account, Agent, Provider } from "@/lib/types";
 import { cn, errorMessage, modKey, uuid, isMac } from "@/lib/utils";
@@ -77,6 +79,7 @@ interface LaunchTarget {
 
 function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDone: () => void }) {
   const [mode, setMode] = usePermissionMode();
+  const [work, setWork, workTypes] = useWorkChoice();
   const accounts = useApp((s) => s.accounts);
   const settings = useApp((s) => s.settings);
   const openAgent = useUi((s) => s.openAgent);
@@ -248,6 +251,13 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
     return model.trim() || null;
   };
 
+  /** The kind of work picked (Claude only). A model typed under "Title & model" wins over it. */
+  const choicesOf = (t: LaunchTarget): Record<string, string> => {
+    const choices = choicesFor(t.provider, work);
+    if (modelFor(t)) delete choices.model;
+    return choices;
+  };
+
   const submit = async () => {
     if (!canSubmit || submittingRef.current) return;
     submittingRef.current = true;
@@ -271,6 +281,7 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
             groupId,
             permissionMode: mode,
             attachments: attach.attachments,
+            configChoices: choicesOf(t),
           }),
         ),
       );
@@ -643,6 +654,9 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
             </span>
           </label>
           {!compare && <AgentCount value={count} onChange={setCount} disabled={submitting} />}
+          {chosen.some((t) => t.provider === "claude") && (
+            <WorkTypeChip value={work} onChange={setWork} available={workTypes} />
+          )}
           <PermissionModeChip value={mode} onChange={setMode} />
           <button
             type="button"

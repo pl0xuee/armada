@@ -695,6 +695,7 @@ impl KvistcodeTools {
                     // Agents the assistant starts always ask before acting.
                     permission_mode: Some(ASSISTANT_AGENT_MODE.into()),
                     attachments: Vec::new(),
+                    config_choices: Default::default(),
                 };
                 match host.core.create_agent(req).await {
                     Ok(agent) => {
