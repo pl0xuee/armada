@@ -131,7 +131,7 @@ export function TokenSavingSettings({ settings }: { settings: Settings }) {
       </SettingRow>
       <SettingRow
         title="Helper agents use"
-        description="Claude splits work into helper agents, each with its own conversation and its own usage. In one measured install, four in five tool calls came from helpers. Running them on a smaller model saves usage and rarely changes the result. Applies to Claude agents as they start."
+        description="Claude splits work into helper agents, each with its own conversation and its own usage. In one measured install, four in five tool calls came from helpers. Running them on a smaller model saves usage and rarely changes the result. This applies even when an agent asks for another model for a helper. It takes effect for Claude agents as they start."
       >
         <Select
           aria-label="Helper agents use"

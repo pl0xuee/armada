@@ -320,7 +320,8 @@ export interface SubagentChip {
 /**
  * Model and effort chips for a sub-agent. A value the launch didn't name shows as "inherits" with the
  * main agent's when it runs on that, as the helper model for a Claude general-purpose one when one is
- * set, or not at all when that isn't known (nothing is invented). Claude Code picks the launch's model,
+ * set (also when the launch names a model: the computer's hook replaces it), or not at all when that
+ * isn't known (nothing is invented). Claude Code picks the launch's model,
  * else the sub-agent definition's, else the helper model, else the main agent's.
  */
 export function subagentChips(info: Pick<SubagentInfo, "model" | "effort" | "kind"> | undefined, inherited?: InheritedConfig): SubagentChip[] {
@@ -330,7 +331,9 @@ export function subagentChips(info: Pick<SubagentInfo, "model" | "effort" | "kin
   const helper = inherited?.claude?.helper ?? null;
   let onParent = true;
   if (!model && inherited?.claude) onParent = RUNS_ON_PARENT.has(kind) || (GENERAL.has(kind) && !helper);
-  if (model) out.push({ key: "model", text: model, inherited: false });
+  // The computer's hook holds a Claude helper that names a model to the helper setting.
+  if (model && helper) out.push({ key: "model", text: `${helper}, helper setting`, inherited: true });
+  else if (model) out.push({ key: "model", text: model, inherited: false });
   else if (onParent && inherited?.model) out.push({ key: "model", text: `inherits ${inherited.model}`, inherited: true });
   else if (helper && GENERAL.has(kind)) out.push({ key: "model", text: `${helper}, helper setting`, inherited: true });
   // The main agent's effort applies only while the sub-agent runs on the main agent's model.

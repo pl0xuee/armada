@@ -195,8 +195,18 @@ describe("sub-agent chips and the helper model", () => {
     expect(subagentChips({ kind: "fork" }, claude("Sonnet"))[0].text).toBe("inherits Opus 5.5");
   });
 
-  it("still shows a model the launch named", () => {
-    expect(subagentChips({ kind: "web-fetch", model: "haiku" }, claude("Sonnet"))).toEqual([
+  it("shows the helper setting for a launch that names a model, which the hook replaces", () => {
+    expect(subagentChips({ kind: "general-purpose", model: "opus", effort: "medium" }, claude("Sonnet"))).toEqual([
+      { key: "model", text: "Sonnet, helper setting", inherited: true },
+      { key: "effort", text: "Medium", inherited: false },
+    ]);
+    expect(subagentChips({ kind: "web-fetch", model: "haiku" }, claude("Sonnet"))[0].text).toBe(
+      "Sonnet, helper setting",
+    );
+  });
+
+  it("still shows a model the launch named when no helper model is set", () => {
+    expect(subagentChips({ kind: "web-fetch", model: "haiku" }, claude(null))).toEqual([
       { key: "model", text: "haiku", inherited: false },
     ]);
   });

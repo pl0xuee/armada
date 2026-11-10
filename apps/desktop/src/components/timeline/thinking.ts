@@ -251,7 +251,8 @@ const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 /**
  * Model and effort chips for a sub-agent. A value the launch named shows as is; otherwise "inherits <the
  * parent's value>" when the parent exposes one and the sub-agent runs on it, the helper model for a
- * Claude general-purpose sub-agent when one is set, and nothing when it isn't known (never invented).
+ * Claude general-purpose sub-agent when one is set (or any Claude launch naming a model, which the
+ * hook overrides), and nothing when it isn't known (never invented).
  */
 export function subagentChips(
   sub: { model?: string | null; effort?: string | null; kind?: string | null },
@@ -270,7 +271,10 @@ export function subagentChips(
     else if (kind === "" || kind === "general-purpose") onParent = !parent.claude.helper;
     else onParent = false;
   }
-  if (model) chips.push({ key: "model", text: model, inherited: false });
+  // Kvistcode's hook holds a Claude helper that names a model to the helper setting (token_saver.rs).
+  if (model && parent.claude?.helper)
+    chips.push({ key: "model", text: `${parent.claude.helper}, helper setting`, inherited: true });
+  else if (model) chips.push({ key: "model", text: model, inherited: false });
   else if (onParent && parent.model) chips.push({ key: "model", text: `inherits ${parent.model}`, inherited: true });
   else if (!onParent && parent.claude?.helper && (kind === "" || kind === "general-purpose"))
     chips.push({ key: "model", text: `${parent.claude.helper}, helper setting`, inherited: true });

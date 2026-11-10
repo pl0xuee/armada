@@ -140,6 +140,12 @@ describe("sub-agent chips and the helper model", () => {
     expect(subagentChips({ kind: "Sub-agent" }, inh)[0].text).toBe("Sonnet, helper setting");
   });
 
+  it("shows the helper setting for a launch that names a model, which the computer's hook replaces", () => {
+    const inh = inheritedConfig(claudeAgent, "sonnet");
+    expect(subagentChips({ kind: "general-purpose", model: "opus" }, inh)[0]).toEqual({ key: "model", text: "Sonnet, helper setting", inherited: true });
+    expect(subagentChips({ kind: "general-purpose", model: "opus" }, inheritedConfig(claudeAgent, null))[0].text).toBe("opus");
+  });
+
   it("says nothing it can't know for a sub-agent with its own definition, keeps plans on the main agent", () => {
     const inh = inheritedConfig(claudeAgent, "sonnet");
     expect(subagentChips({ kind: "web-fetch" }, inh)).toEqual([]);

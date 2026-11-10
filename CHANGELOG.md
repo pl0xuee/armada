@@ -5,6 +5,10 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.4.13 — 2026-11-10
+
+- The helper model setting now always applies. Claude agents could ask for a different model when starting a helper (often Opus for reviews), and that overrode "Helper agents use". Now a helper always runs on the model you chose, and its card shows that model. Running agents pick this up when they next start.
+
 ## v0.4.12 — 2026-11-10
 
 - Settings is reorganized and easier to find your way around. The sidebar is grouped (App, Agents, Workspace, Phone & voice), and a search box at the top finds any setting by name and jumps straight to it.

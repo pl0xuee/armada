@@ -52,6 +52,9 @@ All four have a 1M-token context window and 128K max output. Fable costs twice O
   over only upward (Haiku to Sonnet to Opus to Fable); moving to a smaller model, or off Fable, drops earlier reasoning.
 - **Helpers on a smaller model.** File search, log reading and summaries are cheap to check, so Sonnet or Haiku suit them
   (`CLAUDE_CODE_SUBAGENT_MODEL`, the "Helper agents use" setting). Keep code edits and judgment on the main model.
+  The variable is only Claude Code's default: an agent that names a model for a helper (agents often pick Opus for
+  reviews) overrides it. So Kvistcode also adds a `PreToolUse` hook on `Agent|Task` (`kvistcode helper-model <model>`)
+  that puts the setting's model into any launch naming another one.
 - **Not built in:** the advisor pairing (a bigger model advising a smaller one: +1.7 points for about 2.1x the cost) and
   switching models mid-conversation automatically. `opusplan` is not a default.
 
