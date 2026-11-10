@@ -282,8 +282,12 @@ export function Blocked() {
   // Keep trying quietly while the computer is asleep / the network is down.
   useEffect(() => {
     if (reason !== "unreachable" && reason !== "unavailable") return;
+    // One attempt at a time: a new one cancels the one before, so on a slow link none would land.
+    let trying = false;
     const retry = () => {
-      if (document.visibilityState === "visible") void retryConnect();
+      if (trying || document.visibilityState !== "visible") return;
+      trying = true;
+      void retryConnect().finally(() => (trying = false));
     };
     const id = setInterval(retry, 8_000);
     window.addEventListener("online", retry);

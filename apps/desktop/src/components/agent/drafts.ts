@@ -97,6 +97,21 @@ export function insertIntoDraft(agentId: string, text: string) {
   setDraft(agentId, cur.trim() ? `${cur.trimEnd()}\n\n${text}` : text);
 }
 
+// Pictures attached but not sent yet, per agent. Memory only (they are big), a few agents at most.
+const MAX_PICTURE_DRAFTS = 12;
+const pictures = new Map<string, Attachment[]>();
+
+export function getDraftAttachments(agentId: string): Attachment[] {
+  return pictures.get(agentId) ?? [];
+}
+
+export function setDraftAttachments(agentId: string, attachments: Attachment[]) {
+  pictures.delete(agentId);
+  if (attachments.length === 0) return;
+  pictures.set(agentId, attachments);
+  if (pictures.size > MAX_PICTURE_DRAFTS) pictures.delete(pictures.keys().next().value!);
+}
+
 // Images sent in from elsewhere (e.g. Preview screenshots): the mounted composer owns its attachments
 // and subscribes, like it does for text.
 type AttachListener = (attachments: Attachment[]) => void;

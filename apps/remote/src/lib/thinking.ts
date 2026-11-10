@@ -1,4 +1,5 @@
 /** The working indicator's wording, the same as the desktop's `thinking.ts`. */
+import { startsTurn } from "./rows";
 import type { AgentStatus, TimelineItem } from "./types";
 
 /** Friendly status verbs the indicator cycles through while the agent is busy. */
@@ -26,7 +27,7 @@ export const ELAPSED_AFTER_MS = 3000;
 export function turnStart(items: readonly TimelineItem[], fallback: number): number {
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i];
-    if (it.kind === "user_message") return it.ts;
+    if (startsTurn(it)) return it.ts;
     if (it.kind === "turn_summary") return items[i + 1]?.ts ?? fallback;
   }
   return fallback;

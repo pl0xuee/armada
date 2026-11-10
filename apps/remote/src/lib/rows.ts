@@ -34,6 +34,8 @@ export function isSubagentNode(x: ToolCallItem | SubagentNode): x is SubagentNod
 }
 
 /** A call that launched a sub-agent. Codex wait/close/send calls (`control`) manage existing ones: plain tool calls. */
+/** A message that starts a turn; one sent into a running turn ("Send now") doesn't (as on the desktop). */
+export const startsTurn = (it: TimelineItem): boolean => it.kind === "user_message" && !it.midTurn;
 export const isLauncher = (it: TimelineItem): it is ToolCallItem => it.kind === "tool_call" && !!it.subagent && !it.subagent.control;
 
 export function buildRows(items: TimelineItem[]): Row[] {

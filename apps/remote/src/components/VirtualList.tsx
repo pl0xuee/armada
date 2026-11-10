@@ -146,14 +146,22 @@ export function VirtualList<T>({
   // Older items were prepended: shift the window to the same rows and keep
   // them where they were on screen.
   const prevKeys = useRef(keys);
+  const prevOffsets = useRef(offsets);
   useLayoutEffect(() => {
     const old = prevKeys.current;
+    const oldOffsets = prevOffsets.current;
     prevKeys.current = keys;
+    prevOffsets.current = offsets;
     if (!old.length || old === keys || keys[0] === old[0]) return;
-    const k = keys.indexOf(old[0]);
-    if (k <= 0) return;
-    setRange((r) => [r[0] + k, r[1] + k]);
-    const added = offsets[k] ?? 0;
+    // The old first row may have merged into the page above it (a run of steps or messages
+    // split by the page edge): anchor on the first old row that is still there.
+    let j = 0;
+    let k = -1;
+    for (; j < Math.min(old.length, 3) && k < 0; j++) k = keys.indexOf(old[j]);
+    j -= 1;
+    if (k <= j) return;
+    setRange((r) => [r[0] + k - j, r[1] + k - j]);
+    const added = (offsets[k] ?? 0) - (oldOffsets[j] ?? 0);
     const s = scroll.current;
     if (s.touching || performance.now() - s.last < 120) {
       bias.current += added;

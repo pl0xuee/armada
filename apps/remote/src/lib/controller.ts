@@ -847,8 +847,17 @@ export async function loadTimeline(agentId: string) {
     // Keep older pages already loaded (the tail refetch doesn't include them).
     const minSeq = snapshot.length ? snapshot[0].seq : Infinity;
     const prev = getState().timelines[agentId];
+    // A full page that starts past everything we had (a long time away): what lies between was
+    // never loaded, so start again from this page instead of joining the two with a hole.
+    const hole =
+      !!prev &&
+      raw.length >= PAGE_SIZE &&
+      prev.items.length > 0 &&
+      prev.items[prev.items.length - 1].seq < minSeq;
     const older =
-      prev && snapshot.length ? prev.items.filter((i) => i.seq < minSeq) : [];
+      prev && snapshot.length && !hole
+        ? prev.items.filter((i) => i.seq < minSeq)
+        : [];
     const items = older.length ? [...older, ...merged.items] : merged.items;
     const hasMore = older.length
       ? (prev?.hasMore ?? false)

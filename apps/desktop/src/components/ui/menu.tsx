@@ -82,10 +82,15 @@ export function DropdownMenuCheckItem({
 }) {
   return (
     <DM.Item onSelect={onSelect} className={cn(itemClass, "h-auto min-h-8 py-1.5")}>
-      <span className="flex w-4 justify-center">{checked && <Check className="!text-accent" />}</span>
+      <span className="flex w-4 shrink-0 justify-center">{checked && <Check className="!text-accent" />}</span>
       <span className="flex min-w-0 flex-col">
         <span>{children}</span>
-        {description && <span className="text-meta text-steel">{description}</span>}
+        {description && (
+          // Some descriptions run to a paragraph (sub-agent instructions); keep the menu short.
+          <span title={description} className="line-clamp-2 max-w-72 text-meta text-steel">
+            {description}
+          </span>
+        )}
       </span>
     </DM.Item>
   );

@@ -5,6 +5,17 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.4.9 — 2026-11-09
+
+- Long descriptions in the composer's menus (like a sub-agent's instructions in the Agent menu) are cut to two lines, so the menu no longer fills the screen; hover to read the rest. Same on the phone.
+- Typing a whole command like `/compact` and pressing Enter now sends it; before, the first Enter only completed it. A command that needs something after it is still completed first.
+- Pictures you attached but have not sent stay with that agent when you look at another agent and come back.
+- A note written with "Deny with reason" is no longer lost if it cannot be sent; it lands in the message box.
+- Clicking inside the Preview no longer makes Kvistcode think you looked away (which could raise alerts for the agent in front of you).
+- In a narrow message box the status beside Stop shows whole or as a dot, never cut to "W…".
+- Stopping an automatic compaction no longer risks a later message not being put back in the queue if the agent dies before reading it.
+- Phone: a message sent into a running turn no longer resets the timer or hides running sub-agents; workflow runs are not counted as sub-agents; coming back after a long time away no longer leaves a hole in the conversation; loading older messages keeps your place; the "can't reach Kvistcode" screen no longer cancels its own retries on a slow link; and Undo cannot outlive the moment it still works.
+
 ## v0.4.8 — 2026-11-09
 
 - Companion software: Settings, Providers now lists tools your agents and projects often need (git, GitHub CLI, Node.js, Python, ripgrep, jq, Docker and a few more), shows which are installed and which are missing, says in one sentence what each is for, and installs the missing ones with one click using your computer's own package manager. Kvistcode shows the exact command and asks first, and nothing installs by itself.

@@ -149,7 +149,9 @@ export function App() {
   // Window focus tracking (smart mute)
   useEffect(() => {
     const onFocus = () => useUi.getState().setWindowFocused(true);
-    const onBlur = () => useUi.getState().setWindowFocused(false);
+    // Clicking into the Preview's page blurs the window while the app still has focus: ask the
+    // document a tick later (by then focus has landed in the iframe or left the app).
+    const onBlur = () => setTimeout(() => useUi.getState().setWindowFocused(document.hasFocus() && !document.hidden));
     window.addEventListener("focus", onFocus);
     window.addEventListener("blur", onBlur);
     return () => {

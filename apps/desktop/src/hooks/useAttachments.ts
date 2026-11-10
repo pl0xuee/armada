@@ -10,6 +10,7 @@ import {
   imageFilesFrom,
   MAX_ATTACHMENTS,
 } from "@/lib/attachments";
+import { setDraftAttachments } from "@/components/agent/drafts";
 import { api } from "@/lib/api";
 import type { Attachment } from "@/lib/types";
 
@@ -26,13 +27,20 @@ export function useAttachments(initial: Attachment[] = [], agentId?: string) {
   // both see the same free room and silently overflow.
   const liveCount = useRef(initial.length);
 
-  const setAttachments = useCallback((next: SetStateAction<Attachment[]>) => {
-    setRaw((cur) => {
-      const v = typeof next === "function" ? next(cur) : next;
-      liveCount.current = v.length;
-      return v;
-    });
-  }, []);
+  const setAttachments = useCallback(
+    (next: SetStateAction<Attachment[]>) => {
+      // An agent's composer remembers its pictures while you look at another agent. Stored here
+      // too, so a failed send hands them back even after the composer is gone.
+      if (agentId && typeof next !== "function") setDraftAttachments(agentId, next);
+      setRaw((cur) => {
+        const v = typeof next === "function" ? next(cur) : next;
+        liveCount.current = v.length;
+        if (agentId) setDraftAttachments(agentId, v);
+        return v;
+      });
+    },
+    [agentId],
+  );
 
   const add = useCallback(
     async (files: File[]) => {

@@ -18,7 +18,7 @@ import { latestPendingQuestion } from "@/lib/question";
 import { latestPending } from "../timeline/usePermissionKeys";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
-import { getDraft, onAttachmentsInsert, onDraftInsert, setDraft } from "./drafts";
+import { getDraft, getDraftAttachments, onAttachmentsInsert, onDraftInsert, setDraft } from "./drafts";
 import { AttachButton, DropOverlay } from "../AttachControls";
 import { ComposerVoiceButtons } from "../voice/ComposerVoiceButtons";
 import { AttachmentStrip } from "../AttachmentStrip";
@@ -85,7 +85,7 @@ function ComposerImpl({
   const [caret, setCaret] = useState(0);
   // Results tagged with the query they answer, so a fast Enter never picks a stale file.
   const [files, setFiles] = useState<{ query: string; list: string[] }>({ query: "", list: [] });
-  const attach = useAttachments([], agent.id);
+  const attach = useAttachments(getDraftAttachments(agent.id), agent.id);
   const [wrapRef, width] = useElementWidth<HTMLDivElement>();
   // The shortcut hints need about 520px; in a narrow tile they would be cut off mid-word.
   const roomForHints = width === 0 || width >= 520;
@@ -521,7 +521,12 @@ function ComposerImpl({
         setSlashIndex((activeIndex + d + suggestions.length) % suggestions.length);
         return;
       }
-      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+      // Enter on a command typed out in full sends it; completing it first would need a second Enter.
+      const typed = mode === "slash" ? matches[activeIndex] : undefined;
+      // (A command that needs something after it, like "<pr-number>", is completed instead.)
+      const whole =
+        e.key === "Enter" && typed !== undefined && typed.name === query && !typed.hint?.trim().startsWith("<");
+      if ((e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) && !whole) {
         e.preventDefault();
         pick(activeIndex);
         return;
@@ -697,8 +702,8 @@ function ComposerImpl({
               <div
                 className={cn(
                   "flex items-center gap-1.5 overflow-hidden text-meta text-steel",
-                  // Idle: a container, so the key hint shows whole or not at all.
-                  busy ? "min-w-2" : "@container min-w-0 flex-1",
+                  // A container, so the status label and the key hint show whole or not at all.
+                  busy ? "@container min-w-2 flex-1" : "@container min-w-0 flex-1",
                   fold.bare && "hidden",
                 )}
               >
@@ -711,7 +716,7 @@ function ComposerImpl({
                         blocked ? "bg-warn shadow-[0_0_8px_var(--warn)]" : "bg-accent shadow-[0_0_8px_var(--accent)]",
                       )}
                     />
-                    <span className={cn("min-w-0 truncate", width > 0 && width < 600 && "sr-only")}>
+                    <span className="sr-only whitespace-nowrap @[7.5rem]:not-sr-only">
                       {blocked ? "Waiting for you" : "Working…"}
                     </span>
                   </>

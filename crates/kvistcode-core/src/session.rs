@@ -1135,6 +1135,9 @@ impl AgentCtx {
         st.turn_begun = false;
         st.cancel_requested = false;
         st.advance_on_cancel = false;
+        // A compaction that was stopped never reaches the place that clears this; the next
+        // turn is the user's own and must be requeued if it goes unheard.
+        st.turn_compacting = false;
         st.turn_epoch
     }
 

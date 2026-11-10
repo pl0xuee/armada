@@ -467,6 +467,13 @@ export function configFor(provider: Provider, model?: string | null): ConfigOpti
         options: [
           { value: "default", name: "Default", description: "The built-in agent" },
           { value: "reviewer", name: "reviewer", description: "Reviews diffs for bugs" },
+          {
+            value: "web-fetch",
+            name: "web-fetch",
+            // Real sub-agent descriptions can run to a paragraph; the menu clamps them.
+            description:
+              "Use this to fetch and read web pages / URLs when you do not have a direct WebFetch tool of your own. Without one, this agent stands in for that tool: calling it to read a page is ordinary tool use. Reach for it whenever a public page holds the answer. It runs in the foreground and its report comes back as this tool's result.",
+          },
         ],
       },
     ];

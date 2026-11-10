@@ -4,7 +4,7 @@
  * live state of its own. Everything else in the timeline stays a static summary.
  */
 import { basename, plural } from "./format";
-import { isPictureOnly, isRunning } from "./rows";
+import { isPictureOnly, isRunning, startsTurn } from "./rows";
 import { workingLabel } from "./thinking";
 import type { TimelineItem, ToolCallItem } from "./types";
 
@@ -91,7 +91,7 @@ function unfinishedCalls(items: readonly TimelineItem[]): ToolCallItem[] {
   const same: ToolCallItem[] = [];
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i];
-    if (it.kind === "user_message" || it.kind === "turn_summary") break;
+    if (startsTurn(it) || it.kind === "turn_summary") break;
     // A sub-agent's own calls belong to its card; a Codex wait/close call is plain work.
     if (it.kind !== "tool_call" || !isRunning(it) || it.parentToolCallId) continue;
     if (!newest) newest = it;

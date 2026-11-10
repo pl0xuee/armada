@@ -16,6 +16,7 @@ import { Kbd } from "../ui/kbd";
 import { Spinner } from "../ui/misc";
 import { Tooltip } from "../ui/tooltip";
 import { permissionKeyOptions, type PermissionItem } from "../timeline/usePermissionKeys";
+import { insertIntoDraft } from "./drafts";
 
 /**
  * The approval the agent is waiting on, as the "needs you" row of the pinned dock above the composer, so
@@ -74,7 +75,12 @@ export function ApprovalSection({
       setReason("");
       setReasonOpen(false);
     } catch (e) {
-      toast.error("Answered, but couldn't send your note", { description: errorMessage(e) });
+      // The request is answered, so this form is about to go: keep the note in the message box.
+      insertIntoDraft(agent.id, text);
+      setReason("");
+      toast.error("Answered, but couldn't send your note", {
+        description: `It is in the message box. ${errorMessage(e)}`,
+      });
     } finally {
       setBusy(null);
     }

@@ -26,9 +26,10 @@ function ToastCard({ toast }: { toast: Toast }) {
       role={toast.tone === "err" || toast.tone === "warn" ? "alert" : "status"}
       className="animate-toast pointer-events-auto flex w-full items-stretch overflow-hidden rounded-2xl border bg-card shadow-[0_18px_40px_-12px_rgba(0,0,0,0.7)]"
       style={{ borderColor: `color-mix(in srgb, ${tone.color} 28%, var(--border))` }}
-      onPointerDown={() => holdToast(toast.id, true)}
-      onPointerUp={() => holdToast(toast.id, false)}
-      onPointerCancel={() => holdToast(toast.id, false)}
+      // An Undo toast lasts exactly as long as the undo does: holding it must not keep a dead button.
+      onPointerDown={() => !toast.action && holdToast(toast.id, true)}
+      onPointerUp={() => !toast.action && holdToast(toast.id, false)}
+      onPointerCancel={() => !toast.action && holdToast(toast.id, false)}
     >
       <button
         type="button"

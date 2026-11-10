@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { choiceName } from "./config";
 import { isBusy } from "./meta";
-import { isLauncher } from "./rows";
+import { isLauncher, startsTurn } from "./rows";
 import { useStore } from "./store";
 import type { Agent, ConfigOption, SubagentInfo, TimelineItem, ToolCallItem } from "./types";
 
@@ -16,6 +16,8 @@ export interface SubagentRun {
   toolCallId: string;
   state: "running" | "done" | "failed";
   background: boolean;
+  /** A workflow run: it has its own card and count, and is not a sub-agent to wait on. */
+  workflow: boolean;
 }
 
 export interface SubagentClock {
@@ -128,7 +130,7 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, c
   if (!items) return [];
   let turnStartIdx = 0;
   for (let i = items.length - 1; i >= 0; i--) {
-    if (items[i].kind === "user_message") {
+    if (startsTurn(items[i])) {
       turnStartIdx = i;
       break;
     }
@@ -163,12 +165,12 @@ export function subagentRuns(items: TimelineItem[] | undefined, busy: boolean, c
     if (handedBack.has(it.toolCallId) || (id !== undefined && stopped.has(id))) running = false;
     if (!running && i <= turnStartIdx) continue;
     if (!running && unfinished(it.status)) continue; // stale: open call of an idle agent
-    runs.push({ itemId: it.id, toolCallId: it.toolCallId, state: running ? "running" : it.status === "failed" ? "failed" : "done", background: bg });
+    runs.push({ itemId: it.id, toolCallId: it.toolCallId, state: running ? "running" : it.status === "failed" ? "failed" : "done", background: bg, workflow: !!it.subagent?.workflow });
   }
   return runs;
 }
 
-export const runningCount = (runs: readonly SubagentRun[]) => runs.reduce((n, r) => n + (r.state === "running" ? 1 : 0), 0);
+export const runningCount = (runs: readonly SubagentRun[]) => runs.reduce((n, r) => n + (r.state === "running" && !r.workflow ? 1 : 0), 0);
 
 const bucket = () => Math.floor(Date.now() / SUBAGENT_TICK_MS) * SUBAGENT_TICK_MS;
 
@@ -230,7 +232,7 @@ export interface RunningSubagent {
 
 /** The running sub-agents among `runs`, in launch order. */
 export function runningSubagents(items: readonly TimelineItem[], runs: readonly SubagentRun[]): RunningSubagent[] {
-  const running = new Set(runs.filter((r) => r.state === "running").map((r) => r.itemId));
+  const running = new Set(runs.filter((r) => r.state === "running" && !r.workflow).map((r) => r.itemId));
   if (!running.size) return [];
   const byParent = new Map<string, ToolCallItem[]>();
   for (const it of items) {
@@ -335,9 +337,7 @@ export function useBackgroundSubagentCount(agentId: string | null | undefined): 
   return useStore((s) => {
     const items = agentId ? s.timelines[agentId]?.items : undefined;
     if (!agentId || !live || !items) return 0;
-    const workflows = new Set<string>();
-    for (const it of items) if (it.kind === "tool_call" && it.subagent?.workflow) workflows.add(it.toolCallId);
-    return subagentRuns(items, false, { now, live }).filter((r) => r.state === "running" && r.background && !workflows.has(r.toolCallId)).length;
+    return subagentRuns(items, false, { now, live }).filter((r) => r.state === "running" && r.background && !r.workflow).length;
   });
 }
 
@@ -354,7 +354,7 @@ export function useRunningSubagentList(agentId: string): RunningSubagent[] {
     const items = s.timelines[agentId]?.items;
     if (!agent || !items) return "";
     const runs = subagentRuns(items, isBusy(agent.status), { now, live: isSubagentLive(agent.status) });
-    if (!runs.some((r) => r.state === "running")) return "";
+    if (!runs.some((r) => r.state === "running" && !r.workflow)) return "";
     return JSON.stringify(runningSubagents(items, runs));
   });
   return useMemo(() => (key ? (JSON.parse(key) as RunningSubagent[]) : []), [key]);
