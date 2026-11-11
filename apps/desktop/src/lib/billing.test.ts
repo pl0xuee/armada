@@ -54,3 +54,19 @@ describe("accountSpend", () => {
     expect(accountSpend(agents, "none")).toBe(0);
   });
 });
+
+describe("windowsLeft with Fable", () => {
+  it("lists Claude's Fable weekly allowance after the shared windows", () => {
+    const w = windowsLeft({
+      primary: null,
+      secondary: { usedPercent: 25, windowMins: 10080, resetsAt: 9 },
+      fable: { usedPercent: 40, windowMins: 10080, resetsAt: 9 },
+      plan: null,
+      updatedAt: 0,
+    });
+    expect(w.map((x) => [x.name, x.leftPercent])).toEqual([
+      ["Weekly", 75],
+      ["Fable weekly", 60],
+    ]);
+  });
+});

@@ -210,7 +210,7 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
               </button>
             </p>
           )}
-          {usage && (usage.primary || usage.secondary) && (
+          {usage && (usage.primary || usage.secondary || usage.fable) && (
             <div className={cn("flex items-end gap-x-4 gap-y-1.5", compact ? "mt-1.5" : "mt-2.5")}>
               <UsageMeters usage={usage} className="min-w-0 flex-1 max-w-[640px]" />
               {!compact && (

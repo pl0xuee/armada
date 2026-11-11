@@ -1134,6 +1134,7 @@ impl CodexDriver {
                 ctx.account_usage(AccountUsage {
                     primary: window(&r["primary"]),
                     secondary: window(&r["secondary"]),
+                    fable: None,
                     plan: r["planType"].as_str().map(str::to_string),
                     updated_at: now_ms(),
                 });

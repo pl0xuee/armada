@@ -27,7 +27,17 @@ export function pctTextTone(pct: number) {
   return pct >= 90 ? "text-err" : pct >= 70 ? "text-warn" : "text-fg";
 }
 
-function Meter({ w, compact }: { w: UsageWindow; compact?: boolean }) {
+/** The windows an account reports, each with its name ("5-hour", "Weekly", "Fable weekly"). */
+export function usageWindows(usage: AccountUsage | null | undefined): { name: string; w: UsageWindow }[] {
+  if (!usage) return [];
+  const out: { name: string; w: UsageWindow }[] = [];
+  if (usage.primary) out.push({ name: windowLabel(usage.primary), w: usage.primary });
+  if (usage.secondary) out.push({ name: windowLabel(usage.secondary), w: usage.secondary });
+  if (usage.fable) out.push({ name: "Fable weekly", w: usage.fable });
+  return out;
+}
+
+function Meter({ w, name, compact }: { w: UsageWindow; name: string; compact?: boolean }) {
   const pct = Math.max(0, Math.min(100, Math.round(w.usedPercent)));
   const reset = resetLabel(w.resetsAt);
   return (
@@ -35,7 +45,7 @@ function Meter({ w, compact }: { w: UsageWindow; compact?: boolean }) {
       <div className="flex items-baseline justify-between gap-2 text-micro">
         {/* Wide: "Weekly · resets Fri 3:54 PM" on one line. Narrow: the reset time drops under the label, never cut. */}
         <span className="min-w-0 text-steel">
-          {windowLabel(w)}
+          {name}
           {reset && !compact && (
             <span className="block text-steel/80 @[220px]/m:inline">
               <span aria-hidden className="hidden @[220px]/m:inline">
@@ -53,7 +63,7 @@ function Meter({ w, compact }: { w: UsageWindow; compact?: boolean }) {
       <div
         className="mt-1 h-1 overflow-hidden rounded-full bg-raised"
         role="meter"
-        aria-label={`${windowLabel(w)} usage`}
+        aria-label={`${name} usage`}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={pct}
@@ -78,11 +88,13 @@ export function UsageMeters({
   compact?: boolean;
   className?: string;
 }) {
-  if (!usage || (!usage.primary && !usage.secondary)) return null;
+  const windows = usageWindows(usage);
+  if (windows.length === 0) return null;
   return (
     <div className={cn("flex gap-4", compact && "flex-col gap-2", className)}>
-      {usage.primary && <Meter w={usage.primary} compact={compact} />}
-      {usage.secondary && <Meter w={usage.secondary} compact={compact} />}
+      {windows.map(({ name, w }) => (
+        <Meter key={name} w={w} name={name} compact={compact} />
+      ))}
     </div>
   );
 }

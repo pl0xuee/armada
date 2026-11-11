@@ -163,6 +163,9 @@ pub struct UsageWindow {
 pub struct AccountUsage {
     pub primary: Option<UsageWindow>,
     pub secondary: Option<UsageWindow>,
+    /// Claude's separate weekly allowance for Fable (`seven_day_overage_included`).
+    #[serde(default)]
+    pub fable: Option<UsageWindow>,
     pub plan: Option<String>,
     pub updated_at: i64,
 }

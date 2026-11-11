@@ -334,6 +334,7 @@ fn usage(p: Option<UsageWindow>, s: Option<UsageWindow>, updated_at: i64) -> Acc
     AccountUsage {
         primary: p,
         secondary: s,
+        fable: None,
         plan: None,
         updated_at,
     }

@@ -140,6 +140,8 @@ export interface UsageWindow {
 export interface AccountUsage {
   primary: UsageWindow | null;
   secondary: UsageWindow | null;
+  /** Claude's separate weekly allowance for Fable. Absent on older snapshots. */
+  fable?: UsageWindow | null;
   plan: string | null;
   updatedAt: number;
 }

@@ -49,10 +49,15 @@ const windowName = (w: UsageWindow): string => {
 /** What is left of each usage window a subscription reports (none when the provider reports none). */
 export function windowsLeft(usage: AccountUsage | null | undefined): WindowLeft[] {
   const out: WindowLeft[] = [];
-  for (const w of [usage?.primary, usage?.secondary]) {
+  const named: [UsageWindow | null | undefined, string | null][] = [
+    [usage?.primary, null],
+    [usage?.secondary, null],
+    [usage?.fable, "Fable weekly"],
+  ];
+  for (const [w, name] of named) {
     if (!w) continue;
     const used = Math.max(0, Math.min(100, Math.round(w.usedPercent)));
-    out.push({ name: windowName(w), usedPercent: used, leftPercent: 100 - used, resetsAt: w.resetsAt });
+    out.push({ name: name ?? windowName(w), usedPercent: used, leftPercent: 100 - used, resetsAt: w.resetsAt });
   }
   return out;
 }
@@ -68,7 +73,9 @@ export interface BudgetLeft {
 }
 
 /** Today's spend against the daily cost limit. */
-export function budgetLeft(status: Pick<BudgetStatus, "todayUsd" | "dailyBudgetUsd"> | null | undefined): BudgetLeft | null {
+export function budgetLeft(
+  status: Pick<BudgetStatus, "todayUsd" | "dailyBudgetUsd"> | null | undefined,
+): BudgetLeft | null {
   if (!status) return null;
   const budget = status.dailyBudgetUsd != null && status.dailyBudgetUsd > 0 ? status.dailyBudgetUsd : null;
   const spent = Math.max(0, status.todayUsd);

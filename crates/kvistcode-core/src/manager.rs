@@ -3830,12 +3830,14 @@ fn merge_usage(prev: Option<AccountUsage>, usage: AccountUsage, now: i64) -> Acc
         Some(prev) => AccountUsage {
             primary: live(usage.primary).or(live(prev.primary)),
             secondary: live(usage.secondary).or(live(prev.secondary)),
+            fable: live(usage.fable).or(live(prev.fable)),
             plan: usage.plan.or(prev.plan),
             updated_at: usage.updated_at,
         },
         None => AccountUsage {
             primary: live(usage.primary),
             secondary: live(usage.secondary),
+            fable: live(usage.fable),
             ..usage
         },
     }
@@ -3855,18 +3857,21 @@ mod tests {
         let prev = AccountUsage {
             primary: Some(w(90.0, Some(1_000))),
             secondary: Some(w(40.0, Some(9_000))),
+            fable: Some(w(30.0, Some(9_000))),
             plan: Some("pro".into()),
             updated_at: 1,
         };
         let new = AccountUsage {
             primary: None,
             secondary: None,
+            fable: None,
             plan: None,
             updated_at: 2,
         };
         let m = merge_usage(Some(prev), new, 5_000);
         assert!(m.primary.is_none(), "stale 90% must not linger");
         assert_eq!(m.secondary.unwrap().used_percent, 40.0);
+        assert_eq!(m.fable.unwrap().used_percent, 30.0);
         assert_eq!(m.plan.as_deref(), Some("pro"));
     }
 

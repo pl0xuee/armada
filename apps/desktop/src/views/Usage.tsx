@@ -194,7 +194,7 @@ export function UsageView() {
   const priciest = providerData.length ? [...byProvider.values()].sort((a, b) => b.cost - a.cost)[0] : null;
   const accountsInUse = new Set(agents.filter((a) => a.provider !== "custom").map((a) => a.accountId)).size;
   const split = splitCost(agents, accounts);
-  const metered = accounts.filter((a) => a.usage && (a.usage.primary || a.usage.secondary));
+  const metered = accounts.filter((a) => a.usage && (a.usage.primary || a.usage.secondary || a.usage.fable));
 
   if (agents.length === 0) {
     return (

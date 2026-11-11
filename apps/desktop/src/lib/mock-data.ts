@@ -65,6 +65,7 @@ export function seedAccounts(): Account[] {
       usage: {
         primary: { usedPercent: 12, windowMins: 300, resetsAt: NOW + 3 * 3600_000 + 40 * 60_000 },
         secondary: { usedPercent: 74, windowMins: 10080, resetsAt: NOW + 3 * 86_400_000 },
+        fable: { usedPercent: 38, windowMins: 10080, resetsAt: NOW + 3 * 86_400_000 },
         plan: null,
         updatedAt: min(1),
       },

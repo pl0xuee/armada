@@ -1606,20 +1606,24 @@ fn parse_claude_rate_limit(info: &Value) -> Option<AccountUsage> {
     let windows = &info["unifiedWindows"];
     let mut primary = window(&windows["five_hour"], 300);
     let mut secondary = window(&windows["seven_day"], 10080);
-    if primary.is_none() && secondary.is_none() {
+    // Fable's own weekly allowance (Claude calls it the "Fable limit").
+    let mut fable = window(&windows["seven_day_overage_included"], 10080);
+    if primary.is_none() && secondary.is_none() && fable.is_none() {
         // Older CLIs: only the window that triggered the event.
         match info["rateLimitType"].as_str() {
             Some("five_hour") => primary = window(info, 300),
             Some("seven_day") => secondary = window(info, 10080),
+            Some("seven_day_overage_included") => fable = window(info, 10080),
             _ => {}
         }
     }
-    if primary.is_none() && secondary.is_none() {
+    if primary.is_none() && secondary.is_none() && fable.is_none() {
         return None;
     }
     Some(AccountUsage {
         primary,
         secondary,
+        fable,
         plan: None,
         updated_at: now_ms(),
     })
@@ -1644,6 +1648,24 @@ mod rate_limit_tests {
         assert_eq!(s.window_mins, Some(10080));
         assert_eq!(s.resets_at, Some(1793746800000));
         assert!(u.plan.is_none());
+        assert!(u.fable.is_none());
+    }
+
+    #[test]
+    fn reads_the_fable_weekly_window() {
+        let v = json!({"status":"allowed","unifiedWindows":{
+            "five_hour":{"utilization":0.1,"resetsAt":1793218200},
+            "seven_day":{"utilization":0.25,"resetsAt":1793746800},
+            "seven_day_overage_included":{"utilization":0.4,"resetsAt":1793746800,"status":"allowed"}}});
+        let f = parse_claude_rate_limit(&v).unwrap().fable.unwrap();
+        assert!((f.used_percent - 40.0).abs() < 1e-6);
+        assert_eq!(f.window_mins, Some(10080));
+        assert_eq!(f.resets_at, Some(1793746800000));
+
+        let only = json!({"rateLimitType":"seven_day_overage_included","utilization":0.9,"resetsAt":1793746800});
+        let u = parse_claude_rate_limit(&only).unwrap();
+        assert!(u.primary.is_none() && u.secondary.is_none());
+        assert!((u.fable.unwrap().used_percent - 90.0).abs() < 1e-6);
     }
 
     #[test]
