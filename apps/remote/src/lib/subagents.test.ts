@@ -158,3 +158,17 @@ describe("sub-agent chips and the helper model", () => {
     expect(inheritedConfig({ ...claudeAgent, provider: "codex" }, "sonnet").claude).toBeUndefined();
   });
 });
+
+describe("helper effort chips", () => {
+  const claude = { provider: "claude", configOptions: [], model: "Opus" };
+  it("shows the helper effort setting for a general-purpose helper and for a named effort", () => {
+    const inherited = inheritedConfig(claude, "sonnet", "low");
+    expect(inherited.claude).toEqual({ helper: "Sonnet", helperEffort: "Low" });
+    expect(subagentChips({ kind: "general-purpose" }, inherited).map((c) => c.text)).toEqual(["Sonnet, helper setting", "Low, helper setting"]);
+    expect(subagentChips({ kind: "Explore", effort: "high" }, inherited).map((c) => c.text)).toEqual(["Low, helper setting"]);
+    expect(subagentChips({ kind: "Explore" }, inherited)).toEqual([]);
+  });
+  it("leaves effort to Claude when no helper effort is set", () => {
+    expect(inheritedConfig(claude, "sonnet", null).claude).toEqual({ helper: "Sonnet" });
+  });
+});

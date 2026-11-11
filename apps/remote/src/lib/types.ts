@@ -157,6 +157,8 @@ export interface StateSnapshot {
   claudeChoicesRemembered?: boolean | null;
   /** The model Claude's general-purpose helpers run on, null when none is set. Absent on older servers. */
   helperModel?: string | null;
+  /** The effort Claude's helpers run at, null when none is set. Absent on older servers. */
+  helperEffort?: string | null;
 }
 
 /** What GET /api/agents/{id}/pr sends of a pull request: counts and a link, no check names or logs. */

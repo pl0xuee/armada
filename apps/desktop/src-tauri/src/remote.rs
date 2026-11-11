@@ -2360,7 +2360,7 @@ async fn state(
         })
         .transpose()?;
     // The model Claude's general-purpose helpers run on (null: the agent's own), for sub-agent chips.
-    let helper_model = core.settings()?.token_saver.subagent_model;
+    let saver = core.settings()?.token_saver;
     Ok(Json(json!({
         "agents": agents,
         "accounts": accounts,
@@ -2371,7 +2371,8 @@ async fn state(
         "defaultPermissionMode": default_mode,
         "responseStyle": response_style,
         "claudeChoicesRemembered": claude_remembered,
-        "helperModel": helper_model,
+        "helperModel": saver.subagent_model,
+        "helperEffort": saver.subagent_effort,
     })))
 }
 

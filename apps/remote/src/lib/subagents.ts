@@ -285,24 +285,37 @@ export interface InheritedConfig {
    * runs a general-purpose sub-agent the launch names no model for on it, while a sub-agent defined
    * elsewhere may choose its own, so then the chips only say what is known.
    */
-  claude?: { helper: string | null };
+  claude?: { helper: string | null; helperEffort?: string };
 }
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-/** `helperModel`: the computer's helper model (null: none; undefined: an older server didn't say). */
-export function inheritedConfig(agent: Pick<Agent, "configOptions" | "model"> & { provider?: string }, helperModel?: string | null): InheritedConfig {
+/**
+ * `helperModel`: the computer's helper model (null: none; undefined: an older server didn't say).
+ * `helperEffort`: the effort helpers run at (null: Claude decides).
+ */
+export function inheritedConfig(
+  agent: Pick<Agent, "configOptions" | "model"> & { provider?: string },
+  helperModel?: string | null,
+  helperEffort?: string | null,
+): InheritedConfig {
   const opts = agent.configOptions ?? [];
   const pick = (o: ConfigOption | undefined) => (o?.currentValue ? choiceName(o) : null);
   const model = pick(opts.find((o) => o.category === "model"));
   const base = { model: model ?? agent.model ?? null, effort: pick(opts.find((o) => o.category === "thought_level")) };
-  return agent.provider === "claude" && helperModel !== undefined ? { ...base, claude: { helper: helperModel ? capitalize(helperModel) : null } } : base;
+  if (agent.provider !== "claude" || helperModel === undefined) return base;
+  const helper = helperModel ? capitalize(helperModel) : null;
+  return { ...base, claude: helperEffort ? { helper, helperEffort: capitalize(helperEffort) } : { helper } };
 }
 
 /** `inheritedConfig` with the helper model the computer sent. */
 export function useInheritedConfig(agent: Pick<Agent, "configOptions" | "model"> & { provider?: string }): InheritedConfig {
   const helperModel = useStore((s) => s.helperModel);
-  return useMemo(() => inheritedConfig(agent, helperModel), [agent.configOptions, agent.model, agent.provider, helperModel]);
+  const helperEffort = useStore((s) => s.helperEffort);
+  return useMemo(
+    () => inheritedConfig(agent, helperModel, helperEffort),
+    [agent.configOptions, agent.model, agent.provider, helperModel, helperEffort],
+  );
 }
 
 /** Sub-agent kinds Claude Code runs on the main agent's model when the launch names none. */
@@ -338,7 +351,10 @@ export function subagentChips(info: Pick<SubagentInfo, "model" | "effort" | "kin
   else if (helper && GENERAL.has(kind)) out.push({ key: "model", text: `${helper}, helper setting`, inherited: true });
   // The main agent's effort applies only while the sub-agent runs on the main agent's model.
   const effort = info?.effort?.trim();
-  if (effort) out.push({ key: "effort", text: `${effort} effort`, inherited: false });
+  // The helper effort setting holds a named effort (the computer's hook) and sets it for general-purpose helpers.
+  const helperEffort = inherited?.claude?.helperEffort;
+  if (helperEffort && (effort || GENERAL.has(kind))) out.push({ key: "effort", text: `${helperEffort}, helper setting`, inherited: true });
+  else if (effort) out.push({ key: "effort", text: `${effort} effort`, inherited: false });
   else if ((!inherited?.claude || (!model && onParent)) && inherited?.effort) out.push({ key: "effort", text: `inherits ${inherited.effort} effort`, inherited: true });
   return out;
 }

@@ -76,7 +76,7 @@ describe("the model setup", () => {
     saver = { ...saver, subagentModel: "haiku" };
 
     const pick = { model: "fable", effort: "high", helperModel: "sonnet", helperEffort: "medium", others: {} };
-    expect(await applySetup(pick, saver, saveHelpers)).toBe(true);
+    expect(await applySetup(pick, saver, saveHelpers)).not.toBeNull();
     expect(defaults.claude).toEqual({ model: "fable", effort: "high" });
     expect(readWorkChoice()).toBe("keep");
     expect([saver.subagentModel, saver.subagentEffort]).toEqual(["sonnet", "medium"]);
@@ -91,7 +91,7 @@ describe("the model setup", () => {
   });
 
   it("changes nothing else when the helper settings can't be saved", async () => {
-    expect(await applySetup(RECOMMENDED_SETUP, saver, async () => false)).toBe(false);
+    expect(await applySetup(RECOMMENDED_SETUP, saver, async () => false)).toBeNull();
     expect(setConfigDefaults).not.toHaveBeenCalled();
     expect(readWorkChoice()).toBeNull();
     expect(readUndo()).toBeNull();
@@ -172,11 +172,45 @@ describe("other providers", () => {
     expect(sameSetup(before, pick)).toBe(false);
     expect(sameSetup(before, { ...before, others: { codex: { model: "gpt-5.5" } } })).toBe(true);
 
-    expect(await applySetup(pick, saver, saveHelpers)).toBe(true);
+    expect(await applySetup(pick, saver, saveHelpers)).not.toBeNull();
     expect(defaults.codex).toEqual({ model: "gpt-5.5-mini", effort: "high", approval: "on-request" });
 
     expect(await revertSetup(saveHelpers)).toBe(true);
     expect(defaults.codex).toEqual({ model: "gpt-5.5", approval: "on-request" });
     expect(defaults.claude).toEqual({});
+  });
+});
+
+describe("saving only what changed", () => {
+  it("leaves Claude alone when only another provider changed", async () => {
+    saveWorkChoice("routine");
+    const before = { ...setupFrom(null, undefined, saver), others: { codex: { model: "" } } };
+    const pick = { ...before, others: { codex: { model: "gpt-5.5-mini" } } };
+    const helpers = vi.fn(saveHelpers);
+    expect(await applySetup(pick, saver, helpers, before)).not.toBeNull();
+    expect(helpers).not.toHaveBeenCalled();
+    expect(defaults).toEqual({ codex: { model: "gpt-5.5-mini" } });
+    expect(readWorkChoice()).toBe("routine");
+
+    expect(await revertSetup(saveHelpers)).toBe(true);
+    expect(defaults).toEqual({ codex: {} });
+    expect(readWorkChoice()).toBe("routine");
+  });
+
+  it("an old Undo can't undo a newer change", async () => {
+    const first = await applySetup({ ...RECOMMENDED_SETUP, model: "sonnet" }, saver, saveHelpers);
+    const second = await applySetup({ ...RECOMMENDED_SETUP, model: "haiku" }, saver, saveHelpers);
+    expect(first).not.toBe(second);
+    expect(await revertSetup(saveHelpers, first!)).toBe(false);
+    expect(defaults.claude.model).toBe("haiku");
+    expect(await revertSetup(saveHelpers, second!)).toBe(true);
+    expect(defaults.claude.model).toBe("sonnet");
+  });
+
+  it("a change that fails keeps the Revert that was there", async () => {
+    await applySetup({ ...RECOMMENDED_SETUP, model: "sonnet" }, saver, saveHelpers);
+    const kept = readUndo();
+    expect(await applySetup(RECOMMENDED_SETUP, saver, async () => false)).toBeNull();
+    expect(readUndo()).toEqual(kept);
   });
 });

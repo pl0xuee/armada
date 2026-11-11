@@ -11,7 +11,7 @@ import {
   type SwitchTarget,
   WORK_TYPES,
 } from "@/lib/modelGuide";
-import { forgetRevert, readUndo, rememberForRevert } from "@/lib/modelSetup";
+import { readUndo, rememberForRevert } from "@/lib/modelSetup";
 import { ModelSetupDialog } from "../ModelSetupDialog";
 import { revertModelSetup } from "./modelSetupActions";
 import type { Settings } from "@/lib/types";
@@ -38,9 +38,9 @@ async function helpersOnSonnet(): Promise<boolean> {
  */
 export async function applyRecommendedModels(): Promise<boolean> {
   const saver = useApp.getState().settings?.tokenSaver;
-  await rememberForRevert(saver);
+  const change = await rememberForRevert(saver);
   if (!(await helpersOnSonnet())) {
-    forgetRevert();
+    change.cancel();
     return false;
   }
   saveWorkChoice(RECOMMENDED.id);
@@ -48,7 +48,7 @@ export async function applyRecommendedModels(): Promise<boolean> {
     description: `New Claude agents start on Opus at ${RECOMMENDED.effort} effort, and their helpers run on ${
       saver?.subagentModel === "haiku" ? "Haiku" : "Sonnet"
     }. Running agents keep what they have; pick another kind of work next to the prompt any time.`,
-    action: { label: "Undo", onClick: () => void revertModelSetup() },
+    action: { label: "Undo", onClick: () => void revertModelSetup(change.id) },
   });
   return true;
 }

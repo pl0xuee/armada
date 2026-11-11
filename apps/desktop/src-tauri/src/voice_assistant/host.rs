@@ -1081,6 +1081,8 @@ impl KvistcodeTools {
                     "plan": a.usage.as_ref().and_then(|u| u.plan.clone()),
                     "shortWindow": a.usage.as_ref().and_then(|u| window(&u.primary)),
                     "longWindow": a.usage.as_ref().and_then(|u| window(&u.secondary)),
+                    // Claude's separate weekly limit for Fable agents (absent elsewhere).
+                    "fableWeekly": a.usage.as_ref().and_then(|u| window(&u.fable)),
                 })
             })
             .collect();

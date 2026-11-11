@@ -45,16 +45,30 @@ pub fn plausible(at_ms: i64, now_ms: i64) -> Option<i64> {
     Some(at_ms.max(now_ms))
 }
 
+/// The account's usage as it applies to an agent on `model`: Claude's separate Fable weekly limit
+/// only stops agents running on Fable, so for any other model it is left out.
+pub fn for_model(usage: &AccountUsage, model: Option<&str>) -> AccountUsage {
+    let fable = model.is_some_and(|m| m.to_ascii_lowercase().contains("fable"));
+    AccountUsage {
+        fable: if fable { usage.fable.clone() } else { None },
+        ..usage.clone()
+    }
+}
+
 /// The latest reset among the usage windows that are used up (that is when every limit is lifted).
 /// None when no window is full or the full ones name no future reset.
 pub fn exhausted_reset(usage: &AccountUsage, now_ms: i64) -> Option<i64> {
-    [usage.primary.as_ref(), usage.secondary.as_ref()]
-        .into_iter()
-        .flatten()
-        .filter(|w| w.used_percent >= EXHAUSTED_PERCENT)
-        .filter_map(|w| w.resets_at)
-        .filter(|r| *r > now_ms && *r <= now_ms + MAX_AHEAD_MS)
-        .max()
+    [
+        usage.primary.as_ref(),
+        usage.secondary.as_ref(),
+        usage.fable.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|w| w.used_percent >= EXHAUSTED_PERCENT)
+    .filter_map(|w| w.resets_at)
+    .filter(|r| *r > now_ms && *r <= now_ms + MAX_AHEAD_MS)
+    .max()
 }
 
 /// Whether an account's usage says nothing is used up *and* the snapshot is newer than `since_ms`
@@ -63,10 +77,14 @@ pub fn usage_is_clear(usage: &AccountUsage, now_ms: i64, since_ms: i64) -> bool 
     if usage.updated_at <= since_ms {
         return false;
     }
-    [usage.primary.as_ref(), usage.secondary.as_ref()]
-        .into_iter()
-        .flatten()
-        .all(|w| w.used_percent < EXHAUSTED_PERCENT || w.resets_at.is_some_and(|r| r <= now_ms))
+    [
+        usage.primary.as_ref(),
+        usage.secondary.as_ref(),
+        usage.fable.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .all(|w| w.used_percent < EXHAUSTED_PERCENT || w.resets_at.is_some_and(|r| r <= now_ms))
 }
 
 /// The reset time for a limit that just hit: the later of what the message says and what the

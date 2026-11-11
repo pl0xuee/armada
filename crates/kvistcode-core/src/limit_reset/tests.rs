@@ -410,3 +410,19 @@ fn usage_is_clear_needs_a_fresh_snapshot() {
     let lifted = usage(Some(window(100.0, Some(now - 1))), None, now - 1);
     assert!(usage_is_clear(&lifted, now, hit), "its period has ended");
 }
+
+#[test]
+fn the_fable_window_only_holds_fable_agents() {
+    let now = 10 * HOUR;
+    let mut u = usage(Some(window(20.0, Some(now + HOUR))), None, now - 1);
+    u.fable = Some(window(100.0, Some(now + 3 * DAY)));
+    let opus = for_model(&u, Some("opus"));
+    assert_eq!(exhausted_reset(&opus, now), None);
+    assert!(usage_is_clear(&opus, now, 5 * HOUR));
+    for m in [Some("fable"), Some("claude-fable-5-2[1m]")] {
+        let f = for_model(&u, m);
+        assert_eq!(exhausted_reset(&f, now), Some(now + 3 * DAY));
+        assert!(!usage_is_clear(&f, now, 5 * HOUR));
+    }
+    assert!(for_model(&u, None).fable.is_none());
+}

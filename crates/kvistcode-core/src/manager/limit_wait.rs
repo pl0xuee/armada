@@ -101,7 +101,15 @@ impl Core {
             }
             return;
         }
-        let waiting: Vec<(String, String, i64, LimitResume, Option<i64>)> = self
+        #[allow(clippy::type_complexity)]
+        let waiting: Vec<(
+            String,
+            String,
+            Option<String>,
+            i64,
+            LimitResume,
+            Option<i64>,
+        )> = self
             .inner
             .agents
             .lock()
@@ -113,6 +121,7 @@ impl Core {
                 (
                     r.agent.id.clone(),
                     r.agent.account_id.clone(),
+                    running_model(&r.agent),
                     r.agent.created_at,
                     r.agent.limit_resume.clone().unwrap_or_default(),
                     r.agent.limit_resets_at,
@@ -131,7 +140,7 @@ impl Core {
             st.inflight.clone()
         };
         let mut due: Vec<(i64, String)> = Vec::new();
-        for (id, account_id, created_at, resume, resets_at) in waiting {
+        for (id, account_id, model, created_at, resume, resets_at) in waiting {
             if inflight.contains(&id)
                 || resume
                     .last_attempt_at
@@ -140,7 +149,7 @@ impl Core {
                 continue;
             }
             let jitter = resets_at.map_or(0, |r| limit_resume::jitter_ms(&account_id, r) / div);
-            let usage = self.limit_usage_view(&account_id, &resume, now);
+            let usage = self.limit_usage_view(&account_id, model.as_deref(), &resume, now);
             match limit_resume::decide(now, &resume, resets_at, jitter, usage) {
                 Decision::Wait => {}
                 Decision::Learn(r) => {
@@ -170,10 +179,17 @@ impl Core {
     }
 
     /// What the account's last usage snapshot says about this agent's limit.
-    fn limit_usage_view(&self, account_id: &str, resume: &LimitResume, now: i64) -> UsageView {
+    fn limit_usage_view(
+        &self,
+        account_id: &str,
+        model: Option<&str>,
+        resume: &LimitResume,
+        now: i64,
+    ) -> UsageView {
         let Some(usage) = self.account(account_id).ok().and_then(|a| a.usage) else {
             return UsageView::Unknown;
         };
+        let usage = limit_reset::for_model(&usage, model);
         if let Some(r) = limit_reset::exhausted_reset(&usage, now) {
             UsageView::Full(Some(r))
         } else if limit_reset::usage_is_clear(&usage, now, resume.hit_at) {
@@ -362,7 +378,11 @@ impl Core {
             });
             return;
         }
-        let usage = self.account(&agent.account_id).ok().and_then(|a| a.usage);
+        let usage = self
+            .account(&agent.account_id)
+            .ok()
+            .and_then(|a| a.usage)
+            .map(|u| limit_reset::for_model(&u, running_model(&agent).as_deref()));
         let reported =
             limit_reset::best_reset(message, usage.as_ref(), now, &jiff::tz::TimeZone::system());
         let wait = limit_resume::next_wait(attempts, reported, now, div);
@@ -451,4 +471,14 @@ impl Core {
         );
         Ok(agent)
     }
+}
+
+/// The model an agent runs on: its model option (Claude, Codex, ...) or, for a local agent, its model.
+fn running_model(agent: &crate::model::Agent) -> Option<String> {
+    agent
+        .config_options
+        .iter()
+        .find(|o| o.category.as_deref() == Some("model") || o.id == "model")
+        .map(|o| o.current_value.clone())
+        .or_else(|| agent.model.clone())
 }

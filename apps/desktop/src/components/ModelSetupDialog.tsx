@@ -119,6 +119,7 @@ function Body({ newProject, onClose }: { newProject: boolean; onClose: () => voi
       if (
         await saveModelSetup(
           form,
+          current,
           changedOthers.map((p) => p.name),
         )
       )

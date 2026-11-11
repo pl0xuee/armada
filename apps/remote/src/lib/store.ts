@@ -100,6 +100,8 @@ export interface State {
   claudeChoicesRemembered: boolean | null;
   /** The model Claude's general-purpose helpers run on (null: none set; undefined: an older server didn't say). */
   helperModel: string | null | undefined;
+  /** The effort Claude's helpers run at (null: Claude decides, or an older server). */
+  helperEffort: string | null;
   /** The last PR/CI status the server gave for each agent's branch. */
   prs: Record<string, PrSnapshot>;
   /** Workflow runs still going behind an agent's finished turn, by agent id (see lib/backgroundWork). */
@@ -144,6 +146,7 @@ export const initialState: State = {
   responseStyle: null,
   claudeChoicesRemembered: null,
   helperModel: undefined,
+  helperEffort: null,
   prs: {},
   background: {},
   timelines: {},

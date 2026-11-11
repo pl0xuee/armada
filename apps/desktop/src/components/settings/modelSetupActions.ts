@@ -1,6 +1,13 @@
 // Saving and reverting the model setup, with the toasts that say so (shared by the popup and Settings).
 import { toast } from "sonner";
-import { applySetup, describeSetup, revertSetup, type ModelSetup, type SaveHelpers } from "@/lib/modelSetup";
+import {
+  applySetup,
+  describeSetup,
+  revertSetup,
+  sameClaude,
+  type ModelSetup,
+  type SaveHelpers,
+} from "@/lib/modelSetup";
 import { useApp } from "@/store/app";
 import { saveSettingsPatch } from "./settingsErrors";
 
@@ -13,28 +20,44 @@ export const saveHelperSettings: SaveHelpers = (patch) => {
   );
 };
 
-/** Applies a setup and says so, with Undo in the toast. `others` names the other providers it changes. */
-export async function saveModelSetup(setup: ModelSetup, others: string[] = []): Promise<boolean> {
+/**
+ * Applies a setup and says so, with Undo in the toast. `before` is what the form started from (only
+ * changes are saved); `others` names the other providers it changes.
+ */
+export async function saveModelSetup(setup: ModelSetup, before?: ModelSetup, others: string[] = []): Promise<boolean> {
   const saver = useApp.getState().settings?.tokenSaver;
+  let id: number | null;
   try {
-    if (!(await applySetup(setup, saver, saveHelperSettings))) return false;
+    id = await applySetup(setup, saver, saveHelperSettings, before);
   } catch (e) {
-    toast.error("Couldn't save the models", { description: e instanceof Error ? e.message : String(e) });
+    toast.error("Couldn't save the models", {
+      description: `${e instanceof Error ? e.message : String(e)}. Revert in Settings puts back what you had.`,
+    });
     return false;
   }
+  if (id === null) return false;
+  const claude = !before || !sameClaude(before, setup);
   toast.success("Models saved", {
-    description: `New Claude agents start on ${describeSetup(setup)}.${
-      others.length ? ` New ${others.join(", ").replace(/, ([^,]*)$/, " and $1")} agents start on what you chose.` : ""
-    } Running agents keep what they have.`,
-    action: { label: "Undo", onClick: () => void revertModelSetup() },
+    description: [
+      claude && `New Claude agents start on ${describeSetup(setup)}.`,
+      others.length > 0 && `New ${others.join(", ").replace(/, ([^,]*)$/, " and $1")} agents start on what you chose.`,
+      "Running agents keep what they have.",
+    ]
+      .filter(Boolean)
+      .join(" "),
+    action: { label: "Undo", onClick: () => void revertModelSetup(id) },
   });
   return true;
 }
 
-/** Puts back the models from before the last change, and says so. */
-export async function revertModelSetup(): Promise<boolean> {
+/** Puts back the models from before the last change (or, given `id`, that change), and says so. */
+export async function revertModelSetup(id?: number): Promise<boolean> {
   try {
-    if (!(await revertSetup(saveHelperSettings))) return false;
+    if (!(await revertSetup(saveHelperSettings, id))) {
+      if (id !== undefined)
+        toast.info("Nothing to undo", { description: "That change was already undone or replaced." });
+      return false;
+    }
   } catch (e) {
     toast.error("Couldn't revert the models", { description: e instanceof Error ? e.message : String(e) });
     return false;

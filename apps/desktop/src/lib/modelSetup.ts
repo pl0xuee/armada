@@ -169,6 +169,8 @@ export interface SetupSnapshot {
   defaults: Record<string, Record<string, string>>;
   helperModel: string | null;
   helperEffort: string | null;
+  /** Which change this undoes (so an old Undo button can't undo a newer change). */
+  id: number;
 }
 
 const UNDO_KEY = "kvistcode.modelSetupUndo";
@@ -190,14 +192,12 @@ export function readUndo(): SetupSnapshot | null {
       defaults,
       helperModel: str(v.helperModel),
       helperEffort: str(v.helperEffort),
+      id: typeof v.id === "number" ? v.id : 0,
     };
   } catch {
     return null;
   }
 }
-
-/** Drops what Revert would put back (a change that didn't happen after all). */
-export const forgetRevert = () => writeUndo(null);
 
 function writeUndo(s: SetupSnapshot | null) {
   try {
@@ -212,6 +212,15 @@ function writeUndo(s: SetupSnapshot | null) {
 /** Saves the helper settings; resolves false (after telling the user) when they couldn't be saved. */
 export type SaveHelpers = (patch: Pick<TokenSaverOptions, "subagentModel" | "subagentEffort">) => Promise<boolean>;
 
+let lastId = 0;
+
+/** A change that can be reverted: its id, and `cancel` for when it didn't happen after all. */
+export interface PendingChange {
+  id: number;
+  /** Puts back what Revert offered before this change. */
+  cancel: () => void;
+}
+
 /**
  * Remembers how things are now, so the change about to be made can be reverted. `touched` lists the
  * remembered choices (option ids per provider identity) the change sets.
@@ -219,7 +228,9 @@ export type SaveHelpers = (patch: Pick<TokenSaverOptions, "subagentModel" | "sub
 export async function rememberForRevert(
   saver: TokenSaverOptions | undefined,
   touched: Record<string, readonly string[]> = { claude: ["model", "effort"] },
-) {
+): Promise<PendingChange> {
+  const previous = readUndo();
+  const id = (lastId = Math.max(Date.now(), lastId + 1));
   const now = await Promise.resolve()
     .then(() => api.configDefaults())
     .catch(() => ({}) as Record<string, Record<string, string>>);
@@ -231,28 +242,46 @@ export async function rememberForRevert(
     defaults,
     helperModel: saver?.subagentModel ?? null,
     helperEffort: saver?.subagentEffort ?? null,
+    id,
   });
+  return { id, cancel: () => writeUndo(previous) };
 }
 
-/** Makes `setup` what new agents start with. Running agents keep what they have. */
-export async function applySetup(setup: ModelSetup, saver: TokenSaverOptions | undefined, saveHelpers: SaveHelpers) {
-  const touched: Record<string, string[]> = { claude: ["model", "effort"] };
-  for (const [key, values] of Object.entries(setup.others)) touched[key] = Object.keys(values);
-  await rememberForRevert(saver, touched);
-  if (!(await saveHelpers({ subagentModel: setup.helperModel, subagentEffort: setup.helperEffort }))) {
-    writeUndo(null);
-    return false;
+/**
+ * Makes `setup` what new agents start with. Running agents keep what they have. Given `before` (what
+ * the form started from), only what differs is saved: changing Codex alone leaves Claude as it was.
+ * Resolves to the change's id (for Undo), or null if nothing was saved.
+ */
+export async function applySetup(
+  setup: ModelSetup,
+  saver: TokenSaverOptions | undefined,
+  saveHelpers: SaveHelpers,
+  before?: ModelSetup,
+): Promise<number | null> {
+  const claude = !before || !sameClaude(before, setup);
+  const others = Object.entries(setup.others).filter(([k, v]) => !before || !sameValues(before.others[k], v));
+  const touched: Record<string, string[]> = claude ? { claude: ["model", "effort"] } : {};
+  for (const [key, values] of others) touched[key] = Object.keys(values);
+  const change = await rememberForRevert(saver, touched);
+  if (claude) {
+    if (!(await saveHelpers({ subagentModel: setup.helperModel, subagentEffort: setup.helperEffort }))) {
+      change.cancel();
+      return null;
+    }
+    await api.setConfigDefaults("claude", { model: setup.model, effort: setup.effort });
   }
-  await api.setConfigDefaults("claude", { model: setup.model, effort: setup.effort });
-  for (const [key, values] of Object.entries(setup.others)) await api.setConfigDefaults(key, values);
-  saveWorkChoice(workChoiceFor(setup));
-  return true;
+  for (const [key, values] of others) await api.setConfigDefaults(key, values);
+  if (claude) saveWorkChoice(workChoiceFor(setup));
+  return change.id;
 }
 
-/** Puts back what the last setup change replaced. False if there was nothing, or it couldn't be saved. */
-export async function revertSetup(saveHelpers: SaveHelpers): Promise<boolean> {
+/**
+ * Puts back what the last setup change replaced. Given `id`, only if that change is still the last one.
+ * False if there was nothing to put back, or it couldn't be saved.
+ */
+export async function revertSetup(saveHelpers: SaveHelpers, id?: number): Promise<boolean> {
   const before = readUndo();
-  if (!before) return false;
+  if (!before || (id !== undefined && before.id !== id)) return false;
   if (!(await saveHelpers({ subagentModel: before.helperModel, subagentEffort: before.helperEffort }))) return false;
   for (const [key, values] of Object.entries(before.defaults)) await api.setConfigDefaults(key, values);
   if (before.workChoice) saveWorkChoice(before.workChoice);
