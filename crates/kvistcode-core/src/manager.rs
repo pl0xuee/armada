@@ -1657,7 +1657,7 @@ impl Core {
     }
 
     /// Sets remembered defaults for one provider identity (what new agents start with); an empty
-    /// value forgets that option. Only the model and effort can be set this way.
+    /// value forgets that option. Permission and sandbox options are never set this way.
     pub fn set_config_defaults(
         &self,
         key: &str,
@@ -1666,7 +1666,7 @@ impl Core {
         let s = self.update_settings(|s| {
             let entry = s.config_defaults.entry(key.to_string()).or_default();
             for (option, value) in values {
-                if !matches!(option.as_str(), "model" | "effort") {
+                if !config_memory::may_set_default(&option, &value) {
                     continue;
                 }
                 if value.trim().is_empty() {

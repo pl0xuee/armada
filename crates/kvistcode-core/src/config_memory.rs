@@ -56,15 +56,27 @@ pub fn is_bypass_value(value: &str) -> bool {
     BYPASS_VALUES.contains(&v.as_str()) || BYPASS_FRAGMENTS.iter().any(|f| v.contains(f))
 }
 
-/// Whether the user's choice for this option may be remembered / re-applied.
-pub fn is_rememberable(option: &ConfigOption) -> bool {
-    let id = option.id.to_ascii_lowercase();
-    if SAFETY_IDS.contains(&id.as_str())
+/// Whether an option id names a permission/sandbox control.
+fn is_safety_id(id: &str) -> bool {
+    let id = id.to_ascii_lowercase();
+    SAFETY_IDS.contains(&id.as_str())
         || id.contains("sandbox")
         || id.contains("approval")
         || id.contains("permission")
         || id.contains("bypass")
-    {
+}
+
+/// Whether a choice set without the option at hand (the model setup) may be remembered: never a
+/// permission/sandbox option or a bypass value. Forgetting (an empty value) is always fine.
+pub fn may_set_default(option_id: &str, value: &str) -> bool {
+    !option_id.trim().is_empty()
+        && !is_safety_id(option_id)
+        && (value.trim().is_empty() || !is_bypass_value(value))
+}
+
+/// Whether the user's choice for this option may be remembered / re-applied.
+pub fn is_rememberable(option: &ConfigOption) -> bool {
+    if is_safety_id(&option.id) {
         return false;
     }
     if let Some(c) = option.category.as_deref() {

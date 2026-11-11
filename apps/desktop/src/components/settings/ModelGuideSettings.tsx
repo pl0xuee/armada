@@ -145,7 +145,7 @@ export function ModelGuideSettings({ settings }: { settings: Settings }) {
       </SettingRow>
       <SettingRow
         title="Models for new agents"
-        description="Choose the main agent's model and effort, and the model and effort its helper agents use. Revert puts back what you had before your last change."
+        description="Choose the model and effort new Claude, Codex, Grok and custom agents start with, and for Claude, the model and effort its helper agents use. Revert puts back what you had before your last change."
       >
         <Button size="sm" variant="secondary" onClick={() => setChoosing(true)}>
           Choose models…

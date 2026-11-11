@@ -26,7 +26,7 @@ fn values(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
 }
 
 #[test]
-fn sets_and_forgets_the_model_and_effort_only() {
+fn sets_and_forgets_choices_but_never_permissions() {
     let (tx, rx) = mpsc::unbounded_channel();
     std::mem::forget(rx);
     let base = common::scratch("test-config-defaults-set");
@@ -57,6 +57,22 @@ fn sets_and_forgets_the_model_and_effort_only() {
         .set_config_defaults("claude", values(&[("model", "")]))
         .unwrap();
     assert!(!d.contains_key("claude"));
+
+    // Other providers name their options their own way (Grok's reasoning, a custom agent's).
+    let d = core
+        .set_config_defaults(
+            "custom:gemini",
+            values(&[
+                ("model", "gemini-3-pro"),
+                ("thought_level", "high"),
+                ("speed", "yolo"),
+            ]),
+        )
+        .unwrap();
+    assert_eq!(
+        d["custom:gemini"],
+        values(&[("model", "gemini-3-pro"), ("thought_level", "high")])
+    );
 
     drop(core);
     let _ = std::fs::remove_dir_all(&base);

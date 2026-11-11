@@ -203,7 +203,7 @@ const tauriApi = {
    */
   clearConfigDefaults: (key?: string, clearAgents?: boolean) =>
     invoke<Record<string, Record<string, string>>>("clear_config_defaults", { key, clearAgents }),
-  /** Sets the model/effort new agents of one provider identity start with; an empty value forgets it. */
+  /** Sets choices (model, effort, …) new agents of one provider identity start with; an empty value forgets one. Never permissions. */
   setConfigDefaults: (key: string, values: Record<string, string>) =>
     invoke<Record<string, Record<string, string>>>("set_config_defaults", { key, values }),
   setAgentConfig: (agentId: string, optionId: string, value: string) =>

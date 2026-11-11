@@ -74,6 +74,9 @@ What Kvistcode does with it:
   helpers' model and effort in one place, with the recommended setup one click away. The main pick is saved as the
   remembered Claude model and effort (`set_config_defaults`) plus the matching kind of work, or "My usual model". The
   previous state is kept in `kvistcode.modelSetupUndo` so Revert (and Undo in the toast) restores it exactly.
+  Tabs for Codex, Grok and enabled custom agents (Gemini CLI, ...) set those providers' remembered model and effort
+  options (category `model` / `thought_level`), listed from the most recent agent of each; helpers stay Claude-only.
+  `set_config_defaults` accepts any option except permission/sandbox ones and bypass values.
 - The model and effort menus add a "good for" line where Claude Code gives none, and a note about when to use each.
 - Changing a Claude agent's model with 100k or more tokens of conversation asks first (the cost above), and offers to compact.
 

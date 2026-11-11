@@ -7,7 +7,7 @@ docs/RELEASING.md).
 
 ## Unreleased
 
-- Starting a new project now asks which models to use: the main agent's model and effort, and the model and effort for its helper agents, with "Use recommended" one click away. You can turn the question off, and change the models any time in Settings, Models & spending, Choose models.
+- Starting a new project now asks which models to use: the main agent's model and effort, and the model and effort for its helper agents, with "Use recommended" one click away. Codex, Grok and custom agents like Gemini CLI get their own tab to pick the model and effort they start with. You can turn the question off, and change the models any time in Settings, Models & spending, Choose models.
 - Helper agents have an effort setting too ("Helper effort"). Like the helper model, it applies even when an agent asks for another effort.
 - "Use recommended" and model changes can be undone: Revert in Settings (or Undo in the message) puts back what you had before.
 - Accounts and the agent panel show Claude's separate weekly limit for Fable, next to the 5-hour and weekly limits.

@@ -1,7 +1,10 @@
-// The models new Claude agents start with, set in one place: the main agent's model and effort and
-// the helper agents' model and effort. Used by the model setup popup (shown when a project is made)
+// The models new agents start with, set in one place. For Claude: the main agent's model and effort
+// and the helper agents' model and effort. For Codex, Grok and custom agents (Gemini CLI, ...): the
+// model and effort their agents offer. Used by the model setup popup (shown when a project is made)
 // and Settings. The last change can be reverted.
 import { api } from "./api";
+import { configDefaultsKey, isRememberableOption } from "./configMemory";
+import { identityFor } from "./identity";
 import {
   clearWorkChoice,
   KEEP,
@@ -11,7 +14,7 @@ import {
   saveWorkChoice,
   WORK_TYPES,
 } from "./modelGuide";
-import type { TokenSaverOptions } from "./types";
+import type { Agent, ConfigOption, CustomAgent, ProviderInfo, TokenSaverOptions } from "./types";
 
 export interface ModelSetup {
   /** Claude Code's alias for the main agent's model (`opus`, `sonnet`, `haiku`, `fable`). */
@@ -21,6 +24,8 @@ export interface ModelSetup {
   helperModel: string | null;
   /** `low` … `max`; null = Claude decides. */
   helperEffort: string | null;
+  /** Other providers by identity key (`codex`, `grok`, `custom:<id>`): option id -> value ("" = their default). */
+  others: Record<string, Record<string, string>>;
 }
 
 /** Anthropic's model guide: Opus at medium effort, helpers on Sonnet. */
@@ -29,6 +34,7 @@ export const RECOMMENDED_SETUP: ModelSetup = {
   effort: "medium",
   helperModel: "sonnet",
   helperEffort: null,
+  others: {},
 };
 
 export const MAIN_MODELS = [
@@ -63,8 +69,76 @@ export function describeSetup(s: ModelSetup): string {
   return `${nameOf(MAIN_MODELS, s.model)} at ${nameOf(EFFORTS, s.effort).toLowerCase()} effort, helpers on ${helper}${helperEffort}`;
 }
 
-export const sameSetup = (a: ModelSetup, b: ModelSetup) =>
+/** Whether two setups pick the same Claude models (other providers aside). */
+export const sameClaude = (a: ModelSetup, b: ModelSetup) =>
   a.model === b.model && a.effort === b.effort && a.helperModel === b.helperModel && a.helperEffort === b.helperEffort;
+
+const keysOf = (a: object, b: object) => [...new Set([...Object.keys(a), ...Object.keys(b)])];
+export const sameValues = (a: Record<string, string> = {}, b: Record<string, string> = {}) =>
+  keysOf(a, b).every((k) => (a[k] ?? "") === (b[k] ?? ""));
+
+export const sameSetup = (a: ModelSetup, b: ModelSetup) =>
+  sameClaude(a, b) && keysOf(a.others, b.others).every((k) => sameValues(a.others[k], b.others[k]));
+
+// ---------------------------------------------------------------- other providers
+
+/** A provider besides Claude, with the model and effort options its agents offer (null: not known yet). */
+export interface OtherProvider {
+  key: string;
+  name: string;
+  /** Kvistcode has run one of its agents (so a missing option means it doesn't offer one). */
+  seen: boolean;
+  model: ConfigOption | null;
+  effort: ConfigOption | null;
+}
+
+const isModel = (o: ConfigOption) => o.category === "model" || o.id === "model";
+const isEffort = (o: ConfigOption) => o.category === "thought_level" || /effort|reasoning|thinking/i.test(o.id);
+
+/**
+ * Codex, Grok and the enabled custom agents (Gemini CLI, ...), each with the model and effort options
+ * of its most recently active main agent: a provider's models are only known from one of its agents.
+ * A built-in provider shows when it is installed or has agents. Local models belong to their server,
+ * so they are left out.
+ */
+export function otherProviders(
+  agents: readonly Agent[],
+  providers: readonly ProviderInfo[],
+  customAgents: readonly CustomAgent[],
+): OtherProvider[] {
+  const latest = new Map<string, Agent>();
+  for (const a of agents) {
+    if (a.parentId || !a.configOptions?.length) continue;
+    const key = configDefaultsKey(a.provider, a.customAgentId);
+    const cur = latest.get(key);
+    if (!cur || a.lastActivityAt > cur.lastActivityAt) latest.set(key, a);
+  }
+  const list: { key: string; name: string }[] = [];
+  for (const p of ["codex", "grok"] as const)
+    if (agents.some((a) => a.provider === p) || providers.some((x) => x.provider === p && x.installed))
+      list.push({ key: p, name: identityFor(p, null, [...customAgents]).short });
+  for (const c of customAgents) if (c.enabled) list.push({ key: `custom:${c.id}`, name: c.name });
+  return list.map(({ key, name }) => {
+    const opts = (latest.get(key)?.configOptions ?? []).filter(isRememberableOption);
+    const model = opts.find(isModel) ?? null;
+    const seen = agents.some((a) => !a.parentId && configDefaultsKey(a.provider, a.customAgentId) === key);
+    return { key, name, seen, model, effort: opts.find((o) => o !== model && isEffort(o)) ?? null };
+  });
+}
+
+/** What each provider's new agents start with now ("" where nothing is remembered). */
+export function othersFrom(
+  defaults: Record<string, Record<string, string>>,
+  list: readonly OtherProvider[],
+): ModelSetup["others"] {
+  const out: ModelSetup["others"] = {};
+  for (const p of list) {
+    const values: Record<string, string> = {};
+    for (const o of [p.model, p.effort]) if (o) values[o.id] = defaults[p.key]?.[o.id] ?? "";
+    if (Object.keys(values).length) out[p.key] = values;
+  }
+  return out;
+}
 
 /** The setup in effect: the "kind of work" pick (or the remembered model and effort) plus the helper settings. */
 export function setupFrom(
@@ -78,6 +152,7 @@ export function setupFrom(
     effort: w?.effort ?? claude?.effort ?? RECOMMENDED_SETUP.effort,
     helperModel: saver?.subagentModel ?? null,
     helperEffort: saver?.subagentEffort ?? null,
+    others: {},
   };
 }
 
@@ -87,15 +162,19 @@ export const workChoiceFor = (s: Pick<ModelSetup, "model" | "effort">) =>
 
 // ---------------------------------------------------------------- revert
 
-/** Everything a setup change touches, as it was before. */
+/** Everything a setup change touches, as it was before ("" for a choice that wasn't remembered). */
 export interface SetupSnapshot {
   workChoice: string | null;
-  claude: { model?: string; effort?: string };
+  /** Remembered choices per provider identity, for the options the change sets. */
+  defaults: Record<string, Record<string, string>>;
   helperModel: string | null;
   helperEffort: string | null;
 }
 
 const UNDO_KEY = "kvistcode.modelSetupUndo";
+
+const isStringMap = (v: unknown): v is Record<string, string> =>
+  !!v && typeof v === "object" && Object.values(v).every((x) => typeof x === "string");
 
 export function readUndo(): SetupSnapshot | null {
   try {
@@ -103,13 +182,12 @@ export function readUndo(): SetupSnapshot | null {
     if (!raw) return null;
     const v = JSON.parse(raw) as Partial<SetupSnapshot>;
     const str = (x: unknown) => (typeof x === "string" ? x : null);
-    const claude = v.claude && typeof v.claude === "object" ? v.claude : {};
+    const defaults: SetupSnapshot["defaults"] = {};
+    if (v.defaults && typeof v.defaults === "object")
+      for (const [k, m] of Object.entries(v.defaults)) if (isStringMap(m)) defaults[k] = m;
     return {
       workChoice: str(v.workChoice),
-      claude: {
-        ...(str(claude.model) ? { model: claude.model } : {}),
-        ...(str(claude.effort) ? { effort: claude.effort } : {}),
-      },
+      defaults,
       helperModel: str(v.helperModel),
       helperEffort: str(v.helperEffort),
     };
@@ -134,28 +212,39 @@ function writeUndo(s: SetupSnapshot | null) {
 /** Saves the helper settings; resolves false (after telling the user) when they couldn't be saved. */
 export type SaveHelpers = (patch: Pick<TokenSaverOptions, "subagentModel" | "subagentEffort">) => Promise<boolean>;
 
-/** Remembers how things are now, so the change about to be made can be reverted. */
-export async function rememberForRevert(saver: TokenSaverOptions | undefined) {
-  const defaults = await Promise.resolve()
+/**
+ * Remembers how things are now, so the change about to be made can be reverted. `touched` lists the
+ * remembered choices (option ids per provider identity) the change sets.
+ */
+export async function rememberForRevert(
+  saver: TokenSaverOptions | undefined,
+  touched: Record<string, readonly string[]> = { claude: ["model", "effort"] },
+) {
+  const now = await Promise.resolve()
     .then(() => api.configDefaults())
     .catch(() => ({}) as Record<string, Record<string, string>>);
-  const claude = defaults.claude ?? {};
+  const defaults: SetupSnapshot["defaults"] = {};
+  for (const [key, ids] of Object.entries(touched))
+    defaults[key] = Object.fromEntries(ids.map((id) => [id, now[key]?.[id] ?? ""]));
   writeUndo({
     workChoice: readWorkChoice(),
-    claude: { ...(claude.model ? { model: claude.model } : {}), ...(claude.effort ? { effort: claude.effort } : {}) },
+    defaults,
     helperModel: saver?.subagentModel ?? null,
     helperEffort: saver?.subagentEffort ?? null,
   });
 }
 
-/** Makes `setup` what new Claude agents start with. Running agents keep what they have. */
+/** Makes `setup` what new agents start with. Running agents keep what they have. */
 export async function applySetup(setup: ModelSetup, saver: TokenSaverOptions | undefined, saveHelpers: SaveHelpers) {
-  await rememberForRevert(saver);
+  const touched: Record<string, string[]> = { claude: ["model", "effort"] };
+  for (const [key, values] of Object.entries(setup.others)) touched[key] = Object.keys(values);
+  await rememberForRevert(saver, touched);
   if (!(await saveHelpers({ subagentModel: setup.helperModel, subagentEffort: setup.helperEffort }))) {
     writeUndo(null);
     return false;
   }
   await api.setConfigDefaults("claude", { model: setup.model, effort: setup.effort });
+  for (const [key, values] of Object.entries(setup.others)) await api.setConfigDefaults(key, values);
   saveWorkChoice(workChoiceFor(setup));
   return true;
 }
@@ -165,7 +254,7 @@ export async function revertSetup(saveHelpers: SaveHelpers): Promise<boolean> {
   const before = readUndo();
   if (!before) return false;
   if (!(await saveHelpers({ subagentModel: before.helperModel, subagentEffort: before.helperEffort }))) return false;
-  await api.setConfigDefaults("claude", { model: before.claude.model ?? "", effort: before.claude.effort ?? "" });
+  for (const [key, values] of Object.entries(before.defaults)) await api.setConfigDefaults(key, values);
   if (before.workChoice) saveWorkChoice(before.workChoice);
   else clearWorkChoice();
   writeUndo(null);

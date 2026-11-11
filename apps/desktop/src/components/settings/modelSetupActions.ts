@@ -13,8 +13,8 @@ export const saveHelperSettings: SaveHelpers = (patch) => {
   );
 };
 
-/** Applies a setup and says so, with Undo in the toast. */
-export async function saveModelSetup(setup: ModelSetup): Promise<boolean> {
+/** Applies a setup and says so, with Undo in the toast. `others` names the other providers it changes. */
+export async function saveModelSetup(setup: ModelSetup, others: string[] = []): Promise<boolean> {
   const saver = useApp.getState().settings?.tokenSaver;
   try {
     if (!(await applySetup(setup, saver, saveHelperSettings))) return false;
@@ -23,7 +23,9 @@ export async function saveModelSetup(setup: ModelSetup): Promise<boolean> {
     return false;
   }
   toast.success("Models saved", {
-    description: `New Claude agents start on ${describeSetup(setup)}. Running agents keep what they have.`,
+    description: `New Claude agents start on ${describeSetup(setup)}.${
+      others.length ? ` New ${others.join(", ").replace(/, ([^,]*)$/, " and $1")} agents start on what you chose.` : ""
+    } Running agents keep what they have.`,
     action: { label: "Undo", onClick: () => void revertModelSetup() },
   });
   return true;
@@ -37,6 +39,6 @@ export async function revertModelSetup(): Promise<boolean> {
     toast.error("Couldn't revert the models", { description: e instanceof Error ? e.message : String(e) });
     return false;
   }
-  toast.success("Models reverted", { description: "New Claude agents start on what you had before." });
+  toast.success("Models reverted", { description: "New agents start on what you had before." });
   return true;
 }

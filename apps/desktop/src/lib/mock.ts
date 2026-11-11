@@ -2048,7 +2048,9 @@ export const mockApi: KvistcodeApi = {
   async setConfigDefaults(key, values) {
     const entry = { ...configDefaultsDb[key] };
     for (const [option, value] of Object.entries(values)) {
-      if (option !== "model" && option !== "effort") continue;
+      // Never a permission/sandbox option or a bypass value (config_memory::may_set_default).
+      if (!option.trim() || /^mode$|approval|sandbox|permission|bypass/i.test(option)) continue;
+      if (/bypass|danger|yolo|full.?access|dont.?ask|^never$|^acceptedits$/i.test(value.trim())) continue;
       if (value.trim()) entry[option] = value.trim();
       else delete entry[option];
     }
