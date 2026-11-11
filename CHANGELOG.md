@@ -5,6 +5,39 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.4.15 — 2026-11-11
+
+Fixes from a full review of the app.
+
+- Review and ship
+  - The review sheet works for an agent started in a subfolder of its project. Reverting a file or a hunk, and leaving a secret file out of a commit, could fail or miss the file there.
+  - A secret file you chose to leave out of a commit no longer blocks merging or opening a pull request. A new secret file the agent had already staged is now asked about too.
+  - "Discard worktree" is now called "Delete agent and worktree", which is what it does.
+  - Sending review comments waits for the comment you are still writing, and clearing all comments can be undone.
+  - "Revert file" is no longer offered for binary files, where it could not work.
+- Spending limits and helpers
+  - Raising a spending limit from a paused agent starts from the limit as it is now, not as it was when the agent paused. A limit you removed in the meantime stays removed.
+  - An agent paused at a spending limit is no longer moved to another account by automatic failover.
+  - A helper that changed nothing can be deleted without a warning about unsaved work, and its worktree goes with it.
+  - A helper waiting to merge into the main agent now merges when you stop the main agent, and after a restart of Kvistcode.
+  - A message sent while Kvistcode was saving a checkpoint can no longer be sent twice.
+- Plans and approvals
+  - Mission Control shows the plan itself when an agent asks to approve one, with the same choices as the conversation. Tiles and rows offer "Review plan" instead of a one-click Allow.
+  - Shutting down a working agent from the list asks first. So does keeping one answer in Compare while the others are still working.
+- Search finds older messages that were skipped when the search index was first built. The index repairs itself the next time Kvistcode starts.
+- Settings
+  - A new per-project spending limit is saved once you enter a number, not as "no limit" the moment you add the row.
+  - A voice model is selected only if its download finished.
+  - The Usage page shows the daily bar when only a daily turn limit is set.
+- Phone app
+  - Pairing keeps the device signed in even if the first connection fails or the page reloads right after scanning.
+  - Removing a queued message can be undone. Editing a failed message brings back its photos and keeps what you had typed.
+  - The first message for a new agent is kept if you go back or the page reloads. Search keeps what you typed when you come back from a result.
+  - "Continue" can't be sent twice by a double tap, and a swipe that springs back no longer swallows the next tap.
+  - The QR scanner turns the camera off when you leave the app.
+- Smaller fixes: pressing Escape or Enter in a dialog opened from another dialog no longer acts on the one behind it, "/" with Ctrl or Alt no longer jumps to the filter box, Ctrl+Shift+R never reloads the window, links to local servers no longer pick up a trailing backtick or asterisk, a wait of almost two days reads "2 d" instead of "1 d 24 h", and a tile in Mission Control or Compare no longer goes blank after many agents were opened.
+- The voice assistant can start the same task on a second provider or account (it used to treat that as a repeat), and a stalled connection ends after 10 seconds instead of hanging.
+
 ## v0.4.14 — 2026-11-11
 
 - Each Claude agent can choose its own helper model and effort from the new Helpers menu next to the model in the message box. Pick Sonnet, Haiku or the agent's own model, or leave it on Default to follow Settings. A change applies to the next helper the agent starts, even while it is working. Changing the helper settings now reaches running agents too.
