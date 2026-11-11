@@ -124,6 +124,7 @@ export function MissionControlView() {
               />
             )}
             <HeaderAction
+              variant="primary"
               icon={<Plus />}
               label="New agent"
               hint={`${modKey}${isMac ? "" : "+"}N`}

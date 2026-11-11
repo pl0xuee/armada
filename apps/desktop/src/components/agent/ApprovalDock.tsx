@@ -91,7 +91,11 @@ export function ApprovalSection({
     ? [...approve.slice(0, 1).map((c) => c.option), ...(keepPlanning ? [keepPlanning] : [])]
     : item.options;
   const labelOf = (o: PermissionOption) =>
-    plan ? (approve.find((c) => c.option.id === o.id)?.label ?? o.name) : o.name;
+    plan
+      ? o.id === keepPlanning?.id
+        ? "Keep planning"
+        : (approve.find((c) => c.option.id === o.id)?.label ?? o.name)
+      : o.name;
   const hint = (o: PermissionOption): string | null => {
     if (!focused || plan || !singleKeys) return null;
     if (keyed.allow?.id === o.id) return "A";
@@ -147,7 +151,7 @@ export function ApprovalSection({
               disabled={busy !== null}
               variant={allow ? (i === 0 ? "warn" : "secondary") : "danger"}
               onClick={() => void answer(o)}
-              className={cn(!allow && "sm:ml-auto")}
+              className={cn(!allow && !plan && "sm:ml-auto")}
             >
               {busy === o.id ? <Spinner className="h-3.5 w-3.5 text-current" /> : null}
               {labelOf(o)}
@@ -158,7 +162,7 @@ export function ApprovalSection({
         {denyOption && !reasonOpen && (
           <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setReasonOpen(true)}>
             <MessageSquareX />
-            {plan ? "Keep planning with a note…" : "Deny with reason…"}
+            {plan ? "Give feedback…" : "Deny with reason…"}
           </Button>
         )}
         <Tooltip content="Stop the whole turn instead of answering" shortcut={["Esc ×2"]}>
@@ -168,6 +172,7 @@ export function ApprovalSection({
             disabled={busy !== null}
             onClick={() => void cancelTurn(agent)}
             aria-label="Stop this turn"
+            className="ml-auto"
           >
             <Square className="!h-3 !w-3 fill-current" />
             Stop turn

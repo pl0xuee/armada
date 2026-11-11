@@ -142,14 +142,12 @@ export function CompareView() {
             <HeaderAction
               icon={<Plus />}
               label="Add agents"
-              variant="primary"
-              hint={`Start more agents in ${basename(group.agents[0].projectPath)}`}
               onClick={() => openNewAgent({ projectPath: group.agents[0].projectPath })}
             />
             <HeaderAction
               icon={<Sparkles />}
               label="New comparison"
-              variant="ghost"
+              variant="primary"
               onClick={() => openNewAgent({ compare: true })}
             />
           </>

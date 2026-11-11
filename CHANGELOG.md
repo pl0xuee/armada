@@ -8,6 +8,12 @@ docs/RELEASING.md).
 ## v0.4.13 — 2026-11-10
 
 - The helper model setting now always applies. Claude agents could ask for a different model when starting a helper (often Opus for reviews), and that overrode "Helper agents use". Now a helper always runs on the model you chose, and its card shows that model. Running agents pick this up when they next start.
+- A visual polish across the app.
+  - Settings has the same header as the other pages, and in a narrow window its sections scroll with arrows instead of being cut off.
+  - Mission Control's detail pane shows what the agent last said, its recent steps, where it is working and what it has spent. In a narrow window the "1 of 7" pager is now a stepper.
+  - Every page's main button (New agent, Add account, New comparison, New schedule) has the same look, and header buttons are the same height.
+  - Accounts keeps row actions in fixed places and lets the usage meters fill the row. Usage and Accounts no longer cut off text in a narrow window.
+  - The Projects page, plan approval buttons, the review sheet, dialogs and the welcome screen look more consistent and finished.
 
 ## v0.4.12 — 2026-11-10
 

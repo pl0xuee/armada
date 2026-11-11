@@ -2,7 +2,7 @@ import { forwardRef, type InputHTMLAttributes, type TextareaHTMLAttributes } fro
 import { cn } from "@/lib/utils";
 
 export const fieldClass =
-  "w-full rounded-lg border border-line-strong bg-base/60 px-3 text-body text-fg placeholder:text-steel transition-[border-color,box-shadow] duration-150 focus:border-accent/60 focus:outline-hidden focus:ring-3 focus:ring-accent/15 disabled:opacity-45";
+  "w-full rounded-lg border border-line-strong bg-base/60 px-3 text-body text-fg placeholder:text-steel transition-[border-color,box-shadow] duration-150 hover:border-[color-mix(in_srgb,var(--steel)_45%,var(--border))] focus:border-accent/60 focus:outline-hidden focus:ring-3 focus:ring-accent/15 disabled:opacity-45";
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
   ({ className, ...props }, ref) => (

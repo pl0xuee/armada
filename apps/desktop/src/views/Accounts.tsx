@@ -53,21 +53,24 @@ export function AccountsView() {
         icon={<Users />}
         title="Accounts"
         subtitle={
-          accounts.length === 0 ? (
-            "Where your agents sign in · every account runs in its own isolated profile"
-          ) : (
-            <>
-              <span className="tabular text-fg">{signedIn}</span> of <span className="tabular">{accounts.length}</span>{" "}
-              accounts signed in · every account runs in its own isolated profile
-            </>
-          )
+          <span className="whitespace-normal">
+            {accounts.length === 0 ? (
+              "Where your agents sign in · every account runs in its own isolated profile"
+            ) : (
+              <>
+                <span className="tabular text-fg">{signedIn}</span> of{" "}
+                <span className="tabular">{accounts.length}</span> accounts signed in · every account runs in its own
+                isolated profile
+              </>
+            )}
+          </span>
         }
         right={
           // With no account yet the page body has the one Add account button; two would compete.
           accounts.length > 0 && (
             <>
               <HeaderAction
-                variant="ghost"
+                variant="secondary"
                 icon={<RefreshCw className={cn(checkingAll && "animate-spin")} />}
                 label="Check all"
                 onClick={() => void checkAll()}
@@ -84,7 +87,7 @@ export function AccountsView() {
         }
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[880px] px-4 pb-10 pt-4 @2xl:px-6 @2xl:pb-16 @2xl:pt-6">
+        <div className="mx-auto max-w-[1040px] px-4 pb-10 pt-4 @2xl:px-6 @2xl:pb-16 @2xl:pt-6">
           {accounts.length === 0 ? (
             // The per-provider cards below still show what is installed; this is the one thing to do first.
             <EmptyState

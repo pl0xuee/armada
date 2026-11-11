@@ -203,8 +203,9 @@ export function Onboarding() {
 function StepHeader({ title, description }: { title: ReactNode; description: ReactNode }) {
   return (
     <div className="mb-6">
-      <h1 className="text-[24px] font-semibold tracking-[-0.025em]">{title}</h1>
-      <p className="mt-1.5 max-w-[520px] text-[13.5px] leading-relaxed text-muted">{description}</p>
+      <span aria-hidden className="mb-3 block h-[3px] w-8 rounded-full bg-accent" />
+      <h1 className="text-balance text-[24px] font-semibold tracking-[-0.025em]">{title}</h1>
+      <p className="mt-1.5 max-w-[520px] text-pretty text-[13.5px] leading-relaxed text-muted">{description}</p>
     </div>
   );
 }
@@ -220,10 +221,16 @@ function Welcome({ onNext }: { onNext: () => void }) {
           <AppMark size={60} />
         </div>
       </div>
-      <h1 className="text-[34px] font-semibold leading-tight tracking-[-0.035em]">
+      <h1
+        style={{ animationDelay: "40ms" }}
+        className="ob-rise text-balance text-[34px] font-semibold leading-tight tracking-[-0.035em]"
+      >
         Many agents, <AccentText>you in control</AccentText>.
       </h1>
-      <p className="mt-3 max-w-[460px] text-[14px] leading-relaxed text-muted">
+      <p
+        style={{ animationDelay: "90ms" }}
+        className="ob-rise mt-3 max-w-[460px] text-pretty text-[14px] leading-relaxed text-muted"
+      >
         Run several AI coding agents at once, and stay in control. Use Claude, Codex and Grok side by side, on all your
         accounts. Approve, review and ship from one place.
       </p>
@@ -239,7 +246,14 @@ function Welcome({ onNext }: { onNext: () => void }) {
           </span>
         ))}
       </div>
-      <Button variant="primary" size="lg" className="mt-9 min-w-[180px]" onClick={onNext} autoFocus>
+      <Button
+        variant="primary"
+        size="lg"
+        style={{ animationDelay: "320ms" }}
+        className="ob-rise mt-9 min-w-[180px]"
+        onClick={onNext}
+        autoFocus
+      >
         Get started <ArrowRight />
       </Button>
       <p className="mt-3 text-caption text-steel">Takes about a minute. You can change everything later.</p>

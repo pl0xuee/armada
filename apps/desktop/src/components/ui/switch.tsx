@@ -31,7 +31,7 @@ export function Switch({
     >
       <S.Thumb
         className={cn(
-          "block h-[14px] w-[14px] translate-x-[2px] rounded-full bg-steel shadow-sm transition-transform duration-150",
+          "block h-[14px] w-[14px] translate-x-[2px] rounded-full bg-steel shadow-[0_1px_2px_hsl(var(--shadow-color)/0.35)] transition-transform duration-150",
           "data-[state=checked]:translate-x-[16px] data-[state=checked]:bg-white",
         )}
       />

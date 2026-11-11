@@ -505,15 +505,15 @@ function Welcome() {
           </div>
         )}
 
-        <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+        <div className="mt-3 grid grid-cols-1 gap-3 @lg:grid-cols-3">
           <QuickAction icon={<SlidersHorizontal />} label="All options" onClick={() => openNewAgent()} />
           <QuickAction icon={<Columns3 />} label="Compare providers" onClick={() => openNewAgent({ compare: true })} />
           <QuickAction icon={<LayoutGrid />} label="Mission Control" onClick={() => setView("mission")} />
         </div>
 
         {interrupted.length > 0 && (
-          <div className="mt-6 overflow-hidden rounded-xl border border-violet/30 bg-violet/[0.05]">
-            <div className="flex items-center gap-2 border-b border-violet/20 px-3.5 py-2">
+          <div className="mt-6 overflow-hidden rounded-xl border border-line bg-card/70 edge">
+            <div className="flex items-center gap-2 border-b border-line px-3.5 py-2.5">
               <RotateCcw className="h-3.5 w-3.5 text-violet" />
               <span className="text-small font-semibold">Pick up where you left off</span>
               <Button
@@ -527,10 +527,7 @@ function Welcome() {
             </div>
             <ul>
               {interrupted.slice(0, 4).map((a) => (
-                <li
-                  key={a.id}
-                  className="flex items-center gap-2.5 px-3.5 py-1.5 transition-colors hover:bg-violet/[0.06]"
-                >
+                <li key={a.id} className="flex items-center gap-2.5 px-3.5 py-2 transition-colors hover:bg-raised/60">
                   <ProviderGlyph provider={a.provider} customAgentId={a.customAgentId} size="sm" />
                   <button type="button" onClick={() => openAgent(a.id)} className="min-w-0 flex-1 text-left">
                     <span className="block truncate text-body font-medium">{a.title}</span>
@@ -609,7 +606,7 @@ function QuickAction({ icon, label, onClick }: { icon: React.ReactNode; label: s
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-card/70 px-2.5 text-small text-muted transition-[border-color,background-color,color,transform] duration-150 hover:border-line-strong hover:bg-raised hover:text-fg active:scale-[0.98] [&_svg]:h-3.5 [&_svg]:w-3.5"
+      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-line bg-card/70 edge px-3 text-small text-muted transition-[border-color,background-color,color,transform] duration-150 hover:border-line-strong hover:bg-raised hover:text-fg active:scale-[0.98] [&_svg]:h-4 [&_svg]:w-4"
     >
       {icon}
       {label}

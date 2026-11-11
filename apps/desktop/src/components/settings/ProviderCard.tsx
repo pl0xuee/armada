@@ -103,7 +103,7 @@ export function ProviderCard({
             <a
               href={info.docsUrl}
               rel="noreferrer noopener"
-              className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-meta text-steel transition-colors hover:text-fg"
+              className="inline-flex h-6 items-center gap-1 rounded-md px-2.5 text-meta text-steel transition-colors hover:text-fg"
             >
               Docs <ExternalLink className="h-3 w-3" />
             </a>

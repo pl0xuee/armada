@@ -101,7 +101,7 @@ export function HeaderAction({
         onClick={onClick}
         disabled={disabled}
         aria-label={label}
-        className="h-8 w-8 px-0 @xl/ph:h-7 @xl/ph:w-auto @xl/ph:px-2.5"
+        className="h-8 w-8 px-0 @xl/ph:w-auto @xl/ph:px-3"
       >
         {icon}
         <span className="hidden @xl/ph:inline">{label}</span>

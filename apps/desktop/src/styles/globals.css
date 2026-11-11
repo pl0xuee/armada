@@ -168,9 +168,9 @@
   --claude: #d97757;
   --openai: #10a37f;
   --grok: #e5e7eb;
-  --edge: rgba(255, 255, 255, .05);
+  --edge: rgba(255, 255, 255, 0.05);
   --edge-strong: rgba(255, 255, 255, 0.08);
-  --scrim: rgba(3,5,14,.66);
+  --scrim: rgba(3, 5, 14, 0.66);
   --texture-opacity: 0.45;
   --code-bg: #0a0e1c;
   --diff-add: rgba(61, 220, 151, 0.11);
@@ -213,9 +213,9 @@
   --claude: #d97757;
   --openai: #10a37f;
   --grok: #e5e7eb;
-  --edge: rgba(255, 255, 255, .05);
+  --edge: rgba(255, 255, 255, 0.05);
   --edge-strong: rgba(255, 255, 255, 0.08);
-  --scrim: rgba(2,8,5,.66);
+  --scrim: rgba(2, 8, 5, 0.66);
   --texture-opacity: 0.45;
   --code-bg: #09120d;
   --diff-add: rgba(61, 220, 151, 0.11);
@@ -258,9 +258,9 @@
   --claude: #d97757;
   --openai: #10a37f;
   --grok: #e5e7eb;
-  --edge: rgba(255, 255, 255, .05);
+  --edge: rgba(255, 255, 255, 0.05);
   --edge-strong: rgba(255, 255, 255, 0.08);
-  --scrim: rgba(8,3,14,.68);
+  --scrim: rgba(8, 3, 14, 0.68);
   --texture-opacity: 0.45;
   --code-bg: #0c0712;
   --diff-add: rgba(61, 220, 151, 0.11);
@@ -303,9 +303,9 @@
   --claude: #d97757;
   --openai: #10a37f;
   --grok: #e5e7eb;
-  --edge: rgba(255, 255, 255, .05);
+  --edge: rgba(255, 255, 255, 0.05);
   --edge-strong: rgba(255, 255, 255, 0.08);
-  --scrim: rgba(10,5,2,.68);
+  --scrim: rgba(10, 5, 2, 0.68);
   --texture-opacity: 0.45;
   --code-bg: #0b0806;
   --diff-add: rgba(61, 220, 151, 0.11);
@@ -348,9 +348,9 @@
   --claude: #c25e3e;
   --openai: #0d8a6b;
   --grok: #39414c;
-  --edge: rgba(255,255,255,0.9);
+  --edge: rgba(255, 255, 255, 0.9);
   --edge-strong: rgba(255, 255, 255, 1);
-  --scrim: rgba(48,40,28,.35);
+  --scrim: rgba(48, 40, 28, 0.35);
   --texture-opacity: 0.25;
   --code-bg: #f4f0e6;
   --diff-add: rgba(16, 133, 92, 0.1);
@@ -393,9 +393,9 @@
   --claude: #c25e3e;
   --openai: #0d8a6b;
   --grok: #39414c;
-  --edge: rgba(255,255,255,0.9);
+  --edge: rgba(255, 255, 255, 0.9);
   --edge-strong: rgba(255, 255, 255, 1);
-  --scrim: rgba(36,30,60,.35);
+  --scrim: rgba(36, 30, 60, 0.35);
   --texture-opacity: 0.25;
   --code-bg: #f1eff9;
   --diff-add: rgba(16, 133, 92, 0.1);
@@ -633,7 +633,6 @@
   :focus-visible {
     outline: 2px solid color-mix(in srgb, var(--accent) 80%, transparent);
     outline-offset: 2px;
-    border-radius: 6px;
   }
 
   /* Hairline scrollbars */

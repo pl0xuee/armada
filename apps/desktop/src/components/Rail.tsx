@@ -72,7 +72,7 @@ export function Rail() {
             <m.span
               layoutId="rail-bar"
               transition={{ type: "spring", stiffness: 520, damping: 40 }}
-              className="absolute -left-1 top-2 h-5 w-[3px] rounded-r-full bg-accent shadow-[0_0_10px_var(--accent)]"
+              className="absolute -left-1 top-[10px] h-5 w-[3px] rounded-r-full bg-accent shadow-[0_0_10px_var(--accent)]"
             />
           )}
           <span className="relative flex h-8 w-11 items-center justify-center rounded-[10px]">
@@ -93,7 +93,7 @@ export function Rail() {
             {mission && working > 0 && (
               <span
                 aria-hidden
-                className="absolute right-1 top-1 z-20 h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_6px_var(--accent)] animate-breathe"
+                className="absolute bottom-0.5 right-1 z-20 h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_6px_var(--accent)] animate-breathe"
               />
             )}
           </span>

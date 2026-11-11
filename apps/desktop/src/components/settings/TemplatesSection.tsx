@@ -79,7 +79,7 @@ export function TemplatesSection({ templates }: { templates: PromptTemplate[] })
         title="Templates"
         description="Reusable prompts for the composer, new agents and schedules."
         right={
-          <Button variant="secondary" onClick={() => setEditing("new")}>
+          <Button variant="primary" onClick={() => setEditing("new")}>
             <Plus /> New template
           </Button>
         }

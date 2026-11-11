@@ -1,6 +1,9 @@
 import {
   Bell,
   Bot,
+  ChevronLeft,
+  ChevronRight,
+  Settings as SettingsIcon,
   Boxes,
   FileText,
   Smartphone,
@@ -25,6 +28,7 @@ import { m } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { toast } from "sonner";
 import { AppMark } from "@/components/AppMark";
+import { PageHeader } from "@/components/PageHeader";
 import { GithubGlyph } from "@/components/settings/GithubGlyph";
 import { CompanionSection } from "@/components/settings/CompanionSection";
 import { InstallAllBanner } from "@/components/settings/InstallAllBanner";
@@ -143,60 +147,67 @@ export function SettingsView() {
   };
 
   return (
-    <div className="flex h-full max-[860px]:flex-col">
-      <SettingsNav page={page} onSelect={select} onPick={pick} />
+    <div className="flex h-full flex-col">
+      <PageHeader
+        title="Settings"
+        subtitle="Make Kvistcode yours: look, agents, models, phone and voice."
+        icon={<SettingsIcon />}
+      />
+      <div className="flex min-h-0 flex-1 max-[860px]:flex-col">
+        <SettingsNav page={page} onSelect={select} onPick={pick} />
 
-      <div ref={scrollRef} className="@container min-h-0 min-w-0 flex-1 overflow-y-auto">
-        <div key={page} className="view-enter mx-auto max-w-[720px] px-4 pb-16 pt-6 @md:px-6 @2xl:px-8 @2xl:pt-8">
-          {page === "appearance" && <General settings={settings} />}
-          {page === "keyboard" && <KeyboardPage settings={settings} />}
-          {page === "notifications" && (
-            <>
-              <Notifications settings={settings} />
-              <Part id="sounds">
-                <Sounds settings={settings} />
-              </Part>
-            </>
-          )}
-          {page === "behavior" && <NewAgents settings={settings} />}
-          {page === "models" && (
-            <>
-              <ModelsPage settings={settings} />
-              <Part id="budgets">
-                <BudgetsSection settings={settings} />
-              </Part>
-            </>
-          )}
-          {page === "providers" && (
-            <>
-              <Providers />
-              <Part id="tools">
-                <ToolsSection settings={settings} />
-              </Part>
-              <Part id="agents">
-                <AgentsSection agents={settings.customAgents} />
-              </Part>
-            </>
-          )}
-          {page === "projects" && <ToolsHub servers={settings.mcpServers} />}
-          {page === "templates" && <TemplatesSection templates={settings.templates} />}
-          {page === "remote" && (
-            <>
-              <RemoteSection settings={settings} />
-              <Part id="push">
-                <PhonePush settings={settings} />
-              </Part>
-            </>
-          )}
-          {page === "voice" && (
-            <>
-              <VoiceSection settings={settings} />
-              <Part id="assistant">
-                <VoiceAssistantSection settings={settings} />
-              </Part>
-            </>
-          )}
-          {page === "about" && <About />}
+        <div ref={scrollRef} className="@container min-h-0 min-w-0 flex-1 overflow-y-auto">
+          <div key={page} className="view-enter mx-auto max-w-[1040px] px-4 pb-16 pt-6 @md:px-6 @2xl:px-8 @2xl:pt-8">
+            {page === "appearance" && <General settings={settings} />}
+            {page === "keyboard" && <KeyboardPage settings={settings} />}
+            {page === "notifications" && (
+              <>
+                <Notifications settings={settings} />
+                <Part id="sounds">
+                  <Sounds settings={settings} />
+                </Part>
+              </>
+            )}
+            {page === "behavior" && <NewAgents settings={settings} />}
+            {page === "models" && (
+              <>
+                <ModelsPage settings={settings} />
+                <Part id="budgets">
+                  <BudgetsSection settings={settings} />
+                </Part>
+              </>
+            )}
+            {page === "providers" && (
+              <>
+                <Providers />
+                <Part id="tools">
+                  <ToolsSection settings={settings} />
+                </Part>
+                <Part id="agents">
+                  <AgentsSection agents={settings.customAgents} />
+                </Part>
+              </>
+            )}
+            {page === "projects" && <ToolsHub servers={settings.mcpServers} />}
+            {page === "templates" && <TemplatesSection templates={settings.templates} />}
+            {page === "remote" && (
+              <>
+                <RemoteSection settings={settings} />
+                <Part id="push">
+                  <PhonePush settings={settings} />
+                </Part>
+              </>
+            )}
+            {page === "voice" && (
+              <>
+                <VoiceSection settings={settings} />
+                <Part id="assistant">
+                  <VoiceAssistantSection settings={settings} />
+                </Part>
+              </>
+            )}
+            {page === "about" && <About />}
+          </div>
         </div>
       </div>
     </div>
@@ -242,6 +253,24 @@ function SettingsNav({
   const results = useMemo(() => searchSettings(query), [query]);
   const searching = query.trim() !== "";
   useEffect(() => setActive(0), [query]);
+  // Which edges of the narrow strip have more pills hidden past them (drives the fade and arrows).
+  const [edge, setEdge] = useState({ left: false, right: false });
+  const measureEdge = () => {
+    const el = stripRef.current;
+    if (!el) return;
+    const left = el.scrollLeft > 2;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+    setEdge((e) => (e.left === left && e.right === right ? e : { left, right }));
+  };
+  useEffect(() => {
+    measureEdge();
+    const el = stripRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(measureEdge);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [searching]);
+  const nudge = (dir: 1 | -1) => stripRef.current?.scrollBy({ left: dir * 220, behavior: scrollBehavior() });
 
   // Keep the active pill in view on the narrow strip (scroll only the strip itself).
   useEffect(() => {
@@ -251,6 +280,8 @@ function SettingsNav({
     const target = el.offsetLeft - (strip.clientWidth - el.offsetWidth) / 2;
     strip.scrollTo({ left: Math.max(0, target), behavior: scrollBehavior() });
   }, [page, searching]);
+  const fadeL = edge.left ? "transparent, black 40px" : "black, black 0px";
+  const fadeR = edge.right ? "black calc(100% - 56px), transparent" : "black 100%, black";
 
   const choose = (e: SettingsEntry | undefined) => {
     if (!e) return;
@@ -262,13 +293,10 @@ function SettingsNav({
     <nav
       aria-label="Settings sections"
       className={cn(
-        "flex w-[208px] shrink-0 flex-col border-r border-line bg-panel/50 px-2.5 pb-3 pt-7 min-[861px]:min-h-0 min-[861px]:overflow-y-auto",
-        "max-[860px]:w-full max-[860px]:border-b max-[860px]:border-r-0 max-[860px]:px-0 max-[860px]:pt-4",
+        "flex w-[208px] shrink-0 flex-col border-r border-line bg-panel/50 px-2.5 pb-3 pt-4 min-[861px]:min-h-0 min-[861px]:overflow-y-auto",
+        "max-[860px]:w-full max-[860px]:border-b max-[860px]:border-r-0 max-[860px]:px-0 max-[860px]:pt-3",
       )}
     >
-      <h1 className="mb-3 px-2.5 text-[20px] font-semibold tracking-[-0.02em] max-[860px]:mb-2.5 max-[860px]:px-4 max-[860px]:text-[18px]">
-        Settings
-      </h1>
       <div className="relative mb-3 max-[860px]:mx-3 max-[860px]:mb-2.5">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-steel" />
         <Input
@@ -323,62 +351,87 @@ function SettingsNav({
           ))}
         </div>
       ) : (
-        <div
-          ref={stripRef}
-          className={cn(
-            "flex flex-col",
-            "max-[860px]:flex-row max-[860px]:gap-1 max-[860px]:overflow-x-auto max-[860px]:px-3 max-[860px]:pb-2.5",
-            "max-[860px]:[scrollbar-width:none] max-[860px]:[&::-webkit-scrollbar]:hidden",
-            "max-[860px]:[mask-image:linear-gradient(to_right,transparent,black_14px,black_calc(100%-14px),transparent)]",
+        <div className="relative max-[860px]:pb-2.5">
+          {(["left", "right"] as const).map((side) =>
+            edge[side] ? (
+              <button
+                key={side}
+                type="button"
+                tabIndex={-1}
+                aria-label={side === "left" ? "Scroll sections left" : "Scroll sections right"}
+                onClick={() => nudge(side === "left" ? -1 : 1)}
+                className={cn(
+                  "absolute top-0 z-10 hidden h-8 w-7 items-center justify-center rounded-full border border-line bg-raised text-muted shadow-sm transition-colors hover:text-fg max-[860px]:flex",
+                  side === "left" ? "left-1.5" : "right-1.5",
+                )}
+              >
+                {side === "left" ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              </button>
+            ) : null,
           )}
-        >
-          {NAV_GROUPS.map((g, gi) => (
-            <div
-              key={g.title ?? "more"}
-              role="group"
-              aria-label={g.title ?? undefined}
-              className={cn(
-                "flex flex-col gap-0.5 max-[860px]:contents",
-                gi > 0 && (g.title ? "mt-4" : "mt-4 border-t border-line pt-3"),
-              )}
-            >
-              {g.title && (
-                <h2 className="px-2.5 pb-1 text-micro font-medium uppercase tracking-[0.06em] text-steel max-[860px]:hidden">
-                  {g.title}
-                </h2>
-              )}
-              {g.pages.map((id) => {
-                const isActive = id === page;
-                const Icon = ICON_OF[id];
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    aria-current={isActive ? "page" : undefined}
-                    onClick={() => onSelect(id)}
-                    className={cn(
-                      "relative flex h-8 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 text-body transition-colors",
-                      "max-[860px]:h-8 max-[860px]:gap-2 max-[860px]:rounded-full max-[860px]:px-3",
-                      isActive ? "text-fg" : "text-muted hover:bg-raised/60 hover:text-fg",
-                    )}
-                  >
-                    {isActive && (
-                      <m.span
-                        layoutId="settings-nav"
-                        transition={{ type: "spring", stiffness: 520, damping: 40 }}
-                        className="absolute inset-0 rounded-[inherit] border border-line-strong bg-raised edge"
-                      />
-                    )}
-                    <Icon className={cn("relative h-4 w-4", isActive ? "text-accent" : "text-steel")} />
-                    <span className="relative">{PAGE_LABEL[id]}</span>
-                    {id === "providers" && updates > 0 && (
-                      <CountBadge count={updates} className="relative ml-auto shadow-none max-[860px]:ml-0" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+          <div
+            ref={stripRef}
+            onScroll={measureEdge}
+            style={
+              {
+                "--strip-mask": `linear-gradient(to right, ${fadeL}, ${fadeR})`,
+              } as React.CSSProperties
+            }
+            className={cn(
+              "flex flex-col",
+              "max-[860px]:flex-row max-[860px]:gap-1 max-[860px]:overflow-x-auto max-[860px]:px-3",
+              "max-[860px]:[scrollbar-width:none] max-[860px]:[&::-webkit-scrollbar]:hidden",
+              "max-[860px]:[mask-image:var(--strip-mask)]",
+            )}
+          >
+            {NAV_GROUPS.map((g, gi) => (
+              <div
+                key={g.title ?? "more"}
+                role="group"
+                aria-label={g.title ?? undefined}
+                className={cn(
+                  "flex flex-col gap-0.5 max-[860px]:contents",
+                  gi > 0 && (g.title ? "mt-4" : "mt-4 border-t border-line pt-3"),
+                )}
+              >
+                {g.title && (
+                  <h2 className="px-2.5 pb-1 text-micro font-medium uppercase tracking-[0.06em] text-steel max-[860px]:hidden">
+                    {g.title}
+                  </h2>
+                )}
+                {g.pages.map((id) => {
+                  const isActive = id === page;
+                  const Icon = ICON_OF[id];
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      aria-current={isActive ? "page" : undefined}
+                      onClick={() => onSelect(id)}
+                      className={cn(
+                        "relative flex h-8 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 text-body transition-colors",
+                        "max-[860px]:h-8 max-[860px]:gap-2 max-[860px]:rounded-full max-[860px]:px-3",
+                        isActive ? "text-fg" : "text-muted hover:bg-raised/60 hover:text-fg",
+                      )}
+                    >
+                      {isActive && (
+                        <m.span
+                          layoutId="settings-nav"
+                          transition={{ type: "spring", stiffness: 520, damping: 40 }}
+                          className="absolute inset-0 rounded-[inherit] border border-line-strong bg-raised edge"
+                        />
+                      )}
+                      <Icon className={cn("relative h-4 w-4", isActive ? "text-accent" : "text-steel")} />
+                      <span className="relative">{PAGE_LABEL[id]}</span>
+                      {id === "providers" && updates > 0 && (
+                        <CountBadge count={updates} className="relative ml-auto shadow-none max-[860px]:ml-0" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </nav>
@@ -1027,60 +1080,61 @@ function HotkeyRow({ settings }: { settings: Settings }) {
       description="Bring Kvistcode forward from anywhere. Record a shortcut, or leave it empty to turn it off."
       htmlFor="b-hotkey"
     >
-      <div className="w-[240px] max-w-full">
-        <div className="relative">
-          <Input
-            id="b-hotkey"
-            value={hotkey}
-            placeholder="Disabled"
-            onChange={(e) => setHotkey(e.target.value)}
-            onBlur={() => void commitHotkey(hotkey)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
-              if (e.key === "Escape" && hotkeyError === null) setHotkey(settings.globalHotkey);
-            }}
-            aria-invalid={hotkeyError !== null}
-            aria-describedby={hotkeyError ? "b-hotkey-error" : undefined}
-            className={cn(
-              "peer h-8 pr-8 font-mono text-caption",
-              // The caps below stand in for the raw text until you edit it.
-              hotkeyCaps.length > 0 && !hotkeyError && "text-transparent focus:text-fg",
-              hotkeyError && "border-err/60 focus:border-err/60 focus:ring-err/15",
-            )}
-            spellCheck={false}
-          />
-          {hotkeyCaps.length > 0 && !hotkeyError && (
-            <span
-              aria-hidden
-              className="pointer-events-none absolute inset-y-0 left-2.5 right-8 flex items-center gap-1 overflow-hidden peer-focus:hidden"
-            >
-              {hotkeyCaps.map((c, i) => (
-                <Kbd key={`${c}${i}`}>{c}</Kbd>
-              ))}
-            </span>
-          )}
-          {hotkeySaving ? (
-            <Spinner className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
-          ) : (
-            hotkey && (
-              <button
-                type="button"
-                aria-label="Clear hotkey (disable)"
-                title="Clear (disable)"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  setHotkey("");
-                  void commitHotkey("");
-                }}
-                className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-steel transition-colors hover:bg-raised hover:text-fg"
+      <div className="w-[380px] max-w-full">
+        <div className="flex items-start gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Input
+              id="b-hotkey"
+              value={hotkey}
+              placeholder="Disabled"
+              onChange={(e) => setHotkey(e.target.value)}
+              onBlur={() => void commitHotkey(hotkey)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+                if (e.key === "Escape" && hotkeyError === null) setHotkey(settings.globalHotkey);
+              }}
+              aria-invalid={hotkeyError !== null}
+              aria-describedby={hotkeyError ? "b-hotkey-error" : undefined}
+              className={cn(
+                "peer h-8 pr-8 font-mono text-caption",
+                // The caps below stand in for the raw text until you edit it.
+                hotkeyCaps.length > 0 && !hotkeyError && "text-transparent focus:text-fg",
+                hotkeyError && "border-err/60 focus:border-err/60 focus:ring-err/15",
+              )}
+              spellCheck={false}
+            />
+            {hotkeyCaps.length > 0 && !hotkeyError && (
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-y-0 left-2.5 right-8 flex items-center gap-1 overflow-hidden peer-focus:hidden"
               >
-                <X className="h-3 w-3" />
-              </button>
-            )
-          )}
-        </div>
-        <div className="mt-1.5">
+                {hotkeyCaps.map((c, i) => (
+                  <Kbd key={`${c}${i}`}>{c}</Kbd>
+                ))}
+              </span>
+            )}
+            {hotkeySaving ? (
+              <Spinner className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
+            ) : (
+              hotkey && (
+                <button
+                  type="button"
+                  aria-label="Clear hotkey (disable)"
+                  title="Clear (disable)"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setHotkey("");
+                    void commitHotkey("");
+                  }}
+                  className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-steel transition-colors hover:bg-raised hover:text-fg"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )
+            )}
+          </div>
           <HotkeyRecorder
+            hintBelow
             disabled={hotkeySaving}
             onRecord={(acc) => {
               setHotkey(acc);
@@ -1125,7 +1179,7 @@ function KeyboardPage({ settings }: { settings: Settings }) {
             title="Talk to the voice assistant"
             description="Its hotkey is set with the rest of the voice assistant."
           >
-            <Button size="sm" variant="ghost" onClick={() => useUi.getState().openSettings("assistant")}>
+            <Button size="sm" variant="secondary" onClick={() => useUi.getState().openSettings("assistant")}>
               Open Voice
             </Button>
           </SettingRow>

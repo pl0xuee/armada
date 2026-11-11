@@ -211,10 +211,10 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
             </p>
           )}
           {usage && (usage.primary || usage.secondary) && (
-            <div className={cn("flex flex-wrap items-end gap-x-4 gap-y-1.5", compact ? "mt-1.5" : "mt-2.5")}>
-              <UsageMeters usage={usage} className="w-full max-w-[460px]" />
+            <div className={cn("flex items-end gap-x-4 gap-y-1.5", compact ? "mt-1.5" : "mt-2.5")}>
+              <UsageMeters usage={usage} className="min-w-0 flex-1 max-w-[640px]" />
               {!compact && (
-                <span className="hidden pb-px text-micro text-steel @xl/acct:inline">
+                <span className="hidden shrink-0 pb-px text-micro text-steel @xl/acct:inline">
                   updated {relativeTimeLong(usage.updatedAt, now)}
                 </span>
               )}
@@ -237,6 +237,8 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
             </Tooltip>
           )}
           {/* A healthy account rarely needs this, so it stays out of the way. */}
+          {/* Slot 1 is always 28px: More, Replace key, or an empty spacer, so check/edit/remove never shift. */}
+          {!compact && local && !apiKey && <span aria-hidden className="h-7 w-7 shrink-0" />}
           {loggedIn && !compact && !apiKey && !local && (
             <DropdownMenu>
               <Tooltip content="More">
@@ -299,7 +301,13 @@ export function AccountRow({ account, compact }: { account: Account; compact?: b
                   </Button>
                 </Tooltip>
               )}
-              {account.isSystem && <span aria-hidden className="h-7 w-7 shrink-0" />}
+              {account.isSystem && (
+                <Tooltip content="The default login can't be removed.">
+                  <span tabIndex={0} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md">
+                    <Trash2 aria-hidden className="h-4 w-4 opacity-30" />
+                  </span>
+                </Tooltip>
+              )}
             </>
           )}
         </div>

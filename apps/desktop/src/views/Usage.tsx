@@ -221,7 +221,11 @@ export function UsageView() {
       <PageHeader
         icon={<ChartColumn />}
         title="Usage"
-        subtitle="What your agents used since they were created, and what it would cost at API prices."
+        subtitle={
+          <span className="whitespace-normal">
+            What your agents used since they were created, and what it would cost at API prices.
+          </span>
+        }
         right={
           <Segmented<Metric>
             size="sm"
@@ -237,7 +241,7 @@ export function UsageView() {
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-6xl space-y-3 px-4 py-4 @2xl:space-y-4 @2xl:px-6 @2xl:py-5">
+        <div className="mx-auto max-w-[1040px] space-y-3 px-4 py-4 @2xl:space-y-4 @2xl:px-6 @2xl:py-5">
           {budget && (dailyCap != null || dailyTokenCap != null) && (
             <BudgetBar status={budget} onConfigure={() => openSettings("budgets")} />
           )}

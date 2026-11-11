@@ -578,9 +578,11 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="md" />
         <div className="min-w-0 flex-1">
           <D.Title className="truncate text-[15px] font-semibold tracking-tight">Review · {agent.title}</D.Title>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-caption text-muted">
+          <div className="mt-0.5 flex items-center gap-x-2 whitespace-nowrap text-caption text-muted [&>*:not([data-shrink])]:shrink-0">
             <GitBranch className="h-3.5 w-3.5 text-steel" />
-            <span className="font-mono text-meta">{agent.branch ?? "working tree"}</span>
+            <span data-shrink className="min-w-0 truncate font-mono text-meta" title={agent.branch ?? undefined}>
+              {agent.branch ?? "working tree"}
+            </span>
             {agent.baseBranch && (
               <>
                 <span className="text-steel">into</span>
@@ -598,7 +600,10 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
                 {diff.ahead > 0 && (
                   <>
                     <span className="text-line-strong">·</span>
-                    <span>{pluralize(diff.ahead, "commit")} ahead</span>
+                    <span className="max-[900px]:hidden">{pluralize(diff.ahead, "commit")} ahead</span>
+                    <span className="min-[901px]:hidden" title={`${pluralize(diff.ahead, "commit")} ahead`}>
+                      {diff.ahead} ahead
+                    </span>
                   </>
                 )}
                 {uncommitted > 0 && (
@@ -825,8 +830,8 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         </div>
       )}
 
-      <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line bg-panel px-4 py-3">
-        <div className="flex min-w-[min(280px,100%)] flex-[1_1_320px] items-center gap-2">
+      <footer className="flex shrink-0 items-center gap-2 border-t border-line bg-panel px-4 py-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <Input
             value={commitMsg}
             onChange={(e) => setCommitMsg(e.target.value)}
@@ -852,7 +857,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
             Commit
           </Button>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2 max-[900px]:w-full">
+        <div className="flex shrink-0 items-center justify-end gap-2">
           {/* One main action that follows the state of the work; everything else lives in More. */}
           {agent.worktree && !nothingToShip && (
             <Button
@@ -890,7 +895,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
               <DropdownMenuTrigger asChild>
                 <Button variant="secondary" aria-label="More actions">
                   {busy === "pr" ? <Spinner className="h-3.5 w-3.5" /> : <Ellipsis />}
-                  More
+                  <span className="max-[900px]:sr-only">More</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent

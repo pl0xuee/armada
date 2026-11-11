@@ -80,7 +80,7 @@ export function SectionHeader({
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
       <div className="min-w-0 flex-1 basis-[260px]">
-        <h2 className="text-[17px] font-semibold tracking-[-0.015em] text-fg">{title}</h2>
+        <h2 className="text-[18px] font-semibold tracking-[-0.015em] text-fg">{title}</h2>
         {description && <p className="mt-1 text-body text-muted">{description}</p>}
       </div>
       {right}

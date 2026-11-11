@@ -1,6 +1,6 @@
 import { Keyboard } from "lucide-react";
 import { useEffect, useState } from "react";
-import { isMac } from "@/lib/utils";
+import { cn, isMac } from "@/lib/utils";
 import { Button } from "../ui/button";
 
 const CODE_KEYS: Record<string, string> = {
@@ -55,9 +55,12 @@ export function acceleratorFor(e: KeyboardEvent): string | null {
 export function HotkeyRecorder({
   onRecord,
   disabled,
+  hintBelow,
 }: {
   onRecord: (accelerator: string) => void;
   disabled?: boolean;
+  /** Float the hint under the button, so the button stays a fixed size beside a field. */
+  hintBelow?: boolean;
 }) {
   const [recording, setRecording] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -85,7 +88,7 @@ export function HotkeyRecorder({
   }, [recording, onRecord]);
 
   return (
-    <div className="flex items-center gap-2">
+    <div className={cn("flex items-center gap-2", hintBelow && "relative")}>
       <Button
         size="sm"
         variant={recording ? "primary" : "secondary"}
@@ -100,7 +103,10 @@ export function HotkeyRecorder({
         <Keyboard />
         {recording ? "Press keys…" : "Record"}
       </Button>
-      <span role="status" className="text-meta text-steel">
+      <span
+        role="status"
+        className={cn("text-meta text-steel", hintBelow && "absolute right-0 top-full mt-1.5 whitespace-nowrap")}
+      >
         {recording ? (hint ?? "Press the shortcut, or Esc to cancel") : ""}
       </span>
     </div>

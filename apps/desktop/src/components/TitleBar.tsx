@@ -57,7 +57,9 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
         data-tauri-drag-region
         className={cn(
           "texture relative z-30 grid h-10 shrink-0 items-center border-b border-line bg-panel edge",
-          compact ? "grid-cols-[1fr_auto_1fr]" : "grid-cols-[1fr_minmax(0,380px)_1fr]",
+          compact
+            ? "grid-cols-[1fr_auto_1fr]"
+            : "grid-cols-[1fr_minmax(0,380px)_1fr] max-[999px]:grid-cols-[auto_minmax(0,1fr)_auto]",
         )}
         style={{ paddingLeft: mac ? 78 : 12 }}
       >
@@ -108,7 +110,7 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
                 aria-label="Open command palette"
               >
                 <Search className="h-3.5 w-3.5 shrink-0" />
-                <span className="hidden truncate @[170px]:inline @[330px]:hidden">Search…</span>
+                <span className="hidden truncate @[150px]:inline @[330px]:hidden">Search…</span>
                 <span className="hidden truncate @[330px]:inline">Search agents, actions, history…</span>
                 <span className="ml-auto hidden shrink-0 gap-0.5 @[140px]:flex">
                   <Kbd>{modKey}</Kbd>

@@ -4,6 +4,7 @@ import {
   CircleCheck,
   CircleX,
   Gauge,
+  GitBranch,
   Play,
   Repeat,
   RotateCcw,
@@ -122,7 +123,7 @@ export function NeedsYouDetail({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-8 pt-4 [mask-image:linear-gradient(to_bottom,#000_calc(100%-24px),transparent)]">
         {!items && loading ? (
           <div className="space-y-2.5" aria-label="Loading">
             <Skeleton className="h-4 w-2/3" />
@@ -132,7 +133,10 @@ export function NeedsYouDetail({
           </div>
         ) : reason === "permission" ? (
           pending ? (
-            <PermissionPanel item={pending} provider={identity.short} alwaysArmed={alwaysArmed} />
+            <div className="space-y-5">
+              <PermissionPanel item={pending} provider={identity.short} alwaysArmed={alwaysArmed} />
+              <AgentContext agent={agent} items={items} />
+            </div>
           ) : question ? (
             <QuestionCard item={question} agent={agent} compact />
           ) : (
@@ -225,7 +229,9 @@ export function NeedsYouDetail({
                 : reason === "permission"
                   ? question && !pending
                     ? "Answer the question first"
-                    : (letterKeys ? "Answer the approval first (A / D)" : "Answer the approval first")
+                    : letterKeys
+                      ? "Answer the approval first (A / D)"
+                      : "Answer the approval first"
                   : undefined
             }
             className={cn((reason === "permission" || reason === "budget") && "cursor-not-allowed opacity-45")}
@@ -338,6 +344,80 @@ function PermissionActions({ agentId, item }: { agentId: string; item: Permissio
           </Button>
         );
       })}
+    </div>
+  );
+}
+
+/** What the agent was doing when it stopped to ask: its last words, its last steps and where it works. Only what is known. */
+function AgentContext({ agent, items }: { agent: TriageEntry["agent"]; items: TimelineItem[] | undefined }) {
+  const said = [...(items ?? [])].reverse().find((i) => i.kind === "agent_message" && i.text.trim()) as
+    Extract<TimelineItem, { kind: "agent_message" }> | undefined;
+  const text = (said?.text.trim() || agent.lastMessage?.trim() || "").replace(/\*\*|`/g, "");
+  const steps = (items ?? [])
+    .filter((i): i is Extract<TimelineItem, { kind: "tool_call" }> => i.kind === "tool_call" && !i.parentToolCallId)
+    .slice(-4)
+    .reverse();
+  const ctx =
+    agent.contextUsed != null && agent.contextSize ? Math.min(1, agent.contextUsed / agent.contextSize) : null;
+  return (
+    <section aria-label="Agent context" className="space-y-4 border-t border-line pt-4">
+      {text && (
+        <div>
+          <h3 className="eyebrow text-steel">Last said</h3>
+          <p className="selectable mt-1.5 line-clamp-4 break-words border-l-2 border-line-strong pl-3 text-small leading-relaxed text-muted">
+            {text}
+          </p>
+        </div>
+      )}
+      {steps.length > 0 && (
+        <div>
+          <h3 className="eyebrow text-steel">Recent steps</h3>
+          <ul className="mt-1.5 overflow-hidden rounded-xl border border-line bg-card">
+            {steps.map((t) => (
+              <li
+                key={t.toolCallId}
+                className="flex items-center gap-2.5 border-b border-line px-3 py-2 text-caption last:border-b-0"
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    "h-1.5 w-1.5 shrink-0 rounded-full",
+                    t.status === "failed" ? "bg-err" : t.status === "completed" ? "bg-ok" : "bg-accent",
+                  )}
+                />
+                <span className="min-w-0 flex-1 truncate text-muted">{t.title}</span>
+                <span className="shrink-0 text-meta text-steel">
+                  {t.status === "failed" ? "failed" : t.status === "completed" ? "done" : "running"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line text-caption @xl:grid-cols-4">
+        <Fact label="Working in">
+          {agent.branch ? (
+            <span className="flex items-center gap-1">
+              <GitBranch className="h-3 w-3 shrink-0 text-steel" />
+              <span className="truncate">{agent.branch}</span>
+            </span>
+          ) : (
+            basename(agent.cwd)
+          )}
+        </Fact>
+        <Fact label="Spent">{formatCost(agent.costUsd)}</Fact>
+        <Fact label="Tokens">{formatTokens(agent.tokensUsed)}</Fact>
+        <Fact label="Context">{ctx == null ? "n/a" : `${Math.round(ctx * 100)}% full`}</Fact>
+      </dl>
+    </section>
+  );
+}
+
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0 bg-card px-3 py-2">
+      <dt className="text-micro text-steel">{label}</dt>
+      <dd className="mt-0.5 truncate font-medium tabular text-fg">{children}</dd>
     </div>
   );
 }

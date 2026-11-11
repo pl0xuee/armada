@@ -183,7 +183,6 @@ export const PlanApprovalCard = memo(function PlanApprovalCard({
             disabled={busy !== null}
             onClick={() => void answer(keepPlanning)}
             aria-keyshortcuts={keyboard ? "D N" : undefined}
-            className="sm:ml-auto"
           >
             {busy === keepPlanning.id ? <Spinner className="h-3.5 w-3.5 text-current" /> : null}
             Keep planning
@@ -199,7 +198,7 @@ export const PlanApprovalCard = memo(function PlanApprovalCard({
             aria-keyshortcuts={keyboard ? "Shift+D Shift+N" : undefined}
           >
             <MessageSquareX />
-            Keep planning with feedback…
+            Give feedback…
             {keyboard && <Kbd className="ml-0.5">⇧D</Kbd>}
           </Button>
         )}

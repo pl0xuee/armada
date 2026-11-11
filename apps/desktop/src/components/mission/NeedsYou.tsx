@@ -208,14 +208,29 @@ export function NeedsYouPane({ hasAgents }: { hasAgents: boolean }) {
           </nav>
           <section aria-label="Current agent" className="flex min-w-0 flex-1 flex-col">
             {/* Narrow panes: a compact stepper instead of the list. */}
-            <div className="flex items-center gap-2 border-b border-line px-4 py-2 @3xl:hidden">
-              <Button size="icon-xs" variant="ghost" aria-label="Previous" onClick={() => step(-1)}>
+            <div className="flex items-center gap-3 border-b border-line bg-panel/60 px-4 py-2 @3xl:hidden">
+              <Button size="icon-sm" variant="secondary" aria-label="Previous" onClick={() => step(-1)}>
                 <ChevronLeft className="!h-3.5 !w-3.5" />
               </Button>
-              <span className="text-caption text-muted tabular" aria-live="polite">
-                {index + 1} of {queue.length}
-              </span>
-              <Button size="icon-xs" variant="ghost" aria-label="Next" onClick={() => step(1)}>
+              <div className="min-w-0 flex-1">
+                <span className="block text-center text-caption font-medium text-fg tabular" aria-live="polite">
+                  {index + 1} of {queue.length}
+                  <span className="font-normal text-steel"> waiting</span>
+                </span>
+                {/* One notch per agent: the current one lit, the rest tinted by why they wait. */}
+                <div aria-hidden className="mt-1.5 flex gap-0.5">
+                  {queue.map((e, i) => (
+                    <span
+                      key={e.agent.id}
+                      className={cn(
+                        "h-1 min-w-0 flex-1 rounded-full",
+                        i === index ? "bg-accent" : e.reason === "done" ? "bg-ok/35" : "bg-warn/35",
+                      )}
+                    />
+                  ))}
+                </div>
+              </div>
+              <Button size="icon-sm" variant="secondary" aria-label="Next" onClick={() => step(1)}>
                 <ChevronRight className="!h-3.5 !w-3.5" />
               </Button>
             </div>

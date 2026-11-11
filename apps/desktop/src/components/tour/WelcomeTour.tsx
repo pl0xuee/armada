@@ -102,7 +102,6 @@ export function WelcomeTour() {
       <DialogContent
         title="Quick tour"
         description={`Step ${step + 1} of ${STEPS.length}`}
-        hideClose
         className="w-[min(520px,calc(100vw-32px))]"
         onOpenAutoFocus={(e) => {
           e.preventDefault();

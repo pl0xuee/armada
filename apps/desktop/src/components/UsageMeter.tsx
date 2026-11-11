@@ -31,11 +31,20 @@ function Meter({ w, compact }: { w: UsageWindow; compact?: boolean }) {
   const pct = Math.max(0, Math.min(100, Math.round(w.usedPercent)));
   const reset = resetLabel(w.resetsAt);
   return (
-    <div className={cn("min-w-0", compact ? "w-full" : "w-full max-w-[240px]")}>
+    <div className={cn("@container/m min-w-0", compact ? "w-full" : "w-full max-w-[300px] flex-1")}>
       <div className="flex items-baseline justify-between gap-2 text-micro">
-        <span className="truncate text-steel">
+        {/* Wide: "Weekly · resets Fri 3:54 PM" on one line. Narrow: the reset time drops under the label, never cut. */}
+        <span className="min-w-0 text-steel">
           {windowLabel(w)}
-          {reset && !compact && <span className="text-steel/80"> · {reset}</span>}
+          {reset && !compact && (
+            <span className="block text-steel/80 @[220px]/m:inline">
+              <span aria-hidden className="hidden @[220px]/m:inline">
+                {" "}
+                ·{" "}
+              </span>
+              {reset}
+            </span>
+          )}
         </span>
         <span className={cn("font-medium tabular", pct >= 90 ? "text-err" : pct >= 70 ? "text-warn" : "text-fg")}>
           {pct}%
