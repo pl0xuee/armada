@@ -482,3 +482,28 @@ async fn turn_limits_are_validated_and_old_settings_load() {
     );
     env.core.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn raising_a_limit_starts_from_the_limit_as_it_is_now() {
+    let mut env = setup("raise-current", |s, _| s.daily_budget_turns = Some(2)).await;
+    let project = env.project.clone();
+    let first = start(&mut env, &project, "a1").await;
+    let other = temp_dir("raise-current-other");
+    let second = start(&mut env, &other, "b1").await;
+    assert!(env.core.agent(&second.id).unwrap().budget_hold.is_some());
+    assert!(env.core.agent(&first.id).unwrap().budget_hold.is_none());
+
+    // The limit is edited in Settings while the agent waits. "Raise" on the held agent adds
+    // to that, not to the limit the hold recorded (2 + 5 would lower it to 7).
+    env.core
+        .update_settings(|s| s.daily_budget_turns = Some(50))
+        .unwrap();
+    let settings = env
+        .core
+        .budget_resolve(&second.id, BudgetChoice::Raise { by: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(settings.daily_budget_turns, Some(55));
+    assert!(env.core.agent(&second.id).unwrap().budget_hold.is_none());
+    env.core.shutdown().await;
+}

@@ -114,6 +114,10 @@ export function CommandPalette() {
           aria-describedby={undefined}
           onOpenAutoFocus={focus.onOpenAutoFocus}
           onCloseAutoFocus={focus.onCloseAutoFocus}
+          onEscapeKeyDown={(e) => {
+            // A field that handles Escape itself (naming a new agent) goes back one step.
+            if (e.target instanceof Element && e.target.closest("[data-own-escape]")) e.preventDefault();
+          }}
           className="anim-pop fixed left-1/2 top-[12vh] z-[70] w-[min(640px,calc(100vw-16px))] max-sm:top-2 -translate-x-1/2 overflow-hidden rounded-2xl border border-line-strong bg-card shadow-[0_32px_100px_-12px_rgba(0,0,0,0.75)] edge-strong focus:outline-none"
         >
           <D.Title className="sr-only">Command palette</D.Title>
@@ -284,7 +288,14 @@ function Palette({ onClose }: { onClose: () => void }) {
       onKeyDown={(e) => {
         // Ctrl/⌘+Enter starts an agent with the typed text (Start items never auto-select).
         const mod = isMac ? e.metaKey : e.ctrlKey;
-        if (e.key === "Enter" && mod && !e.nativeEvent.isComposing && e.keyCode !== 229 && task.length >= 3) {
+        if (
+          e.key === "Enter" &&
+          mod &&
+          !searchMode &&
+          !e.nativeEvent.isComposing &&
+          e.keyCode !== 229 &&
+          task.length >= 3
+        ) {
           e.preventDefault();
           startAgent(task, defaultMode);
         }
@@ -968,6 +979,7 @@ function RenameMode({ agent, onCancel, onDone }: { agent: Agent; onCancel: () =>
           autoFocus
           value={title}
           aria-label="New agent title"
+          data-own-escape
           onFocus={(e) => e.currentTarget.select()}
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => {

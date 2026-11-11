@@ -25,7 +25,7 @@ pub struct Db {
 }
 
 /// `PRAGMA user_version` this build writes. Bump with real schema migrations.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// Waiting for another connection's lock before failing with "database is locked".
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -270,6 +270,10 @@ impl Db {
         search::ensure_index(&conn)?;
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version < SCHEMA_VERSION {
+            if version < 3 {
+                // Schema 3: messages an earlier indexer marked done without indexing are redone.
+                search::requeue_unindexed(&conn)?;
+            }
             conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;
         } else if version > SCHEMA_VERSION {
             tracing::warn!(

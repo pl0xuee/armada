@@ -22,6 +22,8 @@ export function QrScanner({
   const [problem, setProblem] = useState<string | null>(null);
   const done = useRef(onResult);
   done.current = onResult;
+  const close = useRef(onClose);
+  close.current = onClose;
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -78,7 +80,16 @@ export function QrScanner({
             : "The camera couldn't start. Paste the pairing link instead.",
         );
       });
-    return stop;
+    // Leaving the app (to find the code, or locking the phone) turns the camera off: iOS hands
+    // back a frozen picture afterwards, so the scan starts fresh from the button instead.
+    const onHide = () => {
+      if (document.visibilityState === "hidden") close.current();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      stop();
+    };
   }, []);
 
   // On the body: the pairing screen's entry animation would otherwise box in `position: fixed`.
@@ -107,7 +118,7 @@ export function QrScanner({
         )}
         <p className="absolute inset-x-0 top-[calc(var(--safe-top)+20px)] px-6 text-center text-[15px] font-medium text-white">
           {problem ??
-            "Point the camera at the QR code in Kvistcode's Settings, Remote"}
+            "Point the camera at the QR code in Kvistcode's Settings, Phone & remote"}
         </p>
       </div>
       <div className="flex justify-center bg-black px-safe pt-4 pb-[calc(var(--safe-bottom)+20px)]">

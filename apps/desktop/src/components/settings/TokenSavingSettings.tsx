@@ -131,7 +131,7 @@ export function TokenSavingSettings({ settings }: { settings: Settings }) {
       >
         <Select
           aria-label="Helper agents use"
-          className="h-8 w-[170px]"
+          className="h-8 w-[210px]"
           value={opts.subagentModel ?? "same"}
           onValueChange={(v) => patch({ subagentModel: v === "same" ? null : v })}
           options={HELPER_MODELS}
@@ -143,7 +143,7 @@ export function TokenSavingSettings({ settings }: { settings: Settings }) {
       >
         <Select
           aria-label="Helper effort"
-          className="h-8 w-[170px]"
+          className="h-8 w-[210px]"
           value={opts.subagentEffort ?? "auto"}
           onValueChange={(v) => patch({ subagentEffort: v === "auto" ? null : v })}
           options={HELPER_EFFORTS}

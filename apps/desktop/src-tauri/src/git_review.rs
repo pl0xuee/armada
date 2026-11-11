@@ -770,7 +770,10 @@ async fn apply_slice(agent: &Agent, patch: &str, reverse: bool) -> anyhow::Resul
     }
     // Same hardening as viewing a diff: the agent controls .git/config and
     // .gitattributes, so no filters/fsmonitor run while touching its files.
-    let git = ReadOnlyGit::new(cwd).await?;
+    // The patch names files from the repository root. Run from a subfolder, `git apply`
+    // skips every path outside that folder and still reports success.
+    let top = checkout_root(&ReadOnlyGit::new(cwd).await?).await?;
+    let git = ReadOnlyGit::new(&top).await?;
     let args: &[&str] = if reverse {
         &["apply", "-R", "--whitespace=nowarn", "-"]
     } else {
@@ -786,6 +789,24 @@ async fn apply_slice(agent: &Agent, patch: &str, reverse: bool) -> anyhow::Resul
             })
         })?;
     Ok(())
+}
+
+/// The root folder of the checkout `git` runs in.
+async fn checkout_root(git: &ReadOnlyGit<'_>) -> anyhow::Result<PathBuf> {
+    Ok(PathBuf::from(
+        git.run(&["rev-parse", "--show-toplevel"])
+            .await?
+            .trim_end_matches(['\r', '\n']),
+    ))
+}
+
+/// [`checkout_root`] for the plain git commands (committing).
+async fn toplevel(cwd: &Path) -> anyhow::Result<PathBuf> {
+    Ok(PathBuf::from(
+        git(cwd, &["rev-parse", "--show-toplevel"])
+            .await?
+            .trim_end_matches(['\r', '\n']),
+    ))
 }
 
 pub async fn get_diff(agent: &Agent) -> anyhow::Result<AgentDiff> {
@@ -816,10 +837,15 @@ async fn diff_worktree_with(
     started: Option<SystemTime>,
     path_env: Option<&OsStr>,
 ) -> anyhow::Result<AgentDiff> {
-    let mut git = ReadOnlyGit::new(cwd).await?;
-    git.run(&["rev-parse", "--is-inside-work-tree"])
+    let here = ReadOnlyGit::new(cwd).await?;
+    here.run(&["rev-parse", "--is-inside-work-tree"])
         .await
         .map_err(|_| anyhow!("{} is not a git repository", cwd.display()))?;
+    // Everything below names files from the repository root (the diff, untracked files,
+    // attributes), so git runs there even when the agent works in a subfolder.
+    let top = checkout_root(&here).await?;
+    drop(here);
+    let mut git = ReadOnlyGit::new(&top).await?;
 
     let has_head = git.has_head().await?;
     // No commits yet: everything is new relative to the empty tree.
@@ -843,7 +869,14 @@ async fn diff_worktree_with(
     // Intent-to-add (in the private index) so brand-new files show up in `git diff <base>`.
     // Only the untracked files: `add -A` would also hash every modified tracked file and
     // write it into the object database.
-    let untracked = &lfs.untracked_plain;
+    // A name that isn't valid UTF-8 was read with replacement characters; handing that back
+    // matches no file and git would fail the whole diff, so such a file is left out.
+    let untracked: Vec<String> = lfs
+        .untracked_plain
+        .iter()
+        .filter(|p| !p.contains('\u{FFFD}'))
+        .cloned()
+        .collect();
     if !untracked.is_empty() {
         git.run_input(
             &[
@@ -853,7 +886,7 @@ async fn diff_worktree_with(
                 "--pathspec-from-file=-",
                 "--pathspec-file-nul",
             ],
-            Some(nul_joined(untracked)),
+            Some(nul_joined(&untracked)),
         )
         .await?;
     }
@@ -1576,18 +1609,19 @@ pub fn looks_like_secret(path: &str) -> bool {
     kvistcode_core::checkpoints::is_secret_path(path)
 }
 
-/// Untracked, not-ignored files that a commit of the agent's work would add and whose
-/// names look like secrets (see [`looks_like_secret`]). `touched` limits the search for
+/// New files (untracked and not ignored, or staged but never committed) that a commit of the
+/// agent's work would add and whose names look like secrets (see [`looks_like_secret`]). `touched` limits the search for
 /// an agent working in the user's own checkout; a worktree agent owns everything.
 pub async fn pending_secret_files(
     agent: &Agent,
     touched: &[String],
 ) -> anyhow::Result<Vec<String>> {
     let cwd = agent_cwd(agent)?;
-    // `--full-name`: relative to the repository root like `repo_relative_paths`, whatever
-    // folder the agent works in (recorded paths are often absolute).
-    let out = git(
-        cwd,
+    // From the repository root, and relative to it like `repo_relative_paths`, whatever
+    // folder the agent works in: a commit takes the whole checkout, not just that folder.
+    let top = toplevel(cwd).await?;
+    let untracked = git(
+        &top,
         &[
             "ls-files",
             "--others",
@@ -1597,21 +1631,34 @@ pub async fn pending_secret_files(
         ],
     )
     .await?;
+    // New files the agent already staged (`git add`) are committed just the same.
+    let staged = git(
+        &top,
+        &[
+            "diff",
+            "--cached",
+            "--no-renames",
+            "--no-ext-diff",
+            "--name-only",
+            "--diff-filter=A",
+            "-z",
+        ],
+    )
+    .await?;
     let mine: Option<Vec<String>> = if agent.worktree {
         None
     } else {
-        let top = PathBuf::from(
-            git(cwd, &["rev-parse", "--show-toplevel"])
-                .await?
-                .trim_end_matches(['\r', '\n']),
-        );
         Some(repo_relative_paths(cwd, &top, touched))
     };
-    Ok(nul_split(&out)
+    let mut found: Vec<String> = nul_split(&untracked)
+        .chain(nul_split(&staged))
         .filter(|p| looks_like_secret(p))
         .filter(|p| mine.as_ref().is_none_or(|m| m.iter().any(|t| t == p)))
         .map(str::to_string)
-        .collect())
+        .collect();
+    found.sort();
+    found.dedup();
+    Ok(found)
 }
 
 pub(crate) async fn commit_all(
@@ -1619,6 +1666,10 @@ pub(crate) async fn commit_all(
     message: &str,
     exclude: &[String],
 ) -> anyhow::Result<CommitSummary> {
+    // `exclude` holds paths from the repository root, so the commands run there. From the
+    // agent's subfolder they would name other files, and the excluded ones would be staged.
+    let top = toplevel(cwd).await?;
+    let cwd = top.as_path();
     if exclude.is_empty() {
         git(cwd, &["add", "-A"]).await?;
     } else {
@@ -2132,6 +2183,38 @@ async fn worktree_with_branch(project: &Path, branch: &str) -> Option<PathBuf> {
     None
 }
 
+/// Whether the agent's checkout holds changes a merge or pull request would leave behind.
+/// Untracked files that look like secrets don't count: committing asks about them first, and
+/// answering "leave them out" must not make the branch impossible to merge.
+async fn has_uncommitted_work(cwd: &Path) -> anyhow::Result<bool> {
+    let status = git(
+        cwd,
+        &[
+            "status",
+            "--porcelain",
+            "-z",
+            "--untracked-files=all",
+            "--ignore-submodules=dirty",
+        ],
+    )
+    .await?;
+    let mut entries = status.split('\0');
+    while let Some(entry) = entries.next() {
+        let Some((state, path)) = entry.split_at_checked(3) else {
+            continue;
+        };
+        // A rename or copy is followed by the name it came from.
+        if state.starts_with(['R', 'C']) {
+            entries.next();
+        }
+        if state == "?? " && looks_like_secret(path) {
+            continue;
+        }
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 /// Merges the agent's branch into its base branch in the project checkout.
 ///
 /// Hooks: the merge runs the project's own hooks (pre-merge-commit, commit-msg,
@@ -2144,12 +2227,7 @@ async fn worktree_with_branch(project: &Path, branch: &str) -> Option<PathBuf> {
 /// Isolating the agent from `.git` is the sandbox's job, not the merge's.
 pub async fn merge(agent: &Agent) -> anyhow::Result<String> {
     let (branch, base, project) = merge_preflight(agent).await?;
-    let agent_dirty = git(
-        agent_cwd(agent)?,
-        &["status", "--porcelain", "--ignore-submodules=dirty"],
-    )
-    .await?;
-    if !agent_dirty.trim().is_empty() {
+    if has_uncommitted_work(agent_cwd(agent)?).await? {
         bail!("The agent has uncommitted changes. Commit them before merging.");
     }
     // `git merge` exits 0 with "Already up to date." when there is nothing to merge;
@@ -2348,8 +2426,7 @@ pub async fn create_pr(
     } else {
         title.trim()
     };
-    let dirty = git(cwd, &["status", "--porcelain", "--ignore-submodules=dirty"]).await?;
-    if !dirty.trim().is_empty() {
+    if has_uncommitted_work(cwd).await? {
         bail!("The agent has uncommitted changes. Commit them before opening a pull request, so they're part of it.");
     }
     // A base the agent didn't start from must be a real branch here or on its remote.
@@ -4112,5 +4189,98 @@ mod tests {
         assert!(err.contains("isn't a valid remote name"), "{err}");
         repo.git(&["config", "branch.feature.remote", "origin"]);
         assert_eq!(push_remote(&repo.dir, "feature").await.unwrap(), "origin");
+    }
+
+    /// An agent whose folder is a subfolder of the checkout: git reports files from the
+    /// repository root, and every command given those names has to run there.
+    #[tokio::test]
+    async fn review_works_for_an_agent_in_a_subfolder() {
+        let repo = Repo::new();
+        repo.write("root.txt", "one\n");
+        repo.write("sub/x.txt", "x\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+        repo.write("root.txt", "two\n");
+        repo.write("sub/new.txt", "new\n");
+        let agent = worktree_agent(&repo, &repo.dir.join("sub"), "main", "main");
+
+        // A new file used to make the whole diff fail from a subfolder.
+        let diff = get_diff(&agent).await.unwrap();
+        let mut paths: Vec<&str> = diff.files.iter().map(|f| f.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(paths, vec!["root.txt", "sub/new.txt"]);
+
+        // Reverting a file outside the agent's folder used to report success and do nothing.
+        let start = diff.patch.find("diff --git a/root.txt").unwrap();
+        let rest = &diff.patch[start..];
+        let end = rest[1..].find("diff --git ").map_or(rest.len(), |i| i + 1);
+        revert_patch(&agent, &rest[..end]).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(repo.dir.join("root.txt")).unwrap(),
+            "one\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_secret_is_left_out_of_a_commit_made_from_a_subfolder() {
+        let repo = Repo::new();
+        repo.write("a.txt", "a");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        repo.write("app/b.txt", "b");
+        repo.write("app/.env", "TOKEN=1");
+        repo.write("other/c.txt", "c");
+        repo.write("other/id_rsa", "key");
+        let agent = worktree_agent(&repo, &repo.dir.join("app"), "main", "main");
+        // Secrets anywhere in the checkout are found, not only in the agent's folder.
+        let found = pending_secret_files(&agent, &[]).await.unwrap();
+        assert_eq!(
+            found,
+            vec!["app/.env".to_string(), "other/id_rsa".to_string()]
+        );
+        let summary = commit_all(&repo.dir.join("app"), "msg", &found)
+            .await
+            .unwrap();
+        assert_eq!(
+            repo.lines(&["show", "--name-only", "--format=", "HEAD"]),
+            vec!["app/b.txt", "other/c.txt"],
+            "{summary:?}"
+        );
+        let status = repo.git(&["status", "--porcelain", "-uall"]);
+        assert!(
+            status.contains("?? app/.env") && status.contains("?? other/id_rsa"),
+            "{status}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_new_secret_the_agent_already_staged_is_asked_about_too() {
+        let repo = Repo::new();
+        repo.write("a.txt", "a");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        repo.write(".env", "TOKEN=1");
+        repo.write("b.txt", "b");
+        repo.git(&["add", ".env", "b.txt"]);
+        let agent = worktree_agent(&repo, &repo.dir, "main", "main");
+        let found = pending_secret_files(&agent, &[]).await.unwrap();
+        assert_eq!(found, vec![".env".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_secret_left_out_of_the_commit_does_not_block_merging() {
+        let repo = Repo::new();
+        repo.write("a.txt", "a");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        assert!(!has_uncommitted_work(&repo.dir).await.unwrap());
+        repo.write("keys/.env", "TOKEN=1");
+        assert!(!has_uncommitted_work(&repo.dir).await.unwrap());
+        // Real work still does, and so does a secret that is tracked.
+        repo.write("b.txt", "b");
+        assert!(has_uncommitted_work(&repo.dir).await.unwrap());
+        std::fs::remove_file(repo.dir.join("b.txt")).unwrap();
+        repo.git(&["add", "keys/.env"]);
+        assert!(has_uncommitted_work(&repo.dir).await.unwrap());
     }
 }

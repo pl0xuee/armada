@@ -417,6 +417,11 @@ impl AcpDriver {
                         None => break,
                     }
                 }
+                // Ended some other way while the checkpoint ran (stopped, or a cancel that
+                // was forced through): the prompt is not sent either.
+                if !me.ctx.prompt_is_current(prompt.token) {
+                    break;
+                }
                 me.open_extras();
                 me.peer.mark_turn();
                 let mark = me.peer.stderr_mark();

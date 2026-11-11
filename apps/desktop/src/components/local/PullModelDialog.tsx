@@ -200,6 +200,8 @@ export function PullModelDialog({
               className="flex gap-2"
               onSubmit={(e) => {
                 e.preventDefault();
+                // Opened from the Add account form: this submit must not reach it.
+                e.stopPropagation();
                 if (customName) void start(customName);
               }}
             >

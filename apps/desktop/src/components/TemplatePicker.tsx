@@ -202,6 +202,8 @@ function FillForm({
     <form
       onSubmit={(e) => {
         e.preventDefault();
+        // The picker can sit inside another form (the schedule dialog); this submit isn't its.
+        e.stopPropagation();
         onDone(preview);
       }}
       className="flex flex-col"

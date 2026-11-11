@@ -224,9 +224,10 @@ export function VoiceSection({ settings }: { settings: Settings }) {
                   size="xs"
                   disabled={dl.active !== null}
                   onClick={() => {
-                    void dl.start(m.id).then(() => {
+                    void dl.start(m.id).then((ok) => {
                       // A fresh download becomes the model in use, unless one is already working.
-                      if (!current?.installed) chooseModel(m.id);
+                      // A cancelled or failed one is not there to use.
+                      if (ok && !current?.installed) chooseModel(m.id);
                     });
                   }}
                 >

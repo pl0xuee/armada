@@ -128,19 +128,23 @@ export function BillingSummary({
           {billing.detail}
         </span>
       </div>
-      {windows.map((w) => (
-        <div key={w.name} className="mt-2 text-meta">
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="truncate text-steel">
-              {w.name} left{resetLabel(w.resetsAt) ? ` · ${resetLabel(w.resetsAt)}` : ""}
-            </span>
-            <span className={cn("font-medium tabular", w.leftPercent <= 10 ? "text-err" : "text-fg")}>
-              {w.leftPercent}%
-            </span>
+      {windows.map((w) => {
+        const reset = resetLabel(w.resetsAt);
+        const text = `${w.name} left${reset ? ` · ${reset}` : ""}`;
+        return (
+          <div key={w.name} className="mt-2 text-meta">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="truncate text-steel" title={text}>
+                {text}
+              </span>
+              <span className={cn("font-medium tabular", w.leftPercent <= 10 ? "text-err" : "text-fg")}>
+                {w.leftPercent}%
+              </span>
+            </div>
+            <LeftBar usedPercent={w.usedPercent} label={`${w.name} usage left`} />
           </div>
-          <LeftBar usedPercent={w.usedPercent} label={`${w.name} usage left`} />
-        </div>
-      ))}
+        );
+      })}
       {billing.mode === "api" && account && <KeySpend accountId={account.id} />}
       {billing.mode === "api" && <DailyBudget signal={signal} />}
     </div>

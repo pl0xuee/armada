@@ -11,6 +11,8 @@ use crate::model::{now_ms, Account, AccountStatus, AuthKind, Provider};
 use crate::providers;
 
 // Still the pre-rename app id: stored sign-ins are filed under it, so changing it would sign everyone out.
+// (Unused under `cargo test`, where secrets stay in memory.)
+#[cfg_attr(test, allow(dead_code))]
 pub(crate) const KEYRING_SERVICE: &str = "dev.armada.app";
 
 pub fn profile_dir(data_dir: &Path, account_id: &str) -> PathBuf {
@@ -18,22 +20,17 @@ pub fn profile_dir(data_dir: &Path, account_id: &str) -> PathBuf {
 }
 
 pub fn set_api_key(account_id: &str, key: &str) -> anyhow::Result<()> {
-    keyring::Entry::new(KEYRING_SERVICE, account_id)?
-        .set_password(key)
+    crate::secrets::key_store()
+        .set(account_id, key)
         .context("saving API key to the OS keychain")
 }
 
 pub fn get_api_key(account_id: &str) -> Option<String> {
-    keyring::Entry::new(KEYRING_SERVICE, account_id)
-        .ok()?
-        .get_password()
-        .ok()
+    crate::secrets::key_store().get(account_id).ok().flatten()
 }
 
 pub fn delete_api_key(account_id: &str) {
-    if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, account_id) {
-        let _ = entry.delete_credential();
-    }
+    crate::secrets::key_store().delete(account_id);
 }
 
 /// Credential and config variables each provider CLI reads from the environment.

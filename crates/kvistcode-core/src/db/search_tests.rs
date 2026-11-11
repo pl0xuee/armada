@@ -407,3 +407,60 @@ fn a_streaming_draft_does_not_make_search_report_indexing() {
     assert!(db.has_unindexed());
     assert!(!db.search_grouped("streaming").unwrap().indexing);
 }
+
+/// A database from before the index whose rows already hold their text, as old versions stored it.
+fn legacy_with_text(name: &str, text: &str) -> PathBuf {
+    let path = temp(name).join("armada.db");
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE items (
+            id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, seq INTEGER NOT NULL,
+            ts INTEGER NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL,
+            search_text TEXT NOT NULL DEFAULT '');",
+    )
+    .unwrap();
+    let it = user("old", 1, text);
+    conn.execute(
+        "INSERT INTO items (id, agent_id, seq, ts, kind, data, search_text)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            it.id,
+            it.agent_id,
+            it.seq,
+            it.ts,
+            it.body.kind_str(),
+            serde_json::to_string(&it).unwrap(),
+            item_text(&it)
+        ],
+    )
+    .unwrap();
+    path
+}
+
+#[test]
+fn an_old_message_whose_stored_text_is_unchanged_is_indexed_too() {
+    let path = legacy_with_text("legacy-same-text", "fix the webhook");
+    let db = Db::open(&path).unwrap();
+    while db.index_step(50).unwrap() > 0 {}
+    assert_eq!(db.search("webhook").unwrap().len(), 1);
+    drop(db);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn a_database_indexed_by_the_earlier_indexer_is_repaired_on_open() {
+    let path = legacy_with_text("legacy-marked-done", "fix the webhook");
+    {
+        // What the earlier indexer left: the row marked done, nothing in the index.
+        let db = Db::open(&path).unwrap();
+        let conn = db.conn.lock();
+        conn.execute("UPDATE items SET idx_ver = 1", []).unwrap();
+        conn.execute_batch("PRAGMA user_version = 2").unwrap();
+    }
+    let db = Db::open(&path).unwrap();
+    assert!(db.has_unindexed());
+    while db.index_step(50).unwrap() > 0 {}
+    assert_eq!(db.search("webhook").unwrap().len(), 1);
+    drop(db);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

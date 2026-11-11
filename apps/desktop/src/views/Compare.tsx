@@ -4,16 +4,18 @@ import { toast } from "sonner";
 import { AgentGrid } from "@/components/compare/AgentGrid";
 import { HeaderAction, PageHeader } from "@/components/PageHeader";
 import { ProviderGlyph } from "@/components/ProviderGlyph";
+import { ConfirmDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { EmptyPane } from "@/components/ui/emptyPane";
 import { api } from "@/lib/api";
 import { useNow } from "@/hooks/useNow";
 import { relativeTimeLong } from "@/lib/format";
+import { isBusy } from "@/lib/agents";
 import { identityFor } from "@/lib/identity";
 import { providerRank } from "@/lib/providers";
 import type { Agent, TimelineItem } from "@/lib/types";
 import { basename, cn, errorMessage } from "@/lib/utils";
-import { useApp } from "@/store/app";
+import { holdTimelines, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 
 interface Group {
@@ -53,6 +55,8 @@ export function CompareView() {
   const openNewAgent = useUi((s) => s.openNewAgent);
   const now = useNow();
   const [keeping, setKeeping] = useState(false);
+  // Keeping one answer stops the others; asked first when some are still working.
+  const [confirmKeep, setConfirmKeep] = useState<Agent | null>(null);
   const [showArchived, setShowArchived] = useState(false);
 
   const groups = useMemo(() => buildGroups(agents), [agents]);
@@ -62,6 +66,7 @@ export function CompareView() {
   useEffect(() => {
     if (!groupIds) return;
     for (const id of groupIds.split(",")) void useApp.getState().ensureItems(id);
+    return holdTimelines(groupIds.split(","));
   }, [groupIds]);
 
   // Returns the prompt text itself, so streamed frames of the columns don't re-render this whole page.
@@ -97,6 +102,8 @@ export function CompareView() {
   const active = group.agents.filter((a) => !a.archived);
   const archived = group.agents.filter((a) => a.archived);
   const columns = showArchived ? group.agents : active.length ? active : group.agents;
+  const stillWorking = (winner: Agent) =>
+    group.agents.filter((a) => a.id !== winner.id && !a.archived && isBusy(a)).length;
   const keep = async (winner: Agent) => {
     const losers = group.agents.filter((a) => a.id !== winner.id && !a.archived);
     setKeeping(true);
@@ -104,7 +111,7 @@ export function CompareView() {
       // Stop the others' turns first so they don't keep spending in the background.
       await Promise.all(
         losers
-          .filter((a) => a.status === "working" || a.status === "starting" || a.status === "needs_permission")
+          .filter(isBusy)
           .map((a) => api.cancelTurn(a.id).catch(() => {})),
       );
       await Promise.all(losers.map((a) => api.archiveAgent(a.id, true)));
@@ -222,10 +229,25 @@ export function CompareView() {
 
         <AgentGrid
           agents={columns}
-          onKeep={(a) => void keep(a)}
+          onKeep={(a) => (stillWorking(a) > 0 ? setConfirmKeep(a) : void keep(a))}
           keepDisabled={(a) => keeping || (active.length === 1 && active[0].id === a.id)}
         />
       </div>
+      {confirmKeep && (
+        <ConfirmDialog
+          open
+          onOpenChange={(o) => !o && setConfirmKeep(null)}
+          title="Stop the agents still working?"
+          description={`${stillWorking(confirmKeep) === 1 ? "1 other agent is" : `${stillWorking(confirmKeep)} other agents are`} still working. Keeping this answer stops and archives the others. Undo brings them back, but not the turn that was stopped.`}
+          confirmLabel="Keep this answer"
+          danger
+          onConfirm={() => {
+            const winner = confirmKeep;
+            setConfirmKeep(null);
+            void keep(winner);
+          }}
+        />
+      )}
     </div>
   );
 }

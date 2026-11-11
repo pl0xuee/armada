@@ -102,10 +102,11 @@ export function Swipeable({
         }}
         onTransitionEnd={() => phase === "settle" && setPhase("idle")}
         onPointerDown={(e) => {
+          // First: a swipe that sprang back must not swallow the next tap, wherever it lands.
+          suppressClick.current = false;
           if (disabled || e.button !== 0 || e.pointerType === "mouse") return;
           if ((e.target as HTMLElement).closest("[data-noswipe]")) return;
           g.current = { id: e.pointerId, x: e.clientX, y: e.clientY, lock: null, moved: false };
-          suppressClick.current = false;
         }}
         onPointerMove={(e) => {
           const s = g.current;

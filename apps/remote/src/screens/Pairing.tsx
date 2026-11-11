@@ -196,7 +196,7 @@ export function Pairing() {
             strokeWidth={2.4}
             className="mx-0.5 inline-block align-[-2px] text-steel"
           />
-          <span className="font-semibold">Remote</span>
+          <span className="font-semibold">Phone &amp; remote</span>
         </Step>
         <Step n={3} icon="qr">
           {scan ? (

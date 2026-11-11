@@ -28,7 +28,7 @@ import { accountOf, useBackground, useCostIsEquivalent, useOtherPendingCount } f
 import { EQUIVALENT_NOTE } from "@/lib/cost";
 import { useBackgroundSubagentCount } from "@/lib/subagents";
 import { useStore, type PendingPrompt, type Timeline as TimelineState } from "@/lib/store";
-import type { Agent, TimelineItem } from "@/lib/types";
+import type { Agent, Attachment, TimelineItem } from "@/lib/types";
 import { AccountSheet, AgentActions, OptionSheet, SettingsChips, switchableAccounts } from "./AgentControls";
 import { EmptyState, ErrorState } from "./States";
 
@@ -324,7 +324,7 @@ function AgentView({
     return () => ro.disconnect();
   }, []);
 
-  const editPrompt = useCallback((text: string) => composer.current?.setText(text), []);
+  const editPrompt = useCallback((text: string, photos: Attachment[]) => composer.current?.setText(text, photos), []);
   const [optionSheet, setOptionSheet] = useState<string | null>(null);
   const [accountSheet, setAccountSheet] = useState(devParam("sheet") === "account");
 

@@ -183,6 +183,8 @@ function NewAgentForm({ preset, onDone }: { preset: NewAgentPreset | null; onDon
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // The New project dialog is on top: its keys are not this dialog's.
+      if (newProjectOpen) return;
       // ⌘/Ctrl+Enter launches from any field (never mid-IME composition).
       const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
       if (e.key === "Enter" && mod && !e.altKey) {

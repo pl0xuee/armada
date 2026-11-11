@@ -60,6 +60,20 @@ END;
     .context("creating the search index")
 }
 
+/// One-off repair for databases indexed before `index_step` wrote missing entries itself: rows
+/// marked done whose text never reached the index go back in line for the background indexer.
+pub(super) fn requeue_unindexed(conn: &Connection) -> anyhow::Result<()> {
+    conn.execute(
+        &format!(
+            "UPDATE items SET idx_ver = 0 WHERE idx_ver = {INDEX_VERSION} AND search_text <> ''
+             AND rowid NOT IN (SELECT rowid FROM items_fts)"
+        ),
+        [],
+    )
+    .context("queueing messages missing from the search index")?;
+    Ok(())
+}
+
 /// What is searchable about an item. Private reasoning (`Thought`) and raw tool
 /// output are left out: they are long, noisy and rarely what you are looking for.
 pub(super) fn item_text(item: &TimelineItem) -> String {
@@ -179,8 +193,17 @@ impl Db {
                 "UPDATE items SET search_text = ?1, idx_ver = {INDEX_VERSION}
                  WHERE rowid = ?2 AND idx_ver < {INDEX_VERSION}"
             ))?;
+            // The update trigger only fires when the text changes. A row from before the index
+            // can already hold this text (older versions stored it lowercased), so its index
+            // entry is written here when the trigger left it out.
+            let mut fill = tx.prepare(
+                "INSERT INTO items_fts(rowid, text) SELECT ?2, ?1
+                 WHERE ?1 <> '' AND NOT EXISTS (SELECT 1 FROM items_fts WHERE rowid = ?2)",
+            )?;
             for (rowid, text) in &texts {
-                update.execute(params![text, rowid])?;
+                if update.execute(params![text, rowid])? > 0 {
+                    fill.execute(params![text, rowid])?;
+                }
             }
         }
         tx.commit()?;

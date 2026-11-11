@@ -84,7 +84,7 @@ export function openLink(
   return false;
 }
 
-const LOOPBACK_TEXT = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?(?:\/[^\s"'<>)\]]*)?/gi;
+const LOOPBACK_TEXT = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?(?:\/[^\s"'<>)\]`*]*)?/gi;
 const MAX_LINKS = 50;
 
 export type TextPart = string | { url: string };

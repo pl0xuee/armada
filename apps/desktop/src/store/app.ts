@@ -218,8 +218,26 @@ function touch(agentId: string) {
 
 const LIVE = new Set(["working", "starting", "needs_permission"]);
 
+/** Conversations on screen (tiles, compare columns), by how many views show them. */
+const shown = new Map<string, number>();
+
 /**
- * Drop cached timelines of agents not opened recently. Never evicts the selected agent, live
+ * A view showing these agents' conversations keeps them cached while it is up: a conversation
+ * dropped under a tile would leave it blank, since a tile only asks for it once. Call the result to let go.
+ */
+export function holdTimelines(ids: string[]): () => void {
+  for (const id of ids) shown.set(id, (shown.get(id) ?? 0) + 1);
+  return () => {
+    for (const id of ids) {
+      const n = (shown.get(id) ?? 1) - 1;
+      if (n > 0) shown.set(id, n);
+      else shown.delete(id);
+    }
+  };
+}
+
+/**
+ * Drop cached timelines of agents not opened recently. Never evicts the selected agent, one on screen, live
  * agents (Mission Control shows their activity), agents with pending approvals (Needs you) or agents
  * with a workflow still running (the background tracker needs their items to see it end).
  */
@@ -231,6 +249,7 @@ function evictTimelines(items: Record<string, TimelineItem[]>, agents: Record<st
     if (
       keep.has(id) ||
       id === selected ||
+      shown.has(id) ||
       (a && (LIVE.has(a.status) || a.pendingPermissions > 0)) ||
       hasBackgroundWork(id)
     )

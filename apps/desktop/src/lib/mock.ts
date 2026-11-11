@@ -2565,8 +2565,9 @@ export const mockApi: KvistcodeApi = {
   },
 
   async discardWorktree(agentId) {
-    patchAgent(agentId, { worktree: false, branch: null, cwd: getAgent(agentId).projectPath });
-    return delay(undefined, 500);
+    // Like the app: the agent goes with its worktree.
+    await sleep(500);
+    return mockApi.deleteAgent(agentId, true, true);
   },
 
   async createAccount(req) {

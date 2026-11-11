@@ -177,7 +177,15 @@ export async function recheckWorkflow(agentId: string, toolCallId: string): Prom
   const key = workflowKey(agentId, toolCallId);
   try {
     const progress = await api.workflowProgress(agentId, toolCallId);
-    if (progress.state !== "finished") watches.delete(key);
+    // Wake the watch in place: a card still holding it would otherwise, on leaving, take down the one
+    // that replaced it, and the run would never be read again.
+    const w = watches.get(key);
+    if (progress.state !== "finished" && w?.done) {
+      w.done = false;
+      w.stale = 0;
+      w.failures = 0;
+      w.timer = setInterval(() => void poll(key), WORKFLOW_POLL_MS);
+    }
     put(key, { progress, failed: false });
     return progress;
   } catch {

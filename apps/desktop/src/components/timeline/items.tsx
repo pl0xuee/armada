@@ -297,7 +297,7 @@ export const ThoughtBlock = memo(function ThoughtBlock({
               text={item.text || "…"}
               streaming={live}
               agentId={agentId}
-              className="!text-small italic !leading-relaxed text-muted [&_*]:!text-muted"
+              className="!text-small italic !leading-[20px] text-muted [&_*]:!text-muted"
             />
           </m.div>
         )}

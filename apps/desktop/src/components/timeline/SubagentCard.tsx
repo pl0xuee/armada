@@ -99,7 +99,7 @@ export const SubagentCard = memo(function SubagentCard({
               <span className="text-meta text-accent tabular">{childrenRunning} running</span>
             )}
           </div>
-          <p className="mt-1 break-words text-body font-medium leading-snug text-fg">{title}</p>
+          <p className="mt-1 break-words text-body font-medium leading-[18px] text-fg">{title}</p>
           {description && item.title && item.title !== description && (
             <p className="mt-0.5 truncate text-meta text-steel" title={item.title}>
               {item.title}

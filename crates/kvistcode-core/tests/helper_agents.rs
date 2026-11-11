@@ -235,3 +235,82 @@ async fn helpers_start_from_a_snapshot_and_sync_both_ways() {
     let h = core.agent(&helper.id).unwrap();
     assert!(h.parent_id.is_none() && h.helper_sync.is_none());
 }
+
+#[tokio::test]
+async fn a_helper_that_changed_nothing_is_deleted_with_its_worktree() {
+    let (core, account) = core_with_mock("helper-delete").await;
+    let project = repo("helper-delete-project");
+    let main = main_agent(&core, &account, &project, "").await;
+    idle(&core, &main.id).await;
+    std::fs::write(project.join("a.txt"), "1\n2\n3\nmain wip\n").unwrap();
+    let helper = core
+        .spawn_helper(&main.id, "hello there", vec![])
+        .await
+        .unwrap();
+    until("helper turn", || {
+        core.agent(&helper.id).unwrap().status == AgentStatus::NeedsPermission
+    })
+    .await;
+    core.cancel_turn(&helper.id).await.unwrap();
+    idle(&core, &helper.id).await;
+    let hdir = PathBuf::from(&helper.cwd);
+
+    // Its own uncommitted work still stops a plain delete.
+    std::fs::write(hdir.join("helper.txt"), "from helper\n").unwrap();
+    let err = core
+        .delete_agent(&helper.id, true, false)
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("uncommitted change"), "{err:#}");
+    std::fs::remove_file(hdir.join("helper.txt")).unwrap();
+
+    // The snapshot it started from is on no other branch, and is not its work.
+    core.delete_agent(&helper.id, true, false).await.unwrap();
+    assert!(core.agent(&helper.id).is_err());
+    assert!(!hdir.exists());
+    let branches = std::process::Command::new("git")
+        .args(["branch", "--list", "kvistcode/helper-*"])
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&branches.stdout).trim().is_empty());
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn stopping_the_main_agent_lets_a_waiting_helper_merge() {
+    let (core, account) = core_with_mock("helper-stop").await;
+    let project = repo("helper-stop-project");
+    let main = main_agent(&core, &account, &project, "").await;
+    idle(&core, &main.id).await;
+    let helper = core
+        .spawn_helper(&main.id, "hello there", vec![])
+        .await
+        .unwrap();
+    until("helper turn", || {
+        core.agent(&helper.id).unwrap().status == AgentStatus::NeedsPermission
+    })
+    .await;
+    core.cancel_turn(&helper.id).await.unwrap();
+    idle(&core, &helper.id).await;
+    let hdir = PathBuf::from(&helper.cwd);
+
+    // The main agent is busy, so the helper's work waits for it.
+    core.send_prompt(&main.id, "hello", vec![]).await.unwrap();
+    until("main busy", || {
+        core.agent(&main.id).unwrap().status == AgentStatus::NeedsPermission
+    })
+    .await;
+    std::fs::write(hdir.join("later.txt"), "later\n").unwrap();
+    let h = core.sync_helper(&helper.id).await.unwrap();
+    assert_eq!(h.helper_sync.unwrap().state, HelperSyncState::PendingToMain);
+
+    // Stopping the main agent (not just its turn) frees the merge as well.
+    core.stop_agent(&main.id).await.unwrap();
+    until("merge after stop", || project.join("later.txt").exists()).await;
+    until("in sync", || {
+        core.agent(&helper.id).unwrap().helper_sync.unwrap().state == HelperSyncState::InSync
+    })
+    .await;
+    core.shutdown().await;
+}

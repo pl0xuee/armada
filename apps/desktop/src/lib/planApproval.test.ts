@@ -44,3 +44,12 @@ describe("planApproval", () => {
     expect(planTitle("  ")).toBe("Plan");
   });
 });
+
+describe("a plan title with names in it", () => {
+  it("keeps underscores inside names and drops markdown marks", () => {
+    expect(planTitle("## Rename user_id to account_id in db_migrate.rs")).toBe(
+      "Rename user_id to account_id in db_migrate.rs",
+    );
+    expect(planTitle("# _Plan_ for **dark** `mode`")).toBe("Plan for dark mode");
+  });
+});

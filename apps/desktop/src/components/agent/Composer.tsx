@@ -652,7 +652,7 @@ function ComposerImpl({
               {hint && text === hint.prefix && (
                 <div
                   aria-hidden
-                  className="pointer-events-none absolute inset-0 whitespace-pre-wrap px-4 pb-1 pt-3.5 text-[13.5px] leading-relaxed"
+                  className="pointer-events-none absolute inset-0 whitespace-pre-wrap px-4 pb-1 pt-3.5 text-[13.5px] leading-[22px]"
                 >
                   <span className="invisible">{text}</span>
                   <span className="text-steel">{hint.hint}</span>
@@ -678,7 +678,7 @@ function ComposerImpl({
                   // Tabbing into another tile's composer makes that tile the focused one (a click already does).
                   if (compact && !focused) useUi.getState().openAgent(agent.id);
                 }}
-                className="relative block max-h-[40vh] min-h-[52px] w-full resize-none field-sizing-content bg-transparent px-4 pb-1 pt-3.5 text-[13.5px] leading-relaxed text-fg placeholder:text-steel focus:outline-hidden"
+                className="relative block max-h-[40vh] min-h-[52px] w-full resize-none field-sizing-content bg-transparent px-4 pb-1 pt-3.5 text-[13.5px] leading-[22px] text-fg placeholder:text-steel focus:outline-hidden"
               />
             </div>
             <div ref={toolbarRef} className="flex items-center gap-2 px-2.5 pb-2.5 pt-1">

@@ -41,7 +41,7 @@ export function InstallTip({ dismissible = true }: { dismissible?: boolean }) {
                 Tap Share, then <span className="text-fg">Add to Home Screen</span>.
                 The Home Screen app has its own storage, so it pairs once on
                 its own: open it and tap <span className="text-fg">Scan QR code</span>,
-                then point it at the code in Kvistcode's Settings, Remote.
+                then point it at the code in Kvistcode's Settings, Phone &amp; remote.
               </>
             ) : (
               <>

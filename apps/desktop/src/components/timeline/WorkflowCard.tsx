@@ -75,7 +75,7 @@ export const WorkflowCard = memo(function WorkflowCard({ item, agentId }: { item
             </span>
             {running && <span className="text-meta leading-4 text-accent">Running in background</span>}
           </div>
-          <p className="mt-1 break-words text-body font-medium leading-snug text-fg">{summary}</p>
+          <p className="mt-1 break-words text-body font-medium leading-[18px] text-fg">{summary}</p>
         </div>
         <span className="mt-1 shrink-0" aria-live="off">
           {running ? (

@@ -9,7 +9,7 @@ import { messageRole, type MessageRole } from "@/lib/collapse";
 import { buildRows, estimateRow, finalAnswerIds, isPictureOnly, latestAnswer, messageRowText, rowKeyForItem, sameRow, withoutResumeNotice, type Row } from "@/lib/rows";
 import type { PendingPrompt } from "@/lib/store";
 import { turnStart, waitingStatus } from "@/lib/thinking";
-import type { Agent, TimelineItem } from "@/lib/types";
+import type { Agent, Attachment, TimelineItem } from "@/lib/types";
 import { VirtualList } from "../VirtualList";
 import { ActivityGroup } from "./ActivityGroup";
 import { AgentMessage, NoticeRow, PlanCard, ThoughtRow, ToolGroup, UserBubble } from "./Items";
@@ -116,7 +116,7 @@ export const Timeline = memo(function Timeline({
   items: TimelineItem[];
   pending: PendingPrompt[];
   readOnly: boolean;
-  onEditPrompt: (text: string) => void;
+  onEditPrompt: (text: string, attachments: Attachment[]) => void;
   /** A search hit to scroll to, once its row is loaded. */
   focus?: { itemId: string; seq: number } | null;
   onFocused?: () => void;
@@ -251,7 +251,7 @@ export const Timeline = memo(function Timeline({
             onRetry={() => void sendPrompt(agent.id, p.text, p.attachments, p.id)}
             onEdit={() => {
               discardPrompt(agent.id, p.id);
-              onEditPrompt(p.text);
+              onEditPrompt(p.text, p.attachments);
             }}
           />
         ))}

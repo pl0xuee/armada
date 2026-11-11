@@ -302,35 +302,46 @@ fn tokens(s: &str) -> Option<String> {
 
 // ---- Headers, URLs, flags ---------------------------------------------------------------
 
-/// Pushes `[a, b)` of `s` replaced by the marker into the rewrite state.
+/// Collects the ranges of `s` to replace by the marker. They may be found in any order (one pass
+/// per header name or flag), so they are sorted and applied at the end: a secret found before an
+/// earlier match is still replaced.
 struct Rewrite<'a> {
     s: &'a str,
-    out: String,
-    copied: usize,
+    ranges: Vec<(usize, usize)>,
 }
 
 impl<'a> Rewrite<'a> {
     fn new(s: &'a str) -> Self {
         Rewrite {
             s,
-            out: String::new(),
-            copied: 0,
+            ranges: Vec::new(),
         }
     }
     fn replace(&mut self, from: usize, to: usize) {
-        if from < self.copied || !self.s.is_char_boundary(from) || !self.s.is_char_boundary(to) {
+        if to < from || !self.s.is_char_boundary(from) || !self.s.is_char_boundary(to) {
             return;
         }
-        self.out.push_str(&self.s[self.copied..from]);
-        self.out.push_str(REDACTED);
-        self.copied = to;
+        self.ranges.push((from, to));
     }
     fn finish(mut self) -> Option<String> {
-        if self.copied == 0 {
+        if self.ranges.is_empty() {
             return None;
         }
-        self.out.push_str(&self.s[self.copied..]);
-        Some(self.out)
+        self.ranges.sort_unstable();
+        let mut out = String::with_capacity(self.s.len());
+        let mut copied = 0;
+        for (from, to) in self.ranges {
+            if from < copied {
+                // Overlaps the range before it: already behind the marker, up to the further end.
+                copied = copied.max(to);
+                continue;
+            }
+            out.push_str(&self.s[copied..from]);
+            out.push_str(REDACTED);
+            copied = to;
+        }
+        out.push_str(&self.s[copied..]);
+        Some(out)
     }
 }
 
@@ -996,5 +1007,31 @@ mod tests {
             // never grows without bound.
             assert!(r(&text).len() <= text.len() * 4 + 64, "{text:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod order_tests {
+    use super::redact_secrets;
+
+    #[test]
+    fn a_cookie_before_an_authorization_header_is_hidden_too() {
+        let out = redact_secrets(
+            "Cookie: sid=abc123def456; theme=dark\nAuthorization: Basic dXNlcjpodW50ZXIyaHVudGVy\n",
+        );
+        assert!(!out.contains("abc123def456"), "{out}");
+        assert!(!out.contains("dXNlcjpodW50ZXIyaHVudGVy"), "{out}");
+        let out = redact_secrets(
+            "curl -H 'Cookie: sid=abc123def456789' -H 'Authorization: Basic dXNlcjpodW50ZXIyaHVudGVy' https://x",
+        );
+        assert!(!out.contains("abc123def456789"), "{out}");
+        assert!(!out.contains("dXNlcjpodW50ZXIyaHVudGVy"), "{out}");
+    }
+
+    #[test]
+    fn every_curl_user_flag_on_a_line_is_hidden() {
+        let out = redact_secrets("curl --user bob:hunter2pass -u alice:secretpass9 https://x");
+        assert!(!out.contains("hunter2pass"), "{out}");
+        assert!(!out.contains("secretpass9"), "{out}");
     }
 }

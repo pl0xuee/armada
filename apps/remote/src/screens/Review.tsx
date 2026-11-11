@@ -6,7 +6,7 @@ import { TopBar } from "@/components/TopBar";
 import { Button, IconButton } from "@/components/ui";
 import { errorMessage, type AgentDiffSummary } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { loadDiff } from "@/lib/controller";
+import { loadDiff, toastError } from "@/lib/controller";
 import { parseUnified } from "@/lib/diff";
 import { plural, shortPath } from "@/lib/format";
 import { findFileIndex, takeReviewFocus } from "@/lib/reviewFocus";
@@ -27,12 +27,18 @@ export function Review({ agentId }: { agentId: string }) {
   const [diff, setDiff] = useState<AgentDiffSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<"commit" | "ship" | null>(null);
+  const shown = useRef(false);
+  shown.current = diff !== null;
 
   const load = useCallback(() => {
     setError(null);
     loadDiff(agentId)
       .then((d) => setDiff(d))
-      .catch((e: unknown) => setError(errorMessage(e)));
+      .catch((e: unknown) => {
+        setError(errorMessage(e));
+        // With changes already on screen the error has nowhere to show.
+        if (shown.current) toastError("Couldn't reload the changes", e);
+      });
   }, [agentId]);
   useEffect(load, [load]);
 

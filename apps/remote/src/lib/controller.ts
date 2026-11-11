@@ -179,7 +179,8 @@ function deviceName(): string {
 
 /**
  * Pair with the one-time code from a pairing link/QR: trade it for this device's own token,
- * then connect with that token like any other (it is only stored once the session accepts it).
+ * then connect with it. The token is kept at once: the code is spent, so losing it to a reload
+ * before the first connection would leave this device unpaired with a code that no longer works.
  */
 export async function pairWithCode(code: string, quiet = false) {
   if (pendingPair?.code !== code) pendingPair = { code, readAt: Date.now() };
@@ -190,10 +191,10 @@ export async function pairWithCode(code: string, quiet = false) {
   if (!quiet)
     setState({ phase: "boot", blockedReason: null, blockedMessage: null });
   try {
-    const { token } = await pairDevice(code, deviceName());
+    const { token, scope } = await pairDevice(code, deviceName());
     if (gen !== generation) return;
     pendingPair = null;
-    await connect({ token, source: "candidate" });
+    await connect({ token, source: adoptValidatedToken(token, scope === "viewer" ? "viewer" : "owner") });
   } catch (e) {
     if (gen !== generation) return;
     if (e instanceof ApiError && e.isRateLimited) {
@@ -1580,7 +1581,8 @@ export async function sendPrompt(
     ts: Date.now(),
     failed: false,
     sent: false,
-    afterSeq,
+    // A retry keeps the first try's place: that one may have reached Kvistcode, and its echo counts.
+    afterSeq: previous?.afterSeq ?? afterSeq,
     attachments,
     key,
     progress: attachments.length ? 0 : null,
@@ -1606,6 +1608,9 @@ export async function sendPrompt(
       sendMode === undefined ? undefined : sendMode === "deliver",
     );
     patchPending(agentId, id, { sent: true, progress: null });
+    // Sent from outside the conversation (Needs you): nothing shows it, and once the conversation
+    // loads only its newest page could settle it, so it is done here.
+    if (!getState().timelines[agentId]) return discardPrompt(agentId, id);
     // It may already be in the queue (agent busy) or the timeline.
     reconcile(agentId, getState().timelines[agentId]?.items ?? []);
   } catch (e) {
@@ -1654,6 +1659,9 @@ export function cancelTurn(agentId: string) {
 export const CONTINUE_PROMPT = "Please continue where you left off.";
 
 export function retryAgent(agentId: string) {
+  // A second tap before the agent's status changes must not ask twice.
+  const out = getState().pendingPrompts[agentId]?.some((p) => !p.failed && p.text === CONTINUE_PROMPT);
+  if (out) return Promise.resolve();
   return sendPrompt(agentId, CONTINUE_PROMPT);
 }
 

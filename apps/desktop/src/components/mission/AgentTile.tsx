@@ -6,6 +6,7 @@ import { useIdentity } from "@/hooks/useIdentity";
 import { StatusDot } from "@/components/StatusDot";
 import { Button } from "@/components/ui/button";
 import { findOption, respondPermission } from "@/lib/actions";
+import { isPlanApproval } from "@/lib/planApproval";
 import { RelTime } from "@/components/RelTime";
 import { agentCostText, formatTokens } from "@/lib/format";
 import type { QuestionItem } from "@/lib/question";
@@ -65,8 +66,11 @@ export const AgentTile = memo(function AgentTile({
       ? preview(agent.lastMessage)
       : null;
   // "Allow" means allow-once only; when the agent offers no such option, show its real label.
-  const allowOpt = pending ? (findOption(pending, ["allow_once"]) ?? findOption(pending, ["allow_always"])) : undefined;
-  const denyOpt = pending ? findOption(pending, ["reject_once", "reject_always"]) : undefined;
+  // A plan is read before it is approved: the tile opens it instead of answering unseen.
+  const plan = pending ? isPlanApproval(pending) : false;
+  const quick = plan ? undefined : pending;
+  const allowOpt = quick ? (findOption(quick, ["allow_once"]) ?? findOption(quick, ["allow_always"])) : undefined;
+  const denyOpt = quick ? findOption(quick, ["reject_once", "reject_always"]) : undefined;
   const color = meta.colorVar;
 
   const respond = async (option: PermissionOption | undefined) => {
@@ -227,6 +231,11 @@ export const AgentTile = memo(function AgentTile({
             <span className="truncate font-medium">{pending.title}</span>
           </div>
           <div className="mt-2 flex gap-1.5">
+            {plan && (
+              <Button size="xs" variant="warn" className="min-w-0 flex-1" onClick={() => onOpen(agent.id)}>
+                <span className="truncate">Review plan</span>
+              </Button>
+            )}
             {allowOpt && (
               <Button
                 size="xs"

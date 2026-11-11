@@ -142,3 +142,12 @@ describe("isResumedBody", () => {
     expect(isResumedBody("Finished")).toBe(false);
   });
 });
+
+describe("a countdown just short of a whole day", () => {
+  it("rounds up to the day, never to 24 hours", async () => {
+    const { untilLabel } = await import("./limitResume");
+    const h = 3_600_000;
+    expect(untilLabel(47.7 * h, 0)).toBe("in 2 d");
+    expect(untilLabel(27 * h, 0)).toBe("in 1 d 3 h");
+  });
+});

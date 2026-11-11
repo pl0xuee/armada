@@ -32,7 +32,14 @@ import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { archiveAgent, exportConversation, refreshProjects, renameAgent, resumeAgent, stopAgent } from "@/lib/actions";
-import { ARCHIVED_KEY, groupByProject, orderedAgents, projectKey, type ProjectGroup } from "@/lib/agents";
+import {
+  ARCHIVED_KEY,
+  groupByProject,
+  isBusy,
+  orderedAgents,
+  projectKey,
+  type ProjectGroup,
+} from "@/lib/agents";
 import {
   addSection,
   arrange,
@@ -69,6 +76,7 @@ import { ResumesAt } from "./ResumesAt";
 import { StatusDot } from "../StatusDot";
 import { moveKeys, ProjectSectionHeader } from "./ProjectSectionHeader";
 import { useProjectDrag, type DragItem, type DropTarget } from "./useProjectDrag";
+import { ConfirmDialog } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import {
   ContextMenu,
@@ -303,6 +311,8 @@ export function AgentList({
     const onKey = (e: KeyboardEvent) => {
       // The conversation scroller is focusable (for PageUp/Space), so resting there counts as nothing focused.
       const at = document.activeElement;
+      // A bare "/" only: with Ctrl/⌘ it is another shortcut.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === "/" && (at === document.body || (at instanceof HTMLElement && at.hasAttribute("data-timeline-scroll")))) {
         e.preventDefault();
         searchRef.current?.focus();
@@ -956,6 +966,7 @@ const AgentRow = memo(function AgentRow({
   const setDeleteAgent = useUi((s) => s.setDeleteAgent);
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(agent.title);
+  const [confirmShutdown, setConfirmShutdown] = useState(false);
   const view = useStatusView(agent);
   const { done, meta: status } = view;
   const identity = useIdentity(agent.provider, agent.customAgentId);
@@ -1221,8 +1232,12 @@ const AgentRow = memo(function AgentRow({
               <Play /> Resume
             </ContextMenuItem>
           ) : (
-            <ContextMenuItem disabled={!agent.running} onSelect={() => void stopAgent(agent)}>
-              <Power /> Shut down
+            <ContextMenuItem
+              disabled={!agent.running}
+              // Mid-turn it would cut the work short, so that asks first (like the header's menu).
+              onSelect={() => (isBusy(agent) ? setConfirmShutdown(true) : void stopAgent(agent))}
+            >
+              <Power /> {isBusy(agent) ? "Shut down…" : "Shut down"}
             </ContextMenuItem>
           )}
           <ContextMenuItem onSelect={() => setHandoffAgent(agent)}>
@@ -1246,6 +1261,20 @@ const AgentRow = memo(function AgentRow({
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+      {confirmShutdown && (
+        <ConfirmDialog
+          open
+          onOpenChange={setConfirmShutdown}
+          title="Shut down this agent?"
+          description="It is in the middle of a turn, which ends now. The session is saved: Resume brings it back with its full history."
+          confirmLabel="Shut down"
+          danger
+          onConfirm={async () => {
+            setConfirmShutdown(false);
+            await stopAgent(agent);
+          }}
+        />
+      )}
     </li>
   );
 });

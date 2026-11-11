@@ -26,6 +26,7 @@ import { useSingleKeys } from "@/hooks/useSingleKeys";
 import { CONTINUE_PROMPT, attempt, findOption, respondPermission, resumeAgent } from "@/lib/actions";
 import { api } from "@/lib/api";
 import { parseFileDiff } from "@/lib/diff";
+import { isPlanApproval, planChoices } from "@/lib/planApproval";
 import { formatCost, formatTokens } from "@/lib/format";
 import type { PermissionOption, TimelineItem } from "@/lib/types";
 import { basename, cn } from "@/lib/utils";
@@ -289,6 +290,11 @@ function PermissionPanel({
       {parsed.map((f, i) => (
         <FileDiffView key={i} file={f} defaultOpen={false} maxHeight={220} />
       ))}
+      {isPlanApproval(item) && (
+        <section aria-label="Plan" className="selectable rounded-xl border border-line bg-card px-4 py-3 text-small">
+          <Markdown text={item.plan} />
+        </section>
+      )}
       {alwaysArmed && always && (
         <p role="status" className="rounded-lg border border-warn/35 bg-warn/10 px-3 py-2 text-caption text-warn">
           Press <Kbd>⇧</Kbd>
@@ -310,6 +316,14 @@ function PermissionActions({ agentId, item }: { agentId: string; item: Permissio
   const once = findOption(item, ["allow_once"]);
   const always = findOption(item, ["allow_always"]);
   const deny = findOption(item, ["reject_once", "reject_always"]);
+  // A plan's choices get the same plain names as in the conversation.
+  const planLabels = useMemo(() => {
+    if (!isPlanApproval(item)) return null;
+    const { approve, keepPlanning } = planChoices(item);
+    const labels = new Map(approve.map((c) => [c.option.id, c.label]));
+    if (keepPlanning) labels.set(keepPlanning.id, "Keep planning");
+    return labels;
+  }, [item]);
   const answer = async (o: PermissionOption) => {
     if (busy) return;
     setBusy(true);
@@ -332,7 +346,7 @@ function PermissionActions({ agentId, item }: { agentId: string; item: Permissio
             onClick={() => void answer(o)}
           >
             {allow ? <ShieldCheck className="!h-3.5 !w-3.5" /> : <ShieldX className="!h-3.5 !w-3.5" />}
-            {o.name}
+            {planLabels?.get(o.id) ?? o.name}
             {letterKeys && o === once && <Kbd className="ml-1 border-warn-fg/30 bg-transparent text-warn-fg/80">A</Kbd>}
             {letterKeys && o === always && (
               <span className="ml-1 flex gap-0.5">

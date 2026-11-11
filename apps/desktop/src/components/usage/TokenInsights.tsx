@@ -11,7 +11,7 @@ import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 
 const DOT: Record<Insight["severity"], string> = {
-  high: "bg-danger",
+  high: "bg-err",
   medium: "bg-warn",
   info: "bg-steel",
 };

@@ -14,7 +14,7 @@ import { expandCommandShortcut } from "@shared/slashCommands";
 import { composerPlaceholders, filterCommands, insertCommand, pickPlaceholder, showResumeQueue, slashQuery } from "@/lib/composerLogic";
 import { insertAtCaret } from "@/lib/templates";
 import { MAX_ATTACHMENTS, mergeAttachments } from "@/lib/attachments";
-import { cancelTurn, clearQueue, removeQueued, resumeQueue, sendPrompt, sendQueuedNow, toastError } from "@/lib/controller";
+import { cancelTurn, clearQueue, pushToast, removeQueued, resumeQueue, sendPrompt, sendQueuedNow, toastError } from "@/lib/controller";
 import { confirmAction } from "@/lib/confirm";
 import { cn } from "@/lib/cn";
 import { agentIdentity, isBusy } from "@/lib/meta";
@@ -36,6 +36,21 @@ export function loadDraft(agentId: string) {
   return storage.get(draftKey(agentId)) ?? "";
 }
 
+/** One tap removes a queued message, so the tap can be taken back. */
+async function removeWithUndo(agentId: string, qid: string) {
+  const removed = await removeQueued(agentId, qid);
+  if (!removed) return;
+  pushToast({
+    tone: "info",
+    title: "Queued message removed",
+    body: null,
+    agentId: null,
+    reason: null,
+    duration: 6_000,
+    action: { label: "Undo", run: () => void sendPrompt(agentId, removed.text, removed.attachments, undefined, "queue") },
+  });
+}
+
 function saveDraft(agentId: string, value: string) {
   if (value.trim()) storage.set(draftKey(agentId), value);
   else storage.remove(draftKey(agentId));
@@ -52,8 +67,8 @@ const draftPhotos = new Map<string, Attachment[]>();
  * survive reloads per agent.
  */
 export interface ComposerHandle {
-  /** Put text back into the box (e.g. editing a failed message). */
-  setText: (text: string) => void;
+  /** Put a message back into the box (editing a failed one): in front of what is typed, with its photos. */
+  setText: (text: string, photos?: Attachment[]) => void;
 }
 
 /**
@@ -71,8 +86,18 @@ export const Composer = memo(function Composer({
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [value, onChange] = useState(() => loadDraft(agent.id));
-  useImperativeHandle(handle, () => ({ setText: (text: string) => { onChange(text); ref.current?.focus({ preventScroll: true }); } }), []);
   const [attachments, setAttachments] = useState<Attachment[]>(() => draftPhotos.get(agent.id) ?? []);
+  useImperativeHandle(
+    handle,
+    () => ({
+      setText: (text: string, photos: Attachment[] = []) => {
+        if (text) onChange((v) => (v.trim() ? `${text}\n\n${v}` : text));
+        if (photos.length) setAttachments((cur) => mergeAttachments(cur, photos).list);
+        ref.current?.focus({ preventScroll: true });
+      },
+    }),
+    [],
+  );
   const picker = usePhotoPicker(attachments, (list) => setAttachments((cur) => mergeAttachments(cur, list).list));
   const customAgents = useStore((s) => s.customAgents);
   const templates = useStore((s) => s.templates);
@@ -508,7 +533,7 @@ function QueueItem({ agent, q, sending, onEdit }: { agent: Agent; q: QueuedPromp
         <button type="button" onClick={() => onEdit(q)} disabled={sending} className={cn(QUEUE_ACTION, "text-muted")}>
           Edit
         </button>
-        <button type="button" onClick={() => void removeQueued(agent.id, q.id)} disabled={sending} className={cn(QUEUE_ACTION, "text-muted")}>
+        <button type="button" onClick={() => void removeWithUndo(agent.id, q.id)} disabled={sending} className={cn(QUEUE_ACTION, "text-muted")}>
           Remove
         </button>
       </div>

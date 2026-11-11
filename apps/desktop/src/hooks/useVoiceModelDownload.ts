@@ -22,15 +22,18 @@ export function useVoiceModelDownload(onFinished?: (id: string) => void) {
     };
   }, []);
 
-  const start = async (id: string) => {
+  /** Resolves to whether the model was downloaded (false when cancelled or failed). */
+  const start = async (id: string): Promise<boolean> => {
     startedRef.current = id;
     setActive({ id, done: 0, total: 1 });
     try {
       await api.voiceDownloadModel(id);
       onFinished?.(id);
+      return true;
     } catch (e) {
       const msg = errorMessage(e);
       if (!/cancel/i.test(msg)) toast.error("Couldn't download the speech model", { description: msg });
+      return false;
     } finally {
       startedRef.current = null;
       setActive(null);

@@ -556,7 +556,14 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   }, [comments, editing, outdatedIds]);
   live.current = { comments, editing, outdatedIds };
 
-  const sendComments = () =>
+  const sendComments = () => {
+    // A comment still being written isn't among the saved ones: sending now would drop it.
+    if (editing) {
+      toast.info("Finish the comment you're writing first", {
+        description: "Save it or cancel it, then send.",
+      });
+      return;
+    }
     void run(
       "send",
       () => api.sendPrompt(agent.id, formatReviewPrompt(comments)),
@@ -571,6 +578,21 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         });
       },
     );
+  };
+  const clearComments = () => {
+    const removed = comments;
+    useReviewComments.getState().clear(agent.id);
+    setEditing(null);
+    toast(`Cleared ${pluralize(removed.length, "comment")}`, {
+      action: {
+        label: "Undo",
+        onClick: () =>
+          useReviewComments.setState((st) => ({
+            byAgent: { ...st.byAgent, [agent.id]: [...removed, ...(st.byAgent[agent.id] ?? [])] },
+          })),
+      },
+    });
+  };
 
   return (
     <>
@@ -762,10 +784,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
                 size="sm"
                 variant="ghost"
                 className="ml-auto"
-                onClick={() => {
-                  useReviewComments.getState().clear(agent.id);
-                  setEditing(null);
-                }}
+                onClick={clearComments}
               >
                 Clear
               </Button>
@@ -791,10 +810,17 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
               <GitMerge className="h-4 w-4 shrink-0 text-ok" />
               <div className="min-w-0 flex-1 space-y-1">
                 <PushBaseNotice agentId={agent.id} initial={afterMerge.baseStatus} />
-                <span className="block text-muted">Clean up the worktree, or archive the agent if it's done.</span>
+                <span className="block text-muted">
+                  Delete the agent with its worktree, or archive it to keep the conversation.
+                </span>
               </div>
-              <Button size="sm" variant="ghost" onClick={() => setConfirmDiscard(true)} disabled={!agent.worktree}>
-                <Trash2 /> Discard worktree
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setConfirmDiscard(true)}
+                disabled={!agent.worktree || busy !== null}
+              >
+                <Trash2 /> Delete agent and worktree
               </Button>
               <Button
                 size="sm"
@@ -936,7 +962,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
                 <DropdownMenuSeparator />
                 <MoreItem
                   icon={<Trash2 />}
-                  label="Discard worktree…"
+                  label="Delete agent and worktree…"
                   danger
                   reason={discardReason}
                   disabled={busy !== null || !!discardReason}
@@ -1028,14 +1054,15 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
         open={confirmDiscard}
         onOpenChange={setConfirmDiscard}
         danger
-        title="Discard this worktree?"
+        title="Delete this agent and its worktree?"
         description={
           <>
-            This deletes the worktree and the <span className="font-mono text-fg">{agent.branch}</span> branch.
-            Uncommitted and unmerged changes will be lost. This can't be undone.
+            This deletes the agent and its conversation, the worktree and the{" "}
+            <span className="font-mono text-fg">{agent.branch}</span> branch. Uncommitted and unmerged changes will be
+            lost. This can't be undone.
           </>
         }
-        confirmLabel="Discard worktree"
+        confirmLabel="Delete agent and worktree"
         busy={busy === "discard"}
         onConfirm={async () => {
           // Stays open with a spinner while the worktree is deleted; an error shows as a toast.
@@ -1043,7 +1070,7 @@ function ReviewBody({ agent, onClose }: { agent: Agent; onClose: () => void }) {
             "discard",
             () => api.discardWorktree(agent.id),
             () => {
-              toast.success("Worktree discarded");
+              toast.success("Agent and worktree deleted");
               onClose();
             },
           );

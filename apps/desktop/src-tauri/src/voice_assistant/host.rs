@@ -663,7 +663,13 @@ impl KvistcodeTools {
         // The card shows exactly this text and this is what runs: no invisible
         // characters or secrets ride along.
         let prompt = clean(prompt, MAX_SHOWN_PROMPT);
-        let key = format!("{path}\u{0}{prompt}");
+        // The provider and account are part of it: the same prompt on another provider is a
+        // new agent, not a repeat.
+        let key = format!(
+            "{}\u{0}{}\u{0}{path}\u{0}{prompt}",
+            provider.as_str(),
+            chosen.id
+        );
         if let Some(existing) = self.duplicate(&key) {
             return existing;
         }

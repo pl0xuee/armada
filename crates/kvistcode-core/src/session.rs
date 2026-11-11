@@ -2036,6 +2036,14 @@ impl AgentCtx {
                 self.notice(NoticeLevel::Info, paused_notice(dropped));
             }
             self.notice(NoticeLevel::Info, "Agent stopped");
+            // A stopped agent is idle like one whose turn finished: a helper that was waiting
+            // for it merges now.
+            if let (Some(core), Ok(rt)) =
+                (self.core.upgrade(), tokio::runtime::Handle::try_current())
+            {
+                let id = self.agent_id.clone();
+                rt.spawn(async move { core.on_turn_idle(&id).await });
+            }
         }
     }
 

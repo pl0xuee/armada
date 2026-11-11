@@ -645,7 +645,7 @@ function PairingCard({
           </span>
           <CopyButton text={url} label="Copy link" />
         </div>
-        {!status.lan && (
+        {!status.lan && !status.tailscale && (
           <p className="mt-2 text-caption text-steel">
             Only this computer can open it. Turn on LAN access to pair a phone.
           </p>

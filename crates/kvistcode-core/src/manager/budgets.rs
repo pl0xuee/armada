@@ -314,11 +314,28 @@ impl Core {
                 if !by.is_finite() || by <= 0.0 {
                     bail!("Enter an amount above zero");
                 }
-                let new_cap = hold.cap + by;
-                if new_cap <= hold.spent {
-                    bail!("That is still under what was spent. Raise it by more.");
+                // The limit and the spend can both have moved since the hold began (a limit
+                // edited in Settings, other agents spending against the same day), so go by
+                // what they are now, not by what the hold recorded.
+                let now = self
+                    .budget_readings(agent_id, false)
+                    .and_then(|(_, _, readings)| {
+                        readings
+                            .into_iter()
+                            .find(|r| r.scope == hold.scope && r.metric == hold.metric)
+                    });
+                let (cap, spent) = match &now {
+                    Some(r) => (r.cap, r.spent),
+                    None => (Some(hold.cap), hold.spent),
+                };
+                // A limit that was removed meanwhile is not brought back.
+                if let Some(cap) = cap {
+                    let new_cap = cap + by;
+                    if new_cap <= spent {
+                        bail!("That is still under what was spent. Raise it by more.");
+                    }
+                    self.budget_raise(&agent, hold, new_cap)?;
                 }
-                self.budget_raise(&agent, hold, new_cap)?;
                 self.budget_release_holds().await;
             }
             BudgetChoice::ContinueOnce => {
@@ -388,7 +405,16 @@ impl Core {
             .map(|r| r.agent.id.clone())
             .collect();
         for id in held {
-            if self.budget_gate(&id, false).is_some() {
+            if let Some(next) = self.budget_gate(&id, false) {
+                // Still over a limit (maybe another one): the hold names that one now.
+                let _ = self.update_agent(&id, |a| {
+                    if let Some(h) = a.budget_hold.as_mut() {
+                        *h = BudgetHold {
+                            since: h.since,
+                            ..next
+                        };
+                    }
+                });
                 continue;
             }
             if self.update_agent(&id, |a| a.budget_hold = None).is_err() {

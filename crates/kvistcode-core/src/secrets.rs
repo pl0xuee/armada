@@ -55,25 +55,34 @@ impl SecretStore for Keyring {
     }
 }
 
+/// The OS keychain, or memory under `cargo test`.
+fn pick_store() -> Box<dyn SecretStore> {
+    #[cfg(test)]
+    {
+        Box::new(Memory::default())
+    }
+    #[cfg(not(test))]
+    {
+        // Integration tests link the library without `cfg(test)`: this switch keeps
+        // them off the real keychain (it would pop up "create a new keyring").
+        if std::env::var_os("KVISTCODE_SECRETS").is_some_and(|v| v == "memory") {
+            Box::new(Memory::default())
+        } else {
+            Box::new(Keyring)
+        }
+    }
+}
+
 /// The vault the database uses (backed by memory under `cargo test`).
 pub(crate) fn vault() -> &'static Vault {
     static V: std::sync::OnceLock<Vault> = std::sync::OnceLock::new();
-    V.get_or_init(|| {
-        #[cfg(test)]
-        {
-            Vault::new(Box::new(Memory::default()))
-        }
-        #[cfg(not(test))]
-        {
-            // Integration tests link the library without `cfg(test)`: this switch keeps
-            // them off the real keychain (it would pop up "create a new keyring").
-            if std::env::var_os("KVISTCODE_SECRETS").is_some_and(|v| v == "memory") {
-                Vault::new(Box::new(Memory::default()))
-            } else {
-                Vault::new(Box::new(Keyring))
-            }
-        }
-    })
+    V.get_or_init(|| Vault::new(pick_store()))
+}
+
+/// Where account API keys are kept, one entry per account (memory under tests, like the vault).
+pub(crate) fn key_store() -> &'static dyn SecretStore {
+    static S: std::sync::OnceLock<Box<dyn SecretStore>> = std::sync::OnceLock::new();
+    S.get_or_init(pick_store).as_ref()
 }
 
 /// The single keychain item, cached in memory.

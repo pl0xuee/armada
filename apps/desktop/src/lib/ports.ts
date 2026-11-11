@@ -5,7 +5,7 @@
 // eslint-disable-next-line no-control-regex
 const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 
-const URL_RE = /\bhttps?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|\[::\]):(\d{1,5})(\/[^\s"'<>)\]]*)?/gi;
+const URL_RE = /\bhttps?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|\[::\]):(\d{1,5})(\/[^\s"'<>)\]`*]*)?/gi;
 // "listening on 0.0.0.0:3000", "Listening at port 3000", "running on 127.0.0.1:8000"
 const LISTEN_RE =
   /\b(?:listening|running|serving|started|available)\b[^\n]{0,40}?\b(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]):(\d{1,5})\b/gi;

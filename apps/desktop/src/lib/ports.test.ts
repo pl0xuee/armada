@@ -73,3 +73,14 @@ describe("effectiveLoopbackUrl", () => {
     expect(effectiveLoopbackUrl("http://localhost:3000/", { v4: false, v6: false })).toBeNull();
   });
 });
+
+describe("a URL quoted in an agent's markdown", () => {
+  it("leaves the backtick or bold marks out of the address", () => {
+    expect(detectDevUrls("The dev server is up at `http://localhost:5173/`.")).toEqual([
+      { url: "http://localhost:5173/", port: 5173 },
+    ]);
+    expect(detectDevUrls("Open **http://localhost:3000/app** to see it")).toEqual([
+      { url: "http://localhost:3000/app", port: 3000 },
+    ]);
+  });
+});

@@ -55,7 +55,7 @@ import {
 } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 import { previewOf, usePreview, usePreviewDetection } from "@/store/preview";
-import { useApp } from "@/store/app";
+import { holdTimelines, useApp } from "@/store/app";
 import { useBackgroundIds } from "@/store/background";
 import { useUi } from "@/store/ui";
 
@@ -197,6 +197,7 @@ const Tile = memo(function Tile({
   const windowFocused = useUi((s) => s.windowFocused);
   useEffect(() => {
     void useApp.getState().ensureItems(agentId);
+    return holdTimelines([agentId]);
   }, [agentId]);
   const unread = agent?.unread ?? false;
   useEffect(() => {

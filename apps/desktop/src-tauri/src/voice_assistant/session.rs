@@ -24,6 +24,8 @@ use super::protocol::{self as p, ServerEvent};
 
 const TOOL_TIMEOUT: Duration = Duration::from_secs(25);
 const TICK: Duration = Duration::from_millis(60);
+/// Longest one message to the server may take to leave before the connection counts as lost.
+const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 /// At most this many side-effect proposals (start_agent / send_message) per user turn,
 /// a turn being the time since the last input transcript completed.
 pub const MAX_PROPOSALS_PER_TURN: u32 = 3;
@@ -561,10 +563,18 @@ async fn connection_inner(
     pending: &mut HashMap<String, PendingConfirm>,
 ) -> ConnEnd {
     let (mut tx, mut rx) = ws.split();
+    // With a deadline: a connection that went silent would otherwise park the loop in a send
+    // once the socket's buffer filled, and Stop, Pause and the session limits with it.
     macro_rules! send {
         ($v:expr) => {
-            if let Err(e) = tx.send(Message::text($v.to_string())).await {
-                return ConnEnd::Dropped(format!("Connection to OpenAI lost: {e}"));
+            match tokio::time::timeout(SEND_TIMEOUT, tx.send(Message::text($v.to_string()))).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => return ConnEnd::Dropped(format!("Connection to OpenAI lost: {e}")),
+                Err(_) => {
+                    return ConnEnd::Dropped(
+                        "Connection to OpenAI lost: it stopped responding".into(),
+                    )
+                }
             }
         };
     }
@@ -626,6 +636,8 @@ async fn connection_inner(
             let text: String = $text;
             last_activity = Instant::now();
             asked += 1;
+            // A new user turn, like a finished transcript: proposals start from zero again.
+            proposals = 0;
             ui.emit(VaEvent::Caption {
                 role: "user",
                 item_id: format!("wake-{asked}"),
@@ -661,7 +673,7 @@ async fn connection_inner(
                 Some(Control::Pause) => {
                     // Say nothing more and send nothing more: hang up right here.
                     speaker.clear();
-                    let _ = tx.send(Message::Close(None)).await;
+                    let _ = tokio::time::timeout(SEND_TIMEOUT, tx.send(Message::Close(None))).await;
                     return ConnEnd::Paused;
                 }
                 Some(Control::Resume) => {}
@@ -684,7 +696,7 @@ async fn connection_inner(
                     }
                 }
                 Some(Control::Stop) | None => {
-                    let _ = tx.send(Message::Close(None)).await;
+                    let _ = tokio::time::timeout(SEND_TIMEOUT, tx.send(Message::Close(None))).await;
                     return ConnEnd::Done(EndReason::UserStopped);
                 }
             },
@@ -929,18 +941,18 @@ async fn connection_inner(
                         && speaker.queued() == 0 && out_level == 0.0;
                     if quiet || at.elapsed() >= PAUSE_GRACE {
                         speaker.clear();
-                        let _ = tx.send(Message::Close(None)).await;
+                        let _ = tokio::time::timeout(SEND_TIMEOUT, tx.send(Message::Close(None))).await;
                         return ConnEnd::Paused;
                     }
                 }
                 if started.elapsed().as_secs() >= cfg.max_secs {
-                    let _ = tx.send(Message::Close(None)).await;
+                    let _ = tokio::time::timeout(SEND_TIMEOUT, tx.send(Message::Close(None))).await;
                     return ConnEnd::Done(EndReason::MaxLength);
                 }
                 let busy = response_active || calls_in_flight > 0 || late_in_flight > 0
                     || !pending.is_empty() || speaker.queued() > 0;
                 if !busy && last_activity.elapsed().as_secs() >= cfg.silence_secs {
-                    let _ = tx.send(Message::Close(None)).await;
+                    let _ = tokio::time::timeout(SEND_TIMEOUT, tx.send(Message::Close(None))).await;
                     return ConnEnd::Done(EndReason::Silence);
                 }
             }

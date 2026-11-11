@@ -50,8 +50,13 @@ export function untilLabel(at: number, now: number = Date.now()): string {
     const m = mins % 60;
     return m === 0 ? `in ${h} h` : `in ${h} h ${m} min`;
   }
-  const d = Math.floor(ms / DAY);
-  const h = Math.round((ms - d * DAY) / HOUR);
+  let d = Math.floor(ms / DAY);
+  let h = Math.round((ms - d * DAY) / HOUR);
+  // 23.5 h and more rounds up to a whole day, never "1 d 24 h".
+  if (h === 24) {
+    d += 1;
+    h = 0;
+  }
   return h === 0 ? `in ${d} d` : `in ${d} d ${h} h`;
 }
 

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useIdentity } from "@/hooks/useIdentity";
 import { findOption, respondPermission } from "@/lib/actions";
+import { isPlanApproval } from "@/lib/planApproval";
 import { BudgetChip } from "@/components/agent/BudgetChip";
 import { agentCostText } from "@/lib/format";
 import type { QuestionItem } from "@/lib/question";
@@ -40,8 +41,11 @@ export const AgentRowCompact = memo(function AgentRowCompact({
   const { done, meta } = view;
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const working = agent.status === "working" || agent.status === "starting" || view.background;
-  const allowOpt = pending ? (findOption(pending, ["allow_once"]) ?? findOption(pending, ["allow_always"])) : undefined;
-  const denyOpt = pending ? findOption(pending, ["reject_once", "reject_always"]) : undefined;
+  // A plan is read before it is approved: the row opens it instead of answering unseen.
+  const plan = pending ? isPlanApproval(pending) : false;
+  const quick = plan ? undefined : pending;
+  const allowOpt = quick ? (findOption(quick, ["allow_once"]) ?? findOption(quick, ["allow_always"])) : undefined;
+  const denyOpt = quick ? findOption(quick, ["reject_once", "reject_always"]) : undefined;
 
   const asking = !pending && question !== null;
   const line = pending
@@ -163,6 +167,16 @@ export const AgentRowCompact = memo(function AgentRowCompact({
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
           >
+            {plan && (
+              <Button
+                size="xs"
+                variant="warn"
+                aria-label={`Review plan: ${pending.title}`}
+                onClick={() => onOpen(agent.id)}
+              >
+                Review plan
+              </Button>
+            )}
             {allowOpt && (
               <Button
                 size="xs"

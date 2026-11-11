@@ -1,4 +1,4 @@
-import { memo, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import { AccountDot, ProviderBadge, StatusText } from "@/components/Identity";
 import { AppMark, Icon } from "@/components/Icon";
 import { Sheet } from "@/components/Sheet";
@@ -27,6 +27,8 @@ import { EmptyState, ErrorState } from "./States";
 
 /** Fleet scroll position, restored when coming back from an agent. */
 let savedScroll = 0;
+/** What was typed in the search box, so Back from a result returns to the same list. */
+let savedQuery = "";
 
 export function Fleet() {
   const agents = useStore((s) => s.agents);
@@ -48,7 +50,10 @@ export function Fleet() {
   const offline = useStore((s) => s.connection === "offline");
 
   const list = useMemo(() => Object.values(agents), [agents]);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(savedQuery);
+  useEffect(() => {
+    savedQuery = query;
+  }, [query]);
   const filtered = useMemo(() => filterAgents(list, query), [list, query]);
   const background = useStore((s) => s.background);
   const { projects, archived } = useMemo(

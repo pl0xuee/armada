@@ -509,13 +509,43 @@ impl Core {
             }
             dirs.into_iter().collect()
         };
-        if !merge_dirs.is_empty() {
-            tokio::task::spawn_blocking(move || {
-                for d in merge_dirs {
-                    let n = crate::helpers::remove_merge_leftovers(std::path::Path::new(&d)).len();
-                    if n > 0 {
-                        tracing::info!("removed {n} leftover merge file(s) in {d}");
+        // Helpers whose merge was waiting (or running) when the app closed. Nothing else tries
+        // it again until some turn ends, so it is tried now, once the leftovers are gone.
+        let pending: Vec<String> = self
+            .inner
+            .agents
+            .lock()
+            .values()
+            .filter(|r| {
+                r.agent.parent_id.is_some()
+                    && r.agent
+                        .helper_sync
+                        .as_ref()
+                        .is_some_and(|h| h.state == HelperSyncState::PendingToMain)
+            })
+            .map(|r| r.agent.id.clone())
+            .collect();
+        if !merge_dirs.is_empty() || !pending.is_empty() {
+            let core = self.clone();
+            tokio::spawn(async move {
+                let cleaned = tokio::task::spawn_blocking(move || {
+                    for d in merge_dirs {
+                        let n =
+                            crate::helpers::remove_merge_leftovers(std::path::Path::new(&d)).len();
+                        if n > 0 {
+                            tracing::info!("removed {n} leftover merge file(s) in {d}");
+                        }
                     }
+                })
+                .await;
+                if cleaned.is_err() {
+                    return;
+                }
+                for id in pending {
+                    if core.is_shutting_down() {
+                        return;
+                    }
+                    core.helper_to_main(&id).await;
                 }
             });
         }
@@ -2683,9 +2713,17 @@ impl Core {
                 .any(|r| r.agent.id != agent.id && r.agent.cwd == agent.cwd);
         let project = PathBuf::from(&agent.project_path);
         let cwd = PathBuf::from(&agent.cwd);
+        // A helper's branch starts at a snapshot of the main agent's files, a commit no other
+        // branch contains. It isn't the helper's work, so it doesn't count as unsaved.
+        let start = agent
+            .parent_id
+            .as_ref()
+            .and(agent.base_commit.as_deref())
+            .filter(|_| !force);
         // Checked before stopping anything, so a refused delete leaves the agent be.
         if remove && !force {
-            if let Some(problem) = git::unsaved_work(&project, &cwd, agent.branch.as_deref()).await
+            if let Some(problem) =
+                git::unsaved_work_past(&project, &cwd, agent.branch.as_deref(), start).await
             {
                 bail!("{problem}");
             }
@@ -2702,16 +2740,38 @@ impl Core {
             ctx.retire_generation(d.generation());
         }
         if remove {
-            // Checked again inside: the agent may have written more before it stopped.
-            if let Err(e) = git::remove_worktree(
-                &self.inner.data_dir,
-                &project,
-                &cwd,
-                agent.branch.as_deref(),
-                force,
-            )
-            .await
-            {
+            // Checked again: the agent may have written more before it stopped. For a helper
+            // the check is made here (it knows the starting snapshot) and the removal forced.
+            let removed = match start {
+                Some(_) => {
+                    match git::unsaved_work_past(&project, &cwd, agent.branch.as_deref(), start)
+                        .await
+                    {
+                        Some(problem) => Err(anyhow!("{problem}")),
+                        None => {
+                            git::remove_worktree(
+                                &self.inner.data_dir,
+                                &project,
+                                &cwd,
+                                agent.branch.as_deref(),
+                                true,
+                            )
+                            .await
+                        }
+                    }
+                }
+                None => {
+                    git::remove_worktree(
+                        &self.inner.data_dir,
+                        &project,
+                        &cwd,
+                        agent.branch.as_deref(),
+                        force,
+                    )
+                    .await
+                }
+            };
+            if let Err(e) = removed {
                 ctx.end_turn_early(ExitIntent::Stop);
                 let _ = self.update_agent(agent_id, |a| {
                     a.running = false;
@@ -3327,6 +3387,18 @@ impl Core {
                 NoticeLevel::Warn,
                 format!(
                     "This account hit its rate limit. You can switch this agent to \u{201c}{}\u{201d} and keep going.",
+                    next.name
+                ),
+            );
+            return;
+        }
+        // A paused spending limit outranks the automatic switch: carrying on with another
+        // account would spend past it without asking.
+        if agent.budget_hold.is_some() || self.budget_gate(agent_id, false).is_some() {
+            ctx.notice(
+                NoticeLevel::Warn,
+                format!(
+                    "This account hit its rate limit. The agent is at a spending limit, so it was not switched to \u{201c}{}\u{201d} automatically.",
                     next.name
                 ),
             );

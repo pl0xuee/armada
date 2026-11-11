@@ -6,7 +6,7 @@ import { idealTileColumns } from "@/lib/helpers";
 import { identityFor } from "@/lib/identity";
 import type { Account, Agent } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { useApp, type AppStore } from "@/store/app";
+import { holdTimelines, useApp, type AppStore } from "@/store/app";
 import { useUi } from "@/store/ui";
 
 /** Narrowest a column can be before the agents go behind tabs instead. */
@@ -123,6 +123,7 @@ export function AgentGrid({
   useEffect(() => {
     if (!ids) return;
     for (const id of ids.split(",")) void useApp.getState().ensureItems(id);
+    return holdTimelines(ids.split(","));
   }, [ids]);
 
   const costs = agents.map((a) => a.costUsd);

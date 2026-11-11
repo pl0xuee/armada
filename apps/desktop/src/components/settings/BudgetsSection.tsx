@@ -252,6 +252,8 @@ export function BudgetsSection({ settings }: { settings: Settings }) {
   );
 }
 
+const NO_CAP: BudgetCap = { usd: null, tokens: null, turns: null };
+
 /** Limits on everything the agents of one project spend. */
 function ProjectLimits({
   projects,
@@ -262,12 +264,18 @@ function ProjectLimits({
 }) {
   const agents = useApp((s) => s.agents);
   const recent = useApp((s) => s.settings?.recentProjects);
+  // Projects picked below that have no limit yet: an empty row, saved once a number is entered.
+  const [drafts, setDrafts] = useState<string[]>([]);
   const known = useMemo(() => {
     const set = new Set<string>(recent ?? []);
     for (const a of Object.values(agents)) set.add(a.projectPath);
-    return [...set].filter((p) => p && !(p in projects)).sort((a, b) => basename(a).localeCompare(basename(b)));
-  }, [agents, recent, projects]);
-  const paths = Object.keys(projects).sort((a, b) => basename(a).localeCompare(basename(b)));
+    return [...set]
+      .filter((p) => p && !(p in projects) && !drafts.includes(p))
+      .sort((a, b) => basename(a).localeCompare(basename(b)));
+  }, [agents, recent, projects, drafts]);
+  const paths = [...new Set([...Object.keys(projects), ...drafts])].sort((a, b) =>
+    basename(a).localeCompare(basename(b)),
+  );
 
   return (
     <SettingRow
@@ -277,7 +285,7 @@ function ProjectLimits({
     >
       <div className="w-full space-y-2.5">
         {paths.map((path) => {
-          const cap = projects[path]!;
+          const cap = projects[path] ?? NO_CAP;
           const id = `budget-project-${path}`;
           return (
             <div key={path} className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
@@ -302,7 +310,10 @@ function ProjectLimits({
                   size="icon-sm"
                   variant="ghost"
                   aria-label={`Remove the limit for ${basename(path)}`}
-                  onClick={() => void onChange(path, { usd: null, tokens: null, turns: null })}
+                  onClick={() => {
+                    setDrafts((d) => d.filter((p) => p !== path));
+                    if (path in projects) void onChange(path, NO_CAP);
+                  }}
                 >
                   <X />
                 </Button>
@@ -316,8 +327,9 @@ function ProjectLimits({
             value=""
             placeholder="Add a project limit…"
             className="h-8 max-w-[320px]"
-            // A limit needs a value: start with a token-free, cost-free row the user then fills in.
-            onValueChange={(path) => void onChange(path, { usd: 10, tokens: null, turns: null })}
+            // Nothing is saved until a number is entered: a made-up starting amount would be a
+            // live limit, and could pause a project that has already spent more.
+            onValueChange={(path) => setDrafts((d) => (d.includes(path) ? d : [...d, path]))}
             options={known.map((p) => ({ value: p, label: basename(p), description: p }))}
           />
         )}

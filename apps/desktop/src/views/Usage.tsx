@@ -92,6 +92,7 @@ export function UsageView() {
   const openNewAgent = useUi((s) => s.openNewAgent);
   const dailyCap = useApp((s) => s.settings?.dailyBudgetUsd);
   const dailyTokenCap = useApp((s) => s.settings?.dailyBudgetTokens);
+  const dailyTurnCap = useApp((s) => s.settings?.dailyBudgetTurns);
   const [metric, setMetric] = useState<Metric>("cost");
   const [group, setGroup] = useState<Group>("provider");
   const [topOpen, setTopOpen] = useState(false);
@@ -242,7 +243,7 @@ export function UsageView() {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1040px] space-y-3 px-4 py-4 @2xl:space-y-4 @2xl:px-6 @2xl:py-5">
-          {budget && (dailyCap != null || dailyTokenCap != null) && (
+          {budget && (dailyCap != null || dailyTokenCap != null || dailyTurnCap != null) && (
             <BudgetBar status={budget} onConfigure={() => openSettings("budgets")} />
           )}
 

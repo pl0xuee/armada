@@ -185,16 +185,19 @@ export const FileDiffView = memo(function FileDiffView({
         </button>
         {review && (
           <div className="flex h-full shrink-0 items-center gap-1 border-l border-line/70 px-1.5">
-            <button
-              type="button"
-              onClick={() => review.revertFile(file.path)}
-              title="Revert this file's changes"
-              aria-label={`Revert all changes to ${file.path}`}
-              className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-meta text-muted transition-colors hover:bg-err/12 hover:text-err"
-            >
-              <Undo2 className="h-3.5 w-3.5" />
-              <span className="max-md:hidden">Revert file</span>
-            </button>
+            {/* A binary file's change isn't in the diff text, so it can't be reverted from here. */}
+            {!file.binary && (
+              <button
+                type="button"
+                onClick={() => review.revertFile(file.path)}
+                title="Revert this file's changes"
+                aria-label={`Revert all changes to ${file.path}`}
+                className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-meta text-muted transition-colors hover:bg-err/12 hover:text-err"
+              >
+                <Undo2 className="h-3.5 w-3.5" />
+                <span className="max-md:hidden">Revert file</span>
+              </button>
+            )}
             <label
               className={cn(
                 "inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-meta transition-colors hover:bg-raised",

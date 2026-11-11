@@ -513,6 +513,17 @@ async fn branch_exists(repo: &Path, branch: &str) -> bool {
 /// or tag contains. None when nothing would be lost. When git can't tell (broken
 /// checkout, git missing), that is reported too, so nothing is deleted unchecked.
 pub async fn unsaved_work(project_path: &Path, cwd: &Path, branch: Option<&str>) -> Option<String> {
+    unsaved_work_past(project_path, cwd, branch, None).await
+}
+
+/// `unsaved_work`, not counting commits reachable from `start`. A helper's branch begins at a
+/// snapshot of the main agent's files that no other branch contains; that commit isn't its work.
+pub async fn unsaved_work_past(
+    project_path: &Path,
+    cwd: &Path,
+    branch: Option<&str>,
+    start: Option<&str>,
+) -> Option<String> {
     let mut problems = Vec::new();
     let top = worktree_top(cwd).await;
     let mut head = None;
@@ -556,6 +567,7 @@ pub async fn unsaved_work(project_path: &Path, cwd: &Path, branch: Option<&str>)
                 args.push(format!("--exclude={b}"));
             }
             args.extend(["--branches".into(), "--remotes".into(), "--tags".into()]);
+            args.extend(start.map(String::from));
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
             match git(&repo, &args).await {
                 Ok(n) => {

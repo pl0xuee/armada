@@ -436,6 +436,11 @@ impl CodexDriver {
                 TurnOutcome::Cancelled,
             );
         }
+        // Ended some other way while the checkpoint ran (stopped, or a cancel that was
+        // forced through): the prompt is not sent either.
+        if !self.ctx.prompt_is_current(prompt.token) {
+            return None;
+        }
         self.peer.mark_turn();
         let mark = self.peer.stderr_mark();
         let preamble = self.ctx.take_preamble();

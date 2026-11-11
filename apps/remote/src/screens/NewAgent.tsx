@@ -12,10 +12,14 @@ import { safeColor } from "@/lib/meta";
 import { mergeAttachments } from "@/lib/attachments";
 import { KEEP, saveWorkChoice, WORK_TYPES } from "@/lib/modelGuide";
 import { accountProblem, agentChoices, initialForm, saveLast, validate, type NewAgentForm } from "@/lib/newAgent";
+import { draftKey } from "@/lib/drafts";
+import { storage } from "@/lib/storage";
 import { goBack, navigate } from "@/lib/router";
 import { useStore } from "@/lib/store";
 import type { Attachment } from "@/lib/types";
 import { EmptyState, ErrorState } from "./States";
+
+const NEW_DRAFT = draftKey("new-agent");
 
 const PROJECTS_SHOWN = 5;
 
@@ -42,7 +46,7 @@ export function NewAgent() {
   useEffect(() => {
     if (form || stateStatus !== "ready") return;
     const f = initialForm(choices, projects, defaultWorktree, undefined, defaultPermissionMode, claudeChoicesRemembered);
-    setForm(f);
+    setForm({ ...f, prompt: f.prompt || (storage.get(NEW_DRAFT) ?? "") });
     setCustomPath(!projects.length);
   }, [choices, claudeChoicesRemembered, defaultPermissionMode, defaultWorktree, form, projects, stateStatus]);
 
@@ -50,6 +54,14 @@ export function NewAgent() {
   // timeout retries the same request (no duplicate agent); editing the form
   // makes it a new request.
   const requestKey = useRef<string | null>(null);
+  // The first message is kept like a composer draft: Back or a reload must not lose it.
+  const sent = useRef(false);
+  const draft = form?.prompt;
+  useEffect(() => {
+    if (draft === undefined || sent.current) return;
+    const t = setTimeout(() => (draft.trim() ? storage.set(NEW_DRAFT, draft) : storage.remove(NEW_DRAFT)), 300);
+    return () => clearTimeout(t);
+  }, [draft]);
   const [progress, setProgress] = useState<number | null>(null);
   const update = (patch: Partial<NewAgentForm>) => {
     setForm((f) => (f ? { ...f, ...patch } : f));
@@ -370,6 +382,8 @@ export function NewAgent() {
       const id = await createAgent(v.request, requestKey.current, uploading ? setProgress : undefined);
       saveLast({ choiceKey: form.choiceKey!, accountId: v.request.accountId, projectPath: v.request.projectPath });
       if (v.request.provider === "claude") saveWorkChoice(form.workType);
+      storage.remove(NEW_DRAFT);
+      sent.current = true;
       navigate({ name: "agent", agentId: id }, { replace: true });
     } catch (e) {
       setError({ message: errorMessage(e) });

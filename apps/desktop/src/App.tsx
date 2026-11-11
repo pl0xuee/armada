@@ -130,7 +130,7 @@ export function App() {
   useEffect(() => installNavigationGuard(), []);
 
   // Theme on <html data-theme>. Until settings load, keep what index.html painted from the cache.
-  const settingsLoaded = settings !== undefined;
+  const settingsLoaded = settings !== null;
   useEffect(() => {
     if (settingsLoaded) document.documentElement.dataset.theme = theme;
   }, [theme, settingsLoaded]);

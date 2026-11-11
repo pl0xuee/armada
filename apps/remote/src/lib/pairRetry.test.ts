@@ -48,3 +48,14 @@ describe("pairing retries", () => {
     expect(getState().blockedReason).toBe("rate_limited");
   });
 });
+
+describe("pairing keeps the token", () => {
+  it("stores the new token even when the first connection fails", async () => {
+    // The code is spent once it is traded, so the token must survive a failed first connect.
+    vi.stubGlobal("fetch", () => Promise.reject(new TypeError("offline")));
+    pairDevice.mockResolvedValueOnce({ token: "tok-fresh", scope: "owner" });
+    await pairWithCode("code-once");
+    expect(localStorage.getItem("armada.token")).toBe("tok-fresh");
+    expect(getState().phase).not.toBe("unpaired");
+  });
+});

@@ -105,6 +105,8 @@ export function useGlobalShortcuts(enabled: boolean) {
       }
       const newOverTour = key === "n" && !e.shiftKey && tourOpen;
       if (newOverTour) closeTour();
+      // Ctrl+Shift+R is the webview's hard reload on Windows: it must never get through, dialog or not.
+      if (key === "r" && e.shiftKey) e.preventDefault();
       // Never navigate out from under an open dialog, sheet or menu.
       if (dialogOpen() && !newOverTour) return;
       if (key === "n" && !e.shiftKey) {

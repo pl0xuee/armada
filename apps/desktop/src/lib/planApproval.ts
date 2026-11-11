@@ -57,7 +57,12 @@ export function planResolution(item: { options: PermissionOption[]; resolution: 
 /** The plan's first heading or line, for a compact summary. */
 export function planTitle(plan: string): string {
   for (const raw of plan.split("\n")) {
-    const line = raw.replace(/^#+\s*/, "").replace(/[*_`]/g, "").trim();
+    // Markdown marks go; an underscore inside a name (user_id) is part of the name.
+    const line = raw
+      .replace(/^#+\s*/, "")
+      .replace(/[*`]/g, "")
+      .replace(/(^|[^\p{L}\p{N}_])_+|_+(?![\p{L}\p{N}])/gu, "$1")
+      .trim();
     if (line) return line.length > 90 ? `${line.slice(0, 89)}…` : line;
   }
   return "Plan";
