@@ -31,6 +31,7 @@ import { Kbd } from "../ui/kbd";
 import { Tooltip } from "../ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/menu";
 import { ConfigOverflowMenu, ConfigSelect } from "./ConfigSelect";
+import { HelperSelect, HelperSubmenu, hasHelperChoice } from "./HelperSelect";
 import { plainConfigOptions } from "./composerModes";
 import { PinnedDock } from "./PinnedDock";
 import { useToolbarFit } from "./toolbarFit";
@@ -111,6 +112,8 @@ function ComposerImpl({
   const roomy = width === 0 || width >= 700;
   const tight = width > 0 && width < 520;
   const configOptions = useMemo(() => plainConfigOptions(agent), [agent]);
+  /** A Claude agent's Helpers menu folds like one more option, after the others. */
+  const helpers = hasHelperChoice(agent);
   const ref = useRef<HTMLTextAreaElement>(null);
   const focusTick = useUi((s) => s.composerFocusTick);
 
@@ -461,6 +464,7 @@ function ComposerImpl({
     actionsRef,
     [
       configOptions.map((o) => `${o.id}=${o.currentValue}`).join(","),
+      helpers && `helpers=${agent.subagentModel ?? ""}/${agent.subagentEffort ?? ""}`,
       busy,
       docked,
       resumable,
@@ -469,9 +473,10 @@ function ComposerImpl({
       roomForHints,
       attach.attachments.length,
     ].join("|"),
-    configOptions.length,
+    configOptions.length + (helpers ? 1 : 0),
     tight,
   );
+  const helpersInline = helpers && fold.inline > configOptions.length;
   /** The agent takes messages into a running turn (so the menu may offer it). */
   const agentTakesMidTurn = !!agent.steerable && !agent.queuePaused;
 
@@ -681,7 +686,12 @@ function ComposerImpl({
                 {configOptions.slice(0, fold.inline).map((opt) => (
                   <ConfigSelect key={opt.id} agent={agent} option={opt} compact={!roomy} />
                 ))}
-                <ConfigOverflowMenu agent={agent} options={configOptions.slice(fold.inline)} />
+                {helpersInline && <HelperSelect agent={agent} compact={!roomy} />}
+                <ConfigOverflowMenu
+                  agent={agent}
+                  options={configOptions.slice(fold.inline)}
+                  extra={helpers && !helpersInline ? <HelperSubmenu agent={agent} /> : undefined}
+                />
                 {/* Icons only: the session options are what you read here; these explain themselves on hover. */}
                 <AttachButton onClick={attach.openPicker} count={attach.attachments.length} iconOnly />
                 <TemplatePicker

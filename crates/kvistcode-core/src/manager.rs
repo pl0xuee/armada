@@ -939,7 +939,12 @@ impl Core {
         settings.validate().map_err(|e| anyhow!(e))?;
         let mut current = self.inner.settings.lock();
         self.inner.db.put_settings(&settings)?;
+        let helpers_changed = helper_settings_differ(&current, &settings);
         *current = settings.clone();
+        drop(current);
+        if helpers_changed {
+            self.refresh_live_subagents();
+        }
         Ok(settings)
     }
 
@@ -952,8 +957,80 @@ impl Core {
         f(&mut next);
         next.validate().map_err(|e| anyhow!(e))?;
         self.inner.db.put_settings(&next)?;
+        let helpers_changed = helper_settings_differ(&current, &next);
         *current = next.clone();
+        drop(current);
+        if helpers_changed {
+            self.refresh_live_subagents();
+        }
         Ok(next)
+    }
+
+    /// Running Claude agents that follow the helper settings get them for their next helper.
+    fn refresh_live_subagents(&self) {
+        let claude: Vec<Agent> = self
+            .inner
+            .agents
+            .lock()
+            .values()
+            .filter(|r| r.agent.provider == Provider::Claude)
+            .map(|r| r.agent.clone())
+            .collect();
+        for a in &claude {
+            self.write_live_subagents(a);
+        }
+    }
+
+    /// Writes the helper model and effort `agent`'s hook reads (see `token_saver::LiveSubagents`).
+    /// None when the file couldn't be written (the agent then starts the old way).
+    fn write_live_subagents(
+        &self,
+        agent: &Agent,
+    ) -> Option<(crate::token_saver::LiveSubagents, PathBuf)> {
+        let live = crate::token_saver::subagents_for(
+            agent.subagent_model.as_deref(),
+            agent.subagent_effort.as_deref(),
+            &self.inner.settings.lock().token_saver,
+        );
+        let path = crate::token_saver::live_subagents_path(&self.inner.data_dir, &agent.id);
+        let write = || -> Result<()> {
+            std::fs::create_dir_all(path.parent().unwrap_or(&self.inner.data_dir))?;
+            let tmp = path.with_extension("json.tmp");
+            std::fs::write(&tmp, serde_json::to_vec(&live)?)?;
+            std::fs::rename(&tmp, &path)?;
+            Ok(())
+        };
+        match write() {
+            Ok(()) => Some((live, path)),
+            Err(e) => {
+                tracing::warn!("couldn't write helper choice for {}: {e:#}", agent.id);
+                None
+            }
+        }
+    }
+
+    /// Sets the model and effort a Claude agent's helpers run on (None: follow the settings).
+    /// A running agent's next helper gets it.
+    pub fn set_agent_subagents(
+        &self,
+        agent_id: &str,
+        model: Option<String>,
+        effort: Option<String>,
+    ) -> Result<Agent> {
+        let clean = |v: Option<String>| v.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+        let (model, effort) = (clean(model), clean(effort));
+        if !crate::token_saver::valid_agent_subagents(model.as_deref(), effort.as_deref()) {
+            bail!("Helpers can run on Sonnet or Haiku, at low to max effort");
+        }
+        if self.agent(agent_id)?.provider != Provider::Claude {
+            bail!("Only Claude agents let Kvistcode choose their helpers' model");
+        }
+        let agent = self.update_agent(agent_id, |a| {
+            a.subagent_model = model;
+            a.subagent_effort = effort;
+        })?;
+        self.write_live_subagents(&agent);
+        Ok(agent)
     }
 
     // ---- accounts ------------------------------------------------------------
@@ -1329,11 +1406,18 @@ impl Core {
             (program, args, acct_env, acct_env_remove)
         };
         let mut env = env;
-        crate::token_saver::extend_env(
+        let exe = std::env::current_exe().ok();
+        // A Claude agent's helper model and effort live in a file its hook reads, so they can
+        // change while it runs (the environment can't).
+        let live_subagents = (agent.provider == Provider::Claude && exe.is_some())
+            .then(|| self.write_live_subagents(&agent))
+            .flatten();
+        crate::token_saver::extend_env_with(
             &mut env,
             agent.provider,
             &self.inner.settings.lock(),
             &self.inner.data_dir,
+            live_subagents.is_some(),
         );
         let children_file = self.inner.data_dir.join("children.json");
         let attachments_dir = self.attachments_dir();
@@ -1367,11 +1451,12 @@ impl Core {
             })
             .flatten();
         // Token saving: the output-filter hook, output limit and no next-prompt prediction.
-        let session_meta = crate::token_saver::extend_session_meta(
+        let session_meta = crate::token_saver::extend_session_meta_with(
             session_meta,
             agent.provider,
             &self.inner.settings.lock(),
-            std::env::current_exe().ok().as_deref(),
+            exe.as_deref(),
+            live_subagents.as_ref().map(|(l, p)| (l, p.as_path())),
         );
         let (response_style, language) = {
             let s = self.inner.settings.lock();
@@ -1955,6 +2040,8 @@ impl Core {
             } else {
                 None
             },
+            subagent_model: None,
+            subagent_effort: None,
             queued_prompts: 0,
             queue: Vec::new(),
             queue_paused: false,
@@ -2658,6 +2745,10 @@ impl Core {
             &pictures,
             |name| self.inner.db.picture_in_use(name),
         );
+        let _ = std::fs::remove_file(crate::token_saver::live_subagents_path(
+            &self.inner.data_dir,
+            agent_id,
+        ));
         self.inner.agents.lock().remove(agent_id);
         self.helper_deleted(&agent).await;
         self.inner.ctxs.lock().remove(agent_id);
@@ -3867,6 +3958,17 @@ fn merge_usage(prev: Option<AccountUsage>, usage: AccountUsage, now: i64) -> Acc
             ..usage
         },
     }
+}
+
+/// Whether the "Helper agents use" / "Helper effort" settings differ.
+fn helper_settings_differ(a: &Settings, b: &Settings) -> bool {
+    (
+        &a.token_saver.subagent_model,
+        &a.token_saver.subagent_effort,
+    ) != (
+        &b.token_saver.subagent_model,
+        &b.token_saver.subagent_effort,
+    )
 }
 
 #[cfg(test)]

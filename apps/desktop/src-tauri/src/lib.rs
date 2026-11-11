@@ -105,6 +105,7 @@ macro_rules! handler {
             commands::relocate_project,
             commands::mark_read,
             commands::set_agent_config,
+            commands::set_agent_subagents,
             commands::config_defaults,
             commands::clear_config_defaults,
             commands::set_config_defaults,

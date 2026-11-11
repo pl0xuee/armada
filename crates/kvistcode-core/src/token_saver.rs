@@ -65,6 +65,21 @@ pub fn helper_model_reply(input: &Value, model: &str) -> Option<Value> {
 /// Like [`helper_model_reply`], for the helper model and/or effort: each one the launch names
 /// differently is replaced; one it doesn't name comes from the environment.
 pub fn helper_reply(input: &Value, model: Option<&str>, effort: Option<&str>) -> Option<Value> {
+    reply(input, model, effort, false)
+}
+
+/// Like [`helper_reply`], for an agent whose helpers are set live (no environment variables): a
+/// general-purpose launch that names no model or effort gets them too. A helper with its own
+/// definition (Explore, ...) keeps the model and effort it chooses unless the launch names one.
+pub fn live_helper_reply(
+    input: &Value,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Option<Value> {
+    reply(input, model, effort, true)
+}
+
+fn reply(input: &Value, model: Option<&str>, effort: Option<&str>, fill: bool) -> Option<Value> {
     if input["hook_event_name"] != "PreToolUse"
         || !HELPER_TOOLS.contains(&input["tool_name"].as_str()?)
     {
@@ -73,11 +88,21 @@ pub fn helper_reply(input: &Value, model: Option<&str>, effort: Option<&str>) ->
     let model = model.filter(|m| SUBAGENT_MODELS.contains(m));
     let effort = effort.filter(|e| SUBAGENT_EFFORTS.contains(e));
     let mut tool_input = input["tool_input"].as_object()?.clone();
+    let kind = tool_input
+        .get("subagent_type")
+        .and_then(Value::as_str)
+        .map(|k| k.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    let general = fill && (kind.is_empty() || kind == "general-purpose");
     let mut changed = false;
     for (key, want) in [("model", model), ("effort", effort)] {
         let Some(want) = want else { continue };
-        let named = tool_input.get(key).and_then(Value::as_str).map(str::trim);
-        if named.is_some_and(|n| !n.is_empty() && n != want) {
+        let named = tool_input
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|n| !n.is_empty());
+        if named.map_or(general, |n| n != want) {
             tool_input.insert(key.into(), json!(want));
             changed = true;
         }
@@ -91,9 +116,60 @@ pub fn helper_reply(input: &Value, model: Option<&str>, effort: Option<&str>) ->
     }}))
 }
 
-/// Entry point of `kvistcode helper-model <model>`. Like the output filter it always exits 0
-/// and prints nothing when anything is unexpected, so a bug here never blocks a helper.
-pub fn run_helper_model_hook(model: &str, effort: &str) -> i32 {
+/// What a Claude agent's helpers (sub-agents) run on, kept in a small file the hook reads on
+/// every helper launch, so a change reaches a running agent's next helper.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveSubagents {
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+/// Where the hook finds an agent's [`LiveSubagents`].
+pub fn live_subagents_path(data_dir: &Path, agent_id: &str) -> std::path::PathBuf {
+    let safe: String = agent_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    data_dir.join("subagents").join(format!("{safe}.json"))
+}
+
+/// The helper model and effort for an agent: its own pick (`same`: its own model, `auto`: Claude
+/// decides), else the "Helper agents use" / "Helper effort" settings.
+pub fn subagents_for(
+    agent_model: Option<&str>,
+    agent_effort: Option<&str>,
+    opts: &TokenSaverOptions,
+) -> LiveSubagents {
+    let model = match agent_model {
+        Some("same") => None,
+        Some(m) if SUBAGENT_MODELS.contains(&m) => Some(m.to_string()),
+        _ => opts
+            .subagent_model
+            .clone()
+            .filter(|m| SUBAGENT_MODELS.contains(&m.as_str())),
+    };
+    let effort = match agent_effort {
+        Some("auto") => None,
+        Some(e) if SUBAGENT_EFFORTS.contains(&e) => Some(e.to_string()),
+        _ => opts
+            .subagent_effort
+            .clone()
+            .filter(|e| SUBAGENT_EFFORTS.contains(&e.as_str())),
+    };
+    LiveSubagents { model, effort }
+}
+
+/// Whether `model` / `effort` are values an agent's own helper pick may hold (None: the setting).
+pub fn valid_agent_subagents(model: Option<&str>, effort: Option<&str>) -> bool {
+    model.is_none_or(|m| m == "same" || SUBAGENT_MODELS.contains(&m))
+        && effort.is_none_or(|e| e == "auto" || SUBAGENT_EFFORTS.contains(&e))
+}
+
+/// Entry point of `kvistcode helper-model <model> [effort] [live file]`. Like the output filter
+/// it always exits 0 and prints nothing when anything is unexpected, so a bug here never blocks a
+/// helper. With a live file (newer agents) its contents win over the arguments, which are what
+/// the agent started with.
+pub fn run_helper_model_hook(model: &str, effort: &str, live: Option<&str>) -> i32 {
     use std::io::Read;
     let mut raw = String::new();
     if std::io::stdin()
@@ -109,7 +185,19 @@ pub fn run_helper_model_hook(model: &str, effort: &str) -> i32 {
     fn some(v: &str) -> Option<&str> {
         Some(v.trim()).filter(|v| !v.is_empty())
     }
-    if let Some(reply) = helper_reply(&input, some(model), some(effort)) {
+    let reply = match live {
+        Some(path) => {
+            let read = std::fs::read(path)
+                .ok()
+                .and_then(|b| serde_json::from_slice::<LiveSubagents>(&b).ok());
+            match read {
+                Some(l) => live_helper_reply(&input, l.model.as_deref(), l.effort.as_deref()),
+                None => live_helper_reply(&input, some(model), some(effort)),
+            }
+        }
+        None => helper_reply(&input, some(model), some(effort)),
+    };
+    if let Some(reply) = reply {
         println!("{reply}");
     }
     0
@@ -189,6 +277,18 @@ pub fn extend_env(
     settings: &Settings,
     data_dir: &Path,
 ) {
+    extend_env_with(env, provider, settings, data_dir, false)
+}
+
+/// [`extend_env`]; `live_helpers`: the helper model and effort are held by the live hook instead
+/// (the environment can't change once Claude Code runs, so it would pin the old choice).
+pub fn extend_env_with(
+    env: &mut Vec<(String, String)>,
+    provider: Provider,
+    settings: &Settings,
+    data_dir: &Path,
+    live_helpers: bool,
+) {
     if provider != Provider::Claude {
         return;
     }
@@ -207,7 +307,7 @@ pub fn extend_env(
         .token_saver
         .subagent_model
         .as_deref()
-        .filter(|m| SUBAGENT_MODELS.contains(m))
+        .filter(|m| !live_helpers && SUBAGENT_MODELS.contains(m))
     {
         add(ENV_SUBAGENT_MODEL, model.to_string());
     }
@@ -215,7 +315,7 @@ pub fn extend_env(
         .token_saver
         .subagent_effort
         .as_deref()
-        .filter(|e| SUBAGENT_EFFORTS.contains(e))
+        .filter(|e| !live_helpers && SUBAGENT_EFFORTS.contains(e))
     {
         add(ENV_SUBAGENT_EFFORT, effort.to_string());
     }
@@ -251,6 +351,16 @@ fn merge(base: &mut Value, extra: Value) {
 /// The Claude Code settings the token-saving options add (`--settings`): the output-filter hook
 /// and the command output limit. `exe` is the Kvistcode binary the hook runs.
 pub fn claude_settings(settings: &Settings, exe: Option<&Path>) -> Option<Value> {
+    claude_settings_with(settings, exe, None)
+}
+
+/// [`claude_settings`]; with `live` (the agent's helper choice and its file), the helper hook is
+/// always there and reads the file, so the helper model and effort can change while it runs.
+pub fn claude_settings_with(
+    settings: &Settings,
+    exe: Option<&Path>,
+    live: Option<(&LiveSubagents, &Path)>,
+) -> Option<Value> {
     let opts = &settings.token_saver;
     let mut out = serde_json::Map::new();
     let mut hooks = serde_json::Map::new();
@@ -277,13 +387,27 @@ pub fn claude_settings(settings: &Settings, exe: Option<&Path>) -> Option<Value>
         .subagent_effort
         .as_deref()
         .filter(|e| SUBAGENT_EFFORTS.contains(e));
-    if let (true, Some(exe)) = (model.is_some() || effort.is_some(), exe) {
+    let live_args = live.map(|(l, path)| {
+        vec![
+            HELPER_MODEL_HOOK.to_string(),
+            l.model.clone().unwrap_or_default(),
+            l.effort.clone().unwrap_or_default(),
+            path.to_string_lossy().into_owned(),
+        ]
+    });
+    if let (true, Some(exe)) = (live.is_some() || model.is_some() || effort.is_some(), exe) {
         // The environment variables are only Claude Code's defaults: a launch that names a model
         // or effort wins over them. This hook makes the helper settings win.
-        let mut args = vec![HELPER_MODEL_HOOK, model.unwrap_or("")];
-        if let Some(e) = effort {
-            args.push(e);
-        }
+        let args = live_args.unwrap_or_else(|| {
+            let mut args = vec![
+                HELPER_MODEL_HOOK.to_string(),
+                model.unwrap_or("").to_string(),
+            ];
+            if let Some(e) = effort {
+                args.push(e.to_string());
+            }
+            args
+        });
         hooks.insert(
             "PreToolUse".into(),
             json!([{
@@ -318,11 +442,22 @@ pub fn extend_session_meta(
     settings: &Settings,
     exe: Option<&Path>,
 ) -> Option<Value> {
+    extend_session_meta_with(existing, provider, settings, exe, None)
+}
+
+/// [`extend_session_meta`] with the agent's live helper choice (see [`claude_settings_with`]).
+pub fn extend_session_meta_with(
+    existing: Option<Value>,
+    provider: Provider,
+    settings: &Settings,
+    exe: Option<&Path>,
+    live: Option<(&LiveSubagents, &Path)>,
+) -> Option<Value> {
     if provider != Provider::Claude {
         return existing;
     }
     let mut meta = existing.unwrap_or_else(|| json!({}));
-    let mut extra = claude_settings(settings, exe).unwrap_or_else(|| json!({}));
+    let mut extra = claude_settings_with(settings, exe, live).unwrap_or_else(|| json!({}));
     extra["promptSuggestionEnabled"] = json!(false);
     merge(
         &mut meta,
@@ -737,5 +872,117 @@ mod auto_compact_tests {
         assert!(env.contains(&("CLAUDE_CODE_SUBAGENT_EFFORT".into(), "low".into())));
         s.token_saver.subagent_effort = Some("extreme".into());
         assert_eq!(s.token_saver.sanitize(), vec!["tokenSaver.subagentEffort"]);
+    }
+
+    fn launch(input: Value) -> Value {
+        json!({"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": input})
+    }
+
+    #[test]
+    fn a_live_helper_choice_fills_general_purpose_launches_too() {
+        let updated = |r: Option<Value>| r.map(|r| r["hookSpecificOutput"]["updatedInput"].clone());
+        // Nothing named: a general-purpose helper gets the choice (no environment variable does it).
+        let got = updated(live_helper_reply(
+            &launch(json!({"prompt": "p"})),
+            Some("haiku"),
+            Some("low"),
+        ))
+        .unwrap();
+        assert_eq!(
+            (got["model"].as_str(), got["effort"].as_str()),
+            (Some("haiku"), Some("low"))
+        );
+        let got = updated(live_helper_reply(
+            &launch(json!({"prompt": "p", "subagent_type": "general-purpose"})),
+            Some("sonnet"),
+            None,
+        ))
+        .unwrap();
+        assert_eq!(got["model"], "sonnet");
+        assert!(got.get("effort").is_none());
+        // A defined helper keeps its own choice unless the launch names one.
+        assert_eq!(
+            live_helper_reply(
+                &launch(json!({"subagent_type": "Explore"})),
+                Some("haiku"),
+                None
+            ),
+            None
+        );
+        let got = updated(live_helper_reply(
+            &launch(json!({"subagent_type": "Explore", "model": "opus"})),
+            Some("haiku"),
+            None,
+        ))
+        .unwrap();
+        assert_eq!(got["model"], "haiku");
+        // Already right, or nothing chosen: no reply. The environment-backed hook never fills.
+        assert_eq!(
+            live_helper_reply(&launch(json!({"model": "haiku"})), Some("haiku"), None),
+            None
+        );
+        assert_eq!(live_helper_reply(&launch(json!({})), None, None), None);
+        assert_eq!(helper_reply(&launch(json!({})), Some("haiku"), None), None);
+    }
+
+    #[test]
+    fn an_agent_choice_beats_the_settings() {
+        let opts = TokenSaverOptions {
+            subagent_model: Some("sonnet".into()),
+            subagent_effort: Some("low".into()),
+            ..Default::default()
+        };
+        let l = |m: Option<&str>, e: Option<&str>| LiveSubagents {
+            model: m.map(Into::into),
+            effort: e.map(Into::into),
+        };
+        assert_eq!(
+            subagents_for(None, None, &opts),
+            l(Some("sonnet"), Some("low"))
+        );
+        assert_eq!(
+            subagents_for(Some("haiku"), Some("max"), &opts),
+            l(Some("haiku"), Some("max"))
+        );
+        assert_eq!(
+            subagents_for(Some("same"), Some("auto"), &opts),
+            l(None, None)
+        );
+        assert_eq!(
+            subagents_for(Some("opus"), None, &opts),
+            l(Some("sonnet"), Some("low"))
+        );
+        assert!(valid_agent_subagents(Some("same"), Some("auto")));
+        assert!(valid_agent_subagents(None, Some("xhigh")));
+        assert!(!valid_agent_subagents(Some("opus"), None));
+        assert!(!valid_agent_subagents(None, Some("extreme")));
+        assert_eq!(
+            live_subagents_path(Path::new("/d"), "../a b"),
+            Path::new("/d/subagents/ab.json")
+        );
+    }
+
+    #[test]
+    fn a_live_agent_always_gets_the_helper_hook_and_no_env() {
+        let s = Settings::default();
+        let file = Path::new("/data/subagents/a.json");
+        let st = claude_settings_with(
+            &s,
+            Some(Path::new("/opt/kv/kvistcode")),
+            Some((&LiveSubagents::default(), file)),
+        )
+        .unwrap();
+        let args = &st["hooks"]["PreToolUse"][0]["hooks"][0]["args"];
+        assert_eq!(
+            args,
+            &json!(["helper-model", "", "", "/data/subagents/a.json"])
+        );
+        let mut s = Settings::default();
+        s.token_saver.subagent_model = Some("haiku".into());
+        let mut env = vec![];
+        extend_env_with(&mut env, Provider::Claude, &s, Path::new("/data"), true);
+        assert!(!env.iter().any(|(k, _)| k == "CLAUDE_CODE_SUBAGENT_MODEL"));
+        extend_env_with(&mut env, Provider::Claude, &s, Path::new("/data"), false);
+        assert!(env.iter().any(|(k, _)| k == "CLAUDE_CODE_SUBAGENT_MODEL"));
     }
 }

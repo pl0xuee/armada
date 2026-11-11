@@ -339,6 +339,18 @@ pub async fn set_agent_config(
         .map_err(err)
 }
 
+/// Sets the model and effort a Claude agent's helpers run on (None: follow the settings).
+#[tauri::command]
+pub fn set_agent_subagents(
+    core: State<'_, Core>,
+    agent_id: String,
+    model: Option<String>,
+    effort: Option<String>,
+) -> CmdResult<kvistcode_core::Agent> {
+    core.set_agent_subagents(&agent_id, model, effort)
+        .map_err(err)
+}
+
 /// Composer choices remembered per provider identity (for new agents).
 #[tauri::command]
 pub fn config_defaults(

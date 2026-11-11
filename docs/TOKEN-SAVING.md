@@ -57,6 +57,12 @@ All four have a 1M-token context window and 128K max output. Fable costs twice O
   that puts the setting's model into any launch naming another one. "Helper effort" works the same way
   (`CLAUDE_CODE_SUBAGENT_EFFORT`, and the hook's optional second argument replaces a named effort:
   `kvistcode helper-model <model or ""> [effort]`).
+  Each Claude agent can also choose its own (the composer's Helpers menu: Sonnet, Haiku or the agent's own model, and
+  an effort; `Agent.subagent_model` / `subagent_effort`, unset follows the settings). Agents started by this version
+  don't get the variables: the hook gets a third argument, `data_dir/subagents/<agent id>.json`, holding
+  `{model, effort}`, and reads it on every helper launch. That file is rewritten when the agent's choice or the
+  settings change, so a running agent's next helper gets it. With the file, the hook also fills a general-purpose
+  launch that names no model or effort (what the variables did); a defined helper (Explore, ...) keeps its own.
 - **Not built in:** the advisor pairing (a bigger model advising a smaller one: +1.7 points for about 2.1x the cost) and
   switching models mid-conversation automatically. `opusplan` is not a default.
 

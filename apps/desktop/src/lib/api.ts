@@ -208,6 +208,12 @@ const tauriApi = {
     invoke<Record<string, Record<string, string>>>("set_config_defaults", { key, values }),
   setAgentConfig: (agentId: string, optionId: string, value: string) =>
     invoke<void>("set_agent_config", { agentId, optionId, value }),
+  /**
+   * The model (`same`, `sonnet`, `haiku`) and effort (`auto`, `low` … `max`) a Claude agent's helpers run on;
+   * null follows the settings. A running agent's next helper gets it.
+   */
+  setAgentSubagents: (agentId: string, model: string | null, effort: string | null) =>
+    invoke<Agent>("set_agent_subagents", { agentId, model, effort }),
   /** Hand the agent's work to another provider/account with an instruction. */
   handoffAgent: (
     agentId: string,

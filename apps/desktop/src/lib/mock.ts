@@ -2029,6 +2029,16 @@ export const mockApi: KvistcodeApi = {
     return delay(undefined, 80);
   },
 
+  async setAgentSubagents(agentId, model, effort) {
+    const a = getAgent(agentId);
+    if (a.provider !== "claude") throw new Error("Only Claude agents let Kvistcode choose their helpers' model");
+    if (model && !["same", "sonnet", "haiku"].includes(model)) throw new Error("Helpers can run on Sonnet or Haiku");
+    if (effort && !["auto", "low", "medium", "high", "xhigh", "max"].includes(effort))
+      throw new Error("Helpers run at low to max effort");
+    patchAgent(agentId, { subagentModel: model, subagentEffort: effort });
+    return delay(clone(getAgent(agentId)), 60);
+  },
+
   async configDefaults() {
     return delay(clone(configDefaultsDb), 30);
   },

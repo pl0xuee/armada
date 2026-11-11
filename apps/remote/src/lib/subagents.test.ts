@@ -172,3 +172,20 @@ describe("helper effort chips", () => {
     expect(inheritedConfig(claude, "sonnet", null).claude).toEqual({ helper: "Sonnet" });
   });
 });
+
+describe("an agent's own helper choice", () => {
+  it("wins over the computer's settings, where same and auto mean none", async () => {
+    const { agentHelperChoice } = await import("./subagents");
+    expect(agentHelperChoice({}, "sonnet", "low")).toEqual({ helperModel: "sonnet", helperEffort: "low" });
+    expect(agentHelperChoice({ subagentModel: "haiku" }, "sonnet", "low")).toEqual({ helperModel: "haiku", helperEffort: "low" });
+    expect(agentHelperChoice({ subagentModel: "same", subagentEffort: "auto" }, "sonnet", "low")).toEqual({
+      helperModel: null,
+      helperEffort: null,
+    });
+    // An older server sent no helper model: nothing is assumed.
+    expect(agentHelperChoice({ subagentModel: "haiku" }, undefined, undefined)).toEqual({
+      helperModel: undefined,
+      helperEffort: undefined,
+    });
+  });
+});

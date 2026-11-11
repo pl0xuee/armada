@@ -292,6 +292,14 @@ pub struct Agent {
     /// For `Provider::Local`: the model the server runs for this agent.
     #[serde(default)]
     pub model: Option<String>,
+    /// Claude: the model this agent's helpers (sub-agents) run on, chosen next to its prompt
+    /// (`same`: its own model, `sonnet`, `haiku`). None: the "Helper agents use" setting.
+    #[serde(default)]
+    pub subagent_model: Option<String>,
+    /// Claude: the effort of this agent's helpers (`auto`: Claude decides, `low` … `max`). None:
+    /// the "Helper effort" setting.
+    #[serde(default)]
+    pub subagent_effort: Option<String>,
     /// Messages sent while a turn was running; they run, in order, right after it.
     #[serde(default)]
     pub queued_prompts: i64,

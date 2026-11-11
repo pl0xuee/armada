@@ -4,6 +4,7 @@ import { memo, useId, useMemo, useState } from "react";
 import type { TimelineItem } from "@/lib/types";
 import { pluralize } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { agentHelpers } from "@/lib/agentHelpers";
 import { useApp } from "@/store/app";
 import { Markdown } from "../Markdown";
 import { Spinner } from "../ui/misc";
@@ -53,8 +54,14 @@ export const SubagentCard = memo(function SubagentCard({
   const title = description ?? item.title;
   const configOptions = useApp((st) => st.agents[agentId]?.configOptions);
   const provider = useApp((st) => st.agents[agentId]?.provider);
-  const helperModel = useApp((st) => st.settings?.tokenSaver.subagentModel);
-  const helperEffort = useApp((st) => st.settings?.tokenSaver.subagentEffort);
+  const settingModel = useApp((st) => st.settings?.tokenSaver.subagentModel);
+  const settingEffort = useApp((st) => st.settings?.tokenSaver.subagentEffort);
+  const ownModel = useApp((st) => st.agents[agentId]?.subagentModel);
+  const ownEffort = useApp((st) => st.agents[agentId]?.subagentEffort);
+  const { model: helperModel, effort: helperEffort } = agentHelpers(
+    { subagentModel: ownModel, subagentEffort: ownEffort },
+    { subagentModel: settingModel, subagentEffort: settingEffort },
+  );
   const chips = useMemo(
     () => subagentChips(info, inheritedOf(configOptions, helperInfo(provider, helperModel, helperEffort))),
     [info, configOptions, provider, helperModel, helperEffort],

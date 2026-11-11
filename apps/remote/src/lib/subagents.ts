@@ -308,14 +308,46 @@ export function inheritedConfig(
   return { ...base, claude: helperEffort ? { helper, helperEffort: capitalize(helperEffort) } : { helper } };
 }
 
-/** `inheritedConfig` with the helper model the computer sent. */
-export function useInheritedConfig(agent: Pick<Agent, "configOptions" | "model"> & { provider?: string }): InheritedConfig {
-  const helperModel = useStore((s) => s.helperModel);
-  const helperEffort = useStore((s) => s.helperEffort);
-  return useMemo(
-    () => inheritedConfig(agent, helperModel, helperEffort),
-    [agent.configOptions, agent.model, agent.provider, helperModel, helperEffort],
-  );
+/**
+ * The agent's own helper choice (from the computer's composer) over the computer's settings: `same` / `auto` mean
+ * none, an unset one follows the setting. `undefined` (an older server) stays as is.
+ */
+export function agentHelperChoice(
+  agent: { subagentModel?: string | null; subagentEffort?: string | null },
+  helperModel: string | null | undefined,
+  helperEffort: string | null | undefined,
+): { helperModel: string | null | undefined; helperEffort: string | null | undefined } {
+  if (helperModel === undefined) return { helperModel, helperEffort };
+  const pick = (own: string | null | undefined, setting: string | null | undefined, none: string) =>
+    !own ? (setting ?? null) : own === none ? null : own;
+  return {
+    helperModel: pick(agent.subagentModel, helperModel, "same"),
+    helperEffort: pick(agent.subagentEffort, helperEffort, "auto"),
+  };
+}
+
+type HelperAgent = Pick<Agent, "configOptions" | "model"> & {
+  provider?: string;
+  subagentModel?: string | null;
+  subagentEffort?: string | null;
+};
+
+/** `inheritedConfig` with the helper model the computer sent (or the agent's own choice). */
+export function useInheritedConfig(agent: HelperAgent): InheritedConfig {
+  const settingModel = useStore((s) => s.helperModel);
+  const settingEffort = useStore((s) => s.helperEffort);
+  return useMemo(() => {
+    const h = agentHelperChoice(agent, settingModel, settingEffort);
+    return inheritedConfig(agent, h.helperModel, h.helperEffort);
+  }, [
+    agent.configOptions,
+    agent.model,
+    agent.provider,
+    agent.subagentModel,
+    agent.subagentEffort,
+    settingModel,
+    settingEffort,
+  ]);
 }
 
 /** Sub-agent kinds Claude Code runs on the main agent's model when the launch names none. */

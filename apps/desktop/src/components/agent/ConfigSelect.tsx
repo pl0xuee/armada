@@ -1,5 +1,5 @@
 import { ChevronDown, SlidersHorizontal } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { attempt } from "@/lib/actions";
 import { api } from "@/lib/api";
 import type { Agent, ConfigOption } from "@/lib/types";
@@ -161,10 +161,19 @@ function useOptionPicker(agent: Agent) {
 }
 
 /** "+" menu holding session options that don't fit inline on narrow composers. */
-export function ConfigOverflowMenu({ agent, options }: { agent: Agent; options: ConfigOption[] }) {
+export function ConfigOverflowMenu({
+  agent,
+  options,
+  extra,
+}: {
+  agent: Agent;
+  options: ConfigOption[];
+  /** More entries after the options (the Helpers submenu). */
+  extra?: ReactNode;
+}) {
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const [pick, switchDialog] = useOptionPicker(agent);
-  if (options.length === 0) return null;
+  if (options.length === 0 && !extra) return null;
   return (
     <DropdownMenu>
       <Tooltip content="More session options">
@@ -223,6 +232,7 @@ export function ConfigOverflowMenu({ agent, options }: { agent: Agent; options: 
             </DropdownMenuSub>
           );
         })}
+        {extra}
       </DropdownMenuContent>
       {switchDialog}
     </DropdownMenu>

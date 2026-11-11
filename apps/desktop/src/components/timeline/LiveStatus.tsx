@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { useHeld, WAITING_HOLD_MS } from "@/hooks/useHeld";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useVisibleInterval } from "@/hooks/useVisibleInterval";
+import { agentHelpers } from "@/lib/agentHelpers";
 import { useApp } from "@/store/app";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { useRunningSubagentCount, useSubagentRuns } from "../agent/useSubagents";
@@ -90,8 +91,8 @@ export function LiveStatus({
   const subagents = useHeld(useRunningSubagentCount(agent.id), 0, WAITING_HOLD_MS);
   const runs = useSubagentRuns(agent.id);
   const running = useMemo(() => runs.filter((r) => r.state === "running"), [runs]);
-  const helperModel = useApp((st) => st.settings?.tokenSaver.subagentModel);
-  const helperEffort = useApp((st) => st.settings?.tokenSaver.subagentEffort);
+  const saver = useApp((st) => st.settings?.tokenSaver);
+  const { model: helperModel, effort: helperEffort } = agentHelpers(agent, saver);
   const inherited = useMemo(
     () => inheritedOf(agent.configOptions, helperInfo(agent.provider, helperModel, helperEffort)),
     [agent.configOptions, agent.provider, helperModel, helperEffort],

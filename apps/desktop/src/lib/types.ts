@@ -223,6 +223,10 @@ export interface Agent {
   customAgentId: string | null;
   /** Set when provider === "local": the model the server runs for this agent. */
   model?: string | null;
+  /** Claude: this agent's helper model (`same`, `sonnet`, `haiku`); null/absent follows "Helper agents use". */
+  subagentModel?: string | null;
+  /** Claude: this agent's helper effort (`auto`, `low` … `max`); null/absent follows "Helper effort". */
+  subagentEffort?: string | null;
   /** Messages sent while a turn was running; they run in order right after it. */
   queuedPrompts: number;
   /** The queued messages themselves (not in the timeline until they run). */
