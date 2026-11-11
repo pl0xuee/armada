@@ -2045,6 +2045,18 @@ export const mockApi: KvistcodeApi = {
     return delay(clone(configDefaultsDb), 30);
   },
 
+  async setConfigDefaults(key, values) {
+    const entry = { ...configDefaultsDb[key] };
+    for (const [option, value] of Object.entries(values)) {
+      if (option !== "model" && option !== "effort") continue;
+      if (value.trim()) entry[option] = value.trim();
+      else delete entry[option];
+    }
+    if (Object.keys(entry).length) configDefaultsDb[key] = entry;
+    else delete configDefaultsDb[key];
+    return delay(clone(configDefaultsDb), 30);
+  },
+
   async handoffAgent(agentId, provider, accountId, instruction, customAgentId) {
     const src = getAgent(agentId);
     const agent = await mockApi.createAgent({
@@ -3839,6 +3851,8 @@ function validateSettings(s: Settings): string | null {
     return "The command output limit must be between 4,000 and 128,000 characters (or empty for Claude's default)";
   if (ts.subagentModel != null && !["sonnet", "haiku"].includes(ts.subagentModel))
     return `Unknown helper model “${ts.subagentModel}”`;
+  if (ts.subagentEffort != null && !["low", "medium", "high", "xhigh", "max"].includes(ts.subagentEffort))
+    return `Unknown helper effort “${ts.subagentEffort}”`;
   if (sameAccelerator(s.voiceAssistant.hotkey, s.globalHotkey, isMac))
     return "The voice assistant hotkey must differ from the global hotkey (which brings Kvistcode forward)";
   const wakeProblem = wakePhraseProblem(s.voiceAssistant.wakePhrase);

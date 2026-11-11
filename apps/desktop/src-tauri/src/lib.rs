@@ -107,6 +107,7 @@ macro_rules! handler {
             commands::set_agent_config,
             commands::config_defaults,
             commands::clear_config_defaults,
+            commands::set_config_defaults,
             commands::handoff_agent,
             commands::apply_token_saver,
             commands::output_filter_stats,

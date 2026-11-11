@@ -54,9 +54,10 @@ export const SubagentCard = memo(function SubagentCard({
   const configOptions = useApp((st) => st.agents[agentId]?.configOptions);
   const provider = useApp((st) => st.agents[agentId]?.provider);
   const helperModel = useApp((st) => st.settings?.tokenSaver.subagentModel);
+  const helperEffort = useApp((st) => st.settings?.tokenSaver.subagentEffort);
   const chips = useMemo(
-    () => subagentChips(info, inheritedOf(configOptions, helperInfo(provider, helperModel))),
-    [info, configOptions, provider, helperModel],
+    () => subagentChips(info, inheritedOf(configOptions, helperInfo(provider, helperModel, helperEffort))),
+    [info, configOptions, provider, helperModel, helperEffort],
   );
   const latest = childCalls[childCalls.length - 1];
   const childrenRunning = childCalls.filter((c) => c.status === "in_progress" || c.status === "pending").length;

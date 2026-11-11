@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import {
   availableWorkTypes,
   KEEP,
+  onModelSetupChange,
   readWorkChoice,
   resolveWorkChoice,
   saveWorkChoice,
@@ -35,12 +36,20 @@ export function useWorkChoice(): [WorkChoice, (c: WorkChoice) => void, ReturnTyp
   const [claudeDefaults, setClaudeDefaults] = useState<Record<string, string> | undefined>(undefined);
   useEffect(() => {
     let live = true;
-    api
-      .configDefaults()
-      .then((d) => live && setClaudeDefaults(d.claude ?? {}))
-      .catch(() => live && setClaudeDefaults({}));
+    const load = () =>
+      api
+        .configDefaults()
+        .then((d) => live && setClaudeDefaults(d.claude ?? {}))
+        .catch(() => live && setClaudeDefaults({}));
+    void load();
+    // The model setup (popup, Settings, Revert) can change both while this is shown.
+    const off = onModelSetupChange(() => {
+      setStored(readWorkChoice());
+      void load();
+    });
     return () => {
       live = false;
+      off();
     };
   }, []);
   const available = useMemo(() => availableWorkTypes(Object.values(agents)), [agents]);

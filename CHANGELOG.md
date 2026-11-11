@@ -5,6 +5,13 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## Unreleased
+
+- Starting a new project now asks which models to use: the main agent's model and effort, and the model and effort for its helper agents, with "Use recommended" one click away. You can turn the question off, and change the models any time in Settings, Models & spending, Choose models.
+- Helper agents have an effort setting too ("Helper effort"). Like the helper model, it applies even when an agent asks for another effort.
+- "Use recommended" and model changes can be undone: Revert in Settings (or Undo in the message) puts back what you had before.
+- Accounts and the agent panel show Claude's separate weekly limit for Fable, next to the 5-hour and weekly limits.
+
 ## v0.4.13 — 2026-11-10
 
 - The helper model setting now always applies. Claude agents could ask for a different model when starting a helper (often Opus for reviews), and that overrode "Helper agents use". Now a helper always runs on the model you chose, and its card shows that model. Running agents pick this up when they next start.

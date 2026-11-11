@@ -358,6 +358,16 @@ pub fn clear_config_defaults(
         .map_err(err)
 }
 
+/// Sets what new agents of one provider identity start with (an empty value forgets that option).
+#[tauri::command]
+pub fn set_config_defaults(
+    core: State<'_, Core>,
+    key: String,
+    values: std::collections::BTreeMap<String, String>,
+) -> CmdResult<std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>> {
+    core.set_config_defaults(&key, values).map_err(err)
+}
+
 #[tauri::command]
 pub async fn handoff_agent(
     core: State<'_, Core>,

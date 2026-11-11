@@ -91,9 +91,10 @@ export function LiveStatus({
   const runs = useSubagentRuns(agent.id);
   const running = useMemo(() => runs.filter((r) => r.state === "running"), [runs]);
   const helperModel = useApp((st) => st.settings?.tokenSaver.subagentModel);
+  const helperEffort = useApp((st) => st.settings?.tokenSaver.subagentEffort);
   const inherited = useMemo(
-    () => inheritedOf(agent.configOptions, helperInfo(agent.provider, helperModel)),
-    [agent.configOptions, agent.provider, helperModel],
+    () => inheritedOf(agent.configOptions, helperInfo(agent.provider, helperModel, helperEffort)),
+    [agent.configOptions, agent.provider, helperModel, helperEffort],
   );
   const starting = agent.status === "starting";
   const [verb, setVerb] = useState(0);

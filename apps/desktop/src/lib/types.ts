@@ -686,6 +686,8 @@ export interface TokenSaverOptions {
   bashOutputMaxChars: number | null;
   /** Model for Claude's helper agents: "sonnet" | "haiku"; null = same as the agent. */
   subagentModel: string | null;
+  /** Effort for those helpers: "low" … "max"; null/absent = what Claude Code picks. */
+  subagentEffort?: string | null;
 }
 
 /** What tidying shell output has saved so far (characters). */

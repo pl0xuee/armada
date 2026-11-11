@@ -2,11 +2,13 @@ import { FolderOpen, FolderPlus } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { askOnNewProject } from "@/lib/modelSetup";
 import { pickFolder } from "@/lib/window";
 import { errorMessage, prettyPath } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { Dialog, DialogBody, DialogContent, DialogFooter } from "./ui/dialog";
 import { Input, Label } from "./ui/input";
+import { ModelSetupDialog } from "./ModelSetupDialog";
 import { Spinner } from "./ui/misc";
 import { Switch } from "./ui/switch";
 
@@ -26,20 +28,33 @@ export function NewProjectDialog({
   /** Called with the new folder's path once it exists. */
   onCreated: (path: string) => void;
 }) {
+  // Once the folder exists, ask which models its agents should use (unless turned off).
+  const [choosingModels, setChoosingModels] = useState(false);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        title="New project"
-        description="Kvistcode makes the folder for you. Your agent starts working inside it."
-        onOpenAutoFocus={(e) => {
-          // Radix would pick the close button; the name is what you type first.
-          e.preventDefault();
-          document.getElementById("np-name")?.focus();
-        }}
-      >
-        {open && <Body onClose={() => onOpenChange(false)} onCreated={onCreated} />}
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent
+          title="New project"
+          description="Kvistcode makes the folder for you. Your agent starts working inside it."
+          onOpenAutoFocus={(e) => {
+            // Radix would pick the close button; the name is what you type first.
+            e.preventDefault();
+            document.getElementById("np-name")?.focus();
+          }}
+        >
+          {open && (
+            <Body
+              onClose={() => onOpenChange(false)}
+              onCreated={(path) => {
+                onCreated(path);
+                if (askOnNewProject()) setChoosingModels(true);
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+      <ModelSetupDialog open={choosingModels} onOpenChange={setChoosingModels} newProject />
+    </>
   );
 }
 

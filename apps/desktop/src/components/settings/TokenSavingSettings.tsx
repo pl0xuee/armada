@@ -5,6 +5,7 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { formatTokens } from "@/lib/format";
+import { HELPER_EFFORTS, HELPER_MODELS } from "@/lib/modelSetup";
 import type { OutputFilterStats, Settings, TokenSaverOptions } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { MoreRows } from "./Disclosure";
@@ -14,11 +15,6 @@ import { saveSettingsPatch } from "./settingsErrors";
 const SIZES = [150_000, 200_000, 250_000, 300_000, 400_000, 500_000];
 const COMPACT_PERCENTS = [60, 70, 80, 90];
 const OUTPUT_LIMITS = [8_000, 12_000, 20_000, 30_000, 60_000];
-const HELPER_MODELS = [
-  { value: "same", label: "Same as the agent" },
-  { value: "sonnet", label: "Sonnet" },
-  { value: "haiku", label: "Haiku (cheapest)" },
-];
 
 /** Applies the "Save tokens" preset (shared by Settings and the Usage insights). */
 export async function applyTokenSaver(): Promise<boolean> {
@@ -139,6 +135,18 @@ export function TokenSavingSettings({ settings }: { settings: Settings }) {
           value={opts.subagentModel ?? "same"}
           onValueChange={(v) => patch({ subagentModel: v === "same" ? null : v })}
           options={HELPER_MODELS}
+        />
+      </SettingRow>
+      <SettingRow
+        title="Helper effort"
+        description="How hard helper agents think. Lower is faster and uses less of your limits; most helper work (searching, reading, small edits) does fine at Low or Medium. Like the model, this applies even when an agent asks for another effort for a helper."
+      >
+        <Select
+          aria-label="Helper effort"
+          className="h-8 w-[170px]"
+          value={opts.subagentEffort ?? "auto"}
+          onValueChange={(v) => patch({ subagentEffort: v === "auto" ? null : v })}
+          options={HELPER_EFFORTS}
         />
       </SettingRow>
       <MoreRows label="More options">

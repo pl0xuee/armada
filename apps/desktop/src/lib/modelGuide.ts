@@ -54,6 +54,29 @@ export function saveWorkChoice(choice: WorkChoice) {
   } catch {
     /* storage unavailable: the pick just isn't remembered */
   }
+  notifyModelSetup();
+}
+
+/** Forgets the pick, so launches go back to the default (used when a model setup is reverted). */
+export function clearWorkChoice() {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {
+    /* storage unavailable: nothing was remembered */
+  }
+  notifyModelSetup();
+}
+
+const listeners = new Set<() => void>();
+
+/** Calls `fn` whenever the models new agents start with change here (the pick, a setup, a revert). */
+export function onModelSetupChange(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => void listeners.delete(fn);
+}
+
+export function notifyModelSetup() {
+  for (const fn of [...listeners]) fn();
 }
 
 /**

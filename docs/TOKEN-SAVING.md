@@ -54,7 +54,9 @@ All four have a 1M-token context window and 128K max output. Fable costs twice O
   (`CLAUDE_CODE_SUBAGENT_MODEL`, the "Helper agents use" setting). Keep code edits and judgment on the main model.
   The variable is only Claude Code's default: an agent that names a model for a helper (agents often pick Opus for
   reviews) overrides it. So Kvistcode also adds a `PreToolUse` hook on `Agent|Task` (`kvistcode helper-model <model>`)
-  that puts the setting's model into any launch naming another one.
+  that puts the setting's model into any launch naming another one. "Helper effort" works the same way
+  (`CLAUDE_CODE_SUBAGENT_EFFORT`, and the hook's optional second argument replaces a named effort:
+  `kvistcode helper-model <model or ""> [effort]`).
 - **Not built in:** the advisor pairing (a bigger model advising a smaller one: +1.7 points for about 2.1x the cost) and
   switching models mid-conversation automatically. `opusplan` is not a default.
 
@@ -67,7 +69,11 @@ What Kvistcode does with it:
 - Onboarding sets helper agents to Sonnet. Existing installs get a one-click offer on the Usage page instead.
 - Settings, General, Models has "Use recommended" for existing installs: it picks Everyday coding as the starting
   point and puts helpers on Sonnet (a helper model already chosen, Sonnet or Haiku, is kept). Running agents and the
-  remembered composer choices are untouched.
+  remembered composer choices are untouched. "Revert" puts back what it replaced.
+- "Choose your models" (shown after New project, and from Settings) sets the main agent's model and effort and the
+  helpers' model and effort in one place, with the recommended setup one click away. The main pick is saved as the
+  remembered Claude model and effort (`set_config_defaults`) plus the matching kind of work, or "My usual model". The
+  previous state is kept in `kvistcode.modelSetupUndo` so Revert (and Undo in the toast) restores it exactly.
 - The model and effort menus add a "good for" line where Claude Code gives none, and a note about when to use each.
 - Changing a Claude agent's model with 100k or more tokens of conversation asks first (the cost above), and offers to compact.
 

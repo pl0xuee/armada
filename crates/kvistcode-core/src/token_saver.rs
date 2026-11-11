@@ -43,7 +43,13 @@ pub const PRESET_SUBAGENT_MODEL: &str = "sonnet";
 
 const ENV_SUBAGENT_MODEL: &str = "CLAUDE_CODE_SUBAGENT_MODEL";
 
-/// `kvistcode helper-model <model>`: the hook that holds Claude's helpers to the helper model.
+/// Effort levels a helper can be held to (Claude Code's names).
+pub const SUBAGENT_EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
+const ENV_SUBAGENT_EFFORT: &str = "CLAUDE_CODE_SUBAGENT_EFFORT";
+
+/// `kvistcode helper-model <model> [effort]`: the hook that holds Claude's helpers to the helper
+/// model and effort (an empty model means only the effort is held).
 pub const HELPER_MODEL_HOOK: &str = "helper-model";
 
 /// Claude Code's tool for starting a helper (`Task` in older versions).
@@ -53,18 +59,32 @@ const HELPER_TOOLS: [&str; 2] = ["Agent", "Task"];
 /// same launch with `model` instead. A launch naming none already gets it from the environment
 /// (or from its own definition, e.g. Explore), so it is left alone.
 pub fn helper_model_reply(input: &Value, model: &str) -> Option<Value> {
+    helper_reply(input, Some(model), None)
+}
+
+/// Like [`helper_model_reply`], for the helper model and/or effort: each one the launch names
+/// differently is replaced; one it doesn't name comes from the environment.
+pub fn helper_reply(input: &Value, model: Option<&str>, effort: Option<&str>) -> Option<Value> {
     if input["hook_event_name"] != "PreToolUse"
         || !HELPER_TOOLS.contains(&input["tool_name"].as_str()?)
-        || !SUBAGENT_MODELS.contains(&model)
     {
         return None;
     }
+    let model = model.filter(|m| SUBAGENT_MODELS.contains(m));
+    let effort = effort.filter(|e| SUBAGENT_EFFORTS.contains(e));
     let mut tool_input = input["tool_input"].as_object()?.clone();
-    let named = tool_input.get("model")?.as_str()?.trim();
-    if named.is_empty() || named == model {
+    let mut changed = false;
+    for (key, want) in [("model", model), ("effort", effort)] {
+        let Some(want) = want else { continue };
+        let named = tool_input.get(key).and_then(Value::as_str).map(str::trim);
+        if named.is_some_and(|n| !n.is_empty() && n != want) {
+            tool_input.insert(key.into(), json!(want));
+            changed = true;
+        }
+    }
+    if !changed {
         return None;
     }
-    tool_input.insert("model".into(), json!(model));
     Some(json!({ "hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "updatedInput": tool_input,
@@ -73,7 +93,7 @@ pub fn helper_model_reply(input: &Value, model: &str) -> Option<Value> {
 
 /// Entry point of `kvistcode helper-model <model>`. Like the output filter it always exits 0
 /// and prints nothing when anything is unexpected, so a bug here never blocks a helper.
-pub fn run_helper_model_hook(model: &str) -> i32 {
+pub fn run_helper_model_hook(model: &str, effort: &str) -> i32 {
     use std::io::Read;
     let mut raw = String::new();
     if std::io::stdin()
@@ -86,7 +106,10 @@ pub fn run_helper_model_hook(model: &str) -> i32 {
     let Ok(input) = serde_json::from_str::<Value>(&raw) else {
         return 0;
     };
-    if let Some(reply) = helper_model_reply(&input, model) {
+    fn some(v: &str) -> Option<&str> {
+        Some(v.trim()).filter(|v| !v.is_empty())
+    }
+    if let Some(reply) = helper_reply(&input, some(model), some(effort)) {
         println!("{reply}");
     }
     0
@@ -103,6 +126,8 @@ pub struct TokenSaverOptions {
     pub bash_output_max_chars: Option<u32>,
     /// Model for the helpers Claude agents start (`sonnet`, `haiku`; None = same as the agent).
     pub subagent_model: Option<String>,
+    /// Effort for those helpers (`low` … `max`; None = what Claude Code picks).
+    pub subagent_effort: Option<String>,
 }
 
 impl TokenSaverOptions {
@@ -115,6 +140,11 @@ impl TokenSaverOptions {
         if let Some(m) = &self.subagent_model {
             if !SUBAGENT_MODELS.contains(&m.as_str()) {
                 return Some(format!("Unknown helper model \u{201c}{m}\u{201d}"));
+            }
+        }
+        if let Some(e) = &self.subagent_effort {
+            if !SUBAGENT_EFFORTS.contains(&e.as_str()) {
+                return Some(format!("Unknown helper effort \u{201c}{e}\u{201d}"));
             }
         }
         None
@@ -137,6 +167,14 @@ impl TokenSaverOptions {
         {
             self.subagent_model = None;
             reset.push("tokenSaver.subagentModel");
+        }
+        if self
+            .subagent_effort
+            .as_deref()
+            .is_some_and(|e| !SUBAGENT_EFFORTS.contains(&e))
+        {
+            self.subagent_effort = None;
+            reset.push("tokenSaver.subagentEffort");
         }
         reset
     }
@@ -172,6 +210,14 @@ pub fn extend_env(
         .filter(|m| SUBAGENT_MODELS.contains(m))
     {
         add(ENV_SUBAGENT_MODEL, model.to_string());
+    }
+    if let Some(effort) = settings
+        .token_saver
+        .subagent_effort
+        .as_deref()
+        .filter(|e| SUBAGENT_EFFORTS.contains(e))
+    {
+        add(ENV_SUBAGENT_EFFORT, effort.to_string());
     }
     if settings.token_saver.output_filter {
         add(
@@ -223,14 +269,21 @@ pub fn claude_settings(settings: &Settings, exe: Option<&Path>) -> Option<Value>
             }]),
         );
     }
-    if let (Some(model), Some(exe)) = (
-        opts.subagent_model
-            .as_deref()
-            .filter(|m| SUBAGENT_MODELS.contains(m)),
-        exe,
-    ) {
-        // The environment variable is only Claude Code's default: a launch that names a model
-        // wins over it. This hook makes the helper setting win.
+    let model = opts
+        .subagent_model
+        .as_deref()
+        .filter(|m| SUBAGENT_MODELS.contains(m));
+    let effort = opts
+        .subagent_effort
+        .as_deref()
+        .filter(|e| SUBAGENT_EFFORTS.contains(e));
+    if let (true, Some(exe)) = (model.is_some() || effort.is_some(), exe) {
+        // The environment variables are only Claude Code's defaults: a launch that names a model
+        // or effort wins over them. This hook makes the helper settings win.
+        let mut args = vec![HELPER_MODEL_HOOK, model.unwrap_or("")];
+        if let Some(e) = effort {
+            args.push(e);
+        }
         hooks.insert(
             "PreToolUse".into(),
             json!([{
@@ -238,7 +291,7 @@ pub fn claude_settings(settings: &Settings, exe: Option<&Path>) -> Option<Value>
                 "hooks": [{
                     "type": "command",
                     "command": exe.to_string_lossy(),
-                    "args": [HELPER_MODEL_HOOK, model],
+                    "args": args,
                     "timeout": 15,
                 }],
             }]),
@@ -647,5 +700,42 @@ mod auto_compact_tests {
         s.token_saver.subagent_model = Some("opus".into());
         s.token_saver.output_filter = false;
         assert!(claude_settings(&s, exe).is_none(), "only offered models");
+    }
+
+    #[test]
+    fn helper_effort_is_held_like_the_model() {
+        let launch = |input: Value| json!({"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": input});
+        let both = launch(json!({"prompt": "p", "model": "opus", "effort": "high"}));
+        let new = &helper_reply(&both, Some("sonnet"), Some("low")).unwrap()["hookSpecificOutput"]
+            ["updatedInput"];
+        assert_eq!(
+            (&new["model"], &new["effort"]),
+            (&json!("sonnet"), &json!("low"))
+        );
+        // Effort only: the model the launch named is kept.
+        let new = &helper_reply(&both, None, Some("medium")).unwrap()["hookSpecificOutput"]
+            ["updatedInput"];
+        assert_eq!(
+            (&new["model"], &new["effort"]),
+            (&json!("opus"), &json!("medium"))
+        );
+        // Nothing named, already right, or an unknown level: left alone.
+        assert!(helper_reply(&launch(json!({"prompt": "p"})), None, Some("low")).is_none());
+        assert!(helper_reply(&launch(json!({"effort": "low"})), None, Some("low")).is_none());
+        assert!(helper_reply(&both, None, Some("extreme")).is_none());
+
+        let exe = Some(Path::new("/opt/kv/kvistcode"));
+        let mut s = Settings::default();
+        s.token_saver.subagent_effort = Some("low".into());
+        let st = claude_settings(&s, exe).unwrap();
+        assert_eq!(
+            st["hooks"]["PreToolUse"][0]["hooks"][0]["args"],
+            json!([HELPER_MODEL_HOOK, "", "low"])
+        );
+        let mut env = Vec::new();
+        extend_env(&mut env, Provider::Claude, &s, Path::new("/tmp"));
+        assert!(env.contains(&("CLAUDE_CODE_SUBAGENT_EFFORT".into(), "low".into())));
+        s.token_saver.subagent_effort = Some("extreme".into());
+        assert_eq!(s.token_saver.sanitize(), vec!["tokenSaver.subagentEffort"]);
     }
 }

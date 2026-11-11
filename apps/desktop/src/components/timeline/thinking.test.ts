@@ -218,3 +218,22 @@ describe("sub-agent chips and the helper model", () => {
     expect(subagentChips({ kind: "worker" }, opus)[0].text).toBe("inherits Opus 5.5");
   });
 });
+
+describe("helper effort chips", () => {
+  const parent = inheritedOf(undefined, helperInfo("claude", "sonnet", "low"));
+  it("shows the helper effort setting, even over an effort the launch named", () => {
+    expect(subagentChips({ kind: "general-purpose", effort: "high" }, parent)).toEqual([
+      { key: "model", text: "Sonnet, helper setting", inherited: true },
+      { key: "effort", text: "Low, helper setting", inherited: true },
+    ]);
+    expect(subagentChips({ kind: null }, parent)).toContainEqual({
+      key: "effort",
+      text: "Low, helper setting",
+      inherited: true,
+    });
+  });
+  it("adds nothing without the setting", () => {
+    expect(helperInfo("claude", "sonnet", null)).toEqual({ helper: "Sonnet" });
+    expect(helperInfo("codex", "sonnet", "low")).toBeUndefined();
+  });
+});

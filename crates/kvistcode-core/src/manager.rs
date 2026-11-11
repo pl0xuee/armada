@@ -1656,6 +1656,32 @@ impl Core {
         Ok(s.config_defaults)
     }
 
+    /// Sets remembered defaults for one provider identity (what new agents start with); an empty
+    /// value forgets that option. Only the model and effort can be set this way.
+    pub fn set_config_defaults(
+        &self,
+        key: &str,
+        values: BTreeMap<String, String>,
+    ) -> Result<BTreeMap<String, BTreeMap<String, String>>> {
+        let s = self.update_settings(|s| {
+            let entry = s.config_defaults.entry(key.to_string()).or_default();
+            for (option, value) in values {
+                if !matches!(option.as_str(), "model" | "effort") {
+                    continue;
+                }
+                if value.trim().is_empty() {
+                    entry.remove(&option);
+                } else {
+                    entry.insert(option, value.trim().to_string());
+                }
+            }
+            if entry.is_empty() {
+                s.config_defaults.remove(key);
+            }
+        })?;
+        Ok(s.config_defaults)
+    }
+
     /// Switches the agent's permission mode to its "Auto" choice, if it has one.
     async fn apply_auto_mode(&self, agent_id: &str, driver: &Driver) {
         let Ok(agent) = self.agent(agent_id) else {

@@ -204,7 +204,7 @@ export interface Inherited {
    * runs a general-purpose sub-agent the launch names no model for on it, while a sub-agent defined
    * elsewhere may choose its own, so then the chips only say what is known.
    */
-  claude?: { helper: string | null };
+  claude?: { helper: string | null; helperEffort?: string | null };
 }
 
 const NO_INHERIT: Inherited = { model: null, effort: null };
@@ -220,7 +220,7 @@ function optionName(opt: ConfigOption | undefined): string | null {
  */
 export function inheritedOf(
   options: readonly ConfigOption[] | undefined,
-  claude?: { helper: string | null },
+  claude?: { helper: string | null; helperEffort?: string | null },
 ): Inherited {
   const base = options?.length
     ? {
@@ -232,8 +232,14 @@ export function inheritedOf(
 }
 
 /** What `inheritedOf` needs to know about helpers: set only for Claude agents. */
-export function helperInfo(provider: string | undefined, subagentModel: string | null | undefined) {
-  return provider === "claude" ? { helper: subagentModel ? capitalize(subagentModel) : null } : undefined;
+export function helperInfo(
+  provider: string | undefined,
+  subagentModel: string | null | undefined,
+  subagentEffort?: string | null,
+) {
+  if (provider !== "claude") return undefined;
+  const helper = subagentModel ? capitalize(subagentModel) : null;
+  return subagentEffort ? { helper, helperEffort: capitalize(subagentEffort) } : { helper };
 }
 
 /** Sub-agent kinds Claude Code runs on the main agent's model when the launch names none. */
@@ -278,8 +284,12 @@ export function subagentChips(
   else if (onParent && parent.model) chips.push({ key: "model", text: `inherits ${parent.model}`, inherited: true });
   else if (!onParent && parent.claude?.helper && (kind === "" || kind === "general-purpose"))
     chips.push({ key: "model", text: `${parent.claude.helper}, helper setting`, inherited: true });
+  // The helper effort setting holds a named effort (hook) and sets it for general-purpose helpers.
+  const helperEffort = parent.claude?.helperEffort;
+  if (helperEffort && (effort || kind === "" || kind === "general-purpose"))
+    chips.push({ key: "effort", text: `${helperEffort}, helper setting`, inherited: true });
   // The main agent's effort applies only while the sub-agent runs on the main agent's model.
-  if (effort) chips.push({ key: "effort", text: capitalize(effort), inherited: false });
+  else if (effort) chips.push({ key: "effort", text: capitalize(effort), inherited: false });
   else if ((!parent.claude || (!model && onParent)) && parent.effort)
     chips.push({ key: "effort", text: `inherits ${parent.effort}`, inherited: true });
   return chips;

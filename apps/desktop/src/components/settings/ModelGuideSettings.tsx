@@ -1,9 +1,19 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
-import { agentsOffRecommended, readWorkChoice, saveWorkChoice, type SwitchTarget, WORK_TYPES } from "@/lib/modelGuide";
+import {
+  agentsOffRecommended,
+  onModelSetupChange,
+  readWorkChoice,
+  saveWorkChoice,
+  type SwitchTarget,
+  WORK_TYPES,
+} from "@/lib/modelGuide";
+import { forgetRevert, readUndo, rememberForRevert } from "@/lib/modelSetup";
+import { ModelSetupDialog } from "../ModelSetupDialog";
+import { revertModelSetup } from "./modelSetupActions";
 import type { Settings } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { SettingGroup, SettingRow } from "./SettingRow";
@@ -28,12 +38,17 @@ async function helpersOnSonnet(): Promise<boolean> {
  */
 export async function applyRecommendedModels(): Promise<boolean> {
   const saver = useApp.getState().settings?.tokenSaver;
-  if (!(await helpersOnSonnet())) return false;
+  await rememberForRevert(saver);
+  if (!(await helpersOnSonnet())) {
+    forgetRevert();
+    return false;
+  }
   saveWorkChoice(RECOMMENDED.id);
   toast.success("Recommended models are on", {
     description: `New Claude agents start on Opus at ${RECOMMENDED.effort} effort, and their helpers run on ${
       saver?.subagentModel === "haiku" ? "Haiku" : "Sonnet"
     }. Running agents keep what they have; pick another kind of work next to the prompt any time.`,
+    action: { label: "Undo", onClick: () => void revertModelSetup() },
   });
   return true;
 }
@@ -71,6 +86,17 @@ export async function switchAgentsToRecommended(targets: readonly SwitchTarget[]
 /** "Models" group in Settings → Models & spending: one click for the recommended starting point. */
 export function ModelGuideSettings({ settings }: { settings: Settings }) {
   const [pick, setPick] = useState(readWorkChoice);
+  const [canRevert, setCanRevert] = useState(() => readUndo() !== null);
+  useEffect(
+    () =>
+      onModelSetupChange(() => {
+        setPick(readWorkChoice());
+        setCanRevert(readUndo() !== null);
+      }),
+    [],
+  );
+  const [choosing, setChoosing] = useState(false);
+  const [reverting, setReverting] = useState(false);
   const inUse = pick === RECOMMENDED.id && !!settings.tokenSaver.subagentModel;
   const agents = useApp((s) => s.agents);
   const targets = useMemo(() => agentsOffRecommended(Object.values(agents)), [agents]);
@@ -93,15 +119,39 @@ export function ModelGuideSettings({ settings }: { settings: Settings }) {
         title="Recommended setup"
         description="From Anthropic's model guide: new Claude agents start on Opus at medium effort, and helper agents run on Sonnet. Choose another kind of work, like routine tasks or a big refactor, next to the prompt when you start an agent. Running agents are not changed."
       >
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={inUse}
-          onClick={() => void applyRecommendedModels().then((ok) => ok && setPick(RECOMMENDED.id))}
-        >
-          {inUse ? "In use" : "Use recommended"}
+        <div className="flex items-center gap-1.5">
+          {canRevert && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={reverting}
+              onClick={() => {
+                setReverting(true);
+                void revertModelSetup().finally(() => setReverting(false));
+              }}
+            >
+              Revert
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={inUse}
+            onClick={() => void applyRecommendedModels().then((ok) => ok && setPick(RECOMMENDED.id))}
+          >
+            {inUse ? "In use" : "Use recommended"}
+          </Button>
+        </div>
+      </SettingRow>
+      <SettingRow
+        title="Models for new agents"
+        description="Choose the main agent's model and effort, and the model and effort its helper agents use. Revert puts back what you had before your last change."
+      >
+        <Button size="sm" variant="secondary" onClick={() => setChoosing(true)}>
+          Choose models…
         </Button>
       </SettingRow>
+      <ModelSetupDialog open={choosing} onOpenChange={setChoosing} />
       <SettingRow
         title="Agents you have now"
         description="Switch your open Claude agents to Opus at medium effort, with helpers on Sonnet unless you chose another helper model. Each keeps its conversation. On a long conversation, the next message costs more once, because the new model reads it all again. An agent that is busy right now gets the helper change when Kvistcode restarts."
