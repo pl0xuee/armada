@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "jsqr": "1.4.0",
     "preact": "11.1.0"
   },
   "devDependencies": {

@@ -5,6 +5,10 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## Unreleased
+
+- The phone app added to an iPhone's Home Screen can now pair by scanning the QR code from inside the app (Scan QR code). iPhone gives Home Screen apps their own storage, so they start signed out, and the Camera app always opened the code in Safari instead. Scanning needs a secure address, such as Tailscale's; on a plain local network address, paste the pairing link as before.
+
 ## v0.4.14 — 2026-11-11
 
 - Each Claude agent can choose its own helper model and effort from the new Helpers menu next to the model in the message box. Pick Sonnet, Haiku or the agent's own model, or leave it on Default to follow Settings. A change applies to the next helper the agent starts, even while it is working. Changing the helper settings now reaches running agents too.

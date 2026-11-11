@@ -12,6 +12,12 @@ import { cn } from "@/lib/cn";
 import { isIOS, isStandalone } from "@/lib/platform";
 import { confirmAction } from "@/lib/confirm";
 import { useStore } from "@/lib/store";
+import {
+  canScanQr,
+  scanUnavailableReason,
+  scannedPairCode,
+} from "@/lib/qrScan";
+import { QrScanner } from "@/components/QrScanner";
 
 function Frame({ children }: { children: ReactNode }) {
   return (
@@ -102,16 +108,24 @@ export function Pairing() {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // In the Home Screen app, the phone's Camera app would open the code in Safari, so scan in here.
+  const scan = standalone && canScanQr();
+  const noCamera = standalone ? scanUnavailableReason() : null;
 
   useEffect(() => {
     if (pasteOpen) inputRef.current?.focus();
   }, [pasteOpen]);
 
-  const submit = async () => {
-    const parsed = parsePasted(value);
+  const submit = async (text = value) => {
+    const parsed = parsePasted(text);
     if (parsed.kind === "invalid") {
-      setError("That doesn't look like a Kvistcode pairing link.");
+      setError(
+        text === value
+          ? "That doesn't look like a Kvistcode pairing link."
+          : "That QR code isn't a Kvistcode pairing code.",
+      );
       return;
     }
     setError(null);
@@ -185,16 +199,56 @@ export function Pairing() {
           <span className="font-semibold">Remote</span>
         </Step>
         <Step n={3} icon="qr">
-          Scan the QR code with your phone's camera
+          {scan ? (
+            <>
+              Tap <span className="font-semibold">Scan QR code</span> below and
+              point it at the code
+            </>
+          ) : (
+            "Scan the QR code with your phone's camera"
+          )}
         </Step>
       </ol>
 
       {standalone && (
         <Callout tone="warn" icon="info" title="Pair this Home Screen app">
           {isIOS()
-            ? "On iPhone the Home Screen app keeps its own storage, separate from Safari. Copy the pairing link in Kvistcode (Settings → Phone & remote) and paste it below once."
-            : "Copy the pairing link in Kvistcode (Settings → Phone & remote) and paste it below."}
+            ? "On iPhone the Home Screen app keeps its own storage, separate from Safari, so it pairs once on its own."
+            : "This Home Screen app pairs once on its own."}{" "}
+          {scan
+            ? "Scan the QR code from here, or paste the pairing link."
+            : noCamera === "insecure"
+              ? "The camera only works on a secure address (such as Tailscale's https one), so copy the pairing link in Kvistcode and paste it below."
+              : "Copy the pairing link in Kvistcode and paste it below."}
         </Callout>
+      )}
+
+      {scan && (
+        <Button
+          variant="primary"
+          size="lg"
+          icon="camera"
+          className="mt-5 w-full"
+          onClick={() => {
+            setError(null);
+            setScanning(true);
+          }}
+        >
+          Scan QR code
+        </Button>
+      )}
+      {scanning && (
+        <QrScanner
+          onClose={() => setScanning(false)}
+          onResult={(text) => {
+            setScanning(false);
+            // A code made for another address of the computer (its LAN one, say) pairs here too, so
+            // the Home Screen app never has to leave for that address.
+            const code = scannedPairCode(text);
+            if (code) void pairWithCode(code);
+            else void submit(text.trim());
+          }}
+        />
       )}
 
       <div className="mt-5">
@@ -239,7 +293,7 @@ export function Pairing() {
             )}
             <Button
               type="submit"
-              variant="primary"
+              variant={scan ? "secondary" : "primary"}
               size="lg"
               className="w-full"
               disabled={!value.trim()}
