@@ -5,7 +5,7 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
-## Unreleased
+## v0.4.14 — 2026-11-11
 
 - Starting a new project now asks which models to use: the main agent's model and effort, and the model and effort for its helper agents, with "Use recommended" one click away. Codex, Grok and custom agents like Gemini CLI get their own tab to pick the model and effort they start with. You can turn the question off, and change the models any time in Settings, Models & spending, Choose models.
 - Helper agents have an effort setting too ("Helper effort"). Like the helper model, it applies even when an agent asks for another effort. Helper cards show it on the computer and the phone.
