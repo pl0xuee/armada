@@ -108,7 +108,7 @@ export function RateLimitBanner({ agent, embedded = false }: { agent: Agent; emb
       <div
         className={cn(
           "flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 [@media(max-height:700px)]:py-2",
-          embedded ? "py-2.5" : "py-3",
+          embedded ? "py-2.5 minimal:py-2" : "py-3",
         )}
       >
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-warn/40 bg-warn/15 text-warn">

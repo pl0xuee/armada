@@ -73,7 +73,7 @@ export const SubagentCard = memo(function SubagentCard({
     <section
       aria-label={`${kind} sub-agent: ${title}`}
       className={cn(
-        "relative overflow-hidden rounded-xl border bg-card/50",
+        "tl-card relative overflow-hidden rounded-xl border bg-card/50",
         running ? "border-accent/30" : failed ? "border-err/30" : "border-line",
       )}
     >

@@ -1,0 +1,44 @@
+/* Minimal look: the conversation (components/timeline).
+ * Every rule here must be scoped to [data-look="minimal"], so the Classic look is untouched. */
+
+/* ---- Surfaces ---- */
+/* A well set into the sheet: the changed-files card, an opened step, a quiet notice. */
+[data-look="minimal"] .tl-well {
+  background: rgb(0 0 0 / 0.2);
+  box-shadow: inset 0 1px 0 var(--edge);
+}
+/* Cards that ask or report (approval, question, plan, sub-agent, workflow): the raised piece.
+   No border colour here: each card's own border says its state. */
+[data-look="minimal"] .tl-card {
+  border-radius: 14px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-3) 92%, white), var(--bg-3));
+  box-shadow:
+    inset 0 1px 0 var(--edge-strong),
+    0 8px 18px -10px hsl(var(--shadow-color) / 0.7);
+}
+/* One that waits for you: the same piece, warmed. */
+[data-look="minimal"] .tl-card[data-tone="warn"] {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--warn) 9%, var(--bg-3)), var(--bg-3));
+}
+
+/* ---- Prose ---- */
+/* The line stays 24px (whole pixels, and the fold heights in collapse.ts count on it). */
+[data-look="minimal"] .prose-chat {
+  font-size: 14.5px;
+}
+[data-look="minimal"] .prose-chat :not(pre) > code {
+  border-radius: 5px;
+  background: rgb(0 0 0 / 0.25);
+}
+
+/* ---- Light themes ---- */
+/* The same wells, a shade under the page instead of a pool of black. */
+[data-look="minimal"]:is([data-theme="titanium"], [data-theme="paper"], [data-theme="lilac"]) .tl-well {
+  background: rgb(0 0 0 / 0.03);
+}
+[data-look="minimal"]:is([data-theme="titanium"], [data-theme="paper"], [data-theme="lilac"])
+  .prose-chat
+  :not(pre)
+  > code {
+  background: rgb(0 0 0 / 0.05);
+}

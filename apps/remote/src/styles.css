@@ -1,20 +1,22 @@
 @import "tailwindcss";
 
 /* --------------------------------------------------------------------------
- * "Gunmetal" tokens, the desktop app's (docs/PLAN.md §8); --steel is slightly lighter here for contrast.
+ * "Minimal" tokens: the desktop's dark gunmetal look (docs/REDESIGN.md). Surfaces that lift
+ * (an open row, your message, the message box, main cards) get a top highlight, a gentle
+ * top-to-bottom gradient and a soft drop shadow; all shadows are static.
  * ------------------------------------------------------------------------ */
 :root {
   color-scheme: dark;
-  --bg-0: #0b0d10;
-  --bg-1: #12151a;
-  --bg-2: #191d23;
-  --bg-3: #21262d;
-  --gunmetal: #2c3539;
-  --border: #2a3038;
-  --border-strong: #353c46;
-  --text-1: #e6eaef;
-  --text-2: #9aa4b2;
-  --steel: #8190a0; /* lifted from #7d8b99: 4.66:1 on --bg-3 (raised), was 4.37:1 */
+  --bg-0: #0e1114;
+  --bg-1: #13171b;
+  --bg-2: #191e23;
+  --bg-3: #20262c;
+  --gunmetal: #2a3238;
+  --border: #242b31;
+  --border-strong: #55616c;
+  --text-1: #e9edf1;
+  --text-2: #a9b3bd;
+  --steel: #8996a2; /* 5.0:1 on --bg-3 (raised) */
   --accent: #4fc3f7;
   --accent-fg: #06141b;
   --warn: #f5b544;
@@ -25,9 +27,14 @@
   --claude: #d97757;
   --openai: #10a37f;
   --grok: #e5e7eb;
-  --edge: rgba(255, 255, 255, 0.05);
-  --edge-strong: rgba(255, 255, 255, 0.08);
-  --code-bg: #0e1115;
+  --edge: rgba(255, 255, 255, 0.06);
+  --edge-strong: rgba(255, 255, 255, 0.1);
+  --code-bg: #0b0e11;
+  /* A lifted surface: highlight on top, a slight gradient, a soft shadow below. */
+  --lift-bg: linear-gradient(180deg, #1d2328, #181d22);
+  --lift-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 8px 18px -10px rgba(0, 0, 0, 0.7);
+  /* The static glow on working dots and the send button. */
+  --accent-glow: 0 0 0 3px rgba(79, 195, 247, 0.16), 0 0 8px rgba(79, 195, 247, 0.7);
   --diff-add: rgba(61, 220, 151, 0.11);
   --diff-del: rgba(255, 92, 108, 0.11);
 
@@ -60,6 +67,10 @@
   --color-err: var(--err);
   --color-violet: var(--violet);
   --color-code: var(--code-bg);
+
+  /* Rounder corners: cards and controls (rounded-xl / rounded-2xl) at 14 and 18px. */
+  --radius-xl: 14px;
+  --radius-2xl: 18px;
 
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Cascadia Mono", "Roboto Mono", Consolas, "Liberation Mono", monospace;
@@ -126,6 +137,42 @@
     box-shadow:
       inset 0 1px 0 0 var(--edge-strong),
       0 1px 2px rgba(0, 0, 0, 0.35);
+  }
+
+  /* A surface that sits above the page (main cards, the open row, your message, the message box). */
+  .lifted {
+    background: var(--lift-bg);
+    box-shadow: var(--lift-shadow);
+  }
+  /* Your message: a raised bubble on the right. */
+  .user-bubble {
+    border-color: #2e373d;
+    background: linear-gradient(180deg, #22292f, #1d2328);
+    box-shadow: var(--lift-shadow);
+  }
+  /* The message box. */
+  .composer-box {
+    border-color: #323b41;
+    background: var(--lift-bg);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 22px 40px -20px rgba(0, 0, 0, 0.85);
+  }
+  .send-glow {
+    background: linear-gradient(180deg, #6fd0fa, #2a9fd6);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.35),
+      0 0 16px rgba(79, 195, 247, 0.4);
+  }
+  /* One of the computer's sections: a quiet box around its projects. */
+  .section-box {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 120px);
+    box-shadow: inset 0 1px 0 var(--edge);
+  }
+  /* The empty part of a usage meter. */
+  .meter-track {
+    background: rgba(0, 0, 0, 0.3);
+    box-shadow: inset 0 0 0 1px var(--border);
   }
 
   /* Translucent chrome (header / composer). */
@@ -285,7 +332,8 @@
     font-size: 0.87em;
     padding: 0.1em 0.38em;
     border-radius: 5px;
-    background: color-mix(in srgb, var(--bg-3) 85%, transparent);
+    background: rgba(0, 0, 0, 0.25);
+    box-shadow: inset 0 0 0 1px var(--border);
     color: color-mix(in srgb, var(--text-1) 88%, var(--accent));
     overflow-wrap: anywhere;
   }
@@ -326,7 +374,7 @@
     line-height: 1.5;
     color: var(--text-2);
     background: var(--bg-3);
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border);
     border-radius: 6px;
   }
   .md-caret {
@@ -344,7 +392,7 @@
     margin-bottom: 0.8em;
     background: var(--code-bg);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: 14px;
     overflow: hidden;
   }
   .md > .md-pre:first-child {

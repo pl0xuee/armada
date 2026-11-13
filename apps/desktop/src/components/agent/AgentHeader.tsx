@@ -14,8 +14,11 @@ import {
   Ellipsis,
   FolderOpen,
   GitCompare,
+  GitFork,
   Globe,
+  PanelBottom,
   PanelLeftOpen,
+  PanelRight,
   PanelRightClose,
   PanelRightOpen,
   Plus,
@@ -29,6 +32,7 @@ import { archiveAgent, attempt, exportConversation, renameAgent, resumeAgent, st
 import { liveTail } from "@/lib/agents";
 import { resumesShort } from "@/lib/limitResume";
 import { agentDerived } from "./derived";
+import { editStats } from "./editStats";
 import { headerFold } from "./headerFold";
 import { canCompact, compactContext, contextRatio } from "./compact";
 import { api } from "@/lib/api";
@@ -37,9 +41,10 @@ import type { Agent, CustomAgent, Provider } from "@/lib/types";
 import { basename, cn, modKey } from "@/lib/utils";
 import { useAgentListLayout } from "@/hooks/useAgentListLayout";
 import { useElementWidth } from "@/hooks/useElementWidth";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useInspectorDocked } from "@/hooks/useInspectorDocked";
+import { useMinimal } from "@/hooks/useLook";
 import { MAX_TILES, tileIdsFor } from "@/lib/helpers";
-import { headerTier, INSPECTOR_DOCK_QUERY } from "@/lib/layout";
+import { headerTier } from "@/lib/layout";
 import { selectFromAgents } from "@/lib/memoSelector";
 import { useApp } from "@/store/app";
 import { hasNewServer, previewOf, togglePreview, usePreview } from "@/store/preview";
@@ -51,7 +56,7 @@ import { AccountSwitcher } from "./AccountSwitcher";
 import { AddAgents } from "./AddAgents";
 import { BudgetChip } from "./BudgetChip";
 import { STATUS } from "@/lib/providers";
-import { useStatusView } from "@/store/background";
+import { useStatusView, type StatusView } from "@/store/background";
 import { ConfirmDialog } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/misc";
@@ -125,7 +130,9 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
   const account = useApp((s) => s.accounts.find((a) => a.id === agent.accountId));
   const view = useStatusView(agent);
   const { done } = view;
-  const wide = useMediaQuery(INSPECTOR_DOCK_QUERY);
+  // Minimal: one quiet line. Review and the panel toggles stay beside ⋯; every other action lives in it.
+  const minimal = useMinimal();
+  const docked = useInspectorDocked();
   const list = useAgentListLayout();
   const [ref, width] = useElementWidth<HTMLElement>();
   // full: labelled buttons · icons: icon buttons · compact: secondary actions live in ⋯
@@ -145,11 +152,13 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
   const inGroup = helperCount > 0 || !!agent.parentId;
   const inspectorPref = useUi((s) => s.inspectorOpen);
   const overlay = useUi((s) => s.inspectorOverlay);
-  const inspectorOpen = wide ? inspectorPref : overlay;
+  const inspectorOpen = docked ? inspectorPref : overlay;
   const workspaceOpen = useUi((s) => s.workspaceOpen);
   const workspaceRoom = useUi((s) => s.workspaceRoom);
   const toggleInspector = () =>
-    wide ? useUi.getState().setInspectorOpen(!inspectorPref) : useUi.getState().setInspectorOverlay(!overlay);
+    docked ? useUi.getState().setInspectorOpen(!inspectorPref) : useUi.getState().setInspectorOverlay(!overlay);
+  // Minimal calls it Details: a card over the conversation, not a panel at the side.
+  const panel = minimal ? "details" : "side panel";
   const setReviewAgent = useUi((s) => s.setReviewAgent);
   const setHandoffAgent = useUi((s) => s.setHandoffAgent);
   const setDeleteAgent = useUi((s) => s.setDeleteAgent);
@@ -171,11 +180,15 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
   // Narrow headers (a tile in a 2-up grid is about 400px) drop the budget chip, then the account chip, and fold
   // every secondary button into ⋯, so the title always keeps room.
   const { noBudget, tight } = headerFold(width);
+  /** Minimal: room for "project /" before the title. */
+  const crumb = width === 0 || width >= 720;
   const ownsPanels = !tile || tile.focused;
   const preview = usePreviewStatus(agent.id);
   const iconSize = tier === "compact" ? "icon-sm" : "icon";
   // Whether the ⋯ menu leads with the folded buttons (Review, Preview, side panel, tiled helpers).
-  const folded = tight && (!!agent.worktree || ownsPanels || helperCount > 0 || isHelper);
+  const folded =
+    (tight && (!!agent.worktree || ownsPanels || helperCount > 0 || isHelper)) ||
+    (minimal && ((resumable && !busy) || helperCount > 0 || isHelper));
   const newServer = tight && ownsPanels && preview.fresh;
   const moreLabel = newServer ? "More actions (new server detected)" : "More actions";
 
@@ -195,11 +208,20 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
   return (
     <header
       ref={ref}
-      className={cn("relative shrink-0 border-b border-line bg-panel/40", tier === "compact" ? "px-3" : "px-5")}
+      className={cn(
+        "relative shrink-0 border-b border-line bg-panel/40 minimal:border-line/50 minimal:bg-transparent",
+        tier === "compact" ? "px-3" : "px-5",
+      )}
     >
       {/* Fixed height: title + one meta line on the left, status/chips/actions on the right.
           Nothing wraps, so switching agents or states never moves the conversation. */}
-      <div className={cn("flex h-[58px] min-w-0 items-center", tight ? "gap-2" : "gap-2.5")}>
+      <div
+        className={cn(
+          "flex h-[58px] min-w-0 items-center",
+          tile ? "minimal:h-11" : "minimal:h-[52px]",
+          tight ? "gap-2" : "gap-2.5",
+        )}
+      >
         {(!list.docked || !list.open) && (!tile || tile.first) && (
           <Tooltip content="Show agents" shortcut={[modKey, "B"]}>
             <Button size="icon" variant="ghost" aria-label="Show agent list" onClick={list.toggle} className="-ml-1">
@@ -215,46 +237,57 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
             {tile.index}
           </span>
         )}
-        <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="md" />
-        <div className="min-w-[104px] flex-1">
-          <EditableTitle agent={agent} editing={renaming} setEditing={setRenaming} />
-          <div className="flex h-4 min-w-0 items-center gap-1.5 text-xs leading-none text-steel">
-            {agent.parentId ? (
-              <>
-                <HelperOfLine agent={agent} />
-                <SyncChip agent={agent} />
-              </>
-            ) : tail ? (
-              <>
-                <Spinner className="h-3 w-3 shrink-0" />
-                <Tooltip content={tail} side="bottom" align="start">
-                  <span className="min-w-0 truncate text-muted" aria-live="off">
-                    {tail}
-                  </span>
-                </Tooltip>
-              </>
-            ) : (
-              <span className="min-w-0 truncate">
-                {basename(agent.projectPath)}
-                {agent.branch && (
-                  <>
-                    <span className="mx-1.5 text-line-strong">·</span>
-                    <span className="font-mono text-xs">{agent.branch}</span>
-                    {agent.baseBranch && <span className="font-mono text-xs"> → {agent.baseBranch}</span>}
-                  </>
-                )}
-                {account && agent.provider !== "custom" && tile && !tile.focused && (
-                  <>
-                    <span className="mx-1.5 text-line-strong">·</span>
-                    {account.name}
-                  </>
-                )}
-              </span>
-            )}
+        <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size={minimal ? "sm" : "md"} />
+        {minimal ? (
+          // One line: "project / title". The title takes the room only while it is being renamed.
+          <div className={cn("flex min-w-[104px] items-center gap-2", renaming && "flex-1")}>
+            {/* The project is the first thing to go when the line gets short: the title matters more. */}
+            {crumb && <Crumb agent={agent} />}
+            <EditableTitle agent={agent} editing={renaming} setEditing={setRenaming} />
           </div>
-        </div>
+        ) : (
+          <div className="min-w-[104px] flex-1">
+            <EditableTitle agent={agent} editing={renaming} setEditing={setRenaming} />
+            <div className="flex h-4 min-w-0 items-center gap-1.5 text-xs leading-none text-steel">
+              {agent.parentId ? (
+                <>
+                  <HelperOfLine agent={agent} />
+                  <SyncChip agent={agent} />
+                </>
+              ) : tail ? (
+                <>
+                  <Spinner className="h-3 w-3 shrink-0" />
+                  <Tooltip content={tail} side="bottom" align="start">
+                    <span className="min-w-0 truncate text-muted" aria-live="off">
+                      {tail}
+                    </span>
+                  </Tooltip>
+                </>
+              ) : (
+                <span className="min-w-0 truncate">
+                  {basename(agent.projectPath)}
+                  {agent.branch && (
+                    <>
+                      <span className="mx-1.5 text-line-strong">·</span>
+                      <span className="font-mono text-xs">{agent.branch}</span>
+                      {agent.baseBranch && <span className="font-mono text-xs"> → {agent.baseBranch}</span>}
+                    </>
+                  )}
+                  {account && agent.provider !== "custom" && tile && !tile.focused && (
+                    <>
+                      <span className="mx-1.5 text-line-strong">·</span>
+                      {account.name}
+                    </>
+                  )}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
         <div className="flex shrink-0 items-center gap-1.5">
-          {tile || tight || (tier === "compact" && inGroup) ? (
+          {minimal && !tile && !tight ? (
+            <QuietStatus view={view} tail={tail} />
+          ) : tile || tight || (tier === "compact" && inGroup) ? (
             <Tooltip content={view.detail ? `${view.pill}. ${view.detail}` : view.meta.label}>
               <span
                 className="flex h-6 w-5 items-center justify-center"
@@ -273,7 +306,7 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
           ) : (
             <StatusPill status={agent.status} done={done} className="h-7 text-xs" />
           )}
-          {helperCount > 0 && !tight && <HelpersChip count={helperCount} label={tier !== "compact"} />}
+          {helperCount > 0 && !tight && !minimal && <HelpersChip count={helperCount} label={tier !== "compact"} />}
           {agent.rateLimited &&
             (tight ? (
               <LimitMark agent={agent} />
@@ -283,14 +316,18 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
                 <ResumesAt agent={agent} fallback={tier === "full" ? "Rate limited" : "Limit"} />
               </Chip>
             ))}
-          {agent.provider !== "custom" && (!tile || tile.focused) && !tight && (
+          {minimal && isHelper && !tight && <SyncChip agent={agent} />}
+          {/* Minimal: the account and the budget are in the details card. */}
+          {agent.provider !== "custom" && (!tile || tile.focused) && !tight && !minimal && (
             <AccountSwitcher agent={agent} showName={tier === "full"} />
           )}
-          {!noBudget && <BudgetChip agent={agent} compact={tier !== "full"} always />}
-          {!tile && tier !== "compact" && <PrChip agent={agent} compact={tier !== "full"} />}
+          {!noBudget && !minimal && <BudgetChip agent={agent} compact={tier !== "full"} always />}
+          {!tile && (minimal ? !tight : tier !== "compact") && (
+            <PrChip agent={agent} compact={minimal || tier !== "full"} />
+          )}
         </div>
-        <div className="relative flex shrink-0 items-center gap-1">
-          {resumable && !busy ? (
+        <div className="relative flex shrink-0 items-center gap-1 minimal:ml-auto">
+          {resumable && !busy && !minimal ? (
             <ActionButton
               tier={tier === "full" || tier === "icons" ? "full" : "compact"}
               label="Resume"
@@ -300,21 +337,43 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
               <Play className="!h-3.5 !w-3.5" />
             </ActionButton>
           ) : null}
-          {agent.worktree && !tight && (
-            <ReviewPill tier={tier} count={changed} onClick={() => setReviewAgent(agent.id)} />
-          )}
-          {ownsPanels && !tight && <PreviewChip agentId={agent.id} showLabel={tier === "full"} />}
-          {agent.parentId && !tight && <TileToggle />}
-          {ownsPanels && !tight && (
-            <Tooltip content={inspectorOpen ? "Hide the side panel" : "Show the side panel"}>
+          {agent.worktree &&
+            !tight &&
+            (minimal ? (
+              <ReviewButton agentId={agent.id} count={changed} onClick={() => setReviewAgent(agent.id)} />
+            ) : (
+              <ReviewPill tier={tier} count={changed} onClick={() => setReviewAgent(agent.id)} />
+            ))}
+          {ownsPanels && !tight && <PreviewChip agentId={agent.id} showLabel={tier === "full" && !minimal} />}
+          {agent.parentId && !tight && !minimal && <TileToggle />}
+          {minimal && !tile && !tight && (
+            <Tooltip
+              content={`${workspaceOpen ? "Hide" : "Show"} the terminal panel${workspaceRoom === 0 ? " (window is small)" : ""}`}
+              shortcut={[modKey, "`"]}
+            >
               <Button
                 size={iconSize}
                 variant="ghost"
-                aria-label={inspectorOpen ? "Hide side panel" : "Show side panel"}
+                aria-label="Terminal panel"
+                aria-pressed={workspaceOpen}
+                onClick={() => useUi.getState().setWorkspaceOpen(!workspaceOpen)}
+                className={cn(workspaceOpen && "bg-raised text-fg")}
+              >
+                <PanelBottom />
+              </Button>
+            </Tooltip>
+          )}
+          {ownsPanels && !tight && (
+            <Tooltip content={inspectorOpen ? `Hide the ${panel}` : `Show the ${panel}`}>
+              <Button
+                size={iconSize}
+                variant="ghost"
+                aria-label={minimal ? "Details" : inspectorOpen ? "Hide side panel" : "Show side panel"}
                 aria-pressed={inspectorOpen}
                 onClick={toggleInspector}
+                className={cn(minimal && inspectorOpen && "bg-raised text-fg")}
               >
-                {inspectorOpen ? <PanelRightClose /> : <PanelRightOpen />}
+                {minimal ? <PanelRight /> : inspectorOpen ? <PanelRightClose /> : <PanelRightOpen />}
               </Button>
             </Tooltip>
           )}
@@ -340,7 +399,12 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
                 keepFocus.current = true;
               }}
             >
-              {/* Narrow header: what the buttons would have shown lives here, so the title keeps the room. */}
+              {/* Narrow header (and Minimal): what the buttons would have shown lives here, so the title keeps the room. */}
+              {minimal && resumable && !busy && (
+                <DropdownMenuItem onSelect={() => void resumeAgent(agent)}>
+                  <Play /> Resume
+                </DropdownMenuItem>
+              )}
               {tight && agent.worktree && (
                 <DropdownMenuItem onSelect={() => setReviewAgent(agent.id)}>
                   <GitCompare /> Review changes{changed > 0 ? ` (${changed} file${changed === 1 ? "" : "s"})` : "…"}
@@ -354,10 +418,15 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
               {tight && ownsPanels && (
                 <DropdownMenuItem onSelect={toggleInspector}>
                   {inspectorOpen ? <PanelRightClose /> : <PanelRightOpen />}
-                  {inspectorOpen ? "Hide side panel" : "Show side panel"}
+                  {inspectorOpen ? `Hide ${panel}` : `Show ${panel}`}
                 </DropdownMenuItem>
               )}
-              {tight && (helperCount > 0 || isHelper) && (
+              {minimal && !crumb && agent.parentId && (
+                <DropdownMenuItem onSelect={() => useUi.getState().openAgent(agent.parentId!)}>
+                  <GitFork /> Open the main agent
+                </DropdownMenuItem>
+              )}
+              {(tight || minimal) && (helperCount > 0 || isHelper) && (
                 <DropdownMenuItem onSelect={() => useUi.getState().setTileHelpers(!tileHelpers)}>
                   <Columns2 />
                   {tileHelpers
@@ -390,7 +459,7 @@ function AgentHeaderImpl({ agent, tile }: { agent: Agent; tile?: HeaderTile }) {
               >
                 <Pencil /> Rename
               </DropdownMenuItem>
-              {!tile && (
+              {!tile && !(minimal && !tight) && (
                 <DropdownMenuItem
                   shortcut={`${modKey}+\``}
                   onSelect={() => useUi.getState().setWorkspaceOpen(!workspaceOpen)}
@@ -514,6 +583,72 @@ function ReviewPill({
   );
 }
 
+/** Minimal: the header's one labelled button, with the lines the agent's edits added and removed. */
+function ReviewButton({ agentId, count, onClick }: { agentId: string; count: number; onClick: () => void }) {
+  // Cached on the tool calls (see editStats): the same object until they change, so streamed text re-renders nothing.
+  const { additions: added, deletions: removed } = useApp((s) =>
+    editStats(agentDerived(agentId, s.items[agentId]).files, s.items[agentId], s.hasOlder[agentId]),
+  );
+  const files = `${count} file${count === 1 ? "" : "s"}`;
+  return (
+    <Tooltip content={count > 0 ? `Review the ${files} this agent changed` : "Review changes (none yet)"}>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={count > 0 ? `Review ${files}` : "Review changes"}
+        className="m-raised inline-flex h-7 shrink-0 select-none items-center gap-1.5 rounded-lg px-2.5 text-small font-medium text-fg transition-[transform,filter] duration-150 hover:brightness-110 active:scale-[0.98] [&_svg]:size-3.5 [&_svg]:text-steel"
+      >
+        <GitCompare />
+        Review
+        {(added > 0 || removed > 0) && (
+          <span className="flex items-center gap-1.5 font-mono text-meta tabular">
+            {added > 0 && <span className="text-ok">+{added}</span>}
+            {removed > 0 && <span className="text-err">−{removed}</span>}
+          </span>
+        )}
+      </button>
+    </Tooltip>
+  );
+}
+
+/** Minimal: the status as plain coloured words beside the title. A plain idle agent says nothing. */
+function QuietStatus({ view, tail }: { view: StatusView; tail: string | null }) {
+  if (view.dot === "idle" && !view.done) return null;
+  const tip = view.detail ?? tail;
+  const status = (
+    <span
+      className="inline-flex h-6 min-w-0 max-w-[240px] items-center gap-1.5 text-small font-medium"
+      style={{ color: view.dot === "stopped" ? "var(--text-2)" : view.meta.colorVar }}
+    >
+      <StatusDot status={view.dot} size={6} done={view.done} />
+      <span className="truncate">{view.background ? view.pill : view.meta.label}</span>
+    </span>
+  );
+  return tip ? <Tooltip content={tip}>{status}</Tooltip> : status;
+}
+
+/** Minimal: what comes before the title. The project (its branch on hover), or for a helper its main agent. */
+function Crumb({ agent }: { agent: Agent }) {
+  const branch = agent.branch ? ` · ${agent.branch}${agent.baseBranch ? ` → ${agent.baseBranch}` : ""}` : "";
+  return (
+    <>
+      {agent.parentId ? (
+        <HelperOfLine agent={agent} />
+      ) : (
+        <span
+          title={`${basename(agent.projectPath)}${branch}`}
+          className="min-w-0 max-w-[180px] shrink-[3] truncate text-[14px] leading-5 text-muted"
+        >
+          {basename(agent.projectPath)}
+        </span>
+      )}
+      <span aria-hidden className="text-[14px] leading-5 text-steel">
+        /
+      </span>
+    </>
+  );
+}
+
 /** The rate-limit chip when there is no room for words: an icon that says the same on hover and to screen readers. */
 function LimitMark({ agent }: { agent: Agent }) {
   const enabled = useApp((s) => s.settings?.resumeAfterLimit ?? true);
@@ -601,7 +736,7 @@ function EditableTitle({
             cancel();
           }
         }}
-        className="-ml-1.5 h-6 w-full rounded-md border border-accent/50 bg-base/60 px-1.5 text-[16px] font-semibold tracking-tight text-fg focus:outline-none focus:ring-3 focus:ring-accent/15"
+        className="-ml-1.5 h-6 w-full rounded-md border border-accent/50 bg-base/60 px-1.5 text-[16px] font-semibold tracking-tight text-fg focus:outline-none focus:ring-3 focus:ring-accent/15 minimal:text-[14.5px]"
       />
     );
   }
@@ -610,9 +745,11 @@ function EditableTitle({
       type="button"
       onClick={() => setEditing(true)}
       title={agent.title}
-      className="group relative -ml-1.5 flex h-6 w-[calc(100%+6px)] items-center rounded-md px-1.5 text-left transition-colors hover:bg-raised/60"
+      className="group relative -ml-1.5 flex h-6 w-[calc(100%+6px)] items-center rounded-md px-1.5 text-left transition-colors hover:bg-raised/60 minimal:w-auto minimal:min-w-0"
     >
-      <h1 className="truncate text-[15.5px] font-semibold leading-snug tracking-[-0.015em] text-fg">{agent.title}</h1>
+      <h1 className="truncate text-[15.5px] font-semibold leading-snug tracking-[-0.015em] text-fg minimal:text-[14.5px] minimal:leading-5">
+        {agent.title}
+      </h1>
       {/* Floats over the end of the row: the title keeps the room it would have given the icon. */}
       <span
         aria-hidden

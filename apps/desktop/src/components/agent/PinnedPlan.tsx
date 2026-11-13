@@ -11,6 +11,7 @@ import {
 } from "@/lib/pinned";
 import type { TimelineItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useMinimal } from "@/hooks/useLook";
 import { useApp } from "@/store/app";
 import { usePinnedUi } from "@/store/pinnedUi";
 import { useUi } from "@/store/ui";
@@ -80,7 +81,9 @@ export function PlanSection({ agentId, pin, compact }: { agentId: string; pin: P
   const { plan, progress, phase } = pin;
   const saved = usePinnedUi((s) => s.planOpen[agentId]);
   const done = phase === "done";
-  const open = !done && !compact && planStartsOpen(progress.total, saved);
+  // Minimal: one line (the step being worked on beside the count) until you open it.
+  const minimal = useMinimal();
+  const open = !done && !compact && (minimal ? saved === true : planStartsOpen(progress.total, saved));
   const reveal = () => useUi.getState().revealItem(agentId, plan.id);
   const toggle = () => usePinnedUi.getState().setPlanOpen(agentId, !open);
   const fill = progress.total ? progress.done / progress.total : 0;
@@ -136,8 +139,8 @@ export function PlanSection({ agentId, pin, compact }: { agentId: string; pin: P
   }
 
   return (
-    <section aria-label="Plan" className="px-3.5 py-2.5">
-      <div className="flex items-center gap-2">
+    <section aria-label="Plan" className={cn("px-3.5 py-2.5", minimal && (open ? "px-3 pb-2.5 pt-0" : "px-3 py-0"))}>
+      <div className="flex items-center gap-2 minimal:h-[30px]">
         <button
           type="button"
           onClick={reveal}
@@ -152,7 +155,12 @@ export function PlanSection({ agentId, pin, compact }: { agentId: string; pin: P
           <span className="text-small font-semibold">{label}</span>
           {count}
         </button>
-        <div className="ml-auto flex items-center gap-1.5">
+        {minimal && !done && !open && currentText && (
+          <span className="min-w-0 truncate text-small text-muted" title={currentText}>
+            {currentText}
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-1.5 minimal:shrink-0">
           {bar}
           {!done && (
             <button
@@ -168,7 +176,7 @@ export function PlanSection({ agentId, pin, compact }: { agentId: string; pin: P
           )}
         </div>
       </div>
-      {!done && !open && currentText && (
+      {!minimal && !done && !open && currentText && (
         <div className="mt-1.5 flex items-start gap-2 pl-[1.375rem] text-small leading-snug">
           <span
             aria-hidden
@@ -182,7 +190,7 @@ export function PlanSection({ agentId, pin, compact }: { agentId: string; pin: P
         </div>
       )}
       {open && (
-        <div className="mt-2 max-h-44 overflow-y-auto pl-0.5 pr-1">
+        <div className="mt-2 max-h-44 overflow-y-auto pl-0.5 pr-1 minimal:mt-1">
           <PlanChecklist entries={plan.entries} dense still />
         </div>
       )}

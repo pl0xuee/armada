@@ -9,7 +9,7 @@ import { cn, modKey } from "@/lib/utils";
 import { CountBadge } from "./ui/misc";
 import { Tooltip } from "./ui/tooltip";
 
-interface RailItem {
+export interface RailItem {
   view: View;
   label: string;
   /** The name under the icon (the full label is the button's name and tooltip). */
@@ -18,7 +18,7 @@ interface RailItem {
   shortcut?: string[];
 }
 
-const TOP: RailItem[] = [
+export const RAIL_TOP: RailItem[] = [
   { view: "agents", label: "Projects", icon: MessagesSquare },
   { view: "mission", label: "Mission Control", short: "Mission", icon: LayoutGrid, shortcut: [modKey, "⇧", "M"] },
   { view: "compare", label: "Compare", icon: Columns3 },
@@ -27,7 +27,9 @@ const TOP: RailItem[] = [
   { view: "accounts", label: "Accounts", icon: Users },
 ];
 
-const BOTTOM: RailItem[] = [{ view: "settings", label: "Settings", icon: Settings, shortcut: [modKey, ","] }];
+export const RAIL_BOTTOM: RailItem[] = [
+  { view: "settings", label: "Settings", icon: Settings, shortcut: [modKey, ","] },
+];
 
 export function Rail() {
   const view = useUi((s) => s.view);
@@ -114,11 +116,11 @@ export function Rail() {
   return (
     <nav
       aria-label="Primary"
-      className="texture flex w-[68px] shrink-0 flex-col items-center gap-1 border-r border-line bg-panel py-2"
+      className="m-flat texture flex w-[68px] shrink-0 flex-col items-center gap-1 border-r border-line bg-panel py-2"
     >
-      {TOP.map(render)}
+      {RAIL_TOP.map(render)}
       <div className="flex-1" />
-      {BOTTOM.map(render)}
+      {RAIL_BOTTOM.map(render)}
     </nav>
   );
 }

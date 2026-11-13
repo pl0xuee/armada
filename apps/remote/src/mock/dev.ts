@@ -21,6 +21,9 @@
  *   &expand=1                       expand every tool call / thought
  *   &latency=<ms>                   mock network latency (default 160)
  *   &stress=1[&items=3000&rate=60]  agent s1 (#/agent/s1): huge timeline + fast text deltas
+ *   #/usage                         usage per account (Work reports three windows, ChatGPT is near its limit, Team has not reported, xAI is signed out)
+ *   &old=1                          a computer from before sections and usage reached the phone (no sections, no usage)
+ *   &relayout=<seconds>             the sections are renamed and reordered on the computer after this long
  */
 import type { DevOverrides } from "@/lib/controller";
 

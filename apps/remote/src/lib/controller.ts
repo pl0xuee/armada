@@ -52,6 +52,8 @@ import { throttledProgress } from "./outcomes";
 import { loadLocalImage } from "./localImages";
 import { applyConfigValue } from "./config";
 import { isResponseStyle } from "./responseStyle";
+import { parseLayout, sameLayout } from "./projectLayout";
+import { parseBudget, parseUsage } from "./usage";
 import { buildAddRequests } from "./together";
 import { rememberGroup } from "./togetherStore";
 import {
@@ -723,6 +725,7 @@ export async function refreshState() {
     const accounts = Object.fromEntries(
       snap.accounts.filter((a) => a && a.id).map((a) => [a.id, a]),
     );
+    const projectLayout = parseLayout(snap.projectLayout);
     const customAgents = Object.fromEntries(
       (snap.customAgents ?? []).filter((c) => c && c.id).map((c) => [c.id, c]),
     );
@@ -742,6 +745,9 @@ export async function refreshState() {
         customAgents,
         projects,
         templates,
+        // The same object while nothing changed, so the list isn't arranged again for nothing.
+        projectLayout: sameLayout(s.projectLayout, projectLayout) ? s.projectLayout : projectLayout,
+        budget: parseBudget(snap.budget),
         defaultWorktree: snap.defaultWorktree === true,
         defaultPermissionMode:
           snap.defaultPermissionMode === "auto" ||
@@ -1195,6 +1201,12 @@ function handleEvent(ev: RemoteEvent) {
         return { accounts };
       });
       return;
+    case "project_layout": {
+      // The sections and order were changed on the computer.
+      const projectLayout = parseLayout(ev.projectLayout);
+      setState((s) => (sameLayout(s.projectLayout, projectLayout) ? {} : { projectLayout }));
+      return;
+    }
     case "resync":
       void resync();
       return;
@@ -1213,7 +1225,8 @@ export function toRemoteAccount(a: unknown): RemoteAccount | null {
     provider?: unknown;
     color?: unknown;
     authKind?: unknown;
-    status?: { label?: unknown; loggedIn?: unknown; error?: unknown } | null;
+    status?: { label?: unknown; plan?: unknown; loggedIn?: unknown; error?: unknown } | null;
+    usage?: unknown;
   };
   if (
     typeof x.id !== "string" ||
@@ -1231,6 +1244,8 @@ export function toRemoteAccount(a: unknown): RemoteAccount | null {
     label: st && typeof st.label === "string" ? st.label : null,
     loggedIn: st && typeof st.loggedIn === "boolean" ? st.loggedIn : null,
     error: st && typeof st.error === "string" ? st.error : null,
+    plan: st && typeof st.plan === "string" ? st.plan : null,
+    usage: parseUsage(x.usage),
   };
 }
 

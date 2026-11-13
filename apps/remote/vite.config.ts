@@ -59,7 +59,7 @@ function devPwaStubs(): Plugin {
       if (process.env.KVISTCODE_REMOTE_URL) return; // proxied to the real server
       server.middlewares.use("/manifest.webmanifest", (_req, res) => {
         res.setHeader("Content-Type", "application/manifest+json");
-        res.end(JSON.stringify({ name: "Kvistcode", short_name: "Kvistcode", display: "standalone", background_color: "#0B0D10", theme_color: "#0B0D10", start_url: "/" }));
+        res.end(JSON.stringify({ name: "Kvistcode", short_name: "Kvistcode", display: "standalone", background_color: "#0E1114", theme_color: "#0E1114", start_url: "/" }));
       });
       server.middlewares.use("/icon.png", (_req, res) => {
         res.statusCode = 204;

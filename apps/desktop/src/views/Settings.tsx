@@ -61,6 +61,7 @@ import {
   type SettingsEntry,
   type SettingsPage,
 } from "@/lib/settingsPages";
+import { LOOKS } from "@/lib/look";
 import { SYSTEM_THEME, THEMES } from "@/lib/themes";
 import { useResolvedTheme } from "@/lib/useResolvedTheme";
 import { Button } from "@/components/ui/button";
@@ -478,10 +479,21 @@ function Appearance({ settings }: { settings: Settings }) {
   const shownScale = dragScale ?? settings.interfaceScale;
   const followSystem = settings.theme === SYSTEM_THEME;
   const shown = useResolvedTheme(settings.theme);
+  const look = useUi((s) => s.look);
+  const setLook = useUi((s) => s.setLook);
   return (
     <>
       <SectionHeader title="General" description="How Kvistcode looks, starts and updates." />
       <SettingGroup className="mb-3">
+        <SettingRow title="Layout" description={LOOKS.find((l) => l.id === look)?.description ?? ""}>
+          <Segmented
+            aria-label="Layout"
+            size="sm"
+            value={look}
+            onChange={setLook}
+            options={LOOKS.map((l) => ({ value: l.id, label: l.name }))}
+          />
+        </SettingRow>
         <SettingRow
           title="Match system"
           description={

@@ -8,3 +8,8 @@ try {
   }
   if (t && /^[a-z]+$/.test(t)) document.documentElement.dataset.theme = t;
 } catch (e) {}
+// The same for the layout ("look"): see LOOK_KEY in src/lib/look.ts.
+try {
+  var l = localStorage.getItem("kvistcode.look");
+  document.documentElement.dataset.look = l === "minimal" ? "minimal" : "classic";
+} catch (e) {}

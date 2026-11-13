@@ -1,6 +1,7 @@
 import { ChevronsDownUp, CircleX, RotateCcw, Wallet } from "lucide-react";
 import { memo, useLayoutEffect, useRef, useState } from "react";
 import { useIdentity } from "@/hooks/useIdentity";
+import { useMinimal } from "@/hooks/useLook";
 import { useScrollFade } from "@/hooks/useScrollFade";
 import { retryLastPrompt } from "@/lib/actions";
 import { isBusy } from "@/lib/agents";
@@ -93,6 +94,7 @@ export const PinnedDock = memo(function PinnedDock({
   const any = sections.length > 0;
   const urgent = kind !== null;
   const stuck = block.rateLimit || block.error || block.budget || block.conflict;
+  const minimal = useMinimal();
 
   const anchor = useRef<HTMLDivElement>(null);
   const maxHeight = usePaneShare(anchor);
@@ -113,21 +115,37 @@ export const PinnedDock = memo(function PinnedDock({
         {announcement}
       </div>
       <Fold open={any}>
-        <div className="pb-2">
+        {/* Minimal: a slim tray joined to the top of the message box; a card of its own while something waits for you. */}
+        <div className={minimal && !urgent ? undefined : "pb-2"}>
           <section
             role="region"
             // The title tells the docks of side-by-side agents apart.
             aria-label={`Pinned for ${agent.title}: what needs you, and progress`}
-            className={cn(
-              "overflow-hidden rounded-2xl border bg-card/90 transition-colors duration-200 edge",
-              urgent
-                ? "border-warn/40"
-                : block.error || block.budget
-                  ? "border-err/30"
-                  : stuck
-                    ? "border-warn/30"
-                    : "border-line-strong",
-            )}
+            data-tone={
+              !minimal
+                ? undefined
+                : urgent
+                  ? "urgent"
+                  : block.error || block.budget
+                    ? "error"
+                    : stuck
+                      ? "stuck"
+                      : undefined
+            }
+            className={
+              minimal
+                ? cn("m-dock overflow-hidden", urgent ? "m-raised rounded-[18px]" : "m-tray")
+                : cn(
+                    "overflow-hidden rounded-2xl border bg-card/90 transition-colors duration-200 edge",
+                    urgent
+                      ? "border-warn/40"
+                      : block.error || block.budget
+                        ? "border-err/30"
+                        : stuck
+                          ? "border-warn/30"
+                          : "border-line-strong",
+                  )
+            }
           >
             <DockScroller maxHeight={maxHeight}>
               <Fold open={needs !== null}>

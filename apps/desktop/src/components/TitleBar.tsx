@@ -56,7 +56,7 @@ export function TitleBar({ minimal = false }: { minimal?: boolean }) {
       <header
         data-tauri-drag-region
         className={cn(
-          "texture relative z-30 grid h-10 shrink-0 items-center border-b border-line bg-panel edge",
+          "m-flat texture relative z-30 grid h-10 shrink-0 items-center border-b border-line bg-panel edge",
           compact
             ? "grid-cols-[1fr_auto_1fr]"
             : "grid-cols-[1fr_minmax(0,380px)_1fr] max-[999px]:grid-cols-[auto_minmax(0,1fr)_auto]",

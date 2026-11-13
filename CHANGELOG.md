@@ -5,6 +5,24 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## v0.5.0 — 2026-11-13
+
+A second look for Kvistcode, Minimal, and usage on the phone.
+
+- Minimal, a calmer layout you can switch to in Settings, General, Layout. Classic, the layout you know, stays the default and looks exactly as before. Both have every feature and share your themes, shortcuts and settings.
+  - One sidebar lists agents by what is happening: what needs you, then what is working. Finished and idle agents fold into "Settled" at the bottom. Choose "By project" in the list's options to see your projects and sections instead. Mission Control, Compare, Schedules, Usage, Accounts and Settings are icons at the foot of the sidebar.
+  - The conversation sits on one raised sheet with "project / title" at the top and a Review button showing the lines the agent added and removed. Details (branch, pull request, plan, context and cost, files) open as a small card when you ask for them.
+  - A finished turn folds its steps into one line, "Worked for 4m 02s", that opens to show them. The answer follows, then one card with the files it changed.
+  - Ctrl+1 to 9, Alt+Up and Down and the voice assistant's numbers follow the list as you see it.
+  - Switching screens fades in smoothly. The list stays fluid with many agents streaming at once.
+- Phone app
+  - A new Usage page shows each account's limits (5-hour, weekly and the rest) as the provider last reported them, what its agents have cost, and today against your daily limits. Open it with the gauge button at the top of the agent list.
+  - The agent list follows the sections and project order you set up on the computer, and changes when you change them there.
+  - The same deeper gunmetal look as Minimal on the computer.
+  - Live account updates sent to the phone no longer include the account's e-mail address, its folder or a local server's address.
+- The agent's right-click menu is grouped (rename; run and hand off; files and export; delete) and can open the agent's folder.
+- "Toggle inspector" in the command palette now also works in a narrow window, where the panel opens over the conversation.
+
 ## v0.4.15 — 2026-11-11
 
 Fixes from a full review of the app.

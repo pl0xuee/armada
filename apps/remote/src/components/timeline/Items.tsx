@@ -74,8 +74,8 @@ export const UserBubble = memo(function UserBubble({
       {text.trim() !== "" && (
       <div
         className={cn(
-          "relative max-w-[86%] rounded-[20px] rounded-br-md border px-3.5 py-2.5 text-[15px] leading-[1.5] break-words whitespace-pre-wrap",
-          state === "failed" ? "border-err/40 bg-err/8" : "border-white/[0.06] bg-gunmetal",
+          "relative max-w-[86%] rounded-[16px] rounded-br-[6px] border px-3.5 py-2.5 text-[15px] leading-[22px] break-words whitespace-pre-wrap",
+          state === "failed" ? "border-err/40 bg-err/8" : "user-bubble",
           state === "sending" && "opacity-70",
         )}
         title={ts ? clockTime(ts) : undefined}
@@ -357,20 +357,14 @@ export const ToolRow = memo(function ToolRow({ item, agentLive = true }: { item:
         }}
         aria-expanded={hasDetails ? expanded : undefined}
         disabled={!hasDetails}
-        className={cn("flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left", hasDetails && "press-row")}
+        className={cn("flex min-h-11 w-full items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-left", hasDetails && "press-row")}
       >
-        <span
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border"
-          style={{
-            color,
-            borderColor: `color-mix(in srgb, ${color} 22%, var(--border))`,
-            background: `color-mix(in srgb, ${color} 8%, transparent)`,
-          }}
-        >
+        {/* A step is a quiet line: a bare glyph in its state's colour, no box. */}
+        <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center" style={{ color }}>
           <Icon name={TOOL_ICON[item.toolKind] ?? "wrench"} size={15} />
         </span>
         <span className="min-w-0 flex-1">
-          <span className={cn("block truncate text-[14px]", isCmd && "font-mono text-[13px]", failed ? "text-fg" : "text-fg/90")}>
+          <span className={cn("block truncate text-[14px] leading-[20px]", isCmd && "font-mono text-[13px]", failed ? "text-fg" : "text-muted")}>
             {item.title}
           </span>
           {tail && <span className="block truncate font-mono text-[11.5px] text-steel">{tail}</span>}
@@ -384,9 +378,9 @@ export const ToolRow = memo(function ToolRow({ item, agentLive = true }: { item:
           <Icon name="chevronDown" size={16} className={cn("shrink-0 text-steel transition-transform duration-150", !expanded && "-rotate-90")} />
         )}
       </button>
-      {item.images && item.images.length > 0 && <ImageStrip images={item.images} className="px-3 pb-3 pl-[52px]" />}
+      {item.images && item.images.length > 0 && <ImageStrip images={item.images} className="px-2 pb-3 pl-[42px]" />}
       {expanded && (
-        <div className="animate-fade space-y-2 px-3 pt-0.5 pb-3">
+        <div className="animate-fade space-y-2 pt-0.5 pr-2 pb-3 pl-[42px]">
           {item.command && <CommandBlock command={item.command} />}
           {item.locations.some(isLocalImagePath) && (
             <div className="flex flex-wrap gap-2">
@@ -418,7 +412,7 @@ export const ToolRow = memo(function ToolRow({ item, agentLive = true }: { item:
 
 export const ToolGroup = memo(function ToolGroup({ items, agentLive = true }: { items: ToolCallItem[]; agentLive?: boolean }) {
   return (
-    <div className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line bg-panel edge">
+    <div className="-mx-2">
       {items.map((it) => (
         <ToolRow key={it.id} item={it} agentLive={agentLive} />
       ))}

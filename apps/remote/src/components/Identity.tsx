@@ -109,7 +109,8 @@ export function StatusDot({ status, size = 8, className }: { status: AgentStatus
         style={{
           background: hollow ? "transparent" : meta.color,
           border: hollow ? `1.5px solid ${meta.color}` : undefined,
-          boxShadow: meta.live ? `0 0 8px 1px color-mix(in srgb, ${meta.color} 60%, transparent)` : undefined,
+          // A static glow (no pulse): the accent one for working, a softer one for the rest.
+          boxShadow: !meta.live ? undefined : meta.color === "var(--accent)" ? "var(--accent-glow)" : `0 0 8px 1px color-mix(in srgb, ${meta.color} 60%, transparent)`,
         }}
       />
     </span>

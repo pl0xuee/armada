@@ -13,6 +13,7 @@ import { cn, errorMessage, modKey } from "@/lib/utils";
 import { useDebounced } from "@/hooks/useDebounced";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { useIdentity } from "@/hooks/useIdentity";
+import { useMinimal } from "@/hooks/useLook";
 import { useAttachments } from "@/hooks/useAttachments";
 import { latestPendingQuestion } from "@/lib/question";
 import { latestPending } from "../timeline/usePermissionKeys";
@@ -88,6 +89,7 @@ function ComposerImpl({
   const [files, setFiles] = useState<{ query: string; list: string[] }>({ query: "", list: [] });
   const attach = useAttachments(getDraftAttachments(agent.id), agent.id);
   const [wrapRef, width] = useElementWidth<HTMLDivElement>();
+  const minimal = useMinimal();
   // The shortcut hints need about 520px; in a narrow tile they would be cut off mid-word.
   const roomForHints = width === 0 || width >= 520;
   // The ⏎ / ⇧⏎ hint shows while you type, not on an empty composer.
@@ -477,6 +479,12 @@ function ComposerImpl({
     tight,
   );
   const helpersInline = helpers && fold.inline > configOptions.length;
+  const inlineOptions = configOptions.slice(0, fold.inline);
+  // Minimal: how it may act stays on the left; model, effort and the rest sit by the send button.
+  const leftOptions = minimal ? inlineOptions.filter((o) => o.category === "mode") : inlineOptions;
+  const rightOptions = minimal ? inlineOptions.filter((o) => o.category !== "mode") : [];
+  /** Minimal, while working with nothing typed: the round accent button stops the turn. */
+  const stopIsMain = minimal && !canSend && !blocked;
   /** The agent takes messages into a running turn (so the menu may offer it). */
   const agentTakesMidTurn = !!agent.steerable && !agent.queuePaused;
 
@@ -596,6 +604,35 @@ function ComposerImpl({
             ? `Message ${name}…  / for commands, @ for files`
             : `Message ${name}…  @ to mention files`;
 
+  // The message text and the hint laid over it share one box. Minimal's single pane reads a size larger.
+  const textBox = cn(
+    "px-4 pb-1 pt-3.5 text-[13.5px] leading-[22px]",
+    minimal && !compact && !tight && "px-[18px] pt-4 text-[15px] leading-6",
+  );
+  // Icons only: the session options are what you read here; these explain themselves on hover.
+  const tools = (
+    <>
+      <AttachButton
+        onClick={attach.openPicker}
+        count={attach.attachments.length}
+        iconOnly
+        className="minimal:h-7 minimal:min-w-7 minimal:justify-center minimal:rounded-lg"
+      />
+      <TemplatePicker
+        onInsert={insertTemplate}
+        trigger={
+          <button
+            type="button"
+            aria-label="Prompt templates"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg minimal:h-7 minimal:w-7 minimal:rounded-lg"
+          >
+            <BookText className="h-3.5 w-3.5" />
+          </button>
+        }
+      />
+    </>
+  );
+
   return (
     <div ref={wrapRef} data-dictation-scope className={cn("shrink-0 pb-4 pt-1", tight ? "px-3" : "px-6")}>
       <div className={cn("mx-auto w-full", width >= 1330 ? "max-w-[1000px]" : "max-w-[860px]")}>
@@ -611,16 +648,20 @@ function ComposerImpl({
         ) : (
           <div
             {...attach.dropHandlers}
-            className={cn(
-              "group relative rounded-2xl border bg-card shadow-[0_10px_40px_-16px_rgba(0,0,0,0.7)] transition-[border-color,box-shadow] duration-150 edge-strong",
-              "border-line-strong focus-within:border-accent/50 focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_12%,transparent),0_10px_40px_-16px_rgba(0,0,0,0.7)]",
-            )}
+            className={
+              minimal
+                ? "m-composer group relative"
+                : cn(
+                    "group relative rounded-2xl border bg-card shadow-[0_10px_40px_-16px_rgba(0,0,0,0.7)] transition-[border-color,box-shadow] duration-150 edge-strong",
+                    "border-line-strong focus-within:border-accent/50 focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_12%,transparent),0_10px_40px_-16px_rgba(0,0,0,0.7)]",
+                  )
+            }
           >
             {attach.dragging && <DropOverlay />}
             {escArmed && (
               <div
                 role="status"
-                className="flex items-center gap-2 rounded-t-2xl border-b border-warn/25 bg-warn/[0.08] px-4 py-1.5 text-caption font-medium text-warn"
+                className="flex items-center gap-2 rounded-t-2xl border-b border-warn/25 minimal:rounded-t-[17px] bg-warn/[0.08] px-4 py-1.5 text-caption font-medium text-warn"
               >
                 <Kbd>Esc</Kbd>
                 {blocked
@@ -650,10 +691,7 @@ function ComposerImpl({
             )}
             <div className="relative">
               {hint && text === hint.prefix && (
-                <div
-                  aria-hidden
-                  className="pointer-events-none absolute inset-0 whitespace-pre-wrap px-4 pb-1 pt-3.5 text-[13.5px] leading-[22px]"
-                >
+                <div aria-hidden className={cn("pointer-events-none absolute inset-0 whitespace-pre-wrap", textBox)}>
                   <span className="invisible">{text}</span>
                   <span className="text-steel">{hint.hint}</span>
                 </div>
@@ -678,34 +716,25 @@ function ComposerImpl({
                   // Tabbing into another tile's composer makes that tile the focused one (a click already does).
                   if (compact && !focused) useUi.getState().openAgent(agent.id);
                 }}
-                className="relative block max-h-[40vh] min-h-[52px] w-full resize-none field-sizing-content bg-transparent px-4 pb-1 pt-3.5 text-[13.5px] leading-[22px] text-fg placeholder:text-steel focus:outline-hidden"
+                className={cn(
+                  "relative block max-h-[40vh] min-h-[52px] w-full resize-none field-sizing-content bg-transparent text-fg placeholder:text-steel focus:outline-hidden",
+                  textBox,
+                )}
               />
             </div>
-            <div ref={toolbarRef} className="flex items-center gap-2 px-2.5 pb-2.5 pt-1">
+            <div ref={toolbarRef} className="flex items-center gap-2 px-2.5 pb-2.5 pt-1 minimal:pt-1.5">
               <div className="flex min-w-0 shrink-0 items-center gap-0.5">
-                {configOptions.slice(0, fold.inline).map((opt) => (
+                {minimal && tools}
+                {leftOptions.map((opt) => (
                   <ConfigSelect key={opt.id} agent={agent} option={opt} compact={!roomy} />
                 ))}
-                {helpersInline && <HelperSelect agent={agent} compact={!roomy} />}
+                {helpersInline && !minimal && <HelperSelect agent={agent} compact={!roomy} />}
                 <ConfigOverflowMenu
                   agent={agent}
                   options={configOptions.slice(fold.inline)}
                   extra={helpers && !helpersInline ? <HelperSubmenu agent={agent} /> : undefined}
                 />
-                {/* Icons only: the session options are what you read here; these explain themselves on hover. */}
-                <AttachButton onClick={attach.openPicker} count={attach.attachments.length} iconOnly />
-                <TemplatePicker
-                  onInsert={insertTemplate}
-                  trigger={
-                    <button
-                      type="button"
-                      aria-label="Prompt templates"
-                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg"
-                    >
-                      <BookText className="h-3.5 w-3.5" />
-                    </button>
-                  }
-                />
+                {!minimal && tools}
                 <span className={cn("mx-1.5 h-4 w-px bg-line", (!busy || fold.bare) && "hidden")} aria-hidden />
               </div>
               {/* Never narrower than the dot: a squeeze shows up as overflow and folds the toolbar instead of halving it. */}
@@ -739,6 +768,14 @@ function ComposerImpl({
                 )}
               </div>
               <div ref={actionsRef} className="ml-auto flex shrink-0 items-center gap-1.5">
+                {rightOptions.length + (helpersInline && minimal ? 1 : 0) > 0 && (
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    {rightOptions.map((opt) => (
+                      <ConfigSelect key={opt.id} agent={agent} option={opt} compact={!roomy} />
+                    ))}
+                    {helpersInline && <HelperSelect agent={agent} compact={!roomy} />}
+                  </div>
+                )}
                 <ComposerVoiceButtons onText={insertDictation} />
                 {busy && !docked && (
                   <Tooltip content="Stop this turn" shortcut={["Esc ×2"]}>
@@ -747,15 +784,16 @@ function ComposerImpl({
                       variant={blocked ? "ghost" : "secondary"}
                       onClick={() => void cancelTurn(agent)}
                       aria-label="Stop this turn"
-                      className="gap-1.5"
+                      className={cn("gap-1.5", minimal && (stopIsMain ? "m-send" : "m-round"))}
                     >
                       <Square className="!h-3 !w-3 fill-current" />
-                      {!fold.iconButtons && "Stop"}
+                      {!fold.iconButtons && !minimal && "Stop"}
                     </Button>
                   </Tooltip>
                 )}
-                {busy && docked && !canSend ? null : busy ? (
-                  <div className="flex items-center">
+                {/* Minimal: nothing to send yet, so the split button waits (its menu would only say "type first"). */}
+                {(busy && docked && !canSend) || (busy && minimal && !canSend) ? null : busy ? (
+                  <div className={cn("flex items-center", minimal && "m-send-split")}>
                     <Tooltip
                       content={
                         primary === "deliver"
@@ -779,7 +817,7 @@ function ComposerImpl({
                               ? "Start a helper with this message"
                               : "Queue message (runs after the current turn)"
                         }
-                        className="rounded-l-lg rounded-r-none"
+                        className="rounded-l-lg rounded-r-none minimal:rounded-l-full"
                       >
                         {primary === "deliver" ? (
                           <ArrowUp className="!h-4 !w-4" strokeWidth={2.5} />
@@ -799,7 +837,7 @@ function ComposerImpl({
                             size="icon-sm"
                             variant={canSend ? "primary" : "secondary"}
                             aria-label="More ways to send"
-                            className="w-6 rounded-l-none rounded-r-lg border-l border-l-black/20"
+                            className="w-6 rounded-l-none rounded-r-lg border-l border-l-black/20 minimal:w-7 minimal:rounded-r-full"
                           >
                             <ChevronDown className="!h-3.5 !w-3.5" />
                           </Button>
@@ -841,7 +879,7 @@ function ComposerImpl({
                       disabled={!canSend}
                       onClick={() => void send()}
                       aria-label={agent.queuePaused && agent.queue.length > 0 ? "Send and resume queue" : "Send"}
-                      className="rounded-lg"
+                      className={cn("rounded-lg", minimal && "m-send")}
                     >
                       <ArrowUp className="!h-4 !w-4" strokeWidth={2.5} />
                     </Button>
@@ -933,7 +971,7 @@ function ResumeBanner({ agent }: { agent: Agent }) {
   return (
     <div
       className={cn(
-        "mb-2.5 flex items-center gap-3 rounded-xl border px-3.5 py-2.5",
+        "mb-2.5 flex items-center gap-3 rounded-xl border px-3.5 py-2.5 minimal:rounded-[18px]",
         interrupted ? "border-violet/35 bg-violet/[0.08]" : "border-line-strong bg-card/70",
       )}
     >

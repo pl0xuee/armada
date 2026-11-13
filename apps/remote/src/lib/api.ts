@@ -10,6 +10,7 @@ import type {
   Session,
   StateSnapshot,
   TimelineItem,
+  UsageSnapshot,
 } from "./types";
 
 export type HttpMethod = "GET" | "POST" | "DELETE";
@@ -240,6 +241,8 @@ export const api = {
       agentPath(agentId, `/items${qs ? `?${qs}` : ""}`),
     ) as Promise<TimelineItem[]>;
   },
+  /** Every account's usage windows and today against the daily limits: what the desktop already holds. */
+  usage: (b: Backend) => b.request("GET", "/api/usage") as Promise<UsageSnapshot>,
   /** Every pending approval across visible agents (cheaper than timelines for the inbox). */
   permissions: (b: Backend) =>
     b.request("GET", "/api/permissions") as Promise<TimelineItem[]>,

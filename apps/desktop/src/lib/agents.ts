@@ -1,4 +1,5 @@
 import type { Account, Agent, ProjectLayout, TimelineItem } from "./types";
+import { nestHelpers } from "./helpers";
 import { arrange } from "./projectLayout";
 import { projectKey } from "./projectKey";
 import { basename } from "./utils";
@@ -24,6 +25,23 @@ export interface ProjectGroup {
 const isWorking = (a: Agent, background?: ReadonlySet<string>) =>
   a.status === "working" || a.status === "starting" || (a.status === "idle" && !!background?.has(a.id));
 
+/** The sidebar's search: title, folder, branch or last message contains `query`. */
+function queryMatcher(query: string): (a: Agent) => boolean {
+  const q = query.trim().toLowerCase();
+  return (a) =>
+    !q ||
+    a.title.toLowerCase().includes(q) ||
+    a.projectPath.toLowerCase().includes(q) ||
+    (a.branch ?? "").toLowerCase().includes(q) ||
+    (a.lastMessage ?? "").toLowerCase().includes(q);
+}
+
+/** Agents that need you first (most urgent reason first), then working ones, then the rest. */
+function activityRank(a: Agent, background?: ReadonlySet<string>): number {
+  const reason = needsAttention(a);
+  return reason ? NEED_RANK[reason] : isWorking(a, background) ? NEED_RANK_END : NEED_RANK_END + 1;
+}
+
 /**
  * The sidebar's projects: every folder that has agents, each with its agents, projects that
  * need you first and then the most recently active. Archived agents are returned separately.
@@ -35,13 +53,7 @@ export function groupByProject(
   query = "",
   background?: ReadonlySet<string>,
 ): { projects: ProjectGroup[]; archived: Agent[] } {
-  const q = query.trim().toLowerCase();
-  const match = (a: Agent) =>
-    !q ||
-    a.title.toLowerCase().includes(q) ||
-    a.projectPath.toLowerCase().includes(q) ||
-    (a.branch ?? "").toLowerCase().includes(q) ||
-    (a.lastMessage ?? "").toLowerCase().includes(q);
+  const match = queryMatcher(query);
 
   const byPath = new Map<string, Agent[]>();
   const archived: Agent[] = [];
@@ -57,11 +69,7 @@ export function groupByProject(
     else byPath.set(key, [a]);
   }
   const byActivity = (x: Agent, y: Agent) => y.lastActivityAt - x.lastActivityAt;
-  // Agents that need you first (most urgent reason first), then working ones, then the rest.
-  const rank = (a: Agent) => {
-    const reason = needsAttention(a);
-    return reason ? NEED_RANK[reason] : isWorking(a, background) ? NEED_RANK_END : NEED_RANK_END + 1;
-  };
+  const rank = (a: Agent) => activityRank(a, background);
   const projects: ProjectGroup[] = [];
   for (const [path, list] of byPath) {
     list.sort((x, y) => rank(x) - rank(y) || byActivity(x, y));
@@ -83,6 +91,35 @@ export function groupByProject(
 }
 
 /**
+ * The Minimal sidebar's order: one flat list by what is happening. `active` holds agents that need you (most
+ * urgent first) and then those working; `settled` the rest, latest first. Pass main agents with `children`
+ * (their helpers) so a main agent whose helper needs you or works is listed as such. `query` and `background`
+ * as in groupByProject.
+ */
+export function groupByActivity(
+  agents: Agent[],
+  query = "",
+  background?: ReadonlySet<string>,
+  children?: ReadonlyMap<string, Agent[]>,
+): { active: Agent[]; settled: Agent[] } {
+  const match = queryMatcher(query);
+  const rankOf = (a: Agent) => activityRank(a, background);
+  const byActivity = (x: Agent, y: Agent) => y.lastActivityAt - x.lastActivityAt || x.id.localeCompare(y.id);
+  const active: { agent: Agent; rank: number }[] = [];
+  const settled: Agent[] = [];
+  for (const a of agents) {
+    // Archived agents are listed apart (groupByProject's `archived`).
+    if (a.archived || !match(a)) continue;
+    const rank = Math.min(rankOf(a), ...(children?.get(a.id) ?? []).map(rankOf));
+    if (rank <= NEED_RANK_END) active.push({ agent: a, rank });
+    else settled.push(a);
+  }
+  active.sort((x, y) => x.rank - y.rank || byActivity(x.agent, y.agent));
+  settled.sort(byActivity);
+  return { active: active.map((x) => x.agent), settled };
+}
+
+/**
  * Flat order used by ⌘1..9 and the voice assistant: the sidebar's order, project by project (archived excluded),
  * following the user's sections and custom order when `layout` is given.
  */
@@ -91,6 +128,22 @@ export function orderedAgents(agents: Agent[], layout?: ProjectLayout): Agent[] 
   if (!layout) return projects.flatMap((p) => p.agents);
   const { loose, sections } = arrange(projects, layout);
   return [...loose, ...sections.flatMap((g) => g.projects)].flatMap((p) => p.agents);
+}
+
+/**
+ * The same flat order for the Minimal sidebar shown "By activity" (`byActivity`): its rows top to bottom,
+ * each main agent followed by its helpers. Otherwise `orderedAgents`.
+ */
+export function sidebarOrder(
+  agents: Agent[],
+  layout: ProjectLayout | undefined,
+  byActivity: boolean,
+  background?: ReadonlySet<string>,
+): Agent[] {
+  if (!byActivity) return orderedAgents(agents, layout);
+  const { roots, children } = nestHelpers(agents);
+  const { active, settled } = groupByActivity(roots, "", background, children);
+  return [...active, ...settled].flatMap((a) => [a, ...(children.get(a.id) ?? [])]);
 }
 
 export function accountName(accounts: Account[], id: string): string {

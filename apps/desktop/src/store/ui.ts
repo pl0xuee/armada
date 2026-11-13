@@ -1,5 +1,14 @@
 import { create } from "zustand";
 import { PREVIEW_DEFAULT_WIDTH } from "@/lib/layout";
+import {
+  applyLook,
+  readLook,
+  readSidebarGroup,
+  saveLook,
+  saveSidebarGroup,
+  type Look,
+  type SidebarGroup,
+} from "@/lib/look";
 import { createCoalescedWriter } from "@/lib/throttle";
 import type { Agent, Provider, Schedule } from "@/lib/types";
 
@@ -65,6 +74,12 @@ interface UiStore {
   tileGroup: string[] | null;
   compareGroupId: string | null;
   settingsSection: SettingsSection;
+  /** Which layout is showing (see lib/look.ts); remembered across restarts. */
+  look: Look;
+  setLook: (look: Look) => void;
+  /** Minimal sidebar: agents by activity, or under their projects. */
+  sidebarGroup: SidebarGroup;
+  setSidebarGroup: (group: SidebarGroup) => void;
   inspectorOpen: boolean;
   /** Inspector shown as an overlay on narrow windows. */
   inspectorOverlay: boolean;
@@ -335,6 +350,17 @@ export const useUi = create<UiStore>((set) => ({
   tileGroup: null,
   compareGroupId: null,
   settingsSection: "appearance",
+  look: readLook(),
+  setLook: (look) => {
+    saveLook(look);
+    applyLook(look);
+    set({ look });
+  },
+  sidebarGroup: readSidebarGroup(),
+  setSidebarGroup: (sidebarGroup) => {
+    saveSidebarGroup(sidebarGroup);
+    set({ sidebarGroup });
+  },
   inspectorOpen: readInspector(),
   inspectorOverlay: false,
   agentList: readAgentList(),

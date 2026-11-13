@@ -6,6 +6,7 @@ import { pluralize } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useHeld, WAITING_HOLD_MS } from "@/hooks/useHeld";
 import { useIdentity } from "@/hooks/useIdentity";
+import { useMinimal } from "@/hooks/useLook";
 import { useVisibleInterval } from "@/hooks/useVisibleInterval";
 import { agentHelpers } from "@/lib/agentHelpers";
 import { useApp } from "@/store/app";
@@ -101,6 +102,7 @@ export function LiveStatus({
   const [verb, setVerb] = useState(0);
   const offset = useRef(Math.floor(Math.random() * THINKING_VERBS.length));
   const listId = useId();
+  const minimal = useMinimal();
 
   useVisibleInterval(() => setVerb((v) => v + 1), VERB_MS);
 
@@ -130,12 +132,24 @@ export function LiveStatus({
 
   const line = (
     <>
-      <span className="relative inline-flex h-6 w-6 shrink-0 items-center justify-center" aria-hidden>
-        <span className="absolute inset-0 animate-spin-slow rounded-full border border-transparent border-t-accent/70" />
-        {/* The ring around it spins: one moving thing is enough to say "working". */}
-        <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="xs" className="opacity-80" />
-      </span>
-      <span className="flex min-w-0 items-baseline gap-1.5 text-small" title={label}>
+      {minimal ? (
+        // The working dot: a still accent glow (nothing here animates; the words beside it do the moving).
+        <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center" aria-hidden>
+          <span className="h-1.5 w-1.5 rounded-full bg-accent m-glow-soft" />
+        </span>
+      ) : (
+        <span className="relative inline-flex h-6 w-6 shrink-0 items-center justify-center" aria-hidden>
+          <span className="absolute inset-0 animate-spin-slow rounded-full border border-transparent border-t-accent/70" />
+          {/* The ring around it spins: one moving thing is enough to say "working". */}
+          <ProviderGlyph
+            provider={agent.provider}
+            customAgentId={agent.customAgentId}
+            size="xs"
+            className="opacity-80"
+          />
+        </span>
+      )}
+      <span className="flex min-w-0 items-baseline gap-1.5 text-small minimal:text-[13.5px]" title={label}>
         {text}
         {cycling && (
           // One layer breathing as a group (three staggered dots are three layers per tile).
@@ -166,12 +180,12 @@ export function LiveStatus({
             onClick={onToggle}
             aria-expanded={expanded}
             aria-controls={listId}
-            className="-ml-1 flex h-7 max-w-full items-center gap-2.5 rounded-lg px-1 text-left text-muted transition-colors hover:bg-raised/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="-ml-1 flex h-7 max-w-full items-center gap-2.5 rounded-lg px-1 text-left text-muted transition-colors hover:bg-raised/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 minimal:gap-2"
           >
             {line}
           </button>
         ) : (
-          <div className="flex h-7 max-w-full items-center gap-2.5 text-muted">{line}</div>
+          <div className="flex h-7 max-w-full items-center gap-2.5 text-muted minimal:gap-2">{line}</div>
         )}
       </div>
       <AnimatePresence initial={false}>
@@ -183,7 +197,7 @@ export function LiveStatus({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.12 }}
-            className="ml-[11px] mt-1 space-y-0.5 border-l border-line pl-3"
+            className="ml-[11px] mt-1 space-y-0.5 border-l border-line pl-3 minimal:ml-1.5 minimal:pl-3.5"
           >
             {running.map((r) => (
               <li key={r.itemId} className="flex h-6 items-center gap-1.5 text-caption">

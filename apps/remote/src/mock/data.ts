@@ -1,16 +1,82 @@
 /** Realistic sample fleet for the dev mock. Dev-only; never bundled in production. */
-import type { Agent, AgentStatus, FileDiff, RemoteAccount, RemoteCustomAgent, TimelineItem } from "@/lib/types";
+import type { Agent, AgentStatus, BudgetStatus, FileDiff, ProjectLayout, RemoteAccount, RemoteCustomAgent, TimelineItem } from "@/lib/types";
 import { CHECKOUT_PNG, ORDERS_PNG } from "./images";
 
 export const MIN = 60_000;
 
 export const accounts: RemoteAccount[] = [
-  { id: "acc-work", name: "Work", provider: "claude", color: "#4FC3F7", label: "Claude Max", authKind: "oauth" },
-  { id: "acc-personal", name: "Personal", provider: "claude", color: "#F472B6", label: "Claude Pro", authKind: "api_key" },
-  { id: "acc-openai", name: "ChatGPT", provider: "codex", color: "#3DDC97", label: "ChatGPT Pro", authKind: "oauth" },
-  { id: "acc-grok", name: "xAI", provider: "grok", color: "#E5E7EB", label: "SuperGrok", loggedIn: false, error: null },
+  { id: "acc-work", name: "Work", provider: "claude", color: "#4FC3F7", label: "Claude Max 20x", authKind: "oauth", plan: "max", loggedIn: true },
+  { id: "acc-personal", name: "Personal", provider: "claude", color: "#F472B6", label: "API key", authKind: "api_key", loggedIn: true },
+  { id: "acc-team", name: "Team", provider: "claude", color: "#F5B544", label: "Claude team", authKind: "oauth", plan: "team", loggedIn: true },
+  { id: "acc-openai", name: "ChatGPT", provider: "codex", color: "#3DDC97", label: "Logged in using ChatGPT", authKind: "oauth", loggedIn: true },
+  { id: "acc-grok", name: "xAI", provider: "grok", color: "#E5E7EB", label: "SuperGrok", authKind: "oauth", loggedIn: false, error: null },
   { id: "custom-gemini", name: "Local agents", provider: "custom", color: "#B39DDB", label: null },
 ];
+
+const HOUR = 60 * MIN;
+
+/**
+ * The accounts as `/api/state` and `/api/usage` send them: with the usage windows each provider last
+ * reported. Work is comfortable, ChatGPT is close to its 5-hour limit, Team is signed in but has not
+ * reported yet, Personal pays per token (no windows) and xAI is signed out.
+ */
+export function accountsWithUsage(now: number): RemoteAccount[] {
+  const usage: Record<string, RemoteAccount["usage"]> = {
+    "acc-work": {
+      primary: { usedPercent: 62, windowMins: 300, resetsAt: now + 2 * HOUR + 14 * MIN },
+      secondary: { usedPercent: 38, windowMins: 10080, resetsAt: now + 3 * 24 * HOUR + 5 * HOUR },
+      fable: { usedPercent: 74, windowMins: 10080, resetsAt: now + 3 * 24 * HOUR + 5 * HOUR },
+      plan: "max",
+      updatedAt: now - 2 * MIN,
+    },
+    "acc-openai": {
+      primary: { usedPercent: 93, windowMins: 300, resetsAt: now + 41 * MIN },
+      secondary: { usedPercent: 55, windowMins: 10080, resetsAt: now + 5 * 24 * HOUR },
+      fable: null,
+      plan: "pro",
+      updatedAt: now - 6 * MIN,
+    },
+    // Its last numbers from before it was signed out: the phone must not show them as current.
+    "acc-grok": { primary: { usedPercent: 12, windowMins: 1440, resetsAt: now - HOUR }, secondary: null, fable: null, plan: null, updatedAt: now - 26 * HOUR },
+  };
+  return accounts.map((a) => ({ ...a, usage: usage[a.id] ?? null }));
+}
+
+/** The desktop sidebar's layout: two sections in the user's own order; `docs` is in neither. */
+export const projectLayout: ProjectLayout = {
+  customOrder: true,
+  order: ["/home/dev/code/docs", "/home/dev/code/design-system"],
+  sections: [
+    { id: "sec-acme", name: "Acme", projects: ["/home/dev/code/acme-web", "/home/dev/code/acme-api", "/home/dev/code/mobile-app"] },
+    { id: "sec-research", name: "Research", projects: ["/home/dev/code/research"] },
+  ],
+};
+
+/** The layout after the user renames and reorders the sections on the computer (`&relayout=<seconds>`). */
+export const projectLayoutAfter: ProjectLayout = {
+  customOrder: true,
+  order: ["/home/dev/code/acme-api"],
+  sections: [
+    { id: "sec-research", name: "Experiments", projects: ["/home/dev/code/research", "/home/dev/code/docs"] },
+    { id: "sec-acme", name: "Acme", projects: ["/home/dev/code/acme-web", "/home/dev/code/mobile-app"] },
+  ],
+};
+
+/** Today against a $15 daily limit, from what the agents have used. */
+export function budgetStatus(agents: readonly Agent[]): BudgetStatus {
+  const todayUsd = agents.reduce((n, a) => n + a.costUsd, 0);
+  const cap = 15;
+  return {
+    day: new Date().toISOString().slice(0, 10),
+    todayUsd,
+    dailyBudgetUsd: cap,
+    todayTokens: agents.reduce((n, a) => n + a.tokensUsed, 0),
+    dailyBudgetTokens: null,
+    todayTurns: 27,
+    dailyBudgetTurns: null,
+    level: todayUsd >= cap ? "hit" : todayUsd >= cap * 0.8 ? "warn" : "under",
+  };
+}
 
 export const customAgents: RemoteCustomAgent[] = [
   { id: "gemini", name: "Gemini CLI", color: "#8AB4F8", enabled: true },

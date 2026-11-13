@@ -238,7 +238,8 @@ export const QuestionCard = memo(function QuestionCard({
       role="group"
       data-question-request={item.requestId}
       aria-label={`Question from ${identity.short}: ${item.message}`}
-      className="relative overflow-hidden rounded-2xl border border-warn/40 bg-gradient-to-b from-warn/[0.09] to-card shadow-[0_0_0_1px_color-mix(in_srgb,var(--warn)_10%,transparent),0_12px_40px_-16px_color-mix(in_srgb,var(--warn)_45%,transparent)] edge"
+      data-tone="warn"
+      className="tl-card relative overflow-hidden rounded-2xl border border-warn/40 minimal:border-warn/30 bg-gradient-to-b from-warn/[0.09] to-card shadow-[0_0_0_1px_color-mix(in_srgb,var(--warn)_10%,transparent),0_12px_40px_-16px_color-mix(in_srgb,var(--warn)_45%,transparent)] edge"
     >
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-warn/70 to-transparent" />
       <div className="flex items-start gap-3 px-4 pb-3 pt-3.5">

@@ -2,13 +2,14 @@ import { useSyncExternalStore } from "react";
 
 /**
  * Hash routing: the desktop server only serves `/`, and the hash never reaches
- * the server (or its logs). Routes: `#/`, `#/agent/<id>`, `#/inbox`.
+ * the server (or its logs). Routes: `#/`, `#/agent/<id>`, `#/inbox`, `#/usage`.
  */
 export type Route =
   | { name: "fleet" }
   | { name: "agent"; agentId: string }
   | { name: "review"; agentId: string }
   | { name: "inbox" }
+  | { name: "usage" }
   | { name: "new" };
 
 const ROUTE_EVENT = "kvistcode:route";
@@ -25,6 +26,7 @@ export function parseRoute(hash: string): Route {
     }
   }
   if (path.startsWith("/inbox")) return { name: "inbox" };
+  if (path === "/usage" || path.startsWith("/usage?")) return { name: "usage" };
   if (path === "/new" || path.startsWith("/new?")) return { name: "new" };
   return { name: "fleet" };
 }
@@ -37,6 +39,8 @@ export function routeHash(route: Route): string {
       return `#/agent/${encodeURIComponent(route.agentId)}/review`;
     case "inbox":
       return "#/inbox";
+    case "usage":
+      return "#/usage";
     case "new":
       return "#/new";
     default:

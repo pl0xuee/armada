@@ -1,6 +1,5 @@
 import { useEffect } from "react";
-import { orderedAgents } from "@/lib/agents";
-import { layoutOf } from "@/lib/projectLayout";
+import { shortcutOrder } from "@/store/shortcutOrder";
 import { onVaHotkey, onVaWake } from "@/lib/api";
 import { LIST_DOCK_QUERY } from "@/lib/layout";
 import { selectNextTriage, triageQueueNow } from "@/components/triage/useTriage";
@@ -48,8 +47,7 @@ export function useGlobalShortcuts(enabled: boolean) {
         !inTerminal(e.target) &&
         !dialogOpen()
       ) {
-        const app = useApp.getState();
-        const list = orderedAgents(Object.values(app.agents), layoutOf(app.settings));
+        const list = shortcutOrder();
         if (list.length === 0) return;
         const step = e.key === "ArrowUp" ? -1 : 1;
         const at = list.findIndex((a) => a.id === useUi.getState().selectedAgentId);
@@ -179,8 +177,7 @@ export function useGlobalShortcuts(enabled: boolean) {
         return;
       }
       if (/^[1-9]$/.test(e.key) && !e.shiftKey) {
-        const app = useApp.getState();
-        const list = orderedAgents(Object.values(app.agents), layoutOf(app.settings));
+        const list = shortcutOrder();
         const target = list[Number(e.key) - 1];
         if (target) {
           e.preventDefault();

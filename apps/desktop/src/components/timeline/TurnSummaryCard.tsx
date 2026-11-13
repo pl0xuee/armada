@@ -9,7 +9,7 @@ import {
   MessageSquarePlus,
   Undo2,
 } from "lucide-react";
-import { memo, useState, type ReactNode } from "react";
+import { memo, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { attempt } from "@/lib/actions";
@@ -22,6 +22,7 @@ import { useApp } from "@/store/app";
 import { useBackground } from "@/store/background";
 import { backgroundActive, backgroundDetail } from "@/lib/background";
 import { useUi } from "@/store/ui";
+import { useMinimal } from "@/hooks/useLook";
 import { PushBaseNotice } from "../git/PushBaseNotice";
 import { ConfirmDialog } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
@@ -29,6 +30,8 @@ import { Input, Label } from "../ui/input";
 import { Spinner } from "../ui/misc";
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Tooltip } from "../ui/tooltip";
+import { formatElapsed } from "./thinking";
+import { turnFileStats } from "./turnFiles";
 
 type Summary = Extract<TimelineItem, { kind: "turn_summary" }>;
 
@@ -44,8 +47,8 @@ export function formatDuration(ms: number): string {
 /** One-line recap used for earlier turns (only the latest gets the full card). */
 export const TurnSummaryLine = memo(function TurnSummaryLine({ item }: { item: Summary }) {
   return (
-    <div className="flex items-center gap-2 px-1 text-meta text-steel">
-      <CircleCheckBig className="h-3.5 w-3.5 text-ok/70" />
+    <div className="flex items-center gap-2 px-1 text-meta text-steel minimal:px-0">
+      <CircleCheckBig className="h-3.5 w-3.5 text-ok/70 minimal:text-steel" />
       <span>
         Done in {formatDuration(item.durationMs)} · {pluralize(item.files.length, "file")} ·{" "}
         {pluralize(item.toolCalls, "tool call")} · {formatCost(item.costUsd)}
@@ -151,6 +154,207 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ item, agent }: { 
   };
 
   const metrics = `${pluralize(item.toolCalls, "tool call")} · ${pluralize(item.commands, "command")} · ${formatCost(item.costUsd)} · ${formatTokens(item.tokens)} tokens`;
+  const minimal = useMinimal();
+  // Lines added and removed per file, from the turn's own edits. The turn is over, so they are read again
+  // only when older history loads (the oldest loaded item changes), not on every streamed word.
+  const oldestId = useApp((s) => (minimal ? s.items[agent.id]?.[0]?.id : undefined));
+  const stats = useMemo(
+    () => (minimal ? turnFileStats(useApp.getState().items[agent.id] ?? [], item.id, item.files) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- oldestId stands for the loaded history
+    [minimal, agent.id, item.id, item.files, oldestId],
+  );
+  if (minimal && stats) {
+    let additions = 0;
+    let deletions = 0;
+    for (const s of stats.values()) {
+      additions += s.additions;
+      deletions += s.deletions;
+    }
+    const state = shipped ? "Merged locally" : shipState?.kind === "not_merged" ? "Committed, not merged" : null;
+    const chips = (
+      <>
+        {stale && !shipped && (
+          <span className="shrink-0 rounded-md border border-line-strong px-1.5 text-micro font-medium text-muted">
+            Earlier turn
+          </span>
+        )}
+        {bgRunning && (
+          <Tooltip content={backgroundDetail(bg)}>
+            <span className="inline-flex h-5 shrink-0 items-center gap-1.5 rounded-md border border-accent/30 bg-accent/10 px-1.5 text-micro font-medium text-accent">
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent" />
+              {bg.workflows > 0 ? "Workflow still running" : "Background agents may still run"}
+            </span>
+          </Tooltip>
+        )}
+      </>
+    );
+    const title = (text: string) => (
+      <Tooltip content={`Done in ${formatElapsed(item.durationMs)} · ${metrics}`}>
+        <span
+          tabIndex={0}
+          aria-label={`Turn finished. ${metrics}`}
+          className="min-w-0 truncate rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+        >
+          {text}
+        </span>
+      </Tooltip>
+    );
+    const quiet = "text-steel hover:text-fg";
+    return (
+      <section aria-label="Turn finished">
+        {hasFiles ? (
+          <div className="tl-well overflow-hidden rounded-[11px] border border-line">
+            <header className="flex h-10 items-center gap-2 pl-3.5 pr-2 text-small font-medium text-fg/90">
+              {title(state ?? pluralize(item.files.length, "changed file"))}
+              {stats.size > 0 && (
+                <span className="shrink-0 font-mono text-caption font-normal tabular-nums">
+                  <span className="text-ok">+{additions}</span> <span className="text-err">−{deletions}</span>
+                </span>
+              )}
+              {chips}
+              <Button size="xs" variant="secondary" className="ml-auto" onClick={() => setReviewAgent(agent.id)}>
+                <GitCompare /> Open diff
+              </Button>
+            </header>
+            <ul aria-label="Files changed">
+              {files.map((f) => {
+                const s = stats.get(f);
+                const cut = f.lastIndexOf("/") + 1;
+                return (
+                  <li key={f} className="group/file flex h-[30px] items-center border-t border-line">
+                    <Tooltip content={`Open diff · ${f}`}>
+                      <button
+                        type="button"
+                        onClick={() => setReviewAgent(agent.id, f)}
+                        className="flex h-full min-w-0 flex-1 items-center gap-2 pl-3.5 pr-2 text-left font-mono text-caption text-steel transition-colors hover:bg-raised/40 focus-visible:outline-offset-[-2px]"
+                      >
+                        <span className="min-w-0 truncate">
+                          {f.slice(0, cut)}
+                          <span className="text-fg/85">{f.slice(cut)}</span>
+                        </span>
+                        {s && (
+                          <span className="ml-auto shrink-0 tabular-nums">
+                            <span className="text-ok">+{s.additions}</span>{" "}
+                            <span className="text-err">−{s.deletions}</span>
+                          </span>
+                        )}
+                      </button>
+                    </Tooltip>
+                    {!shipped && (
+                      <Tooltip content={`Revert changes to ${basename(f)}…`}>
+                        <button
+                          type="button"
+                          onClick={() => setRevertFile(f)}
+                          disabled={agentBusy}
+                          title={busyReason ?? undefined}
+                          aria-label={`Revert changes to ${f}`}
+                          className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-steel opacity-0 transition-[opacity,color,background-color] duration-150 hover:bg-err/12 hover:text-err focus-visible:opacity-100 focus-visible:outline-offset-[-2px] disabled:opacity-0 group-hover/file:opacity-100 group-hover/file:disabled:opacity-45"
+                        >
+                          <Undo2 className="h-3 w-3" />
+                        </button>
+                      </Tooltip>
+                    )}
+                  </li>
+                );
+              })}
+              {(hiddenFiles > 0 || (allFiles && item.files.length > FILES_SHOWN)) && (
+                <li className="flex h-[30px] items-center border-t border-line">
+                  <button
+                    type="button"
+                    onClick={() => showAllFiles(!allFiles)}
+                    aria-expanded={allFiles}
+                    aria-label={allFiles ? "Show fewer files" : `Show ${pluralize(hiddenFiles, "more file")}`}
+                    className="flex h-full w-full items-center pl-3.5 text-left text-caption text-steel transition-colors hover:bg-raised/40 hover:text-fg focus-visible:outline-offset-[-2px]"
+                  >
+                    {allFiles ? "Show fewer" : `+${hiddenFiles} more`}
+                  </button>
+                </li>
+              )}
+            </ul>
+          </div>
+        ) : (
+          <div className="flex h-7 items-center gap-2 text-small text-steel">
+            <Check className="h-3.5 w-3.5 shrink-0 text-ok/70" aria-hidden />
+            {title(state ?? `Done in ${formatElapsed(item.durationMs)}`)}
+            {chips}
+            <Button size="xs" variant="ghost" className={cn("ml-auto", quiet)} onClick={focusComposer}>
+              <MessageSquarePlus /> Continue
+            </Button>
+          </div>
+        )}
+
+        {shipState?.kind === "shipped" && (
+          <div className="mt-2.5">
+            <PushBaseNotice agentId={agent.id} initial={shipState.baseStatus} />
+          </div>
+        )}
+        {shipState?.kind === "not_merged" && (
+          <div
+            role="status"
+            className="mt-2.5 flex flex-wrap items-center gap-2 rounded-[11px] border border-warn/20 bg-warn/[0.07] px-3 py-2 text-caption"
+          >
+            <span className="min-w-0 flex-1 break-words text-muted">{shipState.error}</span>
+            {shipState.conflict && (
+              <Button
+                size="xs"
+                variant="secondary"
+                onClick={() =>
+                  void attempt("Couldn't send the request", () =>
+                    api.sendPrompt(agent.id, conflictPrompt(agent, shipState.error)),
+                  ).then((r) => r !== null && toast.success("Asked the agent to resolve the conflicts"))
+                }
+              >
+                Ask the agent to resolve conflicts
+              </Button>
+            )}
+          </div>
+        )}
+        {hasFiles && (
+          <footer className="-ml-2 mt-1.5 flex flex-wrap items-center gap-0.5">
+            <MessagePopover
+              trigger={
+                <Button size="xs" variant="ghost" className={quiet} disabled={gitDisabled} title={gitReason}>
+                  {busy === "commit" ? <Spinner className="h-3.5 w-3.5" /> : <GitCommitHorizontal />}
+                  Commit
+                </Button>
+              }
+              title="Commit changes"
+              hint={agent.branch ? `On ${agent.branch}` : "In the agent's working tree"}
+              confirm="Commit"
+              defaultMessage={agent.title}
+              onConfirm={(m) => run("commit", m)}
+            />
+            {agent.worktree ? (
+              <MessagePopover
+                trigger={
+                  <Button size="xs" variant="ghost" className={quiet} disabled={gitDisabled} title={gitReason}>
+                    {busy === "ship" ? <Spinner className="h-3.5 w-3.5" /> : <GitMerge />}
+                    Commit & merge
+                  </Button>
+                }
+                title="Commit & merge"
+                hint={`Commits anything uncommitted, then merges ${agent.branch ?? "this branch"} into ${agent.baseBranch ?? "main"}.`}
+                confirm={`Merge into ${agent.baseBranch ?? "main"}`}
+                defaultMessage={agent.title}
+                onConfirm={(m) => run("ship", m)}
+              />
+            ) : (
+              <span className="px-2 text-meta text-steel">Not in a worktree</span>
+            )}
+            {agent.branch && (
+              <Button size="xs" variant="ghost" className={quiet} onClick={() => setReviewAgent(agent.id, null, "pr")}>
+                <GitPullRequest /> Open PR
+              </Button>
+            )}
+            <Button size="xs" variant="ghost" className={cn("-mr-2 ml-auto", quiet)} onClick={focusComposer}>
+              <MessageSquarePlus /> Continue
+            </Button>
+          </footer>
+        )}
+        <RevertFileDialog agent={agent} path={revertFile} onClose={() => setRevertFile(null)} />
+      </section>
+    );
+  }
   return (
     <section aria-label="Turn finished" className="border-t border-line/60 pt-3">
       <header className="flex flex-wrap items-center gap-x-2 gap-y-1">

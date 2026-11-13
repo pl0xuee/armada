@@ -8,6 +8,7 @@ import {
   CircleDot,
   Download,
   Gauge,
+  GitBranch,
   GitFork,
   Repeat,
   ChevronRight,
@@ -31,12 +32,22 @@ import { m, AnimatePresence } from "motion/react";
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
-import { archiveAgent, exportConversation, refreshProjects, renameAgent, resumeAgent, stopAgent } from "@/lib/actions";
+import {
+  archiveAgent,
+  attempt,
+  exportConversation,
+  refreshProjects,
+  renameAgent,
+  resumeAgent,
+  stopAgent,
+} from "@/lib/actions";
+import { api } from "@/lib/api";
 import {
   ARCHIVED_KEY,
+  groupByActivity,
   groupByProject,
   isBusy,
-  orderedAgents,
+  sidebarOrder,
   projectKey,
   type ProjectGroup,
 } from "@/lib/agents";
@@ -60,6 +71,7 @@ import { useBackgroundIds, useStatusView } from "@/store/background";
 import type { Account, Agent, ProjectLayout } from "@/lib/types";
 import { basename, cn, errorMessage, modKey } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
+import { useMinimal } from "@/hooks/useLook";
 import { toggleAgentList } from "@/hooks/useAgentListLayout";
 import { useNow } from "@/hooks/useNow";
 import { useApp } from "@/store/app";
@@ -125,6 +137,8 @@ function readDensity(): Density {
 }
 
 const NO_PROJECTS: never[] = [];
+/** Fold state of "Settled" (Minimal, by activity), kept with the projects' fold states. */
+const SETTLED_KEY = "kvistcode:settled";
 
 export type AgentListVariant = "docked" | "drawer" | "full";
 
@@ -161,6 +175,14 @@ export function AgentList({
   const { projects, archived } = useMemo(
     () => groupByProject(nesting ? nesting.roots : agents, query, background),
     [nesting, agents, query, background],
+  );
+  // Minimal lists agents by what is happening unless "By project" is chosen; Classic always lists by project.
+  const minimal = useMinimal();
+  const sidebarGroup = useUi((s) => s.sidebarGroup);
+  const flat = minimal && sidebarGroup === "activity";
+  const activity = useMemo(
+    () => (flat ? groupByActivity(nesting ? nesting.roots : agents, query, background, nesting?.children) : null),
+    [flat, nesting, agents, query, background],
   );
   const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   // Name the account on a row only for providers that have more than one, so it tells agents apart.
@@ -313,7 +335,10 @@ export function AgentList({
       const at = document.activeElement;
       // A bare "/" only: with Ctrl/⌘ it is another shortcut.
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === "/" && (at === document.body || (at instanceof HTMLElement && at.hasAttribute("data-timeline-scroll")))) {
+      if (
+        e.key === "/" &&
+        (at === document.body || (at instanceof HTMLElement && at.hasAttribute("data-timeline-scroll")))
+      ) {
         e.preventDefault();
         searchRef.current?.focus();
       }
@@ -323,24 +348,54 @@ export function AgentList({
   }, []);
 
   // ⌘1–9 targets come from the same ordering the shortcut uses (not the visible rows).
+  const order = useMemo(() => sidebarOrder(agents, layout, flat, background), [agents, layout, flat, background]);
   const hotkeys = useMemo(() => {
     const m = new Map<string, number>();
-    orderedAgents(agents, layout)
-      .slice(0, 9)
-      .forEach((a, i) => m.set(a.id, i + 1));
+    order.slice(0, 9).forEach((a, i) => m.set(a.id, i + 1));
     return m;
-  }, [agents, layout]);
+  }, [order]);
   // "Agent 2" to the voice assistant is the 2nd agent in this same order (it lists the first 25). Shown only
   // while it is on. It numbers projects from its own list (recent and found folders), which this list isn't.
   const vaOn = useVa((s) => isLive(s));
   const voiceNumbers = useMemo(() => {
     const m = new Map<string, number>();
-    if (vaOn)
-      orderedAgents(agents, layout)
-        .slice(0, 25)
-        .forEach((a, i) => m.set(a.id, i + 1));
+    if (vaOn) order.slice(0, 25).forEach((a, i) => m.set(a.id, i + 1));
     return m;
-  }, [agents, vaOn, layout]);
+  }, [order, vaOn]);
+
+  /** One agent and its helpers in the flat (by activity) list: each row names its project. */
+  const renderFlat = (a: Agent) => (
+    <Fragment key={a.id}>
+      <AgentRow
+        agent={a}
+        account={accountMap.get(a.accountId)}
+        showAccount={a.provider === "custom" || multiAccount.has(a.provider)}
+        selected={a.id === selected}
+        now={now}
+        hotkey={hotkeys.get(a.id) ?? null}
+        voiceNumber={voiceNumbers.get(a.id) ?? null}
+        density={density}
+        showProject
+        onNavigate={onNavigate}
+      />
+      {nesting?.children.get(a.id)?.map((h) => (
+        <AgentRow
+          key={h.id}
+          nested
+          agent={h}
+          account={accountMap.get(h.accountId)}
+          showAccount={h.provider === "custom" || multiAccount.has(h.provider)}
+          selected={h.id === selected}
+          now={now}
+          hotkey={hotkeys.get(h.id) ?? null}
+          voiceNumber={voiceNumbers.get(h.id) ?? null}
+          density={density}
+          onNavigate={onNavigate}
+        />
+      ))}
+    </Fragment>
+  );
+  const settledOpen = !collapsed[SETTLED_KEY] || searching;
 
   const renderProject = (p: ProjectGroup, section: string | null) => {
     const isCollapsed = collapsed[p.path] && !searching;
@@ -507,10 +562,11 @@ export function AgentList({
 
   return (
     <aside
-      aria-label="Projects"
+      aria-label={flat ? "Agents" : "Projects"}
       className={cn(
         "flex h-full flex-col bg-panel",
-        variant === "docked" && "w-[clamp(272px,24vw,304px)] shrink-0 border-r border-line",
+        // Minimal: the docked list is the app's sidebar, flat on the page.
+        variant === "docked" && "m-flat w-[clamp(272px,24vw,304px)] shrink-0 border-r border-line minimal:w-full",
         variant === "drawer" && "w-[min(320px,calc(100vw-72px))] border-r border-line-strong",
         variant === "full" && "min-w-0 flex-1",
       )}
@@ -534,9 +590,11 @@ export function AgentList({
             </Tooltip>
           )}
           <h2 className={cn("font-semibold tracking-tight", variant === "full" ? "text-[18px]" : "text-body")}>
-            Projects
+            {flat ? "Agents" : "Projects"}
           </h2>
-          <span className="rounded-md bg-raised px-1.5 text-micro font-medium text-steel tabular">{total}</span>
+          <span className="rounded-md bg-raised px-1.5 text-micro font-medium text-steel tabular">
+            {flat ? agents.filter((a) => !a.archived && !a.parentId).length : total}
+          </span>
           <Tooltip content="Refresh: find projects whose folder was renamed or moved">
             <Button
               size="icon-xs"
@@ -562,25 +620,50 @@ export function AgentList({
               </DropdownMenuTrigger>
             </Tooltip>
             <DropdownMenuContent align="end" className="min-w-[220px]" onCloseAutoFocus={closeAutoFocus}>
-              <DropdownMenuLabel>Order projects by</DropdownMenuLabel>
-              <DropdownMenuCheckItem
-                checked={!layout.customOrder}
-                onSelect={() => layout.customOrder && saveLayout({ ...layout, customOrder: false })}
-                description="Projects that need you, then the latest"
-              >
-                Recent activity
-              </DropdownMenuCheckItem>
-              <DropdownMenuCheckItem
-                checked={layout.customOrder}
-                onSelect={() => !layout.customOrder && saveLayout(withCustomOrder(layout, everything))}
-                description="Drag projects to arrange them"
-              >
-                Your order
-              </DropdownMenuCheckItem>
-              <DropdownMenuItem onSelect={() => newSection()}>
-                <FolderPlus /> New section
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
+              {minimal && (
+                <>
+                  <DropdownMenuLabel>Show agents</DropdownMenuLabel>
+                  <DropdownMenuCheckItem
+                    checked={flat}
+                    onSelect={() => useUi.getState().setSidebarGroup("activity")}
+                    description="What needs you and what is working, then the rest"
+                  >
+                    By activity
+                  </DropdownMenuCheckItem>
+                  <DropdownMenuCheckItem
+                    checked={!flat}
+                    onSelect={() => useUi.getState().setSidebarGroup("project")}
+                    description="Under their projects and your sections"
+                  >
+                    By project
+                  </DropdownMenuCheckItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              {/* Project order and sections only show in the list by project. */}
+              {!flat && (
+                <>
+                  <DropdownMenuLabel>Order projects by</DropdownMenuLabel>
+                  <DropdownMenuCheckItem
+                    checked={!layout.customOrder}
+                    onSelect={() => layout.customOrder && saveLayout({ ...layout, customOrder: false })}
+                    description="Projects that need you, then the latest"
+                  >
+                    Recent activity
+                  </DropdownMenuCheckItem>
+                  <DropdownMenuCheckItem
+                    checked={layout.customOrder}
+                    onSelect={() => !layout.customOrder && saveLayout(withCustomOrder(layout, everything))}
+                    description="Drag projects to arrange them"
+                  >
+                    Your order
+                  </DropdownMenuCheckItem>
+                  <DropdownMenuItem onSelect={() => newSection()}>
+                    <FolderPlus /> New section
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
               <DropdownMenuLabel>Row density</DropdownMenuLabel>
               <DropdownMenuCheckItem checked={density === "comfortable"} onSelect={() => chooseDensity("comfortable")}>
                 Comfortable
@@ -614,8 +697,8 @@ export function AgentList({
                   (e.target as HTMLInputElement).blur();
                 }
               }}
-              placeholder="Filter projects"
-              aria-label="Filter projects"
+              placeholder={flat ? "Filter agents" : "Filter projects"}
+              aria-label={flat ? "Filter agents" : "Filter projects"}
               spellCheck={false}
               className="h-8 w-full rounded-lg border border-line bg-base/50 pl-8 pr-8 text-small text-fg placeholder:text-steel transition-colors hover:border-line-strong focus:border-accent/50 focus:outline-none focus:ring-3 focus:ring-accent/10"
             />
@@ -659,8 +742,30 @@ export function AgentList({
               <span className="h-0.5 flex-1 rounded-full bg-accent" />
             </div>
           )}
-          <div data-drop-group="">
-            {(rowsReady ? arranged.loose : NO_PROJECTS).map((p) => renderProject(p, null))}
+          {flat && rowsReady && activity && (
+            <>
+              {activity.active.length > 0 && <ul className="mb-2 space-y-0.5">{activity.active.map(renderFlat)}</ul>}
+              {activity.settled.length > 0 && (
+                <div className="mb-1">
+                  <button
+                    type="button"
+                    onClick={() => toggle(SETTLED_KEY)}
+                    aria-expanded={settledOpen}
+                    className="flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 eyebrow text-steel transition-colors hover:text-muted"
+                  >
+                    <ChevronRight
+                      className={cn("h-3 w-3 transition-transform duration-150", settledOpen && "rotate-90")}
+                    />
+                    Settled
+                    <span className="font-medium tabular text-steel">{activity.settled.length}</span>
+                  </button>
+                  {settledOpen && <ul className="space-y-0.5">{activity.settled.map(renderFlat)}</ul>}
+                </div>
+              )}
+            </>
+          )}
+          <div data-drop-group="" hidden={flat}>
+            {(rowsReady && !flat ? arranged.loose : NO_PROJECTS).map((p) => renderProject(p, null))}
             {draggingProject && arranged.loose.length === 0 && (
               <DropZone highlight={drag?.target?.highlight === "group:"}>
                 Drop here to take it out of its section
@@ -668,6 +773,7 @@ export function AgentList({
             )}
           </div>
           {rowsReady &&
+            !flat &&
             shownSections.map(({ section, projects: list }) => {
               const key = `section:${section.id}`;
               const folded = !!collapsed[key] && !searching;
@@ -972,6 +1078,7 @@ const AgentRow = memo(function AgentRow({
   const identity = useIdentity(agent.provider, agent.customAgentId);
   const resumable = agent.status === "interrupted" || agent.status === "stopped";
   const compact = density === "compact";
+  const minimal = useMinimal();
 
   const inputRef = useRef<HTMLInputElement>(null);
   /** Always start from the current title (it may have changed since the row mounted). */
@@ -1030,6 +1137,118 @@ const AgentRow = memo(function AgentRow({
         "aria-label": `${agent.title}, ${status.label}`,
       };
 
+  // The title, or its field while renaming.
+  const titleEl = (
+    <>
+      {renaming ? (
+        <input
+          ref={inputRef}
+          value={title}
+          aria-label="Agent title"
+          onChange={(e) => setTitle(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          onBlur={() => void commitRename()}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void commitRename();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancelRename();
+            }
+          }}
+          className="h-5 min-w-0 flex-1 rounded border border-accent/50 bg-base px-1 text-body focus:outline-none"
+        />
+      ) : (
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate text-body",
+            agent.unread ? "font-semibold text-fg" : "font-medium text-fg/90",
+          )}
+        >
+          {agent.title}
+        </span>
+      )}
+    </>
+  );
+  // Helper and unread marks.
+  const marksEl = (
+    <>
+      {agent.parentId && (
+        <Tooltip content="Helper agent" side="right">
+          <span className="flex shrink-0 items-center text-accent" aria-label="Helper agent">
+            <GitFork className="h-3 w-3" />
+          </span>
+        </Tooltip>
+      )}
+      {agent.unread && !selected && (
+        <span
+          className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]"
+          aria-label="Unread"
+        />
+      )}
+    </>
+  );
+  // Its shortcut and its number for the voice assistant.
+  const hintsEl = (
+    <>
+      {hotkey !== null && (
+        <span aria-hidden className="hidden text-micro text-steel group-hover:inline">
+          {modKey}
+          {hotkey}
+        </span>
+      )}
+      {voiceNumber !== null && (
+        <Tooltip content={`Say "agent ${voiceNumber}" to the voice assistant`} side="right">
+          <span className="tabular rounded border border-line px-1 text-micro leading-[14px] text-steel/80">
+            {voiceNumber}
+          </span>
+        </Tooltip>
+      )}
+    </>
+  );
+  // When it was last active.
+  const timeEl = (
+    <>
+      <span className="sr-only">Last active </span>
+      <Tooltip
+        content={`${relativeTimeLong(agent.lastActivityAt, now)} · ${new Date(agent.lastActivityAt).toLocaleString()}`}
+        side="right"
+      >
+        <time dateTime={new Date(agent.lastActivityAt).toISOString()} className="tabular">
+          {relativeTime(agent.lastActivityAt, now)}
+        </time>
+      </Tooltip>
+    </>
+  );
+  // Rate limit, schedule, helper sync, sub-agents and pull request.
+  const indicatorsEl = (
+    <>
+      {agent.rateLimited && (
+        <Tooltip content="Hit its rate limit" side="right">
+          <span className="flex min-w-0 items-center gap-1 text-warn" aria-label="Rate limit reached">
+            <Gauge className="h-3 w-3 shrink-0" />
+            <span className="truncate text-micro">
+              <ResumesAt agent={agent} />
+            </span>
+          </span>
+        </Tooltip>
+      )}
+      {agent.scheduleId && (
+        <Tooltip content="Started by a schedule" side="right">
+          <span className="flex items-center text-steel" aria-label="Scheduled">
+            <CalendarClock className="h-3 w-3" />
+          </span>
+        </Tooltip>
+      )}
+      {agent.helperSync && <SyncHint sync={agent.helperSync} />}
+      <SubagentBadge agentId={agent.id} />
+      <PrIndicator agentId={agent.id} />
+    </>
+  );
+
   return (
     <li className={nested ? "relative ml-[22px] border-l border-line pl-1" : undefined}>
       <ContextMenu>
@@ -1040,8 +1259,9 @@ const AgentRow = memo(function AgentRow({
               if (!renaming) open();
             }}
             className={cn(
-              "group relative rounded-lg transition-colors duration-100",
-              selected ? "bg-accent/[0.11]" : "hover:bg-raised/60",
+              "group relative rounded-lg transition-colors duration-100 minimal:rounded-xl",
+              // Minimal: the open agent's row lifts off the sidebar.
+              selected ? "bg-accent/[0.11] minimal:m-raised-flat" : "hover:bg-raised/60",
               "has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1.5px_color-mix(in_srgb,var(--accent)_70%,transparent)]",
             )}
           >
@@ -1049,7 +1269,7 @@ const AgentRow = memo(function AgentRow({
               <m.span
                 layoutId="agent-row-active"
                 transition={{ type: "spring", stiffness: 600, damping: 42 }}
-                className="absolute -left-1.5 top-2.5 h-[22px] w-[3px] rounded-full bg-accent"
+                className="absolute -left-1.5 top-2.5 h-[22px] w-[3px] rounded-full bg-accent minimal:top-3 minimal:m-glow"
               />
             )}
             <div
@@ -1064,146 +1284,121 @@ const AgentRow = memo(function AgentRow({
                 if (e.key === "F2") startRename();
               }}
               className={cn(
-                "flex gap-2.5 rounded-lg px-2 outline-none",
+                "flex gap-2.5 rounded-lg px-2 outline-none minimal:px-2.5",
                 // The Resume button below takes the bottom padding of a row that has one.
                 resumable ? (compact ? "pt-1.5" : "pt-2") : compact ? "py-1.5" : "py-2",
               )}
             >
-              <div className="relative mt-0.5 self-start">
-                <ProviderGlyph
-                  provider={agent.provider}
-                  customAgentId={agent.customAgentId}
-                  size={nested ? "sm" : "md"}
-                />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  {renaming ? (
-                    <input
-                      ref={inputRef}
-                      value={title}
-                      aria-label="Agent title"
-                      onChange={(e) => setTitle(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      onBlur={() => void commitRename()}
-                      onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          void commitRename();
-                        } else if (e.key === "Escape") {
-                          e.preventDefault();
-                          cancelRename();
-                        }
+              {minimal ? (
+                // Three lines: where and what state, the title, then the branch and who runs it.
+                <div className="min-w-0 flex-1">
+                  <div className="flex h-4 min-w-0 items-center gap-1.5 whitespace-nowrap text-micro text-steel">
+                    {showProject && (
+                      <span className="max-w-[45%] shrink-0 truncate font-medium text-muted">
+                        {basename(agent.projectPath)}
+                      </span>
+                    )}
+                    <StatusDot status={view.dot} size={6} done={done} />
+                    <span
+                      className="min-w-0 truncate"
+                      title={view.detail ?? undefined}
+                      style={{
+                        color:
+                          !done && !view.background && (agent.status === "idle" || agent.status === "stopped")
+                            ? undefined
+                            : status.colorVar,
                       }}
-                      className="h-5 min-w-0 flex-1 rounded border border-accent/50 bg-base px-1 text-body focus:outline-none"
-                    />
-                  ) : (
-                    <span
-                      className={cn(
-                        "min-w-0 flex-1 truncate text-body",
-                        agent.unread ? "font-semibold text-fg" : "font-medium text-fg/90",
-                      )}
                     >
-                      {agent.title}
+                      {status.label}
                     </span>
+                    <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-1">
+                      {hintsEl}
+                      {timeEl}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-center gap-1.5">
+                    {titleEl}
+                    {marksEl}
+                  </div>
+                  {/* Compact rows stop at the title. */}
+                  {!compact && (
+                    <div className="mt-1 flex h-4 min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-micro text-steel">
+                      <ProviderGlyph provider={agent.provider} customAgentId={agent.customAgentId} size="xs" />
+                      {!nested && agent.branch && (
+                        <span className="flex min-w-0 items-center gap-1">
+                          <GitBranch className="h-3 w-3 shrink-0" />
+                          <span className="truncate font-mono">{agent.branch}</span>
+                        </span>
+                      )}
+                      {indicatorsEl}
+                      {showAccount && (
+                        <span className="ml-auto min-w-0 shrink-[2] truncate pl-1">
+                          {agent.provider === "custom" ? identity.name : (account?.name ?? "—")}
+                        </span>
+                      )}
+                    </div>
                   )}
-                  {agent.parentId && (
-                    <Tooltip content="Helper agent" side="right">
-                      <span className="flex shrink-0 items-center text-accent" aria-label="Helper agent">
-                        <GitFork className="h-3 w-3" />
-                      </span>
-                    </Tooltip>
-                  )}
-                  {agent.unread && !selected && (
-                    <span
-                      className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]"
-                      aria-label="Unread"
+                </div>
+              ) : (
+                <>
+                  <div className="relative mt-0.5 self-start">
+                    <ProviderGlyph
+                      provider={agent.provider}
+                      customAgentId={agent.customAgentId}
+                      size={nested ? "sm" : "md"}
                     />
-                  )}
-                  <span className="flex shrink-0 items-center gap-1.5 text-micro text-steel">
-                    {hotkey !== null && (
-                      <span aria-hidden className="hidden text-micro text-steel group-hover:inline">
-                        {modKey}
-                        {hotkey}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      {titleEl}
+                      {marksEl}
+                      <span className="flex shrink-0 items-center gap-1.5 text-micro text-steel">
+                        {hintsEl}
+                        {timeEl}
                       </span>
-                    )}
-                    {voiceNumber !== null && (
-                      <Tooltip content={`Say "agent ${voiceNumber}" to the voice assistant`} side="right">
-                        <span className="tabular rounded border border-line px-1 text-micro leading-[14px] text-steel/80">
-                          {voiceNumber}
-                        </span>
-                      </Tooltip>
-                    )}
-                    <span className="sr-only">Last active </span>
-                    <Tooltip
-                      content={`${relativeTimeLong(agent.lastActivityAt, now)} · ${new Date(agent.lastActivityAt).toLocaleString()}`}
-                      side="right"
-                    >
-                      <time dateTime={new Date(agent.lastActivityAt).toISOString()} className="tabular">
-                        {relativeTime(agent.lastActivityAt, now)}
-                      </time>
-                    </Tooltip>
-                  </span>
-                </div>
-                <div className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-meta text-steel">
-                  <StatusDot status={view.dot} size={6} done={done} />
-                  {/* May shrink (and end in …) when the label is long, e.g. "1 background agent may be running". */}
-                  <span
-                    className="min-w-0 truncate"
-                    title={view.detail ?? undefined}
-                    style={{
-                      color:
-                        !done && !view.background && (agent.status === "idle" || agent.status === "stopped")
-                          ? undefined
-                          : status.colorVar,
-                    }}
-                  >
-                    {status.label}
-                  </span>
-                  {agent.rateLimited && (
-                    <Tooltip content="Hit its rate limit" side="right">
-                      <span className="flex min-w-0 items-center gap-1 text-warn" aria-label="Rate limit reached">
-                        <Gauge className="h-3 w-3 shrink-0" />
-                        <span className="truncate text-micro">
-                          <ResumesAt agent={agent} />
-                        </span>
+                    </div>
+                    <div className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-meta text-steel">
+                      <StatusDot status={view.dot} size={6} done={done} />
+                      {/* May shrink (and end in …) when the label is long, e.g. "1 background agent may be running". */}
+                      <span
+                        className="min-w-0 truncate"
+                        title={view.detail ?? undefined}
+                        style={{
+                          color:
+                            !done && !view.background && (agent.status === "idle" || agent.status === "stopped")
+                              ? undefined
+                              : status.colorVar,
+                        }}
+                      >
+                        {status.label}
                       </span>
-                    </Tooltip>
-                  )}
-                  {agent.scheduleId && (
-                    <Tooltip content="Started by a schedule" side="right">
-                      <span className="flex items-center text-steel" aria-label="Scheduled">
-                        <CalendarClock className="h-3 w-3" />
-                      </span>
-                    </Tooltip>
-                  )}
-                  {agent.helperSync && <SyncHint sync={agent.helperSync} />}
-                  <SubagentBadge agentId={agent.id} />
-                  <PrIndicator agentId={agent.id} />
-                  {(showAccount || showProject) && (
-                    <>
-                      <span className="text-line-strong">·</span>
-                      <span className="truncate">
-                        {showAccount && (agent.provider === "custom" ? identity.name : (account?.name ?? "—"))}
-                        {showAccount && showProject && " · "}
-                        {showProject && basename(agent.projectPath)}
-                      </span>
-                    </>
-                  )}
-                </div>
-                {agent.lastMessage &&
-                  !nested &&
-                  density === "comfortable" &&
-                  (selected || agent.status === "needs_permission") && (
-                    <p className="mt-1 line-clamp-1 text-caption leading-snug text-muted">{agent.lastMessage}</p>
-                  )}
-              </div>
+                      {indicatorsEl}
+                      {(showAccount || showProject) && (
+                        <>
+                          <span className="text-line-strong">·</span>
+                          <span className="truncate">
+                            {showAccount && (agent.provider === "custom" ? identity.name : (account?.name ?? "—"))}
+                            {showAccount && showProject && " · "}
+                            {showProject && basename(agent.projectPath)}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    {agent.lastMessage &&
+                      !nested &&
+                      density === "comfortable" &&
+                      (selected || agent.status === "needs_permission") && (
+                        <p className="mt-1 line-clamp-1 text-caption leading-snug text-muted">{agent.lastMessage}</p>
+                      )}
+                  </div>
+                </>
+              )}
             </div>
             {resumable && (
               // Lined up with the text above (row padding + glyph + gap).
-              <div className={cn("pt-1.5", compact ? "pb-1.5" : "pb-2", nested ? "pl-[38px]" : "pl-[44px]")}>
+              <div
+                className={cn("pt-1.5 minimal:pl-2.5", compact ? "pb-1.5" : "pb-2", nested ? "pl-[38px]" : "pl-[44px]")}
+              >
                 <button
                   type="button"
                   onClick={(e) => {
@@ -1227,6 +1422,7 @@ const AgentRow = memo(function AgentRow({
           <ContextMenuItem onSelect={startRename} shortcut="F2">
             <Pencil /> Rename
           </ContextMenuItem>
+          <ContextMenuSeparator />
           {resumable ? (
             <ContextMenuItem onSelect={() => void resumeAgent(agent)}>
               <Play /> Resume
@@ -1248,6 +1444,10 @@ const AgentRow = memo(function AgentRow({
               <Repeat /> Move to another account…
             </ContextMenuItem>
           )}
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => void attempt("Couldn't open the folder", () => api.openPath(agent.cwd))}>
+            <FolderOpen /> Open folder
+          </ContextMenuItem>
           <ContextMenuItem onSelect={() => void exportConversation(agent)}>
             <Download /> Export conversation…
           </ContextMenuItem>

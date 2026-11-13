@@ -11,6 +11,7 @@ import { Fleet } from "./screens/Fleet";
 import { Inbox } from "./screens/Inbox";
 import { NewAgent } from "./screens/NewAgent";
 import { Review } from "./screens/Review";
+import { Usage } from "./screens/Usage";
 import { Blocked, Boot, Pairing } from "./screens/Pairing";
 
 export function App() {
@@ -102,6 +103,12 @@ function Screen({ route, viewerAgent }: { route: ReturnType<typeof useRoute>; vi
       return (
         <div key="inbox" className="animate-enter-right">
           <Inbox />
+        </div>
+      );
+    case "usage":
+      return (
+        <div key="usage" className="animate-enter-right">
+          <Usage />
         </div>
       );
     default:

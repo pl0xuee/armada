@@ -10,10 +10,11 @@ use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use kvistcode_core::budget::BudgetChoice;
+use kvistcode_core::redact::redact_secrets;
 use kvistcode_core::workflow::{WorkflowAgentStatus, WorkflowProgress, WorkflowState};
 use kvistcode_core::{
-    now_ms, AgentStatus, ItemBody, KvistcodeEvent, ResponseStyle, SearchResults, SubAgent,
-    TimelineItem,
+    now_ms, Account, AgentStatus, ItemBody, KvistcodeEvent, ResponseStyle, SearchResults, SubAgent,
+    TimelineItem, UsageWindow,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -97,6 +98,81 @@ fn pr_view(status: &PrStatus) -> Value {
         "pr": pr,
         "fetchedAt": status.fetched_at,
     })
+}
+
+/// An account as the phone gets it: its name, plan and sign-in state, and the usage windows
+/// the provider last reported (5-hour, weekly, ...). Never the config folder, the e-mail
+/// address or a local server's address, and no key or token (the core doesn't hold them
+/// on an account either).
+pub(super) fn account_view(a: &Account) -> Value {
+    let status = a.status.as_ref();
+    let window = |w: &Option<UsageWindow>| {
+        w.as_ref().map(|w| {
+            json!({
+                "usedPercent": w.used_percent,
+                "windowMins": w.window_mins,
+                "resetsAt": w.resets_at,
+            })
+        })
+    };
+    let usage = a.usage.as_ref().map(|u| {
+        json!({
+            "primary": window(&u.primary),
+            "secondary": window(&u.secondary),
+            "fable": window(&u.fable),
+            "plan": u.plan,
+            "updatedAt": u.updated_at,
+        })
+    });
+    json!({
+        "id": a.id,
+        "name": a.name,
+        "provider": a.provider,
+        "color": a.color,
+        // Lets the phone say a subscription's cost is API-equivalent, not a bill.
+        "authKind": a.auth_kind,
+        "label": status.and_then(|s| s.label.clone()),
+        "plan": status.and_then(|s| s.plan.clone()),
+        "loggedIn": status.map(|s| s.logged_in),
+        "error": status
+            .and_then(|s| s.error.as_deref())
+            .map(|e| redact_secrets(e).into_owned()),
+        "usage": usage,
+    })
+}
+
+/// The live `account_updated` event as the phone gets it: `account_view`, plus the sign-in
+/// state again under `status`, the shape phones from before 0.5 read from this event.
+pub(super) fn account_event(a: &Account) -> Value {
+    let mut v = account_view(a);
+    let status = a.status.as_ref().map(|_| {
+        json!({
+            "label": v["label"],
+            "plan": v["plan"],
+            "loggedIn": v["loggedIn"],
+            "error": v["error"],
+        })
+    });
+    v["status"] = status.unwrap_or(Value::Null);
+    json!({ "type": "account_updated", "account": v })
+}
+
+/// The phone's Usage screen: every account with its usage windows, and today against the
+/// daily limits. All of it is what the core already holds in memory (providers report
+/// their windows while agents run), so asking again costs no provider call.
+pub(super) async fn usage(
+    State(c): State<Ctx>,
+    ConnectInfo(peer): Peer,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    owner(&c.auth(&peer, &headers)?)?;
+    let core = c.remote.core();
+    let accounts: Vec<Value> = core.accounts()?.iter().map(account_view).collect();
+    Ok(Json(json!({
+        "accounts": accounts,
+        "budget": core.budget_status(),
+        "at": now_ms(),
+    })))
 }
 
 /// Workflow runs older than this are not looked at (their run is long over): the desktop's
@@ -889,5 +965,268 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(v, json!({ "workflows": 2, "working": 3, "total": 5 }));
+    }
+
+    /// An account with everything set, including what must never reach a phone.
+    fn full_account() -> kvistcode_core::Account {
+        let window = |used: f64, mins: i64| {
+            Some(UsageWindow {
+                used_percent: used,
+                window_mins: Some(mins),
+                resets_at: Some(1_800_000_000_000),
+            })
+        };
+        kvistcode_core::Account {
+            id: "acc-1".into(),
+            provider: kvistcode_core::Provider::Claude,
+            name: "Work".into(),
+            color: "#4FC3F7".into(),
+            auth_kind: kvistcode_core::AuthKind::Oauth,
+            is_system: false,
+            config_dir: Some("/home/someone/.kvistcode/profiles/work".into()),
+            created_at: 1,
+            status: Some(kvistcode_core::AccountStatus {
+                logged_in: true,
+                label: Some("Claude Max".into()),
+                email: Some("someone@example.com".into()),
+                plan: Some("max".into()),
+                checked_at: 2,
+                error: Some("Sign-in failed: Authorization: Bearer abcdef0123456789abcdef".into()),
+            }),
+            usage: Some(kvistcode_core::AccountUsage {
+                primary: window(42.5, 300),
+                secondary: window(71.0, 10_080),
+                fable: None,
+                plan: Some("max".into()),
+                updated_at: 3,
+            }),
+            local: Some(kvistcode_core::LocalServer {
+                kind: kvistcode_core::LocalKind::Custom,
+                base_url: "http://gpu-box.internal:8000/v1".into(),
+            }),
+        }
+    }
+
+    #[test]
+    fn an_account_goes_to_the_phone_with_its_usage_and_nothing_private() {
+        let v = account_view(&full_account());
+        assert_eq!(v["id"], "acc-1");
+        assert_eq!(v["name"], "Work");
+        assert_eq!(v["provider"], "claude");
+        assert_eq!(v["authKind"], "oauth");
+        assert_eq!(v["label"], "Claude Max");
+        assert_eq!(v["plan"], "max");
+        assert_eq!(v["loggedIn"], true);
+        assert_eq!(
+            v["usage"],
+            json!({
+                "primary": { "usedPercent": 42.5, "windowMins": 300, "resetsAt": 1_800_000_000_000_i64 },
+                "secondary": { "usedPercent": 71.0, "windowMins": 10_080, "resetsAt": 1_800_000_000_000_i64 },
+                "fable": null,
+                "plan": "max",
+                "updatedAt": 3,
+            })
+        );
+        // Exactly these fields: a field added to `Account` later is not sent by accident.
+        let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "authKind", "color", "error", "id", "label", "loggedIn", "name", "plan",
+                "provider", "usage"
+            ]
+        );
+        let text = v.to_string();
+        for private in [
+            "someone@example.com",
+            "/home/someone",
+            "gpu-box",
+            "abcdef0123456789abcdef",
+        ] {
+            assert!(!text.contains(private), "{private} leaked: {text}");
+        }
+        assert!(v["error"].as_str().unwrap().starts_with("Sign-in failed"));
+
+        // Not checked yet, nothing reported: unknown sign-in, no usage.
+        let mut bare = full_account();
+        bare.status = None;
+        bare.usage = None;
+        let v = account_view(&bare);
+        assert!(v["loggedIn"].is_null());
+        assert!(v["usage"].is_null());
+        assert!(v["plan"].is_null());
+    }
+
+    #[test]
+    fn the_live_account_event_carries_nothing_private_either() {
+        let v = account_event(&full_account());
+        assert_eq!(v["type"], "account_updated");
+        // Same shape as the core's event, so older phones still read the sign-in state.
+        assert_eq!(v["account"]["status"]["label"], "Claude Max");
+        assert_eq!(v["account"]["status"]["loggedIn"], true);
+        assert_eq!(v["account"]["usage"]["primary"]["usedPercent"], 42.5);
+        let text = v.to_string();
+        for private in [
+            "someone@example.com",
+            "/home/someone",
+            "gpu-box",
+            "abcdef0123456789abcdef",
+        ] {
+            assert!(!text.contains(private), "{private} leaked: {text}");
+        }
+        assert_eq!(
+            serde_json::to_value(kvistcode_core::KvistcodeEvent::AccountUpdated {
+                account: full_account()
+            })
+            .unwrap()["type"],
+            v["type"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn usage_is_owner_only_and_reads_what_the_desktop_holds() {
+        let rig = rig().await;
+        let owner = rig.owner.clone();
+        assert_eq!(rig.call("GET", "/api/usage", None, None).await.0, 401);
+        assert_eq!(
+            rig.call("GET", "/api/usage", Some("not-a-token"), None)
+                .await
+                .0,
+            401
+        );
+        let held = rig.held_agent("COST one").await;
+        let viewer = rig.viewer(&held.id);
+        assert_eq!(
+            rig.call("GET", "/api/usage", Some(&viewer), None).await.0,
+            403
+        );
+
+        let mut settings = rig.core.settings().unwrap();
+        settings.daily_budget_usd = Some(20.0);
+        rig.core.save_settings(settings).unwrap();
+        let (code, body) = rig.call("GET", "/api/usage", Some(&owner), None).await;
+        assert_eq!(code, 200, "{body}");
+        let v: Value = serde_json::from_str(&body).unwrap();
+        let known = rig.core.accounts().unwrap();
+        let accounts = v["accounts"].as_array().unwrap();
+        assert_eq!(accounts.len(), known.len());
+        for (sent, account) in accounts.iter().zip(&known) {
+            assert_eq!(sent["id"], account.id.as_str());
+            assert_eq!(sent["name"], account.name.as_str());
+            let sent = sent.as_object().unwrap();
+            assert!(sent.contains_key("usage") && sent.contains_key("loggedIn"));
+            for private in ["configDir", "status", "email", "local", "isSystem"] {
+                assert!(!sent.contains_key(private), "{private} was sent");
+            }
+        }
+        // The held agent's turn cost $0.50, counted toward today.
+        assert_eq!(v["budget"]["dailyBudgetUsd"], 20.0);
+        assert!(v["budget"]["todayUsd"].as_f64().unwrap() >= 0.5, "{body}");
+        assert!(v["budget"]["day"].is_string() && v["budget"]["level"].is_string());
+        assert!(v["at"].as_i64().unwrap() > 0);
+        for account in &known {
+            if let Some(dir) = account.config_dir.as_deref().filter(|d| !d.is_empty()) {
+                assert!(!body.contains(dir), "a config folder was sent");
+            }
+        }
+        // The token that asked is not echoed back either.
+        assert!(!body.contains(&owner));
+        rig.finish().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_state_carries_the_layout_and_usage_for_the_owner_only() {
+        let rig = rig().await;
+        let owner = rig.owner.clone();
+        assert_eq!(rig.call("GET", "/api/state", None, None).await.0, 401);
+        // Settings that never had a layout: no sections, automatic order.
+        let (code, body) = rig.call("GET", "/api/state", Some(&owner), None).await;
+        assert_eq!(code, 200, "{body}");
+        let v: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            v["projectLayout"],
+            json!({ "customOrder": false, "order": [], "sections": [] })
+        );
+        assert!(v["budget"]["todayUsd"].is_number());
+        assert!(v["accounts"][0].as_object().unwrap().contains_key("usage"));
+
+        rig.core
+            .update_settings(|s| {
+                s.project_layout = kvistcode_core::ProjectLayout {
+                    custom_order: true,
+                    order: vec!["/code/loose".into()],
+                    sections: vec![kvistcode_core::ProjectSection {
+                        id: "s1".into(),
+                        name: "Client work".into(),
+                        projects: vec!["/code/a".into(), "/code/b".into()],
+                    }],
+                };
+            })
+            .unwrap();
+        let (_, body) = rig.call("GET", "/api/state", Some(&owner), None).await;
+        let v: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            v["projectLayout"],
+            json!({
+                "customOrder": true,
+                "order": ["/code/loose"],
+                "sections": [{ "id": "s1", "name": "Client work", "projects": ["/code/a", "/code/b"] }],
+            })
+        );
+
+        // A share link learns no folders, accounts or spend.
+        let held = rig.held_agent("COST one").await;
+        let viewer = rig.viewer(&held.id);
+        let (code, body) = rig.call("GET", "/api/state", Some(&viewer), None).await;
+        assert_eq!(code, 200, "{body}");
+        let v: Value = serde_json::from_str(&body).unwrap();
+        assert!(v["projectLayout"].is_null(), "{body}");
+        assert!(v["budget"].is_null(), "{body}");
+        assert!(v["accounts"].as_array().unwrap().is_empty());
+        assert!(!body.contains("Client work") && !body.contains("/code/a"));
+        rig.finish().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_changed_layout_is_pushed_to_paired_phones_once() {
+        let rig = rig().await;
+        let port: u16 = rig.base.rsplit(':').next().unwrap().parse().unwrap();
+        let running = RemoteSettings {
+            enabled: true,
+            lan: false,
+            port,
+            ..Default::default()
+        };
+        let mut stream = rig.remote.events.subscribe();
+        // A settings save that leaves the layout alone says nothing.
+        rig.remote.apply(&running).await;
+        assert!(stream.try_recv().is_err());
+
+        rig.core
+            .update_settings(|s| {
+                s.project_layout.sections = vec![kvistcode_core::ProjectSection {
+                    id: "s1".into(),
+                    name: "Client work".into(),
+                    projects: vec!["/code/a".into()],
+                }];
+            })
+            .unwrap();
+        rig.remote.apply(&running).await;
+        let event = stream.try_recv().expect("the layout change is published");
+        // Owner-only: it is about no agent, so a share link's stream skips it.
+        assert!(event.agent_id.is_none());
+        let v: Value = serde_json::from_str(&event.json).unwrap();
+        assert_eq!(v["type"], "project_layout");
+        assert_eq!(v["projectLayout"]["sections"][0]["name"], "Client work");
+        assert_eq!(v["projectLayout"]["customOrder"], false);
+        // Saving again without a change is quiet, and the server kept running throughout.
+        rig.remote.apply(&running).await;
+        assert!(stream.try_recv().is_err());
+        assert!(rig.remote.status().running);
+        rig.finish().await;
     }
 }

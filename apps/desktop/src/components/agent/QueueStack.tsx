@@ -121,7 +121,7 @@ export function QueueStack({
     >
       <div
         className={cn(
-          "flex h-8 items-center gap-2 px-3 text-meta",
+          "flex h-8 items-center gap-2 px-3 text-meta minimal:h-[30px] minimal:text-small",
           expanded && "border-b",
           paused ? "border-warn/20 bg-warn/[0.07] text-warn" : "border-line text-muted",
         )}

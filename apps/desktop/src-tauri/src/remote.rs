@@ -47,8 +47,8 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use futures_util::stream::Stream;
 use kvistcode_core::{
-    now_ms, Agent, Attachment, BusySend, Core, CreateAgentRequest, KvistcodeEvent, Provider,
-    RemoteSettings,
+    now_ms, Agent, Attachment, BusySend, Core, CreateAgentRequest, KvistcodeEvent, ProjectLayout,
+    Provider, RemoteSettings,
 };
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -521,6 +521,8 @@ pub struct Remote {
     /// Idempotency-Key → result (None while in flight), so a phone retrying after a
     /// timeout doesn't start a second agent or send a prompt twice.
     idempotency: Mutex<HashMap<String, (Instant, Option<IdemResult>)>>,
+    /// The sidebar layout phones were last told about (None until the first settings pass).
+    layout_seen: Mutex<Option<ProjectLayout>>,
 }
 
 /// A finished request's status and JSON body.
@@ -861,6 +863,7 @@ impl Remote {
             limiter: ConnLimiter::standard(),
             streams: Arc::new(Mutex::new(HashMap::new())),
             idempotency: Mutex::new(HashMap::new()),
+            layout_seen: Mutex::new(None),
         });
         if let Some(problem) = remote.tokens_problem.lock().as_deref() {
             warn!("{problem}");
@@ -933,6 +936,10 @@ impl Remote {
                     self.core.hydrate_pictures(std::slice::from_mut(&mut item));
                     serde_json::to_string(&KvistcodeEvent::ItemUpserted { item })
                 }
+                // Not the whole account: no e-mail, config folder or local server address.
+                KvistcodeEvent::AccountUpdated { account } => {
+                    Ok(phone::account_event(account).to_string())
+                }
                 _ => serde_json::to_string(event),
             };
             if let Ok(json) = json {
@@ -956,6 +963,25 @@ impl Remote {
                 }));
             }
         }
+    }
+
+    /// Tells paired phones when the sidebar's sections or project order changed, so their
+    /// agent list follows the desktop without a reload. Owner-only: it lists project folders.
+    fn publish_layout(&self) {
+        let Ok(layout) = self.core.settings().map(|s| s.project_layout) else {
+            return;
+        };
+        let before = self.layout_seen.lock().replace(layout.clone());
+        // The first pass only records it: a phone reads the layout with its state.
+        if before.is_none_or(|b| b == layout) || self.events.receiver_count() == 0 {
+            return;
+        }
+        let json = json!({ "type": "project_layout", "projectLayout": layout }).to_string();
+        let _ = self.events.send(Arc::new(Published {
+            agent_id: None,
+            kind: PublishedKind::Other,
+            json,
+        }));
     }
 
     /// Whether a paired device (not just a share link) has a live event stream open.
@@ -1288,6 +1314,8 @@ impl Remote {
         if self.is_shutting_down() {
             return;
         }
+        // Every settings save comes through here, so this is where a changed layout is seen.
+        self.publish_layout();
         *self.wanted.lock() = settings.enabled.then(|| settings.clone());
         let unchanged = self.running.lock().as_ref().is_some_and(|r| {
             r.settings.lan == settings.lan
@@ -1557,6 +1585,7 @@ impl Remote {
             .route("/api/agents/{id}/budget", post(phone::budget_resolve))
             .route("/api/agents/{id}/pr", get(phone::pr))
             .route("/api/background", get(phone::background))
+            .route("/api/usage", get(phone::usage))
             .route("/api/search", get(phone::search))
             .route("/api/response-style", post(phone::set_response_style))
             .route("/api/permissions", get(permissions))
@@ -2144,8 +2173,8 @@ async fn manifest() -> impl IntoResponse {
             "short_name": "Kvistcode",
             "start_url": "/",
             "display": "standalone",
-            "background_color": "#0B0D10",
-            "theme_color": "#0B0D10",
+            "background_color": "#0E1114",
+            "theme_color": "#0E1114",
             "icons": [
                 { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
                 { "src": "/icon.png", "sizes": "256x256", "type": "image/png" },
@@ -2294,22 +2323,7 @@ async fn state(
         })
         .collect();
     let accounts: Vec<Value> = if scope == Scope::Owner {
-        core.accounts()?
-            .into_iter()
-            .map(|a| {
-                json!({
-                    "id": a.id,
-                    "name": a.name,
-                    "provider": a.provider,
-                    "color": a.color,
-                    // Lets the phone say a subscription's cost is API-equivalent, not a bill.
-                    "authKind": a.auth_kind,
-                    "label": a.status.as_ref().and_then(|s| s.label.clone()),
-                    "loggedIn": a.status.as_ref().map(|s| s.logged_in),
-                    "error": a.status.and_then(|s| s.error),
-                })
-            })
-            .collect()
+        core.accounts()?.iter().map(phone::account_view).collect()
     } else {
         Vec::new()
     };
@@ -2361,9 +2375,17 @@ async fn state(
         .transpose()?;
     // The model Claude's general-purpose helpers run on (null: the agent's own), for sub-agent chips.
     let saver = core.settings()?.token_saver;
+    // The desktop sidebar's sections and project order, so the phone lists agents the same way.
+    let layout = (scope == Scope::Owner)
+        .then(|| core.settings().map(|s| s.project_layout))
+        .transpose()?;
+    // Today against the daily limits (kept in memory by the core; nothing is asked of a provider).
+    let budget = (scope == Scope::Owner).then(|| core.budget_status());
     Ok(Json(json!({
         "agents": agents,
         "accounts": accounts,
+        "projectLayout": layout,
+        "budget": budget,
         "customAgents": custom_agents,
         "projects": projects,
         "templates": templates,

@@ -103,7 +103,7 @@ export const SubagentCard = memo(function SubagentCard({
     <section
       aria-label={`Sub-agent: ${description}`}
       className={cn("overflow-hidden rounded-2xl border bg-panel edge", depth > 0 && "rounded-xl")}
-      style={{ borderColor: `color-mix(in srgb, ${color} ${running ? 38 : 18}%, var(--border))` }}
+      style={{ borderColor: running ? `color-mix(in srgb, ${color} 26%, var(--border))` : "var(--border)" }}
     >
       <button
         type="button"

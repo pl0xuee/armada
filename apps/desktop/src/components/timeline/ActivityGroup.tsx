@@ -1,11 +1,12 @@
-import { ChevronRight, CircleCheck, CircleX } from "lucide-react";
+import { Brain, Check, ChevronRight, CircleCheck, CircleX, Wrench } from "lucide-react";
 import { m, AnimatePresence } from "motion/react";
 import { memo, useId } from "react";
 import type { Agent, TimelineItem } from "@/lib/types";
 import { pluralize } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useMinimal } from "@/hooks/useLook";
 import { Spinner } from "../ui/misc";
-import { AgentMessage, ThoughtBlock, ToolCallCard } from "./items";
+import { AgentMessage, ThoughtBlock, ToolCallCard, TOOL_ICON } from "./items";
 
 type ToolItem = Extract<TimelineItem, { kind: "tool_call" }>;
 
@@ -87,6 +88,19 @@ export const ActivityGroup = memo(function ActivityGroup({
 }) {
   const bodyId = useId();
   const { text, failed } = summarizeActivity(items);
+  const minimal = useMinimal();
+  // Minimal: what kind of work it was on the left, how it went on the right (like a single step).
+  const first = items.find((it) => it.kind === "tool_call") as ToolItem | undefined;
+  const KindIcon = first ? (TOOL_ICON[first.toolKind] ?? Wrench) : Brain;
+  const status = live ? (
+    <Spinner className="h-3.5 w-3.5" />
+  ) : failed > 0 ? (
+    <CircleX className="h-3.5 w-3.5 text-err/80" aria-hidden />
+  ) : minimal ? (
+    <Check className="h-3.5 w-3.5 text-ok/70" aria-hidden />
+  ) : (
+    <CircleCheck className="h-3.5 w-3.5 text-ok/60" aria-hidden />
+  );
 
   return (
     <div>
@@ -98,15 +112,12 @@ export const ActivityGroup = memo(function ActivityGroup({
         className="group/trace -mx-1.5 flex h-7 w-[calc(100%+0.75rem)] items-center gap-2 rounded-lg px-1.5 text-left text-steel transition-colors hover:bg-raised/40 hover:text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
       >
         <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-          {live ? (
-            <Spinner className="h-3.5 w-3.5" />
-          ) : failed > 0 ? (
-            <CircleX className="h-3.5 w-3.5 text-err/80" aria-hidden />
-          ) : (
-            <CircleCheck className="h-3.5 w-3.5 text-ok/60" aria-hidden />
-          )}
+          {minimal ? <KindIcon className={cn("h-3.5 w-3.5", live && "text-accent")} aria-hidden /> : status}
         </span>
-        <span className={cn("min-w-0 truncate text-small", live && "text-muted")} title={text}>
+        <span
+          className={cn("min-w-0 truncate text-small", live && "text-muted", minimal && "font-medium text-muted")}
+          title={text}
+        >
           {text}
         </span>
         {!live && failed > 0 && (
@@ -115,6 +126,7 @@ export const ActivityGroup = memo(function ActivityGroup({
           </span>
         )}
         <span className="shrink-0 text-meta tabular-nums text-steel">· {pluralize(items.length, "step")}</span>
+        {minimal && <span className="ml-auto flex h-3.5 w-3.5 shrink-0 items-center justify-center">{status}</span>}
         <ChevronRight
           className={cn(
             "h-3 w-3 shrink-0 text-steel transition-transform duration-150 group-hover/trace:text-muted",

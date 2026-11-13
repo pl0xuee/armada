@@ -17,9 +17,10 @@ import { navigate } from "@/lib/router";
 import { accountOf, filterAgents, isUsageLimited, pendingKindOf, permissionIndex, USAGE_LIMIT_LABEL, useAgentPending, useBackground, useTriage } from "@/lib/selectors";
 import { resumesLabel } from "@/lib/resumes";
 import { storage } from "@/lib/storage";
+import { arrange, sectionFoldKey, sectionSummary } from "@/lib/projectLayout";
 import { groupByProject, needsYouLabel, projectSummary, type NeedsReason, type ProjectGroup, type TriageEntry } from "@/lib/triage";
 import { useStore } from "@/lib/store";
-import type { Agent } from "@/lib/types";
+import type { Agent, ProjectSection as LayoutSection } from "@/lib/types";
 import { ConversationSearch } from "@/components/ConversationSearch";
 import { InstallTip, installTipApplies } from "@/components/InstallTip";
 import { ResponseStyleRow } from "@/components/ResponseStyleRow";
@@ -66,6 +67,21 @@ export function Fleet() {
     [list, background],
   );
   const active = list.filter((a) => !a.archived).length;
+  // The computer's sections and order (none from an older Kvistcode or on a share link).
+  const layout = useStore((s) => s.projectLayout);
+  const arranged = useMemo(() => arrange(projects, layout), [projects, layout]);
+  // While searching, only sections with a match show, and nothing is folded (as on the desktop).
+  const sections = query ? arranged.sections.filter((g) => g.projects.length > 0) : arranged.sections;
+  const renderProject = (p: ProjectGroup) => (
+    <ProjectSection
+      key={p.path || "none"}
+      project={p}
+      reasons={triage.reasons}
+      open={!collapsed.has(p.path) || !!query}
+      onToggle={() => toggleProject(p.path)}
+      now={now}
+    />
+  );
 
   useLayoutEffect(() => {
     window.scrollTo({ top: savedScroll, behavior: "instant" });
@@ -114,15 +130,17 @@ export function Fleet() {
         )}
         {query && !filtered.length && <p className="px-1 text-[14px] text-muted">No agents match "{query}".</p>}
         {!query && triage.count > 0 && <NeedsYouCallout queue={triage.queue} />}
-        {projects.map((p) => (
-          <ProjectSection
-            key={p.path || "none"}
-            project={p}
-            reasons={triage.reasons}
-            open={!collapsed.has(p.path) || !!query}
-            onToggle={() => toggleProject(p.path)}
-            now={now}
-          />
+        {arranged.loose.map(renderProject)}
+        {sections.map(({ section, projects: inside }) => (
+          <SectionBlock
+            key={section.id}
+            section={section}
+            projects={inside}
+            open={!collapsed.has(sectionFoldKey(section.id)) || !!query}
+            onToggle={() => toggleProject(sectionFoldKey(section.id))}
+          >
+            {inside.map(renderProject)}
+          </SectionBlock>
         ))}
         {archived.length > 0 && (
           <section aria-labelledby="group-archived">
@@ -174,6 +192,7 @@ export function Fleet() {
         right={
           <div className="flex items-center gap-0.5">
             <ConnectionPill className="mr-1.5" />
+            {owner && <IconButton icon="gauge" label="Usage" onClick={() => navigate({ name: "usage" })} />}
             <IconButton icon="inbox" label="Needs you" badge={triage.count} tone="warn" onClick={() => navigate({ name: "inbox" })} />
             <IconButton icon="sliders" label="Settings" onClick={() => setSettings(true)} />
           </div>
@@ -208,6 +227,7 @@ export function Fleet() {
   );
 }
 
+/** Folded projects by folder path, and sections by `section:<id>` (legacy key: installed phones keep their folds). */
 const COLLAPSED_KEY = "armada.fleet.collapsed";
 
 function loadCollapsed(): Set<string> {
@@ -252,6 +272,49 @@ function NeedsYouCallout({ queue }: { queue: readonly TriageEntry[] }) {
   );
 }
 
+/** One of the computer's sections: a box around its projects, with a header that folds them. */
+function SectionBlock({
+  section,
+  projects,
+  open,
+  onToggle,
+  children,
+}: {
+  section: LayoutSection;
+  projects: readonly ProjectGroup[];
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  const id = `section-${section.id}`;
+  const needs = projects.reduce((n, p) => n + p.needs, 0);
+  return (
+    <section aria-labelledby={id} className="section-box rounded-[18px] border border-line px-2.5 pt-1 pb-1">
+      <h2 id={id}>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          className="press-row flex min-h-12 w-full items-center gap-2 rounded-xl px-1 text-left"
+        >
+          <Icon name="chevronDown" size={16} className={cn("shrink-0 text-steel transition-transform duration-150", !open && "-rotate-90")} />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[12.5px] leading-[16px] font-semibold tracking-[0.08em] text-muted uppercase">{section.name}</span>
+            <span className="block truncate text-[12.5px] leading-[16px] text-steel">{sectionSummary(projects)}</span>
+          </span>
+          {!open && needs > 0 && (
+            <span className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-warn/14 px-2.5 text-[12px] font-semibold text-warn tabular">
+              <span className="h-1.5 w-1.5 rounded-full bg-warn" aria-hidden />
+              {needs} {needs === 1 ? "needs" : "need"} you
+            </span>
+          )}
+        </button>
+      </h2>
+      {open && projects.length > 0 && <div className="space-y-5 pt-1 pb-2">{children}</div>}
+    </section>
+  );
+}
+
 /** One project: a header (name, counts, "N need you") that folds its agents. */
 const ProjectSection = memo(function ProjectSection({
   project,
@@ -290,7 +353,7 @@ const ProjectSection = memo(function ProjectSection({
         </button>
       </h2>
       {open && (
-        <ul className="overflow-hidden rounded-2xl border border-line bg-panel edge">
+        <ul className="lifted overflow-hidden rounded-2xl border border-line">
           {project.agents.map((a, i) => (
             <li key={a.id} className={cn(i > 0 && "border-t border-line/70")}>
               <AgentRow agent={a} now={now} reason={reasons.get(a.id) ?? null} />

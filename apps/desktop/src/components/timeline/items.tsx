@@ -1,6 +1,7 @@
 import {
   ArrowRightLeft,
   Brain,
+  Check,
   ChevronRight,
   CircleCheck,
   CirclePause,
@@ -53,6 +54,7 @@ import { stripOutputFence } from "@/lib/terminalOutput";
 import { ImageLightbox } from "../ImageLightbox";
 import { LocationThumb } from "../LocalImage";
 import { useIdentity } from "@/hooks/useIdentity";
+import { useMinimal } from "@/hooks/useLook";
 import { useSingleKeys } from "@/hooks/useSingleKeys";
 import { AttachmentImg } from "../AttachmentImg";
 import { AttachmentStrip } from "../AttachmentStrip";
@@ -103,11 +105,11 @@ export const UserBubble = memo(function UserBubble({
           <AttachmentStrip attachments={item.attachments} size={88} className="mb-1.5 justify-end" />
         )}
         {item.text && (
-          <div className="rounded-2xl rounded-br-md border border-line/70 bg-raised/60 text-[14.5px] leading-[1.55] text-fg">
+          <div className="rounded-2xl rounded-br-md border border-line/70 bg-raised/60 text-[14.5px] leading-[1.55] text-fg minimal:m-raised minimal:rounded-[14px] minimal:rounded-br-md minimal:leading-[23px]">
             <div
               dir="auto"
               className={cn(
-                "selectable whitespace-pre-wrap break-words px-3.5 py-2",
+                "selectable whitespace-pre-wrap break-words px-3.5 py-2 minimal:px-[15px] minimal:py-2.5",
                 folded &&
                   "max-h-[22rem] overflow-hidden [mask-image:linear-gradient(to_bottom,#000_calc(100%-3rem),transparent)]",
               )}
@@ -119,7 +121,7 @@ export const UserBubble = memo(function UserBubble({
                 type="button"
                 aria-expanded={open}
                 onClick={() => setOpen((v) => !v)}
-                className="flex h-7 w-full items-center justify-center gap-1 rounded-b-2xl border-t border-line/60 text-meta text-steel transition-colors hover:bg-raised hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
+                className="flex h-7 w-full items-center justify-center gap-1 rounded-b-2xl border-t border-line/60 text-meta text-steel transition-colors hover:bg-raised hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 minimal:rounded-b-[13px] minimal:rounded-br-[5px]"
               >
                 {open ? "Show less" : `Show all ${userMessageLines(item.text).toLocaleString()} lines`}
               </button>
@@ -277,7 +279,7 @@ export const ThoughtBlock = memo(function ThoughtBlock({
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="group flex max-w-full items-center gap-1.5 rounded-md py-0.5 pr-1.5 text-steel transition-colors hover:text-muted"
+        className="group flex max-w-full items-center gap-1.5 rounded-md py-0.5 pr-1.5 text-steel transition-colors hover:text-muted minimal:h-7 minimal:gap-2 minimal:py-0"
       >
         <Brain className={cn("h-3.5 w-3.5 shrink-0", live && "text-accent animate-breathe")} />
         <span className={cn("font-medium", live && "text-muted")}>Thought</span>
@@ -320,10 +322,19 @@ export const TOOL_ICON: Record<ToolKind, ComponentType<{ className?: string }>> 
   other: Wrench,
 };
 
-function ToolStatusIcon({ status, stalled }: { status: Item<"tool_call">["status"]; stalled: boolean }) {
+function ToolStatusIcon({
+  status,
+  stalled,
+  minimal,
+}: {
+  status: Item<"tool_call">["status"];
+  stalled: boolean;
+  minimal: boolean;
+}) {
   if (stalled) return <CirclePause className="h-3.5 w-3.5 text-violet" aria-label="Paused" />;
   if (status === "in_progress" || status === "pending") return <Spinner className="h-3.5 w-3.5" />;
   if (status === "failed") return <CircleX className="h-3.5 w-3.5 text-err" aria-label="Failed" />;
+  if (minimal) return <Check className="h-3.5 w-3.5 text-ok/70" aria-label="Completed" />;
   return <CircleCheck className="h-3.5 w-3.5 text-ok/60" aria-label="Completed" />;
 }
 
@@ -475,6 +486,7 @@ function exitCodeOf(output: string): string | null {
 }
 
 const PATH_TITLE_RE = /^(Read|Edit|Write|Create|Update|Delete|Remove|Move|Rename|View|Open)\s+(\S+)$/i;
+const RUN_TITLE_RE = /^(?:run(?:ning)?|ran|bash|execute)\s+/i;
 
 /** "Read src/a/b.ts": the file as a tidy chip (folder muted, file name emphasised); other titles stay plain text. */
 const ToolTitle = memo(function ToolTitle({ title, kind }: { title: string; kind: ToolKind }) {
@@ -489,6 +501,27 @@ const ToolTitle = memo(function ToolTitle({ title, kind }: { title: string; kind
         {path.slice(0, cut)}
         <span className="font-medium text-fg/85">{path.slice(cut)}</span>
       </span>
+    </>
+  );
+});
+
+/** Minimal look: what was done in words, what it was done to in mono ("Read package.json", "Ran npm test"). */
+const StepTitle = memo(function StepTitle({
+  title,
+  kind,
+  running,
+}: {
+  title: string;
+  kind: ToolKind;
+  running: boolean;
+}) {
+  const path = kind === "execute" ? null : PATH_TITLE_RE.exec(title);
+  const verb = kind === "execute" ? (running ? "Running" : "Ran") : path?.[1];
+  const rest = kind === "execute" ? title.replace(RUN_TITLE_RE, "") : path?.[2];
+  if (!verb || !rest) return <>{title}</>;
+  return (
+    <>
+      <span className="font-medium text-muted">{verb}</span> <span className="font-mono text-caption">{rest}</span>
     </>
   );
 });
@@ -526,13 +559,14 @@ export const ToolCallCard = memo(function ToolCallCard({
   const isCmd = item.toolKind === "execute";
   const failed = item.status === "failed";
   const exit = isCmd && failed ? exitCodeOf(item.output) : null;
+  const minimal = useMinimal();
 
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-lg border transition-colors",
+        "overflow-hidden rounded-lg border transition-colors minimal:rounded-[11px]",
         !nested && "-mx-1.5",
-        expanded && hasBody ? "border-line bg-card/40" : "border-transparent",
+        expanded && hasBody ? "tl-well border-line bg-card/40" : "border-transparent",
         failed && expanded && "border-err/30",
       )}
     >
@@ -544,7 +578,7 @@ export const ToolCallCard = memo(function ToolCallCard({
         title={item.title}
         className={cn(
           "group/row flex w-full items-center gap-2 px-1.5 text-left text-steel transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:cursor-default",
-          nested ? "h-7" : "h-8",
+          nested ? "h-7" : "h-8 minimal:h-7",
           hasBody && "hover:bg-raised/40 hover:text-muted",
         )}
       >
@@ -552,11 +586,15 @@ export const ToolCallCard = memo(function ToolCallCard({
         <span
           className={cn(
             "min-w-0 flex-1 truncate text-small",
-            isCmd && "font-mono text-caption",
+            isCmd && !minimal && "font-mono text-caption",
             running ? "text-muted" : failed ? "text-err/90" : "",
           )}
         >
-          <ToolTitle title={item.title} kind={item.toolKind} />
+          {minimal ? (
+            <StepTitle title={item.title} kind={item.toolKind} running={running} />
+          ) : (
+            <ToolTitle title={item.title} kind={item.toolKind} />
+          )}
         </span>
         {hasDiffs && <DiffStat additions={stats.additions} deletions={stats.deletions} />}
         {exit !== null && (
@@ -564,7 +602,7 @@ export const ToolCallCard = memo(function ToolCallCard({
             exit {exit}
           </span>
         )}
-        <ToolStatusIcon status={item.status} stalled={stalled} />
+        <ToolStatusIcon status={item.status} stalled={stalled} minimal={minimal} />
         {hasBody && (
           <ChevronRight
             className={cn(
@@ -755,7 +793,8 @@ export const PermissionCard = memo(function PermissionCard({
       tabIndex={keyboard ? 0 : undefined}
       data-permission-request={item.requestId}
       aria-label={`Approval needed: ${item.title}${keyboard ? ". Enter allows once." : ""}`}
-      className="relative overflow-hidden rounded-2xl border border-warn/40 bg-gradient-to-b from-warn/[0.09] to-card shadow-[0_0_0_1px_color-mix(in_srgb,var(--warn)_10%,transparent),0_12px_40px_-16px_color-mix(in_srgb,var(--warn)_45%,transparent)] edge"
+      data-tone="warn"
+      className="tl-card relative overflow-hidden rounded-2xl border border-warn/40 bg-gradient-to-b from-warn/[0.09] to-card shadow-[0_0_0_1px_color-mix(in_srgb,var(--warn)_10%,transparent),0_12px_40px_-16px_color-mix(in_srgb,var(--warn)_45%,transparent)] edge minimal:border-warn/30"
     >
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-warn/70 to-transparent" />
       <div className="flex items-start gap-3 px-4 pb-3 pt-3.5">
@@ -891,7 +930,7 @@ export const PlanCard = memo(function PlanCard({ item }: { item: Item<"plan"> })
   // While the plan is pinned above the composer it is the live view; this card is the quiet record.
   const pinned = usePinnedUi((s) => Boolean(s.planPinned[item.agentId]));
   return (
-    <div className="rounded-xl border border-line bg-card/50 p-3.5">
+    <div className="tl-card rounded-xl border border-line bg-card/50 p-3.5">
       <div className="mb-2.5 flex items-center gap-2">
         <ListChecks className="h-4 w-4 text-accent" />
         <span className="text-small font-semibold">Plan</span>
@@ -953,10 +992,10 @@ export const NoticeBanner = memo(function NoticeBanner({
     <div
       role={item.level === "error" ? "alert" : "status"}
       className={cn(
-        "rounded-xl border text-small",
-        item.level === "error" && "border-err/30 bg-err/[0.07] text-err",
-        item.level === "warn" && "border-warn/30 bg-warn/[0.07] text-warn",
-        item.level === "info" && "border-line bg-card/40 text-muted",
+        "rounded-xl border text-small minimal:rounded-[11px]",
+        item.level === "error" && "border-err/30 bg-err/[0.07] text-err minimal:border-err/20",
+        item.level === "warn" && "border-warn/30 bg-warn/[0.07] text-warn minimal:border-warn/20",
+        item.level === "info" && "tl-well border-line bg-card/40 text-muted",
       )}
     >
       <div className="flex items-start gap-2 px-3 py-2">

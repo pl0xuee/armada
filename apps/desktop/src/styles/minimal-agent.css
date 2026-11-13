@@ -1,0 +1,72 @@
+/* Minimal look: the agent header, details card, message box and docks.
+ * Every rule here must be scoped to [data-look="minimal"], so the Classic look is untouched. */
+
+/* ---- Message box ---- */
+/* Typing in it: the accent traces the edge. A static change, nothing animates. */
+[data-look="minimal"] .m-composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow:
+    inset 0 1px 0 var(--edge-strong),
+    0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent),
+    0 22px 40px -20px hsl(var(--shadow-color) / 0.85);
+}
+/* The one round accent button: send, start, or stop while the agent works. */
+[data-look="minimal"] .m-send {
+  height: 32px;
+  width: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  color: var(--accent-fg);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 86%, white), var(--accent));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.35),
+    0 0 16px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+[data-look="minimal"] .m-send:disabled {
+  opacity: 0.38;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.35);
+}
+/* A quiet round button beside it (Stop, once a message is typed). */
+[data-look="minimal"] .m-round {
+  height: 32px;
+  width: 32px;
+  padding: 0;
+  border-radius: 9999px;
+}
+/* Send / Queue / Helper with its "more ways" arrow: one accent pill. */
+[data-look="minimal"] .m-send-split {
+  border-radius: 9999px;
+  box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+[data-look="minimal"] .m-send-split button {
+  height: 32px;
+}
+
+/* ---- Docks above the message box ---- */
+/* Calm (plan, queue, a limit): a slim tray joined to the top of the message box. */
+[data-look="minimal"] .m-tray {
+  margin: 0 14px;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 38%, var(--border));
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  /* Set a little into the sheet; lighter on a light theme (engines without light-dark() keep the first). */
+  background: hsl(var(--shadow-color) / 0.2);
+  background: light-dark(rgb(0 0 0 / 0.045), rgb(0 0 0 / 0.2));
+}
+[data-look="minimal"] .m-tray[data-tone="stuck"] {
+  border-color: color-mix(in srgb, var(--warn) 30%, var(--border));
+}
+[data-look="minimal"] .m-tray[data-tone="error"] {
+  border-color: color-mix(in srgb, var(--err) 30%, var(--border));
+}
+/* Something waits for you: the raised card, edged in the warning colour. */
+[data-look="minimal"] .m-dock[data-tone="urgent"] {
+  border-color: color-mix(in srgb, var(--warn) 40%, var(--border));
+}
+
+/* ---- Details card ---- */
+/* Solid, so the conversation under it never shows through the rows (no blur: that costs while agents stream). */
+[data-look="minimal"] .m-details {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-3) 92%, white), var(--bg-2));
+}

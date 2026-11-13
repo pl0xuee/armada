@@ -1,5 +1,6 @@
 import { Check, OctagonX, Square } from "lucide-react";
 import { useState } from "react";
+import { useMinimal } from "@/hooks/useLook";
 import { cn } from "@/lib/utils";
 import { formatElapsed, type TurnEnd } from "./thinking";
 
@@ -17,13 +18,20 @@ export function TurnEndLine({ end, lastActivityAt }: { end: TurnEnd; lastActivit
   // Animate only when it appears live, not when an old conversation is opened.
   const [fresh] = useState(() => Date.now() - lastActivityAt < 10_000);
   const tone = TONE[end.tone];
+  // Minimal: a plain mark, no ring, and no glow that animates.
+  const minimal = useMinimal();
   return (
-    <div role="status" className="flex items-center gap-2.5 pb-2 pt-1">
+    <div role="status" className="flex items-center gap-2.5 pb-2 pt-1 minimal:min-h-9 minimal:gap-2">
       <span
         aria-hidden
-        className={cn("inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border", tone.ring)}
+        className={cn(
+          "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border minimal:h-3.5 minimal:w-3.5 minimal:border-0 minimal:bg-transparent",
+          tone.ring,
+        )}
         style={
-          fresh && end.tone === "done" ? { animation: "var(--animate-done-pop), var(--animate-done-glow)" } : undefined
+          fresh && end.tone === "done" && !minimal
+            ? { animation: "var(--animate-done-pop), var(--animate-done-glow)" }
+            : undefined
         }
       >
         {end.tone === "done" ? (
@@ -39,7 +47,11 @@ export function TurnEndLine({ end, lastActivityAt }: { end: TurnEnd; lastActivit
         )}
       </span>
       <span
-        className={cn("flex items-baseline gap-1.5 text-small font-medium", tone.text, fresh && "animate-think-in")}
+        className={cn(
+          "flex items-baseline gap-1.5 text-small font-medium minimal:text-[13.5px] minimal:font-normal",
+          tone.text,
+          fresh && "animate-think-in",
+        )}
       >
         {end.label}
         {end.elapsedMs !== null && end.elapsedMs >= 1000 && (
@@ -54,14 +66,14 @@ export function TurnEndLine({ end, lastActivityAt }: { end: TurnEnd; lastActivit
 /** Calm closing line once the background work that outlived the turn is over too. */
 export function EverythingFinishedLine({ detail }: { detail?: string }) {
   return (
-    <div role="status" className="flex items-center gap-2.5 pb-2 pt-1">
+    <div role="status" className="flex items-center gap-2.5 pb-2 pt-1 minimal:min-h-9 minimal:gap-2">
       <span
         aria-hidden
-        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-ok/40 bg-ok/15 text-ok"
+        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-ok/40 bg-ok/15 text-ok minimal:h-3.5 minimal:w-3.5 minimal:border-0 minimal:bg-transparent"
       >
         <Check className="h-3.5 w-3.5" strokeWidth={3} />
       </span>
-      <span className="flex items-baseline gap-1.5 text-small font-medium text-ok">
+      <span className="flex items-baseline gap-1.5 text-small font-medium text-ok minimal:text-[13.5px] minimal:font-normal">
         Everything finished
         {detail && <span className="text-2xs font-normal text-steel">· {detail}</span>}
       </span>

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type { Agent, TimelineItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
+import { useMinimal } from "@/hooks/useLook";
 import { useScrollFade } from "@/hooks/useScrollFade";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
@@ -32,12 +33,14 @@ import { WorkflowCard } from "./WorkflowCard";
 import { useRunningSubagentCount, useSubagentRuns } from "../agent/useSubagents";
 import { useHeld, WAITING_HOLD_MS } from "@/hooks/useHeld";
 import { LiveStatus } from "./LiveStatus";
-import { isBackgroundLaunch } from "@/lib/agents";
+import { isBackgroundLaunch, isBusy } from "@/lib/agents";
 import { backgroundActive, backgroundShort } from "@/lib/background";
 import { useBackground, useBackgroundStore } from "@/store/background";
 import { shouldShowThinking, turnEndOf, turnStart, waitingStatus } from "./thinking";
 import { EverythingFinishedLine, TurnEndLine } from "./TurnEndLine";
 import { TurnSummaryCard, TurnSummaryLine } from "./TurnSummaryCard";
+import { applyFolds, turnFolds, type FoldedRows, type TurnFold } from "./turnFold";
+import { WorkedLine } from "./WorkedLine";
 import { QuestionCard, questionCardSelector } from "./QuestionCard";
 import { isPlanApproval } from "@/lib/planApproval";
 import { PlanApprovalCard } from "./PlanApprovalCard";
@@ -50,9 +53,15 @@ const STICK_THRESHOLD = 24;
 /** Page older items in when scrolled this close to the top. */
 const LOAD_OLDER_PX = 600;
 
-/** Rough height by kind, refined by measurement once a row renders. */
-function estimateSize(it: TimelineItem | undefined, messageChars?: number): number {
+/** Rough height by kind, refined by measurement once a row renders. `minimal`: the Minimal look's row sizes. */
+function estimateSize(it: TimelineItem | undefined, messageChars?: number, minimal = false): number {
   if (!it) return 60;
+  if (minimal) {
+    // Airier around your message, one 28px line per step, and a file list instead of chips.
+    if (it.kind === "user_message") return 81 + Math.min(240, Math.floor(it.text.length / 90) * 23);
+    if (it.kind === "tool_call" && !it.subagent && !it.images?.length) return 32;
+    if (it.kind === "turn_summary") return 64 + Math.min(it.files.length, 5) * 30;
+  }
   switch (it.kind) {
     case "user_message":
       return 72 + Math.min(240, Math.floor(it.text.length / 90) * 22);
@@ -127,7 +136,6 @@ export function Timeline({
   const structureKey = `${list.length}:${list[0]?.id ?? ""}:${list[list.length - 1]?.id ?? ""}:${attributed}:${[...unattributed].join(",")}`;
   // Keyed on structure on purpose: it reads the current list, but deltas never change the structure.
   const view = useMemo(() => buildView(list, unattributed), [structureKey]);
-  const rows = view.top;
   const childrenOf = useResolvedLists(view.children, list, isToolItem);
   const groupItems = useResolvedLists(view.groups, list);
   // Runs of consecutive agent messages (one continuous text), resolved to the current items.
@@ -148,16 +156,62 @@ export function Timeline({
     });
   }, []);
 
+  // Minimal look: a finished turn's steps fold into one "Worked for 4m 02s" line (see turnFold.ts).
+  // The folds the reader opened are kept here, keyed by the fold's first item, like the groups above.
+  const minimal = useMinimal();
+  const [openFolds, setOpenFolds] = useState<ReadonlySet<string>>(new Set());
+  useLayoutEffect(() => setOpenFolds(new Set()), [agent.id]);
+  // The latest turn shows its steps live. A "working" status that lands before the next prompt's own
+  // item must not unfold the turn that just rested: it runs once something was added to it.
+  const restKey = `${agent.id}:${list.length}:${list[list.length - 1]?.id ?? ""}`;
+  const restedAt = useRef<string | null>(null);
+  const busy = isBusy(agent);
+  if (!busy) restedAt.current = restKey;
+  const latestRunning = busy && restedAt.current !== restKey;
+  // A turn that ends while the reader is scrolled up stays open: nothing folds under them.
+  const [wasRunning, setWasRunning] = useState(latestRunning);
+  if (wasRunning !== latestRunning) {
+    setWasRunning(latestRunning);
+    const ended = latestRunning || !minimal || stick.current ? [] : view.folds.filter((f) => f.latest);
+    if (ended.length) setOpenFolds((s) => new Set([...s, ...ended.map((f) => list[f.first].id)]));
+  }
+  const folded = useMemo<FoldedRows | null>(
+    () =>
+      minimal ? applyFolds(view.top, view.folds, (first) => openFolds.has(list[first]?.id ?? ""), latestRunning) : null,
+    // Like the view, it reads the current list but only depends on its structure.
+    [view, minimal, openFolds, latestRunning],
+  );
+  const rows = folded ? folded.rows : view.top;
+  const foldItems = useResolvedLists(minimal ? view.foldMembers : NO_LISTS, list);
+  const foldOpenedAt = useRef(-Infinity);
+  const toggleFold = useCallback(
+    (id: string) => {
+      const n = new Set(openFolds);
+      if (!n.delete(id)) {
+        n.add(id);
+        foldOpenedAt.current = performance.now();
+        // The steps open downward from the line the reader clicked: following the stream must not pull it away.
+        stick.current = false;
+        setAtBottom(false);
+      }
+      setOpenFolds(n);
+    },
+    [openFolds],
+  );
+
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: (i) => {
       const it = list[rows[i]];
+      // A closed fold is its one line, whatever its first step is; an open one adds that line.
+      const fold = folded?.heads.has(rows[i]) ? WORKED_LINE_PX : 0;
+      if (fold && !folded?.steps.has(rows[i])) return fold;
       const g = it && groupItems.get(it.id);
-      if (g) return openGroups.has(it.id) ? 60 + g.length * 48 : 48;
+      if (g) return fold + (openGroups.has(it.id) ? 60 + g.length * (minimal ? 32 : 48) : minimal ? 32 : 48);
       const run = it && runItems.get(it.id);
-      if (run && it?.kind === "agent_message") return estimateSize(it, runLength(run));
-      return estimateSize(it);
+      if (run && it?.kind === "agent_message") return fold + estimateSize(it, runLength(run), minimal);
+      return fold + estimateSize(it, undefined, minimal);
     },
     getItemKey: (i) => list[rows[i]]?.id ?? i,
     overscan: 6,
@@ -172,7 +226,8 @@ export function Timeline({
       const el = scrollRef.current;
       if (!el) return;
       if (stick.current) el.scrollTop = el.scrollHeight;
-      else if (grew) setHasNew(true);
+      // (Steps the reader just unfolded are not new activity.)
+      else if (grew && performance.now() - foldOpenedAt.current > 500) setHasNew(true);
     },
   });
 
@@ -222,14 +277,16 @@ export function Timeline({
     scrollToBottom();
   }, [agent.id, scrollToBottom]);
 
+  // Counted before folding (the same rows in Classic): opening a fold is not new activity.
+  const rowCount = view.top.length;
   useLayoutEffect(() => {
-    const n = rows.length;
+    const n = rowCount;
     if (n !== lastCount.current) {
       if (stick.current) scrollToBottom();
       else if (n > lastCount.current) setHasNew(true);
       lastCount.current = n;
     }
-  }, [rows.length, scrollToBottom]);
+  }, [rowCount, scrollToBottom]);
 
   // Scroll to an item another part of the UI asked for (a sub-agent's card), once its row exists.
   const revealTarget = useUi((s) => (s.revealTarget?.agentId === agent.id ? s.revealTarget : null));
@@ -247,6 +304,12 @@ export function Timeline({
       if (parent === undefined) break;
       at = parent;
     }
+    // Folded away with its finished turn: open the fold, then come back for the row.
+    const foldedIn = at === undefined ? undefined : folded?.hidden.get(at);
+    if (foldedIn !== undefined) {
+      setOpenFolds((s) => new Set(s).add(list[foldedIn].id));
+      return;
+    }
     const row = at === undefined ? -1 : rows.indexOf(at);
     useUi.getState().clearRevealTarget();
     if (row < 0) return;
@@ -256,7 +319,7 @@ export function Timeline({
     setFlashId(list[at as number].id);
     // Measurement can shift rows after the first jump; settle on the target again.
     requestAnimationFrame(() => virtualizer.scrollToIndex(row, { align: "center" }));
-  }, [revealTarget, rows, list, items, loading, view, virtualizer]);
+  }, [revealTarget, rows, list, items, loading, view, virtualizer, folded]);
   useEffect(() => {
     if (!flashId) return;
     const t = setTimeout(() => setFlashId(null), 1600);
@@ -432,12 +495,10 @@ export function Timeline({
   const virtualRows = virtualizer.getVirtualItems();
 
   // Live status line: the one place that says what a busy agent is doing right now.
-  const lastRowRun = rows.length ? runItems.get(list[rows[rows.length - 1]]?.id) : undefined;
-  const lastRowItem = lastRowRun
-    ? lastRowRun[lastRowRun.length - 1]
-    : rows.length
-      ? list[rows[rows.length - 1]]
-      : undefined;
+  // The timeline's last row, folded away or not (the same row in Classic).
+  const lastRow = view.top.length ? list[view.top[view.top.length - 1]] : undefined;
+  const lastRowRun = lastRow && runItems.get(lastRow.id);
+  const lastRowItem = lastRowRun ? lastRowRun[lastRowRun.length - 1] : lastRow;
   const messageSettled = useQuietFor(
     lastRowItem?.kind === "agent_message" ? `${lastRowItem.id}:${lastRowItem.text.length}` : null,
     MESSAGE_SETTLE_MS,
@@ -517,6 +578,43 @@ export function Timeline({
                 const turnStart = startsAgentTurn(it, prev, hasOlder);
                 const run = runItems.get(it.id);
                 const tailId = run ? run[run.length - 1].id : it.id;
+                // Minimal: the first step of a finished turn carries its "Worked for…" line; closed, it is only that line.
+                const fold = folded?.heads.get(rows[v.index]);
+                const step = !!folded?.steps.has(rows[v.index]);
+                const spacing = spacingFor(
+                  it,
+                  prev,
+                  !!group,
+                  !!prev && groupItems.has(prev.id),
+                  view.finalIds.has(it.id),
+                );
+                const content = group ? (
+                  <ActivityGroup
+                    groupId={it.id}
+                    items={group}
+                    agent={stableAgent}
+                    live={live && !waiting && group[group.length - 1].id === lastId}
+                    agentLive={stableAgent.running && stableAgent.status !== "interrupted"}
+                    open={openGroups.has(it.id)}
+                    onToggle={toggleGroup}
+                  />
+                ) : (
+                  renderItem(it, {
+                    agent: stableAgent,
+                    prev,
+                    liveTail: live && tailId === lastId,
+                    parts: run,
+                    view,
+                    childrenOf,
+                    bgRunningIds,
+                    lastPrompt: lastPrompt?.kind === "user_message" ? lastPrompt : null,
+                    midTurnWaiting,
+                    pendingId,
+                    questionId,
+                    reasonFor,
+                    reasonHandler,
+                  })
+                );
                 return (
                   <div
                     key={v.key}
@@ -525,39 +623,29 @@ export function Timeline({
                     ref={virtualizer.measureElement}
                     className={cn(
                       "absolute left-0 top-0 w-full",
-                      spacingFor(it, prev, !!group, !!prev && groupItems.has(prev.id), view.finalIds.has(it.id)),
+                      fold ? !step && "pb-2.5" : !step && spacing,
                       flashId === it.id && "[&>*]:rounded-xl [&>*]:ring-2 [&>*]:ring-accent/50",
                     )}
                     style={{ transform: `translateY(${v.start}px)` }}
                   >
                     <ErrorBoundary resetKey={group ?? it} fallback={() => <RowFailed />}>
-                      {turnStart && <TurnHeader agent={stableAgent} ts={it.ts} />}
-                      {group ? (
-                        <ActivityGroup
-                          groupId={it.id}
-                          items={group}
-                          agent={stableAgent}
-                          live={live && !waiting && group[group.length - 1].id === lastId}
-                          agentLive={stableAgent.running && stableAgent.status !== "interrupted"}
-                          open={openGroups.has(it.id)}
-                          onToggle={toggleGroup}
+                      {turnStart && !minimal && <TurnHeader agent={stableAgent} ts={it.ts} />}
+                      {fold && (
+                        <WorkedLine
+                          foldId={it.id}
+                          items={foldItems.get(it.id) ?? NO_ITEMS}
+                          durationMs={fold.durationMs}
+                          open={step}
+                          onToggle={toggleFold}
                         />
+                      )}
+                      {step ? (
+                        // An open fold's steps hang off one rule; the spacing sits inside it so the rule has no gaps.
+                        <div className={cn("ml-1.5 border-l border-line pl-3.5", fold && "mt-1.5", spacing)}>
+                          {content}
+                        </div>
                       ) : (
-                        renderItem(it, {
-                          agent: stableAgent,
-                          prev,
-                          liveTail: live && tailId === lastId,
-                          parts: run,
-                          view,
-                          childrenOf,
-                          bgRunningIds,
-                          lastPrompt: lastPrompt?.kind === "user_message" ? lastPrompt : null,
-                          midTurnWaiting,
-                          pendingId,
-                          questionId,
-                          reasonFor,
-                          reasonHandler,
-                        })
+                        !fold && content
                       )}
                     </ErrorBoundary>
                   </div>
@@ -666,9 +754,10 @@ function spacingFor(
   isAnswer = false,
 ): string {
   const trace = isTrace(it, isGroup);
-  const base = trace ? "pb-1" : "pb-3";
+  // Minimal: your message gets more air (26px above, 20px below).
+  const base = trace ? "pb-1" : it.kind === "user_message" ? "pb-3 minimal:pb-5" : "pb-3";
   if (!prev) return base;
-  if (it.kind === "user_message") return cn(base, "pt-3");
+  if (it.kind === "user_message") return cn(base, "pt-3 minimal:pt-3.5");
   // The answer that closes a turn of work sets itself apart from the steps above it.
   if (isAnswer && it.kind === "agent_message" && (prev.kind === "tool_call" || isTrace(prev, prevIsGroup)))
     return cn(base, "pt-4");
@@ -707,9 +796,16 @@ interface TimelineView {
   lastSummaryId: string | null;
   lastErrorId: string | null;
   lastPromptIdx: number | null;
+  /** Runs of steps a finished turn folds in the Minimal look (see turnFold.ts). */
+  folds: TurnFold[];
+  /** Each fold's steps (group members included): indices keyed by the first item's id. */
+  foldMembers: Map<string, number[]>;
 }
 
 const NO_ITEMS: TimelineItem[] = [];
+const NO_LISTS = new Map<string, number[]>();
+/** Height of a fold's "Worked for…" line with the gap under it (see WorkedLine). */
+const WORKED_LINE_PX = 44;
 
 function runLength(run: TimelineItem[]): number {
   let n = 0;
@@ -804,7 +900,15 @@ function buildView(items: TimelineItem[], hold: ReadonlySet<string> = new Set())
   for (const [first, idxs] of stitched.runs) runs.set(items[first].id, idxs);
   const finalIds = new Set<string>();
   let lastFinalId: string | null = null;
-  for (const i of finalAnswers(items, stitched.rows)) {
+  const finals = finalAnswers(items, stitched.rows);
+  const folds = turnFolds(items, stitched.rows, finals);
+  const foldMembers = new Map<string, number[]>();
+  for (const f of folds)
+    foldMembers.set(
+      items[f.first].id,
+      f.rows.flatMap((r) => grouped.groups.get(r) ?? [r]),
+    );
+  for (const i of finals) {
     finalIds.add(items[i].id);
     // Rows are in order and so are the answers' indices.
     lastFinalId = items[i].id;
@@ -833,6 +937,8 @@ function buildView(items: TimelineItem[], hold: ReadonlySet<string> = new Set())
     lastSummaryId,
     lastErrorId,
     lastPromptIdx,
+    folds,
+    foldMembers,
   };
 }
 

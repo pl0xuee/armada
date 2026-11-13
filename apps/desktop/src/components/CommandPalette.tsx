@@ -76,6 +76,7 @@ import { usePr } from "@/store/pr";
 import { useDebounced } from "@/hooks/useDebounced";
 import { useApp, usePendingPermissions, usePendingQuestions } from "@/store/app";
 import { useUi, type SettingsSection } from "@/store/ui";
+import { toggleInspector } from "@/hooks/useInspectorDocked";
 import { previewOf, togglePreview, usePreview } from "@/store/preview";
 import { openTerminal } from "@/store/workspace";
 import { openShortcutHelp } from "./shell/ShortcutHelp";
@@ -709,8 +710,9 @@ function Palette({ onClose }: { onClose: () => void }) {
               />
               <PaletteAction
                 icon={<PanelRight />}
-                label="Toggle inspector"
-                onSelect={() => run(() => ui.setInspectorOpen(!useUi.getState().inspectorOpen))}
+                label={ui.look === "minimal" ? "Toggle details" : "Toggle inspector"}
+                keywords={["inspector", "details", "side panel"]}
+                onSelect={() => run(toggleInspector)}
               />
             </Command.Group>
 

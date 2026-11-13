@@ -4,10 +4,11 @@
  * failure, a 401 means the device was unpaired), kept in their own module.
  */
 import type { HoldChoice } from "./budgetHold";
-import { api } from "./api";
+import { api, ApiError } from "./api";
 import { activeBackend, handleAuthError, toastError } from "./controller";
 import { getState, setState } from "./store";
-import type { Agent, ResponseStyle, SearchResults } from "./types";
+import type { Agent, RemoteAccount, ResponseStyle, SearchResults } from "./types";
+import { parseBudget, parseUsage } from "./usage";
 
 /** The agent as it should look once the server has taken `choice` (its own update follows and wins). */
 export function heldAfter(agent: Agent, choice: HoldChoice): Agent {
@@ -52,6 +53,36 @@ export async function loadPr(agentId: string): Promise<void> {
     handleAuthError(e);
   } finally {
     prInFlight.delete(agentId);
+  }
+}
+
+let usageInFlight = false;
+
+/**
+ * Reads every account's usage and today's totals for the Usage screen. The computer answers from what it
+ * already holds, so this asks no provider anything. Quiet: a failure keeps what is shown.
+ */
+export async function loadUsage(): Promise<void> {
+  const b = activeBackend();
+  if (!b || usageInFlight || getState().session?.scope !== "owner") return;
+  usageInFlight = true;
+  try {
+    const snap = await api.usage(b);
+    if (activeBackend() !== b || !snap || !Array.isArray(snap.accounts)) return;
+    setState((s) => {
+      const accounts = { ...s.accounts };
+      for (const a of snap.accounts as RemoteAccount[]) {
+        if (!a || typeof a.id !== "string") continue;
+        accounts[a.id] = { ...accounts[a.id], ...a, usage: parseUsage(a.usage) };
+      }
+      return { accounts, budget: parseBudget(snap.budget), usageAt: Date.now(), usageUnsupported: false };
+    });
+  } catch (e) {
+    if (handleAuthError(e)) return;
+    // An older Kvistcode on the computer has no such page: say so instead of showing empty meters.
+    if (e instanceof ApiError && (e.status === 404 || e.status === 405)) setState({ usageUnsupported: true });
+  } finally {
+    usageInFlight = false;
   }
 }
 

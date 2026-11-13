@@ -105,7 +105,7 @@ export function HelperSelect({ agent, compact }: { agent: Agent; compact?: boole
           <button
             type="button"
             aria-label={`Helpers: ${summary}`}
-            className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-meta text-muted transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg"
+            className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-meta text-muted transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg minimal:h-7 minimal:rounded-lg minimal:px-2 minimal:text-small"
           >
             <span className={cn("truncate", compact ? "max-w-[110px]" : "max-w-[150px]")}>
               <span className="text-steel">Helpers: </span>

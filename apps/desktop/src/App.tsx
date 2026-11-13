@@ -5,6 +5,7 @@ import { AgentDialogs } from "@/components/AgentDialogs";
 import { Announcer } from "@/components/shell/Announcer";
 import { VoiceSetupDialog } from "@/components/DictateButton";
 import { ShortcutHelp } from "@/components/shell/ShortcutHelp";
+import { SideNav } from "@/components/shell/Sidebar";
 import { VoiceAssistantPanel } from "@/components/voice/VoiceAssistantPanel";
 import { AppMark } from "@/components/AppMark";
 import { Rail } from "@/components/Rail";
@@ -22,6 +23,7 @@ import { installNavHistory } from "@/store/navHistory";
 import { api } from "@/lib/api";
 import { setSingleKeyShortcuts } from "@/lib/approvalKeys";
 import { applyDevLinks } from "@/lib/devlinks";
+import { applyLook } from "@/lib/look";
 import { cacheThemeChoice, isLightTheme } from "@/lib/themes";
 import { useResolvedTheme } from "@/lib/useResolvedTheme";
 import { installNavigationGuard } from "@/lib/external";
@@ -139,6 +141,9 @@ export function App() {
   useEffect(() => setSingleKeyShortcuts(singleKeys), [singleKeys]);
   const themeChoice = settings?.theme;
   useEffect(() => cacheThemeChoice(themeChoice), [themeChoice]);
+  // Layout on <html data-look> (theme-init.js painted it already; this covers tests and a cleared cache).
+  const look = useUi((s) => s.look);
+  useEffect(() => applyLook(look), [look]);
 
   // Interface zoom (webview zoom, so layout and measurements stay consistent)
   const scale = settings?.interfaceScale;
@@ -190,7 +195,7 @@ export function App() {
               <>
                 <TitleBar />
                 <div className="flex min-h-0 flex-1">
-                  <Rail />
+                  {look === "minimal" ? <SideNav /> : <Rail />}
                   <Main />
                 </div>
                 <WhenOpened open={(s) => s.paletteOpen} warm>
@@ -303,7 +308,8 @@ function Main() {
     </div>
   );
   return (
-    <main className="relative min-w-0 flex-1 overflow-hidden">
+    // Minimal: the screen sits on one raised sheet.
+    <main className="relative min-w-0 flex-1 overflow-hidden minimal:mb-2 minimal:mr-2 minimal:m-sheet">
       {PERF ? (
         <Profiler id="main" onRender={onRender}>
           {content}

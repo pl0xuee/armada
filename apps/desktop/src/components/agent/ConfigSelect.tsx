@@ -53,7 +53,7 @@ export function ConfigSelect({
           aria-label={option.name}
           onClick={() => setOption(agent, option, on ? toggle.off : toggle.on)}
           className={cn(
-            "inline-flex h-6 items-center gap-1.5 rounded-md px-1.5 text-meta transition-colors",
+            "inline-flex h-6 items-center gap-1.5 rounded-md px-1.5 text-meta transition-colors minimal:h-7 minimal:rounded-lg minimal:px-2 minimal:text-small",
             on ? "bg-accent/10 text-accent hover:bg-accent/15" : "text-steel hover:bg-raised hover:text-fg",
           )}
         >
@@ -74,7 +74,7 @@ export function ConfigSelect({
             type="button"
             aria-label={`${option.name}: ${current?.name ?? option.currentValue}`}
             className={cn(
-              "inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-meta text-muted transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg",
+              "inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-meta text-muted transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg minimal:h-7 minimal:rounded-lg minimal:px-2 minimal:text-small",
               warn && "text-warn hover:text-warn",
             )}
           >
@@ -181,7 +181,7 @@ export function ConfigOverflowMenu({
           <button
             type="button"
             aria-label="More session options"
-            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg data-[state=open]:bg-raised data-[state=open]:text-fg minimal:h-7 minimal:w-7 minimal:rounded-lg"
           >
             <SlidersHorizontal className="h-3.5 w-3.5" />
           </button>

@@ -42,12 +42,12 @@ import { selectFromAgents } from "@/lib/memoSelector";
 import type { Agent } from "@/lib/types";
 import { basename, modKey } from "@/lib/utils";
 import { useAgentListLayout } from "@/hooks/useAgentListLayout";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useInspectorDocked } from "@/hooks/useInspectorDocked";
+import { useMinimal } from "@/hooks/useLook";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { useBudgetStatus } from "@/hooks/useBudgetStatus";
 import {
   clampPreviewWidth,
-  INSPECTOR_DOCK_QUERY,
   INSPECTOR_WIDTH,
   PREVIEW_DEFAULT_WIDTH,
   PREVIEW_MIN_WIDTH,
@@ -65,6 +65,8 @@ const TimelinePane = lazy(() => import("@/components/agent/TimelinePane").then((
 export function AgentsView() {
   const selectedId = useUi((s) => s.selectedAgentId);
   const agent = useApp((s) => (selectedId ? s.agents[selectedId] : undefined));
+  // Minimal: the list is the app's sidebar (shell/Sidebar.tsx), not part of this view.
+  const minimal = useMinimal();
   const list = useAgentListLayout();
   // "a,b,c" while several agents are shown together: started together, or a main agent and its helpers (when tiling is on).
   const tileOn = useUi((s) => s.tileHelpers);
@@ -96,7 +98,7 @@ export function AgentsView() {
 
   return (
     <div className="relative flex h-full">
-      {list.docked && list.open && <AgentList variant="docked" />}
+      {list.docked && list.open && !minimal && <AgentList variant="docked" />}
       {agent ? (
         // Tiled: one pane for the whole group, so focusing another tile never remounts the others.
         <ErrorBoundary resetKey={agent.id} fallback={(error, reset) => <PaneFailed error={error} onRetry={reset} />}>
@@ -208,7 +210,7 @@ const Tile = memo(function Tile({
     <section
       // Agents started together often share a title: the number tells the panes apart.
       aria-label={tiled && index ? `${agent.title} (agent ${index})` : agent.title}
-      className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-base"
+      className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-base minimal:bg-transparent"
       // The pinned dock above the composer sizes itself against this pane.
       data-pane=""
       // Ambient animation (see globals.css) runs in the focused tile only.
@@ -247,7 +249,9 @@ function AgentPane({ agentId, tileIds }: { agentId: string; tileIds?: string[] }
   const agent = useApp((s) => s.agents[agentId]);
   const inspectorPref = useUi((s) => s.inspectorOpen);
   const overlay = useUi((s) => s.inspectorOverlay);
-  const wide = useMediaQuery(INSPECTOR_DOCK_QUERY);
+  // Minimal never docks it: there it is a card over the conversation, opened from the header.
+  const minimal = useMinimal();
+  const wide = useInspectorDocked();
   const workspaceOpen = useUi((s) => s.workspaceOpen);
   // Preview pane: right of the conversation. Detection runs whenever this agent is on screen so the
   // header can offer the pane as soon as a server is up; it polls faster while the pane is open.
@@ -301,7 +305,7 @@ function AgentPane({ agentId, tileIds }: { agentId: string; tileIds?: string[] }
 
   return (
     <div ref={rootRef} className="relative flex min-w-0 flex-1">
-      <div ref={sectionRef} className="flex min-w-0 flex-1 flex-col bg-base">
+      <div ref={sectionRef} className="flex min-w-0 flex-1 flex-col bg-base minimal:bg-transparent">
         <TileRow
           ids={tileIds ?? [agentId]}
           focusId={agentId}
@@ -420,7 +424,11 @@ function AgentPane({ agentId, tileIds }: { agentId: string; tileIds?: string[] }
             key="inspector"
             agent={agent}
             className={
-              wide ? undefined : "absolute inset-y-0 right-0 z-20 shadow-[-24px_0_60px_-20px_rgba(0,0,0,0.6)] bg-card"
+              wide
+                ? undefined
+                : minimal
+                  ? "absolute right-3 top-[52px] z-20 max-h-[calc(100%-64px)] m-float"
+                  : "absolute inset-y-0 right-0 z-20 shadow-[-24px_0_60px_-20px_rgba(0,0,0,0.6)] bg-card"
             }
           />
         )}
@@ -457,7 +465,7 @@ function Welcome() {
   ];
 
   return (
-    <div className="@container relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-base">
+    <div className="@container relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-base minimal:bg-transparent">
       {!listLayout.open && (
         <div className="absolute left-3 top-3 z-10">
           <Tooltip content="Show agents" shortcut={[modKey, "B"]}>

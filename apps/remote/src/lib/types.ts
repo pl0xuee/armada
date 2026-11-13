@@ -5,8 +5,11 @@
  * envelopes and widens a couple of fields the Rust model already has.
  */
 import type {
+  AccountUsage,
   Agent as CoreAgent,
+  BudgetStatus,
   PrInfo,
+  ProjectLayout,
   ResponseStyle,
   KvistcodeEvent,
   AgentStatus,
@@ -38,6 +41,7 @@ export type { TimelineItem };
 export type { QuestionAnswers, QuestionField, QuestionOption } from "@shared/types";
 export type { ResponseStyle, SearchGroup, SearchHit, SearchResults } from "@shared/types";
 export type { ConfigOption, ConfigOptionChoice, QueuedPrompt, SlashCommand, SubagentInfo } from "@shared/types";
+export type { AccountUsage, BudgetLevel, BudgetStatus, ProjectLayout, ProjectSection, UsageWindow } from "@shared/types";
 
 export type Provider = CoreProvider;
 
@@ -94,6 +98,10 @@ export interface RemoteAccount {
   loggedIn?: boolean | null;
   /** Last problem checking or using the account, if any. */
   error?: string | null;
+  /** The plan the sign-in check found ("max", "pro"). Absent on older servers. */
+  plan?: string | null;
+  /** The usage windows the provider last reported (5-hour, weekly, …); null = none reported. Absent on older servers. */
+  usage?: AccountUsage | null;
 }
 
 /** A user-defined ACP agent (Gemini CLI, Goose, OpenCode, …) as /api/state lists it. */
@@ -159,6 +167,18 @@ export interface StateSnapshot {
   helperModel?: string | null;
   /** The effort Claude's helpers run at, null when none is set. Absent on older servers. */
   helperEffort?: string | null;
+  /** Owner only: the desktop sidebar's sections and project order. Absent on older servers (then: no sections). */
+  projectLayout?: ProjectLayout | null;
+  /** Owner only: today against the daily limits. Absent on older servers. */
+  budget?: BudgetStatus | null;
+}
+
+/** GET /api/usage: every account with its usage windows, and today against the daily limits. */
+export interface UsageSnapshot {
+  accounts: RemoteAccount[];
+  budget: BudgetStatus | null;
+  /** When the server answered (unix ms). */
+  at: number;
 }
 
 /** What GET /api/agents/{id}/pr sends of a pull request: counts and a link, no check names or logs. */
@@ -192,6 +212,8 @@ export type RemoteEvent =
   | Pick_<"attention">
   | Pick_<"account_updated">
   | Pick_<"account_removed">
+  /** The desktop's sections or project order changed (owner only). */
+  | { type: "project_layout"; projectLayout: ProjectLayout }
   | { type: "resync" };
 
 export type AttentionEvent = Pick_<"attention">;

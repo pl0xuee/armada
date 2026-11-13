@@ -2631,7 +2631,7 @@ dependencies = [
 
 [[package]]
 name = "kvistcode-core"
-version = "0.4.15"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -2657,7 +2657,7 @@ dependencies = [
 
 [[package]]
 name = "kvistcode-desktop"
-version = "0.4.15"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "arboard",

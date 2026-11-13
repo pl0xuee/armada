@@ -2,6 +2,12 @@
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/jetbrains-mono";
 @import "@xterm/xterm/css/xterm.css";
+/* Minimal look, by area (all rules are scoped to [data-look="minimal"]). */
+@import "./minimal-transcript.css";
+@import "./minimal-agent.css";
+
+/* The Minimal layout (see lib/look.ts). `minimal:` styles apply only in it, so Classic renders as before. */
+@custom-variant minimal (&:where([data-look="minimal"], [data-look="minimal"] *));
 
 /* ------------------------------------------------------------------------
  * Theme tokens. "Gunmetal" values come straight from docs/PLAN.md §8.
@@ -413,6 +419,27 @@
   --syntax-token-function: #5a3fd0;
   --syntax-token-punctuation: #58546f;
   --syntax-token-link: #5a3fd0;
+}
+
+/* ------------------------------------------------------------------------
+ * Minimal look: the default theme sits a shade deeper and grayer (dark gunmetal), so the raised
+ * pieces (the sheet, the open agent, the message box) lift off it. Other themes keep their colours.
+ * ---------------------------------------------------------------------- */
+[data-look="minimal"]:root:not([data-theme]),
+[data-look="minimal"][data-theme="gunmetal"] {
+  --bg-0: #0e1114;
+  --bg-1: #13171b;
+  --bg-2: #191e23;
+  --bg-3: #20262c;
+  --gunmetal: #2a3238;
+  --border: #242b31;
+  --border-strong: #55616c;
+  --text-1: #e9edf1;
+  --text-2: #a9b3bd;
+  --steel: #8996a2;
+  --edge: rgba(255, 255, 255, 0.06);
+  --edge-strong: rgba(255, 255, 255, 0.1);
+  --code-bg: #0c0f12;
 }
 
 /* A headline phrase in the accent as a soft gradient. On light themes the light end would wash out, so it runs darker. */
@@ -1328,4 +1355,74 @@ html[data-window="blurred"] ::after {
 :root[data-dragging] * {
   cursor: grabbing !important;
   user-select: none !important;
+}
+
+/* ------------------------------------------------------------------------
+ * Minimal look surfaces. Theme-agnostic: built from the theme's own tokens.
+ * Shadows are static (never animated), so they cost nothing while agents stream.
+ * ---------------------------------------------------------------------- */
+/* The one sheet the main area sits on. */
+@utility m-sheet {
+  /* What sits on the sheet takes the sheet's colour as its page, so panes and bars inside lie flat on it. */
+  --bg-0: var(--bg-1);
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 55%, black);
+  background:
+    radial-gradient(1000px 380px at 40% -120px, color-mix(in srgb, var(--accent) 6%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-1) 95%, white), var(--bg-1) 220px);
+  box-shadow: inset 0 1px 0 var(--edge-strong);
+}
+/* A piece that lifts off its surface: the open agent's row, your message, a secondary button. */
+@utility m-raised {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-3) 92%, white), var(--bg-3));
+  border: 1px solid color-mix(in srgb, var(--border-strong) 38%, var(--border));
+  box-shadow:
+    inset 0 1px 0 var(--edge-strong),
+    0 8px 18px -10px hsl(var(--shadow-color) / 0.7);
+}
+/* The same lift without a border (rows inside a list). */
+@utility m-raised-flat {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-3) 92%, white), var(--bg-3));
+  box-shadow:
+    inset 0 1px 0 var(--edge-strong),
+    0 6px 16px -8px hsl(var(--shadow-color) / 0.7);
+}
+/* A card floating over the conversation (details, menus that stay open). */
+@utility m-float {
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 38%, var(--border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, color-mix(in srgb, var(--bg-3) 92%, white) 94%, transparent),
+    color-mix(in srgb, var(--bg-2) 94%, transparent)
+  );
+  box-shadow:
+    inset 0 1px 0 var(--edge-strong),
+    0 18px 40px -16px hsl(var(--shadow-color) / 0.8);
+}
+/* The message box. */
+@utility m-composer {
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 45%, var(--border));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-3) 94%, white), var(--bg-2));
+  box-shadow:
+    inset 0 1px 0 var(--edge-strong),
+    0 22px 40px -20px hsl(var(--shadow-color) / 0.85);
+}
+/* The accent's glow: what is working, what is open, the one primary action. */
+@utility m-glow {
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+@utility m-glow-soft {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent),
+    0 0 8px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+/* Bars that are flat in Minimal (title bar, rail, sidebar): the page shows through. No effect in Classic. */
+[data-look="minimal"] .m-flat {
+  background: transparent;
+  background-image: none;
+  border-color: transparent;
+  box-shadow: none;
 }

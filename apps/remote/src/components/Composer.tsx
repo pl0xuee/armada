@@ -340,7 +340,7 @@ export const Composer = memo(function Composer({
         <label className="sr-only" htmlFor={`composer-${agent.id}`}>
           Message {name}
         </label>
-        <div className="flex min-h-12 min-w-0 flex-1 items-center rounded-[22px] border border-line-strong bg-card px-4 py-[9px] focus-within:border-accent/60 edge">
+        <div className="composer-box flex min-h-12 min-w-0 flex-1 items-center rounded-[18px] border px-4 py-[9px] focus-within:border-accent/60">
           <textarea
             id={`composer-${agent.id}`}
             ref={ref}
@@ -386,7 +386,7 @@ export const Composer = memo(function Composer({
             aria-label={busy ? (plan.mode === "deliver" ? "Send into the running turn" : "Queue message") : "Send"}
             className={cn(
               "press inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full",
-              canSend ? "bg-accent text-accent-fg shadow-[0_6px_18px_-6px_var(--accent)]" : "bg-raised text-steel",
+              canSend ? "send-glow text-accent-fg" : "bg-raised text-steel",
             )}
           >
             <Icon name="arrowUp" size={22} strokeWidth={2.2} />

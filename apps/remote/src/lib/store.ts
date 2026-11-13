@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { BackgroundWork } from "./background";
-import type { Agent, Attachment, AttentionReason, PendingItem, PermissionMode, PrSnapshot, PromptTemplate, RemoteAccount, RemoteCustomAgent, ResponseStyle, Session, TimelineItem } from "./types";
+import type { Agent, Attachment, AttentionReason, BudgetStatus, PendingItem, PermissionMode, PrSnapshot, ProjectLayout, PromptTemplate, RemoteAccount, RemoteCustomAgent, ResponseStyle, Session, TimelineItem } from "./types";
 
 export type Phase =
   /** Checking the stored token. */
@@ -102,6 +102,14 @@ export interface State {
   helperModel: string | null | undefined;
   /** The effort Claude's helpers run at (null: Claude decides, or an older server). */
   helperEffort: string | null;
+  /** The desktop sidebar's sections and project order (no sections on an older server or a share link). */
+  projectLayout: ProjectLayout;
+  /** Today against the daily limits (owner only); null = the server doesn't send it. */
+  budget: BudgetStatus | null;
+  /** When the Usage screen last read the accounts' usage from the computer (null: not yet). */
+  usageAt: number | null;
+  /** The computer runs a Kvistcode from before the phone could show usage. */
+  usageUnsupported: boolean;
   /** The last PR/CI status the server gave for each agent's branch. */
   prs: Record<string, PrSnapshot>;
   /** Workflow runs still going behind an agent's finished turn, by agent id (see lib/backgroundWork). */
@@ -147,6 +155,10 @@ export const initialState: State = {
   claudeChoicesRemembered: null,
   helperModel: undefined,
   helperEffort: null,
+  projectLayout: { customOrder: false, order: [], sections: [] },
+  budget: null,
+  usageAt: null,
+  usageUnsupported: false,
   prs: {},
   background: {},
   timelines: {},

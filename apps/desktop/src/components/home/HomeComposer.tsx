@@ -2,6 +2,7 @@ import { ArrowUp, Check, ChevronDown, FolderOpen, FolderPlus, GitBranch } from "
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useIdentity } from "@/hooks/useIdentity";
+import { useMinimal } from "@/hooks/useLook";
 import { launchAgents, needsWorktree, resolveLaunch, type ResolvedLaunch } from "@/lib/launchDefaults";
 import { choicesFor } from "@/lib/modelGuide";
 import { CUSTOM_ACCOUNT_ID, PROVIDER_ORDER, PROVIDERS } from "@/lib/providers";
@@ -53,6 +54,7 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
   const setPrompt = useUi((s) => s.setHomePrompt);
   // The agents already started for this prompt when some failed, so a retry joins them (kept like the prompt).
   const batch = useUi((s) => s.homeBatch);
+  const minimal = useMinimal();
   const [count, setCount] = useState(() => useUi.getState().homeBatch?.count ?? 1);
   const [busy, setBusy] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -165,12 +167,18 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
     }
   };
 
+  // Minimal: the round accent button; it keeps its label when it starts several agents.
+  const round = minimal && count === 1;
   return (
     <div
-      className={cn(
-        "rounded-2xl border border-line-strong bg-card shadow-[0_18px_60px_-24px_rgba(0,0,0,0.75)] transition-[border-color,box-shadow] duration-150 edge-strong",
-        "focus-within:border-accent/50 focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_12%,transparent),0_18px_60px_-24px_rgba(0,0,0,0.75)]",
-      )}
+      className={
+        minimal
+          ? "m-composer"
+          : cn(
+              "rounded-2xl border border-line-strong bg-card shadow-[0_18px_60px_-24px_rgba(0,0,0,0.75)] transition-[border-color,box-shadow] duration-150 edge-strong",
+              "focus-within:border-accent/50 focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_12%,transparent),0_18px_60px_-24px_rgba(0,0,0,0.75)]",
+            )
+      }
     >
       <label htmlFor={compact ? "home-prompt-compact" : "home-prompt"} className="sr-only">
         What should an agent do?
@@ -196,7 +204,7 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
             : "What should an agent do?"
         }
         className={cn(
-          "block w-full resize-none bg-transparent px-4 pt-3.5 leading-relaxed text-fg placeholder:text-steel focus:outline-none",
+          "block w-full resize-none bg-transparent px-4 pt-3.5 leading-relaxed text-fg placeholder:text-steel focus:outline-none minimal:px-[18px] minimal:pt-4",
           compact ? "min-h-[56px] text-[13.5px]" : "min-h-[84px] text-[15px]",
         )}
       />
@@ -243,18 +251,19 @@ export function HomeComposer({ compact = false, autoFocus = true }: { compact?: 
           <Tooltip content="Start agent. Shift+Enter adds a new line." shortcut={["⏎"]}>
             <Button
               variant="primary"
-              size={compact ? "icon-sm" : "sm"}
+              size={compact || round ? "icon-sm" : "sm"}
               disabled={!canStart}
               onClick={() => void start()}
               aria-label={count > 1 ? `Start ${count} agents` : "Start agent"}
               aria-keyshortcuts="Enter"
+              className={cn(round ? "m-send" : "minimal:rounded-full")}
             >
               {busy ? (
                 <Spinner className="h-3.5 w-3.5 text-current" />
               ) : (
                 <ArrowUp className="!h-4 !w-4" strokeWidth={2.5} />
               )}
-              {!compact && (count > 1 ? `Start ${count}` : "Start")}
+              {!compact && !round && (count > 1 ? `Start ${count}` : "Start")}
             </Button>
           </Tooltip>
         </div>

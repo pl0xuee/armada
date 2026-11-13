@@ -54,7 +54,7 @@ export const WorkflowCard = memo(function WorkflowCard({ item, agentId }: { item
     <section
       aria-label={`Workflow: ${summary}`}
       className={cn(
-        "relative overflow-hidden rounded-xl border bg-card/50",
+        "tl-card relative overflow-hidden rounded-xl border bg-card/50",
         running ? "border-accent/30" : failedAll ? "border-err/30" : "border-line",
       )}
     >

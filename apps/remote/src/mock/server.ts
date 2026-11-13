@@ -10,7 +10,7 @@ import { mockDiff } from "./diff";
 import { mockPr } from "./pr";
 import { buildExtras } from "./scenarios";
 import { streamChunk, stressAgent, stressTimeline } from "./stress";
-import { accounts, buildAgents, buildTimelines, customAgents, nextSeq, projects, providerConfig, STREAM_SCRIPT, templates } from "./data";
+import { accounts, accountsWithUsage, budgetStatus, buildAgents, buildTimelines, customAgents, nextSeq, projectLayout, projectLayoutAfter, projects, providerConfig, STREAM_SCRIPT, templates } from "./data";
 
 export interface Scenario {
   scope: "owner" | "viewer";
@@ -29,6 +29,10 @@ export interface Scenario {
   workflowSecs: number;
   /** Optional extra agents for newer features (see ./scenarios). */
   extras: Set<string>;
+  /** `&old=1`: a computer from before sections and usage reached the phone (no layout, no usage, no /api/usage). */
+  old: boolean;
+  /** `&relayout=<seconds>`: the sections are renamed and reordered on the computer after this long (0 = never). */
+  relayoutSecs: number;
 }
 
 export function scenarioFromParams(p: URLSearchParams): Scenario {
@@ -47,6 +51,8 @@ export function scenarioFromParams(p: URLSearchParams): Scenario {
     stressRate: Math.max(1, Number(p.get("rate") ?? 60) || 60),
     workflowSecs: Math.max(0, Number(p.get("wf") ?? 0) || 0),
     extras: new Set(["quick", "plan", "group", "md", "dock", "hold", "pics"].filter((k) => p.get(k) === "1")),
+    old: p.get("old") === "1",
+    relayoutSecs: Math.max(0, Number(p.get("relayout") ?? 0) || 0),
   };
 }
 
@@ -98,6 +104,7 @@ export class MockBackend implements Backend {
   private createSeq = 0;
   private readonly createdAt = Date.now();
   private responseStyle: ResponseStyle = "concise";
+  private layout = projectLayout;
 
   constructor(scenario: Scenario) {
     this.s = scenario;
@@ -115,6 +122,13 @@ export class MockBackend implements Backend {
     this.streamItemId = a3?.[a3.length - 1]?.id ?? null;
     if (scenario.stream && !scenario.empty) setInterval(() => this.tick(), 140);
     if (scenario.stressItems) this.startStress(scenario.stressItems, scenario.stressRate);
+    if (scenario.relayoutSecs && !scenario.old) {
+      setTimeout(() => {
+        this.layout = projectLayoutAfter;
+        // Owner-only, like the server (a share link is never told about the layout).
+        if (this.s.scope === "owner") this.emit({ type: "project_layout", projectLayout: this.layout });
+      }, scenario.relayoutSecs * 1000);
+    }
   }
 
   /** Huge timeline + fast deltas on agent s1 (and status churn on others). */
@@ -217,14 +231,21 @@ export class MockBackend implements Backend {
       const agents = [...this.agents.values()].filter((a) => this.s.scope === "owner" || a.id === VIEWER_AGENT);
       return {
         agents: this.s.scope === "viewer" ? agents.map(trimForViewer) : structuredClone(agents),
-        accounts: this.s.scope === "owner" ? accounts : [],
+        accounts: this.s.scope !== "owner" ? [] : this.s.old ? accounts.map(({ plan: _plan, ...a }) => a) : accountsWithUsage(Date.now()),
         customAgents: this.s.scope === "owner" ? customAgents : customAgents.filter((c) => agents.some((a) => a.customAgentId === c.id)),
         projects: this.s.scope === "owner" ? projects : [],
         templates: this.s.scope === "owner" ? templates : [],
         defaultWorktree: this.s.scope === "owner",
         defaultPermissionMode: "ask",
         ...(this.s.scope === "owner" ? { responseStyle: this.responseStyle } : {}),
+        // Like the server: the sidebar's layout and today's totals, for the owner only.
+        ...(this.s.old ? {} : { projectLayout: this.s.scope === "owner" ? this.layout : null, budget: this.s.scope === "owner" ? budgetStatus(agents) : null }),
       };
+    }
+    if (path === "/api/usage" && !this.s.old) {
+      if (this.s.scope !== "owner") throw new ApiError(403, "This is a read-only link.");
+      if (this.s.fail.has("usage")) throw new ApiError(500, "usage failed (simulated)");
+      return { accounts: accountsWithUsage(Date.now()), budget: budgetStatus([...this.agents.values()]), at: Date.now() };
     }
     if (path === "/api/permissions") {
       if (this.s.scope !== "owner") throw new ApiError(403, "This is a read-only link.");

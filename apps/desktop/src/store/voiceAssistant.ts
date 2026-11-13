@@ -4,8 +4,7 @@ import { api, onVaEvent } from "@/lib/api";
 import { beginVa, initialVa, isLive, reduceVa, type VaEvent, type VaState } from "@/lib/voiceAssistant";
 import { errorMessage } from "@/lib/utils";
 import { useApp } from "./app";
-import { orderedAgents } from "@/lib/agents";
-import { layoutOf } from "@/lib/projectLayout";
+import { shortcutOrder } from "./shortcutOrder";
 import { tileIdsFor } from "@/lib/helpers";
 import { screenContextOf } from "@/lib/screenContext";
 import { useUi, type MissionTab, type SettingsSection, type View } from "./ui";
@@ -94,7 +93,7 @@ function reportScreen(): () => void {
       return;
     }
     const agents = useApp.getState().agents;
-    const order = orderedAgents(Object.values(agents), layoutOf(useApp.getState().settings)).map((a) => a.id);
+    const order = shortcutOrder().map((a) => a.id);
     const ui = useUi.getState();
     // An agent that no longer exists isn't on screen (the pane shows the welcome page instead).
     const open = ui.selectedAgentId && agents[ui.selectedAgentId] ? ui.selectedAgentId : null;
