@@ -5,6 +5,10 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
+## Unreleased
+
+- Minimal's sidebar has an Activity / Projects switch at the top. Projects shows your projects in the sections you made, as in Classic, and you can drag projects into sections there. If you have sections, Minimal opens on Projects until you pick otherwise.
+
 ## v0.5.0 — 2026-11-13
 
 A second look for Kvistcode, Minimal, and usage on the phone.

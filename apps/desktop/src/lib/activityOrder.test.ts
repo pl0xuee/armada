@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { groupByActivity, orderedAgents, sidebarOrder } from "./agents";
 import type { Agent } from "./types";
+import { sidebarGroupOf } from "./look";
 
 let n = 0;
 const agent = (over: Partial<Agent>): Agent =>
@@ -92,5 +93,17 @@ describe("sidebarOrder (⌘1–9 and Alt+↑/↓)", () => {
     const kept = agent({ id: "kept" });
     const gone = agent({ id: "gone", archived: true, status: "needs_permission" });
     expect(ids(sidebarOrder([kept, gone], undefined, true))).toEqual(["kept"]);
+  });
+});
+
+describe("sidebarGroupOf (Minimal sidebar: Activity or Projects)", () => {
+  it("keeps a saved choice", () => {
+    expect(sidebarGroupOf("activity", 3)).toBe("activity");
+    expect(sidebarGroupOf("project", 0)).toBe("project");
+  });
+
+  it("without one, shows projects to people who made sections, activity to everyone else", () => {
+    expect(sidebarGroupOf(null, 2)).toBe("project");
+    expect(sidebarGroupOf(null, 0)).toBe("activity");
   });
 });

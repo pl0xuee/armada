@@ -46,12 +46,19 @@ export function applyLook(look: Look) {
 export type SidebarGroup = "activity" | "project";
 const SIDEBAR_GROUP_KEY = "kvistcode.sidebarGroup";
 
-export function readSidebarGroup(): SidebarGroup {
+/** The saved choice; null until one is made (see sidebarGroupOf). */
+export function readSidebarGroup(): SidebarGroup | null {
   try {
-    return localStorage.getItem(SIDEBAR_GROUP_KEY) === "project" ? "project" : "activity";
+    const v = localStorage.getItem(SIDEBAR_GROUP_KEY);
+    return v === "project" || v === "activity" ? v : null;
   } catch {
-    return "activity";
+    return null;
   }
+}
+
+/** The grouping in effect: the saved choice, else by project for people who made sections, else by activity. */
+export function sidebarGroupOf(saved: SidebarGroup | null, sections: number): SidebarGroup {
+  return saved ?? (sections > 0 ? "project" : "activity");
 }
 
 export function saveSidebarGroup(group: SidebarGroup) {

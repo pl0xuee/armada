@@ -78,7 +78,8 @@ interface UiStore {
   look: Look;
   setLook: (look: Look) => void;
   /** Minimal sidebar: agents by activity, or under their projects. */
-  sidebarGroup: SidebarGroup;
+  /** The Minimal sidebar's saved grouping; null: not chosen (sidebarGroupOf picks). */
+  sidebarGroup: SidebarGroup | null;
   setSidebarGroup: (group: SidebarGroup) => void;
   inspectorOpen: boolean;
   /** Inspector shown as an overlay on narrow windows. */

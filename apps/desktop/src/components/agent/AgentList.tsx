@@ -72,6 +72,8 @@ import type { Account, Agent, ProjectLayout } from "@/lib/types";
 import { basename, cn, errorMessage, modKey } from "@/lib/utils";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useMinimal } from "@/hooks/useLook";
+import { sidebarGroupOf } from "@/lib/look";
+import { Segmented } from "@/components/ui/segmented";
 import { toggleAgentList } from "@/hooks/useAgentListLayout";
 import { useNow } from "@/hooks/useNow";
 import { useApp } from "@/store/app";
@@ -178,7 +180,12 @@ export function AgentList({
   );
   // Minimal lists agents by what is happening unless "By project" is chosen; Classic always lists by project.
   const minimal = useMinimal();
-  const sidebarGroup = useUi((s) => s.sidebarGroup);
+  // Not chosen yet: people who made sections see them (by project), everyone else sees activity.
+  const sectionCount = useApp((s) => s.settings?.projectLayout?.sections.length ?? 0);
+  const sidebarGroup = sidebarGroupOf(
+    useUi((s) => s.sidebarGroup),
+    sectionCount,
+  );
   const flat = minimal && sidebarGroup === "activity";
   const activity = useMemo(
     () => (flat ? groupByActivity(nesting ? nesting.roots : agents, query, background, nesting?.children) : null),
@@ -620,26 +627,6 @@ export function AgentList({
               </DropdownMenuTrigger>
             </Tooltip>
             <DropdownMenuContent align="end" className="min-w-[220px]" onCloseAutoFocus={closeAutoFocus}>
-              {minimal && (
-                <>
-                  <DropdownMenuLabel>Show agents</DropdownMenuLabel>
-                  <DropdownMenuCheckItem
-                    checked={flat}
-                    onSelect={() => useUi.getState().setSidebarGroup("activity")}
-                    description="What needs you and what is working, then the rest"
-                  >
-                    By activity
-                  </DropdownMenuCheckItem>
-                  <DropdownMenuCheckItem
-                    checked={!flat}
-                    onSelect={() => useUi.getState().setSidebarGroup("project")}
-                    description="Under their projects and your sections"
-                  >
-                    By project
-                  </DropdownMenuCheckItem>
-                  <DropdownMenuSeparator />
-                </>
-              )}
               {/* Project order and sections only show in the list by project. */}
               {!flat && (
                 <>
@@ -683,6 +670,21 @@ export function AgentList({
             </Tooltip>
           )}
         </div>
+        {minimal && (
+          <div className="px-3 pb-2">
+            <Segmented
+              size="sm"
+              aria-label="Show agents"
+              className="flex w-full"
+              value={sidebarGroup}
+              onChange={(g) => useUi.getState().setSidebarGroup(g)}
+              options={[
+                { value: "activity", label: "Activity" },
+                { value: "project", label: "Projects" },
+              ]}
+            />
+          </div>
+        )}
         <div className="px-3 pb-2">
           <div className="group relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-steel" />
