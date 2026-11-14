@@ -421,27 +421,6 @@
   --syntax-token-link: #5a3fd0;
 }
 
-/* ------------------------------------------------------------------------
- * Minimal look: the default theme sits a shade deeper and grayer (dark gunmetal), so the raised
- * pieces (the sheet, the open agent, the message box) lift off it. Other themes keep their colours.
- * ---------------------------------------------------------------------- */
-[data-look="minimal"]:root:not([data-theme]),
-[data-look="minimal"][data-theme="gunmetal"] {
-  --bg-0: #0e1114;
-  --bg-1: #13171b;
-  --bg-2: #191e23;
-  --bg-3: #20262c;
-  --gunmetal: #2a3238;
-  --border: #242b31;
-  --border-strong: #55616c;
-  --text-1: #e9edf1;
-  --text-2: #a9b3bd;
-  --steel: #8996a2;
-  --edge: rgba(255, 255, 255, 0.06);
-  --edge-strong: rgba(255, 255, 255, 0.1);
-  --code-bg: #0c0f12;
-}
-
 /* A headline phrase in the accent as a soft gradient. On light themes the light end would wash out, so it runs darker. */
 .accent-text {
   background-image: linear-gradient(
@@ -1361,16 +1340,13 @@ html[data-window="blurred"] ::after {
  * Minimal look surfaces. Theme-agnostic: built from the theme's own tokens.
  * Shadows are static (never animated), so they cost nothing while agents stream.
  * ---------------------------------------------------------------------- */
-/* The one sheet the main area sits on. */
+/* The one sheet the main area sits on: the theme's page colour (as Classic's main area), framed by the
+ * panel colour around it (as Classic's sidebar and title bar), so both looks use the same colours. */
 @utility m-sheet {
-  /* What sits on the sheet takes the sheet's colour as its page, so panes and bars inside lie flat on it. */
-  --bg-0: var(--bg-1);
   border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--border) 55%, black);
-  background:
-    radial-gradient(1000px 380px at 40% -120px, color-mix(in srgb, var(--accent) 6%, transparent), transparent 70%),
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-1) 95%, white), var(--bg-1) 220px);
-  box-shadow: inset 0 1px 0 var(--edge-strong);
+  border: 1px solid var(--border);
+  background: var(--bg-0);
+  box-shadow: inset 0 1px 0 var(--edge);
 }
 /* A piece that lifts off its surface: the open agent's row, your message, a secondary button. */
 @utility m-raised {

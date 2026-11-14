@@ -5,8 +5,11 @@ and the notes shown by the in-app updater, so write for people using the app.
 `scripts/release_notes.py` refuses to cut a release whose section is missing or empty (see
 docs/RELEASING.md).
 
-## Unreleased
+## v0.5.1 — 2026-11-13
 
+Projects in Minimal, and Minimal in the same colours as Classic.
+
+- Minimal now uses exactly the same colours as Classic in every theme. Gunmetal was a shade lighter in Minimal; it no longer is. The phone app is back to the same gunmetal colours too.
 - Minimal's sidebar has an Activity / Projects switch at the top. Projects shows your projects in the sections you made, as in Classic, and you can drag projects into sections there. If you have sections, Minimal opens on Projects until you pick otherwise.
 
 ## v0.5.0 — 2026-11-13

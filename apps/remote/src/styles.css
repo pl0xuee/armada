@@ -1,22 +1,22 @@
 @import "tailwindcss";
 
 /* --------------------------------------------------------------------------
- * "Minimal" tokens: the desktop's dark gunmetal look (docs/REDESIGN.md). Surfaces that lift
+ * "Minimal" look on the desktop's gunmetal colours (docs/REDESIGN.md). Surfaces that lift
  * (an open row, your message, the message box, main cards) get a top highlight, a gentle
  * top-to-bottom gradient and a soft drop shadow; all shadows are static.
  * ------------------------------------------------------------------------ */
 :root {
   color-scheme: dark;
-  --bg-0: #0e1114;
-  --bg-1: #13171b;
-  --bg-2: #191e23;
-  --bg-3: #20262c;
-  --gunmetal: #2a3238;
-  --border: #242b31;
-  --border-strong: #55616c;
-  --text-1: #e9edf1;
-  --text-2: #a9b3bd;
-  --steel: #8996a2; /* 5.0:1 on --bg-3 (raised) */
+  --bg-0: #0b0d10;
+  --bg-1: #12151a;
+  --bg-2: #191d23;
+  --bg-3: #21262d;
+  --gunmetal: #2c3539;
+  --border: #2a3038;
+  --border-strong: #353c46;
+  --text-1: #e6eaef;
+  --text-2: #9aa4b2;
+  --steel: #8190a0; /* 4.66:1 on --bg-3 (raised) */
   --accent: #4fc3f7;
   --accent-fg: #06141b;
   --warn: #f5b544;
@@ -27,9 +27,9 @@
   --claude: #d97757;
   --openai: #10a37f;
   --grok: #e5e7eb;
-  --edge: rgba(255, 255, 255, 0.06);
-  --edge-strong: rgba(255, 255, 255, 0.1);
-  --code-bg: #0b0e11;
+  --edge: rgba(255, 255, 255, 0.05);
+  --edge-strong: rgba(255, 255, 255, 0.08);
+  --code-bg: #0e1115;
   /* A lifted surface: highlight on top, a slight gradient, a soft shadow below. */
   --lift-bg: linear-gradient(180deg, #1d2328, #181d22);
   --lift-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 8px 18px -10px rgba(0, 0, 0, 0.7);

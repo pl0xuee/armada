@@ -178,7 +178,7 @@ export function App() {
     <LazyMotion features={loadMotionFeatures} strict>
       <MotionConfig reducedMotion="user">
         <TooltipProvider delayDuration={350} skipDelayDuration={200}>
-          <div className="flex h-full flex-col bg-base text-fg">
+          <div className="flex h-full flex-col bg-base text-fg minimal:bg-panel">
             {!booted ? (
               <>
                 <TitleBar minimal />
